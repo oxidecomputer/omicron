@@ -198,7 +198,7 @@ async fn prune_blueprints(
                 "nscanned" => target_table_status.nscanned,
             );
             return Ok(BlueprintPrunerDetails {
-                nkept: target_table_status.nfound,
+                nkept_by_policy: target_table_status.nfound,
                 deleted: vec![],
                 ntargets_deleted: 0,
                 ntargets_removable: 0,
@@ -386,7 +386,7 @@ impl PruneTracker {
 
     fn into_details(self, pargs: &PruneArgs) -> BlueprintPrunerDetails {
         BlueprintPrunerDetails {
-            nkept: pargs.nblueprints_found,
+            nkept_by_policy: pargs.nblueprints_found,
             deleted: self.deleted,
             ntargets_removable: self.ntargets_removable,
             ntargets_deleted: self.ntargets_deleted,
@@ -739,9 +739,6 @@ impl<T> ControlFlowExt for ControlFlow<T, T> {
 }
 
 // XXX-dap test plan:
-// - write a helper that loads N blueprints into the database as noops based on
-//   the current one
-//   (result: blueprint versions 1-(N+1) in the database?)
 // - write a verification helper:
 //   - input: final version number to expect
 //   - input: set of versions to expect or blueprint ids (unclear which)
@@ -755,14 +752,7 @@ impl<T> ControlFlowExt for ControlFlow<T, T> {
 //       here
 //     - all of the blueprints that the caller says should be here are here
 // - things we want to test:
-//   - very basic behavior:
-//     - multiple iterations
-//       (max_prune > batch_size and nblueprints - nkeep > max_prune)
-//     - keeps the correct number
-//     - stops when hitting max_prune
-//     - noop when nblueprints < nkeep
-//   - recover from backlog (multiple iterations eventually converges and keeps
-//     the right number)
+//   - multiple SQL batches
 //   - case where bp_target row references missing blueprint
 //   - extra blueprints (not referenced) are not touched
 //   - case: gap in bp_target table
@@ -784,6 +774,7 @@ mod test {
     use nexus_types::deployment::BlueprintMetadata;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::internal_api::background::BlueprintPrunerDetails;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1012,6 +1003,56 @@ mod test {
         }
     }
 
+    /// Runs and verifies a `prune` operation where:
+    ///
+    /// - input: keep `nkeep` blueprints
+    /// - input: at most `nmax` delete attempts
+    ///
+    /// This verifies:
+    ///
+    /// - that no errors were encountered
+    /// - that we deleted the same number of blueprints as `bp_target` rows
+    /// - that these were the _right_ bp_target rows / blueprints (the oldest)
+    /// - that no other `bp_target` rows were deleted
+    /// - that the reported stats (ntargets_removable, ntargets_deleted) are
+    ///   correct (note that `nkept_by_policy` is up to the caller to check, as
+    ///   is the actual number of deleted blueprints)
+    async fn verify_prune(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        blueprints: &mut BlueprintDatabaseState,
+        nkeep: usize,
+        nmax: usize,
+    ) -> BlueprintPrunerDetails {
+        let details =
+            prune_blueprints(opctx, datastore, &opctx.log, nkeep, nmax)
+                .await
+                .expect("successful prune");
+        println!("{details:?}");
+        // Verify no problems encountered.
+        assert!(details.warnings.is_empty());
+        // Verify that whatever blueprints we deleted, they were the oldest ones.
+        let deleted = if !details.deleted.is_empty() {
+            let oldest = blueprints.drop_oldest(details.deleted.len());
+            for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
+                assert_eq!(old.id, pruned.id);
+            }
+            oldest
+        } else {
+            vec![]
+        };
+
+        // Verify that we reported the right number of blueprints gone.
+        assert_eq!(details.ntargets_removable, deleted.len());
+        // Verify that we actually deleted the right number of bp_target rows.
+        assert_eq!(details.ntargets_deleted, deleted.len());
+        // Verify that the runtime state we've been using and verifying matches
+        // the underlying database state.
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        details
+    }
+
     #[tokio::test]
     async fn test_basic() {
         let logctx = dev::test_setup_log("blueprint_pruner_basic");
@@ -1053,100 +1094,87 @@ mod test {
         blueprints.verify_blueprints_referenced_by_targets();
         blueprints.verify_targets_referenced_by_blueprints();
 
-        // Pruning at this point should do nothing, even if we choose to keep 0.
-        // That's because we'll never remove the last few blueprints.
-        let details = prune_blueprints(opctx, datastore, log, 0, 10)
-            .await
-            .expect("successful prune");
-        println!("{details:?}");
-        blueprints.verify_database_matches(opctx, datastore).await;
-        assert!(details.deleted.is_empty());
-        assert_eq!(details.nkept, 1);
-        assert_eq!(details.ntargets_removable, 0);
-        assert_eq!(details.ntargets_deleted, 0);
-        assert!(details.warnings.is_empty());
+        // Trivial case: pruning at this point should do nothing, even if we
+        // choose to keep 0.  That's because we'll never remove the last few
+        // blueprints.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 1, 100).await;
+        assert_eq!(details.nkept_by_policy, 1);
+        assert_eq!(details.deleted.len(), 0);
 
         // Add several more blueprints and make sure our representation of the
         // database state matches up with the real thing.
-        let nnew = 12;
-        for _ in 0..nnew {
+        for _ in 0..22 {
             blueprints.add_target_blueprint(opctx, datastore).await;
         }
         blueprints.verify_blueprints_referenced_by_targets();
         blueprints.verify_targets_referenced_by_blueprints();
         blueprints.verify_database_matches(opctx, datastore).await;
 
-        // Next, we'll do this:
+        // At this point, we have 23 blueprints.
         //
-        // - prune(nkeep = 0, max_deletes = 4);
-        //   (should clamp `nkeep` at 3 and delete 4, leaving the latest 9)
-        // - prune(nkeep = 0, max_deletes = 4);
-        //   (should clamp `nkeep` at 3 and delete 4, leaving the latest 5)
-        // - prune(nkeep = 0, max_deletes = 4);
-        //   (should clamp `nkeep` at 3 and delete 2, leaving the latest 3)
-        // - prune(nkeep = 0, max_deletes = 4);
-        //   (should clamp `nkeep` at 3 and delete nothing)
-        //
-        // This tests a few things:
-        //
-        // - basic pruning behavior
-        //   - no blueprints left around
-        //   - no bp_target rows left around
-        //   - *correct* blueprints/bp_target rows were deleted
-        // - `nkeep` clamped at 3 and is honored
-        // - `max_deletes` is honored
-        let mut nleft = blueprints.target_rows.len();
-        for _ in 0..2 {
-            let ndelete = 4;
-            let oldest = blueprints.drop_oldest(ndelete);
-            let details = prune_blueprints(opctx, datastore, log, 0, ndelete)
-                .await
-                .expect("successful prune");
-            println!("{details:?}");
-            assert!(details.warnings.is_empty());
-            assert_eq!(details.deleted.len(), oldest.len());
-            assert_eq!(details.nkept, 3);
-            assert_eq!(details.ntargets_removable, ndelete);
-            assert_eq!(details.ntargets_deleted, ndelete);
-            for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
-                assert_eq!(old.id, pruned.id);
-            }
-            nleft -= ndelete;
-            assert_eq!(blueprints.target_rows.len(), nleft);
-            blueprints.verify_database_matches(opctx, datastore).await;
-        }
+        // Prune some.  Run `prune(nkeep = 13, max_deletes = 100)`.  This should
+        // remove 10 blueprints, leaving 13.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 13, 100).await;
+        assert_eq!(details.nkept_by_policy, 13);
+        assert_eq!(details.deleted.len(), 10);
 
-        // At this point, there are only 5 left.  Attempting to prune another 4
-        // will hit the lower bound and remove only 2.
-        let oldest = blueprints.drop_oldest(2);
-        let details = prune_blueprints(opctx, datastore, log, 0, 4)
-            .await
-            .expect("successful prune");
-        println!("{details:?}");
-        assert_eq!(details.deleted.len(), oldest.len());
-        assert_eq!(details.nkept, 3);
-        assert_eq!(details.ntargets_removable, 2);
-        assert_eq!(details.ntargets_deleted, 2);
-        assert!(details.warnings.is_empty());
-        for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
-            assert_eq!(old.id, pruned.id);
-        }
-        nleft -= 2;
-        assert_eq!(blueprints.target_rows.len(), nleft);
-        blueprints.verify_database_matches(opctx, datastore).await;
+        // Run `prune(nkeep = 0, max_deletes = 4).  `nkeep` is internally
+        // clamped (below) at 3, so this should remove 4 blueprints and leave 9.
+        // This exercises pruning a different number -- and specifically the
+        // clamping behavior on `nkeep`.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 0, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 4);
 
-        // Pruning again will remove nothing, since we hit the end.
-        let details = prune_blueprints(opctx, datastore, log, 0, 4)
-            .await
-            .expect("successful prune");
-        println!("{details:?}");
-        assert!(details.deleted.is_empty());
-        assert_eq!(details.nkept, 3);
-        assert_eq!(details.ntargets_removable, 0);
-        assert_eq!(details.ntargets_deleted, 0);
-        assert!(details.warnings.is_empty());
-        assert_eq!(blueprints.target_rows.len(), 3);
-        blueprints.verify_database_matches(opctx, datastore).await;
+        // Do the same thing again, removing another 4 blueprints and leaving 5.
+        // This shows that when we stop due to running into the max, the next
+        // attempt will prune more.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 4);
+
+        // Do it again, but we'll finally run into the maximum that we can
+        // prune.  Only two blueprints will be pruned, leaving 3.  This tests
+        // what happens when we finally do run into the limit.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 2);
+
+        // Prune one more time.  This shouldn't do anything since we're still at
+        // the limit.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 0);
+
+        // Now exercise a typical steady-state: if we create another blueprint,
+        // then prune, then we'll wind up pruning the oldest one.
+        blueprints.add_target_blueprint(opctx, datastore).await;
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 1);
+
+        // Sometimes, the pruner may get ahead of generation and we'll have
+        // nothing to prune.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 0);
+
+        // Other times, the planner may get ahead and we'll have multiple to
+        // prune.
+        blueprints.add_target_blueprint(opctx, datastore).await;
+        blueprints.add_target_blueprint(opctx, datastore).await;
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 2);
 
         db.terminate().await;
         logctx.cleanup_successful();

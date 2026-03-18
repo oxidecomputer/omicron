@@ -807,8 +807,11 @@ impl std::fmt::Display for BlueprintPrunerStatus {
 /// The status of a `blueprint_pruner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlueprintPrunerDetails {
-    /// count of blueprints kept
-    pub nkept: usize,
+    /// count of blueprints that were kept by policy
+    ///
+    /// More may be kept because of an error or because the maximum number
+    /// deleted per activation was hit.
+    pub nkept_by_policy: usize,
     /// blueprints deleted
     pub deleted: Vec<DeletedBlueprint>,
     /// count of `bp_target` rows that were determined to be removable
@@ -821,7 +824,7 @@ pub struct BlueprintPrunerDetails {
 
 impl std::fmt::Display for BlueprintPrunerDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "    blueprints kept: {}", self.nkept)?;
+        writeln!(f, "    blueprints kept by policy: {}", self.nkept_by_policy)?;
         writeln!(
             f,
             "    bp_target rows that can be deleted: {}",
@@ -1131,7 +1134,7 @@ mod test {
             deleted: vec![blueprint1, blueprint2],
             ntargets_deleted: 17,
             ntargets_removable: 18,
-            nkept: 12,
+            nkept_by_policy: 12,
             warnings: vec![String::from("fake-oh problem-oh")],
         };
         let status = BlueprintPrunerStatus::Enabled(details);
