@@ -23,7 +23,9 @@ Define a struct for the task's activation status. Derive `Clone, Debug, Deserial
 
 Create the task module. The struct holds whatever state it needs (typically `Arc<DataStore>` plus config). Implement `BackgroundTask::activate` by delegating to an `async fn actually_activate(&mut self, opctx) -> YourStatus` method, then serialize the status to `serde_json::Value`. The `actually_activate` pattern makes unit testing easy without going through the trait.
 
-Logging conventions: `debug` when there's nothing to do, `info` when routine work was done, `warn` when the work done indicates something is wrong (e.g., cleaning up after a crash), `error` on failure.
+Logging conventions: `debug` when there's nothing to do, `info` when routine work was done, `warn` when the work done indicates something is wrong (e.g., cleaning up after a crash), `error` on failure. Log errors as structured fields with the `; &err` slog syntax (which uses the `SlogInlineError` trait), not by interpolating into the message string. For the error string in the status struct, use `InlineErrorChain::new(&err).to_string()` (from `slog_error_chain`) to capture the full cause chain. Status error strings should not repeat the task name — omdb already shows which task you're looking at.
+
+If the task takes config values that need conversion or validation (e.g., converting a `Duration` to `TimeDelta`, or checking a numeric range), do it once in `new()` and store the validated form. Don't re-validate on every activation — if the config is invalid, panic in `new()` with a message that includes the invalid value.
 
 Include a unit test in the same file using `TestDatabase::new_with_datastore` that calls `actually_activate` directly. If the task has a datastore method, a single test exercising the task end-to-end is usually sufficient — don't add a redundant test for the datastore method separately unless it has complex logic worth testing in isolation.
 

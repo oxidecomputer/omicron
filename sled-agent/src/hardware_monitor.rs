@@ -297,7 +297,7 @@ impl HardwareMonitor {
             }
         } else {
             if let Err(e) = service_manager.deactivate_switch().await {
-                warn!(self.log, "Failed to deactivate switch: {e}");
+                warn!(self.log, "Failed to deactivate switch"; e);
             }
         }
     }

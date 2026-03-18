@@ -339,7 +339,7 @@ async fn sis_destroy_vmm_record(
     // may be permitted to reincarnate. If it is, activate the instance
     // reincarnation background task to help it along.
     let karmic_status =
-        db_instance.auto_restart.can_reincarnate(db_instance.runtime());
+        db_instance.auto_restart.can_reincarnate(&db_instance.runtime());
     if karmic_status == db::model::Reincarnatability::WillReincarnate {
         info!(
             osagactx.log(),
@@ -418,7 +418,7 @@ async fn sis_move_to_starting(
         // If the instance has a Propolis ID, but the Propolis was left behind
         // by a previous start saga unwinding, that's fine, we can just clear it
         // out and proceed as though there was no Propolis ID here.
-        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {
+        Some(vmm) if vmm.state == db::model::VmmState::SagaUnwound => {
             abandoned_unwound_vmm = true;
         }
 
@@ -452,7 +452,7 @@ async fn sis_move_to_starting(
             propolis_id: Some(propolis_id.into_untyped_uuid()),
             generation: db_instance.runtime().generation.next().into(),
             time_last_auto_restarted,
-            ..db_instance.runtime_state
+            ..db_instance.runtime()
         }
     };
 
@@ -475,7 +475,7 @@ async fn sis_move_to_starting(
     }
 
     let mut new_record = db_instance.clone();
-    new_record.runtime_state = new_runtime;
+    new_record.set_runtime(new_runtime);
     Ok(new_record)
 }
 
@@ -492,8 +492,8 @@ async fn sis_move_to_starting_undo(
     let new_runtime = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
         propolis_id: None,
-        generation: db_instance.runtime_state.generation.next().into(),
-        ..db_instance.runtime_state
+        generation: db_instance.state_generation.next().into(),
+        ..db_instance.runtime()
     };
 
     if !osagactx
@@ -1232,7 +1232,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1408,7 +1407,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1618,7 +1616,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1689,7 +1686,7 @@ mod test {
             test_helpers::instance_fetch(cptestctx, instance_id).await;
 
         assert_eq!(
-            db_instance.instance().runtime_state.nexus_state,
+            db_instance.instance().nexus_state,
             nexus_db_model::InstanceState::NoVmm
         );
         assert!(db_instance.vmm().is_none());

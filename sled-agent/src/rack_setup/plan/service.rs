@@ -66,6 +66,7 @@ use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use slog_error_chain::SlogInlineError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
@@ -75,16 +76,16 @@ use uuid::Uuid;
 const MINIMUM_U2_COUNT: usize = 3;
 
 /// Describes errors which may occur while generating a plan for services.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, SlogInlineError)]
 pub enum PlanError {
-    #[error("I/O error while {message}: {err}")]
+    #[error("I/O error while {message}")]
     Io {
         message: String,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("Error making HTTP request to Sled Agent: {0}")]
+    #[error("Error making HTTP request to Sled Agent")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
     #[error("Error initializing sled via sled-agent: {0}")]
@@ -93,7 +94,7 @@ pub enum PlanError {
     #[error("Failed to allocate service IP for service: {0}")]
     ServiceIp(&'static str),
 
-    #[error("Failed to construct an HTTP client: {0}")]
+    #[error("Failed to construct an HTTP client")]
     HttpClient(reqwest::Error),
 
     #[error("Ran out of sleds / U2 storage pools")]
@@ -281,9 +282,9 @@ impl Plan {
 
         let log_failure = |error: PlanError, call_count, total_duration| {
             if call_count == 0 {
-                info!(log, "failed to get inventory from {address}"; "error" => ?error);
+                info!(log, "failed to get inventory from {address}"; error);
             } else if total_duration > std::time::Duration::from_secs(20) {
-                warn!(log, "failed to get inventory from {address}"; "error" => ?error, "total duration" => ?total_duration);
+                warn!(log, "failed to get inventory from {address}"; error, "total duration" => ?total_duration);
             }
         };
         let inventory = retry_notify_ext(
@@ -1325,7 +1326,6 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
@@ -1334,6 +1334,7 @@ mod tests {
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
@@ -1555,7 +1556,8 @@ mod tests {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
             },
             is_scrimlet,

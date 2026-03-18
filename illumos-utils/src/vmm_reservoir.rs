@@ -30,7 +30,7 @@ pub enum Error {
     #[error("Reservoir size must be aligned to 2 MiB: {0}")]
     InvalidSize(ByteCount),
 
-    #[error("Failed to resize reservoir: {0}")]
+    #[error("Failed to resize reservoir")]
     ReservoirError(#[from] std::io::Error),
 }
 

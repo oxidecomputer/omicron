@@ -26,6 +26,15 @@ impl<T> ScalarEditor<T> {
         }
     }
 
+    /// Equivalent to `set_value(self.original)`, without
+    /// having to expose the original value.
+    pub(crate) fn reset_to_original(&mut self) -> Cow<'_, T>
+    where
+        T: Clone,
+    {
+        self.set_value(self.original.clone())
+    }
+
     /// Set the value to a new one, returning the old value.
     ///
     /// The old value might either be owned or borrowed, depending on

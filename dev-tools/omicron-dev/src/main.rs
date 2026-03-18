@@ -172,11 +172,11 @@ impl RunAllArgs {
             cptestctx.silo_name,
             cptestctx.external_dns_zone_name,
         );
-        for (location, gateway) in &cptestctx.gateway {
+        for (switch_slot, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:     {} ({})",
+                "omicron-dev: management gateway:     {} ({:?})",
                 gateway.client.baseurl(),
-                location,
+                switch_slot,
             );
         }
         println!(

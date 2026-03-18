@@ -1020,15 +1020,15 @@ pub enum ResourceType {
 /// Identity-related metadata that's included in nearly all public API objects
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct IdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
+    /// Unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /// unique, mutable, user-controlled identifier for each resource
+    /// Unique, mutable, user-controlled identifier for each resource
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// timestamp when this resource was created
+    /// Timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
+    /// Timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }
 
@@ -1199,17 +1199,17 @@ pub struct Instance {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this Instance
+    /// ID for the project containing this instance
     pub project_id: Uuid,
 
-    /// number of CPUs allocated for this Instance
+    /// Number of CPUs allocated for this instance
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
+    /// Memory allocated for this instance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the instance
     pub hostname: String,
 
-    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
     pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
@@ -2839,46 +2839,6 @@ pub struct AddressLotBlock {
 
     /// The last address of the block (inclusive).
     pub last_address: IpAddr,
-}
-
-/// A loopback address is an address that is assigned to a rack switch but is
-/// not associated with any particular port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LoopbackAddress {
-    /// The id of the loopback address.
-    pub id: Uuid,
-
-    /// The address lot block this address came from.
-    pub address_lot_block_id: Uuid,
-
-    /// The id of the rack where this loopback address is assigned.
-    pub rack_id: Uuid,
-
-    /// Switch location where this loopback address is assigned.
-    pub switch_location: String,
-
-    /// The loopback IP address and prefix length.
-    pub address: oxnet::IpNet,
-}
-
-/// A switch port represents a physical external port on a rack switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPort {
-    /// The id of the switch port.
-    pub id: Uuid,
-
-    /// The rack this switch port belongs to.
-    pub rack_id: Uuid,
-
-    /// The switch location of this switch port.
-    pub switch_location: String,
-
-    /// The name of this switch port.
-    pub port_name: Name,
-
-    /// The primary settings group of this switch port. Will be `None` until
-    /// this switch port is configured.
-    pub port_settings_id: Option<Uuid>,
 }
 
 /// A switch port settings identity whose id may be used to view additional

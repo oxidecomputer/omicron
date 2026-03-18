@@ -1261,7 +1261,7 @@ impl DatasetTask {
                         log,
                         "Failed to create keyfile for rekey";
                         "dataset" => &req.dataset_name,
-                        "error" => %e,
+                        InlineErrorChain::new(&e),
                     );
                     failed.insert(disk_id);
                     continue;
@@ -1290,7 +1290,7 @@ impl DatasetTask {
                     log,
                     "Failed to zero keyfile after rekey";
                     "path" => %keypath,
-                    "error" => %e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }

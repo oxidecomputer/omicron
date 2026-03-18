@@ -132,12 +132,12 @@ pub(super) fn try_make_update(
                     | KnownArtifactKind::Trampoline
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
+                    | KnownArtifactKind::MeasurementCorpus
                     | KnownArtifactKind::PscRot
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletSp
                     | KnownArtifactKind::PscSp
-                    | KnownArtifactKind::SwitchSp
-                    | KnownArtifactKind::MeasurementCorpus,
+                    | KnownArtifactKind::SwitchSp,
                 ) => false,
             }
         })

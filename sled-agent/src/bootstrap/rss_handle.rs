@@ -20,6 +20,7 @@ use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -307,7 +308,7 @@ impl BootstrapAgentHandleReceiver {
                             .connect_timeout(dur)
                             .timeout(dur)
                             .build()
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
                         let client = BootstrapAgentClient::new_with_client(
                             &format!("http://{}", bootstrap_addr),
                             client,

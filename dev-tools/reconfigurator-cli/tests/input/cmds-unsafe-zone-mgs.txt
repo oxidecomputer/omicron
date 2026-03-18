@@ -21,6 +21,16 @@ sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --to-target-release
 sled-update-install-dataset serial2 --to-target-release
 
+# Measurements will block further planning progress, run a planning step
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
 # Generate inventory, then do a planning run to ensure that all zones
 # are set to Artifact.
 inventory-generate

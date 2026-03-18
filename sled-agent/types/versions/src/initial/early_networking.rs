@@ -287,7 +287,6 @@ pub struct PortConfig {
 #[derive(
     Clone,
     Copy,
-    Debug,
     Deserialize,
     Serialize,
     PartialEq,
@@ -296,6 +295,7 @@ pub struct PortConfig {
     Eq,
     PartialOrd,
     Ord,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchSlot {
