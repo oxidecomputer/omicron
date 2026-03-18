@@ -91,7 +91,7 @@ impl<'a> SitrepBuilder<'a> {
                 .cases
                 .cases
                 .into_iter()
-                .map(|builder| fm::Case::from(builder))
+                .map(fm::Case::from)
                 .collect(),
         }
     }
