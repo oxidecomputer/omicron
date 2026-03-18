@@ -111,6 +111,11 @@ impl BundleDataSelection {
     pub fn get(&self, category: BundleDataCategory) -> Option<&BundleData> {
         self.data.get(&category)
     }
+
+    /// Iterate over all data entries in this selection.
+    pub fn iter(&self) -> impl Iterator<Item = &BundleData> {
+        self.data.values()
+    }
 }
 
 impl fmt::Display for BundleDataSelection {
