@@ -87,12 +87,7 @@ impl<'a> SitrepBuilder<'a> {
                 comment: self.comment,
                 time_created,
             },
-            cases: self
-                .cases
-                .cases
-                .into_iter()
-                .map(fm::Case::from)
-                .collect(),
+            cases: self.cases.cases.into_iter().map(fm::Case::from).collect(),
         }
     }
 }
