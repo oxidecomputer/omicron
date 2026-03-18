@@ -30,7 +30,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, DbSwitchSlot, SqlU8, SqlU16, SqlU32,
+    AddressLot, BgpConfig, DbSwitchSlot, SqlU16,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
@@ -47,59 +47,89 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BgpPeerConfig {
-    pub port_settings_id: Uuid,
-    pub bgp_config_id: Uuid,
-    pub interface_name: Name,
-    pub addr: Option<IpNetwork>,
-    pub hold_time: SqlU32,
-    pub idle_hold_time: SqlU32,
-    pub delay_open: SqlU32,
-    pub connect_retry: SqlU32,
-    pub keepalive: SqlU32,
-    pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU8>,
-    pub md5_auth_key: Option<String>,
-    pub multi_exit_discriminator: Option<SqlU32>,
-    pub local_pref: Option<SqlU32>,
-    pub enforce_first_as: bool,
-    pub allowed_import: ImportExportPolicy,
-    pub allowed_export: ImportExportPolicy,
-    pub communities: Vec<u32>,
-    pub vlan_id: Option<SqlU16>,
-    pub router_lifetime: SqlU16,
+/// This is a wrapper around [`networking::BgpPeer`], with two additions:
+///
+/// * [`BgpPeerFromDb::bgp_config_id`] is guaranteed to be an ID, unlike the
+///   inner [`networking::BgpPeer::bgp_config`] which might be an ID or might be
+///   a [`Name`].
+/// * Adds [`BgpPeerFromDb::port_settings_id`], which doesn't exist in
+///   inner [`networking::BgpPeer`].
+#[derive(Clone, Debug)]
+pub struct BgpPeerFromDb {
+    port_settings_id: Uuid,
+    bgp_config_id: Uuid,
+    inner: networking::BgpPeer,
 }
 
-impl Into<networking::BgpPeer> for BgpPeerConfig {
-    fn into(self) -> networking::BgpPeer {
-        networking::BgpPeer {
-            bgp_config: self.bgp_config_id.into(),
-            interface_name: self.interface_name.into(),
-            addr: self.addr.map(|a| a.ip()),
-            hold_time: self.hold_time.into(),
-            idle_hold_time: self.idle_hold_time.into(),
-            delay_open: self.delay_open.into(),
-            connect_retry: self.connect_retry.into(),
-            keepalive: self.keepalive.into(),
-            remote_asn: self.remote_asn.map(Into::into),
-            min_ttl: self.min_ttl.map(Into::into),
-            md5_auth_key: self.md5_auth_key.clone(),
-            multi_exit_discriminator: self
-                .multi_exit_discriminator
-                .map(Into::into),
-            communities: self.communities,
-            local_pref: self.local_pref.map(Into::into),
-            enforce_first_as: self.enforce_first_as,
-            allowed_import: self.allowed_import,
-            allowed_export: self.allowed_export,
-            vlan_id: self.vlan_id.map(Into::into),
-            router_lifetime: self.router_lifetime.into(),
+impl From<BgpPeerFromDb> for networking::BgpPeer {
+    fn from(value: BgpPeerFromDb) -> Self {
+        value.inner
+    }
+}
+
+impl BgpPeerFromDb {
+    pub fn port_settings_id(&self) -> Uuid {
+        self.port_settings_id
+    }
+
+    pub fn bgp_config_id(&self) -> Uuid {
+        self.bgp_config_id
+    }
+
+    pub fn as_bgp_peer(&self) -> &networking::BgpPeer {
+        &self.inner
+    }
+}
+
+// Helper to build a `BgpPeerFromDb`. This is a struct instead of a function so
+// we get named arguments, particularly for the import/export policy values that
+// have the same type.
+struct BgpPeerFromDbBuilder<'a> {
+    peer_config: &'a SwitchPortBgpPeerConfig,
+    communities: Vec<u32>,
+    allowed_import: ImportExportPolicy,
+    allowed_export: ImportExportPolicy,
+}
+
+impl BgpPeerFromDbBuilder<'_> {
+    fn build(self) -> BgpPeerFromDb {
+        let Self {
+            peer_config: p,
+            communities,
+            allowed_import,
+            allowed_export,
+        } = self;
+        BgpPeerFromDb {
+            port_settings_id: p.port_settings_id,
+            bgp_config_id: p.bgp_config_id,
+            inner: networking::BgpPeer {
+                bgp_config: p.bgp_config_id.into(),
+                interface_name: p.interface_name.clone().into(),
+                addr: p.addr.map(|a| a.ip()),
+                hold_time: p.hold_time.into(),
+                idle_hold_time: p.idle_hold_time.into(),
+                delay_open: p.delay_open.into(),
+                connect_retry: p.connect_retry.into(),
+                keepalive: p.keepalive.into(),
+                remote_asn: p.remote_asn.map(From::from),
+                min_ttl: p.min_ttl.map(From::from),
+                md5_auth_key: p.md5_auth_key.clone(),
+                multi_exit_discriminator: p
+                    .multi_exit_discriminator
+                    .map(From::from),
+                local_pref: p.local_pref.map(From::from),
+                enforce_first_as: p.enforce_first_as,
+                vlan_id: p.vlan_id.map(From::from),
+                router_lifetime: p.router_lifetime.into(),
+                communities,
+                allowed_import,
+                allowed_export,
+            },
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SwitchPortSettingsCombinedResult {
     pub settings: SwitchPortSettings,
     pub groups: Vec<SwitchPortSettingsGroups>,
@@ -110,7 +140,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub interfaces: Vec<SwitchInterfaceConfig>,
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
-    pub bgp_peers: Vec<BgpPeerConfig>,
+    pub bgp_peers: Vec<BgpPeerFromDb>,
     pub addresses: Vec<SwitchPortAddressView>,
 }
 
@@ -662,30 +692,15 @@ impl DataStore {
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
 
-                    let view = BgpPeerConfig {
-                        port_settings_id: p.port_settings_id,
-                        bgp_config_id: p.bgp_config_id,
-                        interface_name: p.interface_name.clone(),
-                        addr: p.addr,
-                        hold_time: p.hold_time,
-                        idle_hold_time: p.idle_hold_time,
-                        delay_open: p.delay_open,
-                        connect_retry: p.connect_retry,
-                        keepalive: p.keepalive,
-                        remote_asn: p.remote_asn,
-                        min_ttl: p.min_ttl,
-                        md5_auth_key: p.md5_auth_key.clone(),
-                        multi_exit_discriminator: p.multi_exit_discriminator,
-                        local_pref: p.local_pref,
-                        enforce_first_as: p.enforce_first_as,
-                        vlan_id: p.vlan_id,
-                        router_lifetime: p.router_lifetime,
-                        communities: communities.into_iter().map(|c| c.community.0).collect(),
+                    result.bgp_peers.push(BgpPeerFromDbBuilder {
+                        peer_config: p,
+                        communities: communities
+                            .into_iter()
+                            .map(|c| c.community.0)
+                            .collect(),
                         allowed_import,
                         allowed_export,
-                    };
-
-                    result.bgp_peers.push(view);
+                    }.build());
                 }
 
                 // get the address configs
@@ -1535,29 +1550,15 @@ async fn do_switch_port_settings_create(
                 .map(|x| x.communities.clone())
                 .unwrap_or(Vec::new()),
         );
-        let view = BgpPeerConfig {
-            port_settings_id: p.port_settings_id,
-            bgp_config_id: p.bgp_config_id,
-            interface_name: p.interface_name,
-            addr: p.addr,
-            hold_time: p.hold_time,
-            idle_hold_time: p.idle_hold_time,
-            delay_open: p.delay_open,
-            connect_retry: p.connect_retry,
-            keepalive: p.keepalive,
-            remote_asn: p.remote_asn,
-            min_ttl: p.min_ttl,
-            md5_auth_key: p.md5_auth_key,
-            multi_exit_discriminator: p.multi_exit_discriminator,
-            local_pref: p.local_pref,
-            enforce_first_as: p.enforce_first_as,
-            vlan_id: p.vlan_id,
-            router_lifetime: p.router_lifetime,
-            allowed_import,
-            allowed_export,
-            communities,
-        };
-        result.bgp_peers.push(view);
+        result.bgp_peers.push(
+            BgpPeerFromDbBuilder {
+                peer_config: &p,
+                communities,
+                allowed_import,
+                allowed_export,
+            }
+            .build(),
+        );
     }
 
     let mut address_config = Vec::new();
@@ -2146,15 +2147,15 @@ mod test {
         let mut db_peers = HashMap::new();
 
         for peer in db_settings.bgp_peers {
-            db_peers.insert(peer.interface_name.clone(), peer);
+            db_peers.insert(peer.inner.interface_name.clone(), peer);
         }
 
         for config in settings.bgp_peers {
             let db_peer = db_peers
-                .get(&config.link_name.into())
+                .get(&config.link_name)
                 .expect("requested peer should be present");
 
-            for peer in config.peers {
+            for mut peer in config.peers {
                 match peer.bgp_config {
                     NameOrId::Id(id) => {
                         assert_eq!(db_peer.bgp_config_id, id);
@@ -2175,25 +2176,12 @@ mod test {
                     }
                 }
 
-                assert_eq!(db_peer.addr.map(|a| a.ip()), peer.addr);
-                assert_eq!(*db_peer.hold_time, peer.hold_time);
-                assert_eq!(*db_peer.idle_hold_time, peer.idle_hold_time);
-                assert_eq!(*db_peer.delay_open, peer.delay_open);
-                assert_eq!(*db_peer.connect_retry, peer.connect_retry);
-                assert_eq!(*db_peer.keepalive, peer.keepalive);
-                assert_eq!(db_peer.remote_asn.map(|asn| *asn), peer.remote_asn);
-                assert_eq!(db_peer.min_ttl.map(|ttl| *ttl), peer.min_ttl);
-                assert_eq!(db_peer.md5_auth_key, peer.md5_auth_key);
-                assert_eq!(
-                    db_peer.multi_exit_discriminator.map(|med| *med),
-                    peer.multi_exit_discriminator
-                );
-                assert_eq!(db_peer.communities, peer.communities);
-                assert_eq!(db_peer.local_pref.map(|lp| *lp), peer.local_pref);
-                assert_eq!(db_peer.enforce_first_as, peer.enforce_first_as);
-                assert_eq!(db_peer.allowed_export, peer.allowed_export);
-                assert_eq!(db_peer.allowed_import, peer.allowed_import);
-                assert_eq!(db_peer.vlan_id.map(|vid| *vid), peer.vlan_id);
+                // We now know `db_peer.bgp_config_id` is correct; set
+                // `peer.bgp_config` to an ID (potentially replacing a Name) so
+                // we can compare the rest of the struct at once, since
+                // `db_peer.inner.bgp_config` is always populated with an ID.
+                peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
+                assert_eq!(peer, db_peer.inner);
             }
         }
 
