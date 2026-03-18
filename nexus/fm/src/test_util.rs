@@ -23,7 +23,7 @@ pub struct FmTest {
 }
 
 impl FmTest {
-    pub fn new_with_logxtx(test_name: &str) -> (Self, dev::LogContext) {
+    pub fn new_with_logctx(test_name: &str) -> (Self, dev::LogContext) {
         let logctx = dev::test_setup_log(test_name);
         (Self::new(test_name, &logctx.log), logctx)
     }
