@@ -48,42 +48,18 @@ pub struct EreporterRestartBySerial {
     pub ereports: u32,
 }
 
-/// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EreportFilters {
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or later.
-    ///
-    /// If `end_time` is also present, this value *must* be earlier than
-    /// `end_time`.
-    pub start_time: Option<DateTime<Utc>>,
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or before.
-    ///
-    /// If `start_time` is also present, this value *must* be later than
-    /// `start_time`.
-    pub end_time: Option<DateTime<Utc>>,
-    /// If this list is non-empty, include only ereports that were reported by
-    /// systems with the provided serial numbers.
-    pub only_serials: Vec<String>,
-    /// If this list is non-empty, include only ereports with the provided class
-    /// strings.
-    // TODO(eliza): globbing could be nice to add here eventually...
-    pub only_classes: Vec<String>,
-}
+pub use nexus_types::support_bundle::EreportFilters;
 
-impl EreportFilters {
-    fn check_time_range(&self) -> Result<(), Error> {
-        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
-            if start > end {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
+fn check_ereport_time_range(filters: &EreportFilters) -> Result<(), Error> {
+    if let (Some(start), Some(end)) = (filters.start_time, filters.end_time) {
+        if start > end {
+            return Err(Error::invalid_request(
+                "start time must be before end time",
+            ));
         }
-
-        Ok(())
     }
+
+    Ok(())
 }
 
 impl DataStore {
@@ -132,7 +108,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        filters.check_time_range()?;
+        check_ereport_time_range(filters)?;
 
         let query = Self::ereport_fetch_matching_query(filters, pagparams);
         query
