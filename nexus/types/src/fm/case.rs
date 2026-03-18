@@ -5,8 +5,11 @@
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
+use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
-use omicron_uuid_kinds::{AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid, SupportBundleUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -21,6 +24,7 @@ pub struct Case {
 
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
+    pub support_bundles_requested: IdOrdMap<SupportBundleRequest>,
 
     pub comment: String,
 }
@@ -88,6 +92,22 @@ impl iddqd::IdOrdItem for AlertRequest {
     iddqd::id_upcast!();
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SupportBundleRequest {
+    pub id: SupportBundleUuid,
+    pub requested_sitrep_id: SitrepUuid,
+    pub data_selection: Option<BundleDataSelection>,
+}
+
+impl iddqd::IdOrdItem for SupportBundleRequest {
+    type Key<'a> = &'a SupportBundleUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
 struct DisplayCase<'a> {
     case: &'a Case,
     indent: usize,
@@ -120,6 +140,7 @@ impl fmt::Display for DisplayCase<'_> {
                     ereports,
                     comment,
                     alerts_requested,
+                    support_bundles_requested,
                 },
             indent,
             sitrep_id,
@@ -234,6 +255,47 @@ impl fmt::Display for DisplayCase<'_> {
             }
         }
 
+        if !support_bundles_requested.is_empty() {
+            writeln!(f, "\n{:>indent$}support bundles requested:", "")?;
+            writeln!(f, "{:>indent$}-------------------------", "")?;
+
+            let indent = indent + 2;
+            for SupportBundleRequest {
+                id,
+                requested_sitrep_id,
+                data_selection,
+            } in support_bundles_requested.iter()
+            {
+                const REQUESTED_IN: &str = "requested in:";
+                const DATA: &str = "data:";
+                const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
+
+                writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
+                    "",
+                    this_sitrep(*requested_sitrep_id)
+                )?;
+                match data_selection {
+                    None => {
+                        writeln!(
+                            f,
+                            "{:>indent$}{DATA:<WIDTH$} all (default)\n",
+                            "",
+                        )?;
+                    }
+                    Some(selection) => {
+                        writeln!(
+                            f,
+                            "{:>indent$}{DATA:<WIDTH$} {selection}\n",
+                            "",
+                        )?;
+                    }
+                }
+            }
+        }
+
         writeln!(f)?;
 
         Ok(())
@@ -248,6 +310,7 @@ mod tests {
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
         AlertUuid, CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
+        SupportBundleUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -275,6 +338,12 @@ mod tests {
                 .unwrap();
         let alert2_id =
             AlertUuid::from_str("8a6f88ef-c436-44a9-b4cb-cae91d7306c9")
+                .unwrap();
+        let bundle1_id =
+            SupportBundleUuid::from_str("d1a2b3c4-e5f6-7890-abcd-ef1234567890")
+                .unwrap();
+        let bundle2_id =
+            SupportBundleUuid::from_str("a9b8c7d6-e5f4-3210-fedc-ba0987654321")
                 .unwrap();
 
         // Create some ereports
@@ -349,6 +418,38 @@ mod tests {
             })
             .unwrap();
 
+        use crate::support_bundle::{BundleData, BundleDataSelection};
+        let mut bundle1_data = BundleDataSelection::new();
+        bundle1_data.insert(BundleData::Reconfigurator);
+        bundle1_data.insert(BundleData::SpDumps);
+        bundle1_data.insert(BundleData::HostInfo(
+            std::collections::HashSet::from([
+                crate::support_bundle::SledSelection::All,
+            ]),
+        ));
+        bundle1_data.insert(BundleData::Ereports(
+            crate::fm::ereport::EreportFilters {
+                only_classes: vec!["hw.pwr.*".to_string()],
+                ..Default::default()
+            },
+        ));
+
+        let mut support_bundles_requested = IdOrdMap::new();
+        support_bundles_requested
+            .insert_unique(SupportBundleRequest {
+                id: bundle1_id,
+                requested_sitrep_id: created_sitrep_id,
+                data_selection: Some(bundle1_data),
+            })
+            .unwrap();
+        support_bundles_requested
+            .insert_unique(SupportBundleRequest {
+                id: bundle2_id,
+                requested_sitrep_id: closed_sitrep_id,
+                data_selection: None,
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -357,6 +458,7 @@ mod tests {
             de: DiagnosisEngineKind::PowerShelf,
             ereports,
             alerts_requested,
+            support_bundles_requested,
             comment: "Power shelf rectifier added and removed here :-)"
                 .to_string(),
         };

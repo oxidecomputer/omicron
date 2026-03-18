@@ -230,6 +230,7 @@ mod tests {
             de: fm::DiagnosisEngineKind::PowerShelf,
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
             comment: "my great case".to_string(),
         };
         case1
@@ -305,6 +306,7 @@ mod tests {
             de: fm::DiagnosisEngineKind::PowerShelf,
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
             comment: "my other great case".to_string(),
         };
         case2

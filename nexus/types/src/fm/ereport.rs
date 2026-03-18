@@ -217,7 +217,7 @@ fn get_sp_metadata_string(
 }
 
 /// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EreportFilters {
     /// If present, include only ereports that were collected at the specified
     /// timestamp or later.
@@ -240,6 +240,55 @@ pub struct EreportFilters {
     pub only_classes: Vec<String>,
 }
 
+impl fmt::Display for EreportFilters {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use itertools::Itertools;
+
+        // Writes a semicolon-separated part to the formatter, tracking whether
+        // we've written anything yet.
+        let mut empty = true;
+        let mut fmt_part =
+            |f: &mut fmt::Formatter, args: fmt::Arguments| -> fmt::Result {
+                if !empty {
+                    write!(f, "; ")?;
+                }
+                empty = false;
+                f.write_fmt(args)
+            };
+
+        if let Some(start) = &self.start_time {
+            fmt_part(f, format_args!("start: {start}"))?;
+        }
+        if let Some(end) = &self.end_time {
+            fmt_part(f, format_args!("end: {end}"))?;
+        }
+        if !self.only_serials.is_empty() {
+            fmt_part(
+                f,
+                format_args!(
+                    "serials: {}",
+                    self.only_serials.iter().format(", ")
+                ),
+            )?;
+        }
+        if !self.only_classes.is_empty() {
+            fmt_part(
+                f,
+                format_args!(
+                    "classes: {}",
+                    self.only_classes.iter().format(", ")
+                ),
+            )?;
+        }
+
+        // If no filters are set, display "none" rather than empty output.
+        if empty {
+            write!(f, "none")?;
+        }
+        Ok(())
+    }
+}
+
 impl EreportFilters {
     pub fn check_time_range(&self) -> Result<(), Error> {
         if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
@@ -251,5 +300,42 @@ impl EreportFilters {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_datetime() -> impl Strategy<Value = DateTime<Utc>> {
+        // Generate timestamps in a reasonable range (2020-2030).
+        (1577836800i64..1893456000i64)
+            .prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
+    }
+
+    impl Arbitrary for EreportFilters {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            (
+                prop::option::of(arb_datetime()),
+                prop::option::of(arb_datetime()),
+                prop::collection::vec(".*", 0..=3),
+                prop::collection::vec(".*", 0..=3),
+            )
+                .prop_map(
+                    |(start_time, end_time, only_serials, only_classes)| {
+                        EreportFilters {
+                            start_time,
+                            end_time,
+                            only_serials,
+                            only_classes,
+                        }
+                    },
+                )
+                .boxed()
+        }
     }
 }

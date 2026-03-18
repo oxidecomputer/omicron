@@ -8,12 +8,16 @@
 //! They are shared between the support bundle collector and FM case types.
 
 use crate::fm::ereport::EreportFilters;
+use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 
 /// Describes the category of support bundle data.
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleDataCategory {
     /// Collects reconfigurator state (some of the latest blueprints,
     /// information about the target blueprint).
@@ -35,7 +39,8 @@ pub enum BundleDataCategory {
 /// For categories without additional parameters, the variant is a unit variant.
 /// For categories that can be filtered or configured, the variant contains
 /// that configuration data.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleData {
     Reconfigurator,
     HostInfo(HashSet<SledSelection>),
@@ -56,12 +61,26 @@ impl BundleData {
     }
 }
 
+impl fmt::Display for BundleData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Reconfigurator => write!(f, "reconfigurator"),
+            Self::HostInfo(sleds) => {
+                write!(f, "host_info({})", sleds.iter().format(", "))
+            }
+            Self::SledCubbyInfo => write!(f, "sled_cubby_info"),
+            Self::SpDumps => write!(f, "sp_dumps"),
+            Self::Ereports(filters) => write!(f, "ereports({filters})"),
+        }
+    }
+}
+
 /// A collection of bundle data specifications.
 ///
 /// This wrapper ensures that categories and data always match - you can't
 /// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
 /// because each BundleData determines its own category.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
     data: HashMap<BundleDataCategory, BundleData>,
 }
@@ -91,6 +110,12 @@ impl BundleDataSelection {
 
     pub fn get(&self, category: BundleDataCategory) -> Option<&BundleData> {
         self.data.get(&category)
+    }
+}
+
+impl fmt::Display for BundleDataSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data.values().format(", "))
     }
 }
 
@@ -128,8 +153,50 @@ impl Default for BundleDataSelection {
 ///
 /// Multiple values of this enum are joined together into a HashSet.
 /// Therefore "SledSelection::All" overrides specific sleds.
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum SledSelection {
     All,
     Specific(SledUuid),
+}
+
+impl fmt::Display for SledSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::All => write!(f, "all"),
+            Self::Specific(id) => write!(f, "{id}"),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+    use proptest::prelude::*;
+
+    impl Arbitrary for BundleDataSelection {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            prop::collection::vec(any::<BundleData>(), 0..=5)
+                .prop_map(|data| data.into_iter().collect())
+                .boxed()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+
+    #[proptest]
+    fn bundle_data_selection_serde_round_trip(selection: BundleDataSelection) {
+        let json = serde_json::to_string(&selection).unwrap();
+        let deserialized: BundleDataSelection =
+            serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(selection, deserialized);
+    }
 }
