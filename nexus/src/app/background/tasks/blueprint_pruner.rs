@@ -738,26 +738,6 @@ impl<T> ControlFlowExt for ControlFlow<T, T> {
     }
 }
 
-// XXX-dap test plan:
-// - write a verification helper:
-//   - input: final version number to expect
-//   - input: set of versions to expect or blueprint ids (unclear which)
-//   - input: blueprints / bp_target rows expected to be gone
-//   - loads all bp_target rows
-//   - loads all referenced blueprints
-//   - verifies that there are no gaps in the range
-//   - verifies that the range ends with the specific version
-//   - verifies a specific set of rows / blueprints exist:
-//     - none of the blueprints created by the test that shouldn't be here are
-//       here
-//     - all of the blueprints that the caller says should be here are here
-// - things we want to test:
-//   - multiple SQL batches
-//   - case where bp_target row references missing blueprint
-//   - extra blueprints (not referenced) are not touched
-//   - case: gap in bp_target table
-//   - common steady-state behavior (adding/pruning one at a time)
-//   - same blueprint enabled/disabled
 #[cfg(test)]
 mod test {
     use super::prune_blueprints;
@@ -1058,7 +1038,6 @@ mod test {
         let logctx = dev::test_setup_log("blueprint_pruner_basic");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let log = &opctx.log;
 
         // Verify the initial state set up by the test suite.
         let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
@@ -1113,33 +1092,40 @@ mod test {
 
         // At this point, we have 23 blueprints.
         //
-        // Prune some.  Run `prune(nkeep = 13, max_deletes = 100)`.  This should
-        // remove 10 blueprints, leaving 13.
+        // Basic case: prune down to some minimum number.  Specifically:
+        // `prune(nkeep = 13, max_deletes = 100)`.  This should remove 10
+        // blueprints, leaving 13.
         let details =
             verify_prune(opctx, datastore, &mut blueprints, 13, 100).await;
         assert_eq!(details.nkept_by_policy, 13);
         assert_eq!(details.deleted.len(), 10);
 
-        // Run `prune(nkeep = 0, max_deletes = 4).  `nkeep` is internally
-        // clamped (below) at 3, so this should remove 4 blueprints and leave 9.
-        // This exercises pruning a different number -- and specifically the
-        // clamping behavior on `nkeep`.
-        let details =
-            verify_prune(opctx, datastore, &mut blueprints, 0, 4).await;
-        assert_eq!(details.nkept_by_policy, 3);
-        assert_eq!(details.deleted.len(), 4);
-
-        // Do the same thing again, removing another 4 blueprints and leaving 5.
-        // This shows that when we stop due to running into the max, the next
-        // attempt will prune more.
+        // Now, exercise pruning with a large backlog -- i.e., where the number
+        // of blueprints to be pruned exceeds the maximum number we're willing
+        // to prune in each activation and we have to run the operation multiple
+        // times.
+        //
+        // Start with `prune(nkeep = 3, max_deletes = 4).  This should remove 4
+        // blueprints and leave 9.
         let details =
             verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
         assert_eq!(details.nkept_by_policy, 3);
         assert_eq!(details.deleted.len(), 4);
 
-        // Do it again, but we'll finally run into the maximum that we can
-        // prune.  Only two blueprints will be pruned, leaving 3.  This tests
-        // what happens when we finally do run into the limit.
+        // Continue pruning the backlog.  Do the same thing again, removing
+        // another 4 blueprints and leaving 5.  This shows that when we stop due
+        // to running into the max, the next attempt will prune more.
+        //
+        // In this example, we'll also set `nkeep = 0` to test the clamping
+        // behavior.  This will be implicitly clamped (below) at 3.
+        let details =
+            verify_prune(opctx, datastore, &mut blueprints, 0, 4).await;
+        assert_eq!(details.nkept_by_policy, 3);
+        assert_eq!(details.deleted.len(), 4);
+
+        // Finish pruning the backlog.  Only two blueprints will be pruned,
+        // leaving 3.  This tests what happens when we finally do run into the
+        // limit.
         let details =
             verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
         assert_eq!(details.nkept_by_policy, 3);
@@ -1179,4 +1165,12 @@ mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    // XXX-dap TODO-coverage test:
+    // - pruning with multiple SQL batches
+    // - pruning where it takes multiple batches to determine how many to keep
+    // - case where bp_target row references missing blueprint
+    // - extra blueprints (not referenced) are not touched
+    // - case: gap in bp_target table
+    // - same blueprint enabled/disabled a lot, at various points
 }
