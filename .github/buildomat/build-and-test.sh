@@ -138,6 +138,7 @@ RECORDING_CONFIG_DIR="/tmp/nextest-recording-config"
 RECORDING_CONFIG="$RECORDING_CONFIG_DIR/config.toml"
 NEXTEST_STATE_DIR="$(mktemp -d /tmp/nextest-state.XXXXXX)"
 ARCHIVE_PATH="/tmp/nextest-run-archive.zip"
+CHROME_TRACE_PATH="/tmp/nextest-chrome-trace.json"
 
 mkdir -p "$RECORDING_CONFIG_DIR"
 printf '[experimental]\nrecord = true\n\n[record]\nenabled = true\n' \
@@ -158,6 +159,12 @@ if ! ptime -m cargo nextest store export latest \
     --user-config-file "$RECORDING_CONFIG" \
     --archive-file "$ARCHIVE_PATH"; then
     echo "warning: failed to export recording archive" >&2
+fi
+
+if ! ptime -m cargo nextest store export-chrome-trace latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --output "$CHROME_TRACE_PATH"; then
+    echo "warning: failed to export Chrome trace" >&2
 fi
 
 if [[ "$NEXTEST_EXIT" -ne 0 ]]; then
