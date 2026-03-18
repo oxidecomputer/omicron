@@ -525,8 +525,12 @@ async fn main() -> Result<()> {
 
     let incorp_version = format!("{}.0.0.0", version.major);
     if args.mkincorp {
-        let action = if let Some(helios) = &pins.helios {
-            helios::Action::Passthru { version: helios.incorporation.clone() }
+        let action = if let Some(omicron_pins::Helios {
+            incorporation: Some(incorp),
+            ..
+        }) = &pins.helios
+        {
+            helios::Action::Passthru { version: incorp.clone() }
         } else {
             helios::Action::Generate { version: incorp_version.clone() }
         };
@@ -642,11 +646,14 @@ async fn main() -> Result<()> {
                 .arg(format!("{}={extra_origin}", helios::PUBLISHER));
         }
 
-        if let Some(helios) = &pins.helios {
+        if let Some(omicron_pins::Helios {
+            incorporation: Some(incorp), ..
+        }) = &pins.helios
+        {
             image_cmd = image_cmd.arg("-F").arg(format!(
                 "extra_packages+=/{}@{}",
                 helios::INCORP_NAME,
-                helios.incorporation
+                incorp
             ));
         } else if args.mkincorp {
             image_cmd = image_cmd

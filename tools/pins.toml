@@ -1,4 +1,7 @@
 # Helios should *not* be pinned except on release branches.
 [helios]
+# https://github.com/oxidecomputer/helios/pull/246
 commit = "79e69e701d123debd1761d6d46e4df426b187788"
-incorporation = "18.0.0.0"
+# Omit incorporation to get updated stlouis that includes
+# https://code.oxide.computer/c/illumos-gate/+/717
+# incorporation = "18.0.0.0"

@@ -16,7 +16,7 @@ pub struct Pins {
 #[serde(deny_unknown_fields)]
 pub struct Helios {
     pub commit: String,
-    pub incorporation: String,
+    pub incorporation: Option<String>,
 }
 
 impl Pins {
