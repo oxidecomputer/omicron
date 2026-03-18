@@ -983,6 +983,35 @@ mod test {
         }
     }
 
+    /// Inserts an initial blueprint into the database
+    async fn add_initial_blueprint(opctx: &OpContext, datastore: &DataStore) {
+        // Verify the initial state set up by the test suite.
+        let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
+        assert!(blueprints.all_blueprint_ids.is_empty());
+        assert!(blueprints.target_rows.is_empty());
+
+        // Insert an initial blueprint.
+        let blueprint = BlueprintBuilder::build_empty_seeded(
+            "test-suite",
+            PlannerRng::from_entropy(),
+        );
+        datastore
+            .blueprint_insert(opctx, &blueprint)
+            .await
+            .expect("inserting initial blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("inserting initial blueprint target");
+    }
+
     /// Runs and verifies a `prune` operation where:
     ///
     /// - input: keep `nkeep` blueprints
@@ -1011,7 +1040,7 @@ mod test {
         println!("{details:?}");
         // Verify no problems encountered.
         assert!(details.warnings.is_empty());
-        // Verify that whatever blueprints we deleted, they were the oldest ones.
+        // Verify that whatever blueprints we deleted were the oldest ones.
         let deleted = if !details.deleted.is_empty() {
             let oldest = blueprints.drop_oldest(details.deleted.len());
             for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
@@ -1033,39 +1062,22 @@ mod test {
         details
     }
 
+    /// Tests basic behavior of pruner:
+    ///
+    /// - pruning deletes the right blueprints and bp_target rows
+    /// - per-activation delete cap is honored
+    /// - minimum "nkept" is honored
+    /// - does nothing when there's nothing to prune
     #[tokio::test]
     async fn test_basic() {
         let logctx = dev::test_setup_log("blueprint_pruner_basic");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Verify the initial state set up by the test suite.
-        let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
-        assert!(blueprints.all_blueprint_ids.is_empty());
-        assert!(blueprints.target_rows.is_empty());
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
 
-        // Insert an initial blueprint.
-        let blueprint = BlueprintBuilder::build_empty_seeded(
-            "test-suite",
-            PlannerRng::from_entropy(),
-        );
-        datastore
-            .blueprint_insert(opctx, &blueprint)
-            .await
-            .expect("inserting initial blueprint");
-        datastore
-            .blueprint_target_set_current(
-                opctx,
-                BlueprintTarget {
-                    target_id: blueprint.id,
-                    enabled: false,
-                    time_made_target: Utc::now(),
-                },
-            )
-            .await
-            .expect("inserting initial blueprint target");
-
-        // Verify that newly loaded state reflects that.
+        // Verify that newly loaded state reflects one blueprint.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
         assert_eq!(blueprints.all_blueprint_ids.len(), 1);
@@ -1166,10 +1178,89 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    /// Tests pruning when some of the entries in `bp_target` have already had
+    /// their blueprints removed
+    ///
+    /// This will commonly be the case on deployed systems because of manual
+    /// cleanup that has been run in the past with `omdb reconfigurator
+    /// archive`.
+    #[tokio::test]
+    async fn test_prune_missing_blueprint() {
+        let logctx = dev::test_setup_log("blueprint_pruner_missing_blueprint");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add several more blueprints and make sure our representation of the
+        // database state matches up with the real thing.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        for _ in 0..20 {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_blueprints_referenced_by_targets();
+        blueprints.verify_targets_referenced_by_blueprints();
+        blueprints.verify_database_matches(opctx, datastore).await;
+        let nblueprints = blueprints.all_blueprint_ids.len();
+        assert_eq!(
+            blueprints.all_blueprint_ids.len(),
+            blueprints.target_rows.len()
+        );
+
+        // Delete the first few blueprints from the database.
+        let ndeleted = 4;
+        for i in 0..ndeleted {
+            datastore
+                .blueprint_delete(
+                    opctx,
+                    &authz::Blueprint::new_for_id(blueprints.target_rows[i].id),
+                )
+                .await
+                .expect("deleting blueprint");
+        }
+
+        // Reload the database state.
+        let blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        // Verify that there are now fewer blueprints in the database than
+        // target rows.
+        assert_eq!(blueprints.all_blueprint_ids.len(), nblueprints - ndeleted);
+        assert_eq!(blueprints.target_rows.len(), nblueprints);
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Now, prune.
+        let nkeep = 5;
+        let details =
+            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
+                .await
+                .expect("successful prune");
+        println!("{details:?}");
+        assert!(details.warnings.is_empty());
+
+        // This is the crux of the test: we should have marked more bp_target
+        // rows as removable than blueprints deleted.  And we should have
+        // deleted all of the removable rows.
+        assert_eq!(details.ntargets_removable, nblueprints - nkeep);
+        assert_eq!(details.deleted.len(), nblueprints - nkeep - ndeleted);
+        assert_eq!(details.ntargets_deleted, nblueprints - nkeep);
+
+        // Load the database state again and make sure what's in the database
+        // matches what we expect: just `nkeep` blueprints and target rows that
+        // exactly match up.
+        let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
+        assert_eq!(blueprints.target_rows.len(), nkeep);
+        blueprints.verify_blueprints_referenced_by_targets();
+        blueprints.verify_targets_referenced_by_blueprints();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // XXX-dap TODO-coverage test:
     // - pruning with multiple SQL batches
     // - pruning where it takes multiple batches to determine how many to keep
-    // - case where bp_target row references missing blueprint
     // - extra blueprints (not referenced) are not touched
     // - case: gap in bp_target table
     // - same blueprint enabled/disabled a lot, at various points
