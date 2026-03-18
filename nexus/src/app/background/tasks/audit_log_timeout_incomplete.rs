@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,8 +29,12 @@ impl AuditLogTimeoutIncomplete {
         timeout: Duration,
         max_timed_out_per_activation: u32,
     ) -> Self {
-        let timeout = TimeDelta::from_std(timeout)
-            .expect("timeout must be representable as a TimeDelta");
+        let Ok(timeout) = TimeDelta::from_std(timeout) else {
+            panic!(
+                "invalid timeout {timeout:?} \
+                 (must be representable as a TimeDelta)"
+            );
+        };
         Self { datastore, timeout, max_timed_out_per_activation }
     }
 
@@ -49,15 +54,17 @@ impl AuditLogTimeoutIncomplete {
         {
             Ok(count) => count,
             Err(err) => {
-                let msg =
-                    format!("audit log timeout incomplete failed: {err:#}");
-                slog::error!(&opctx.log, "{msg}");
+                slog::error!(
+                    &opctx.log,
+                    "audit log timeout incomplete failed";
+                    &err,
+                );
                 return AuditLogTimeoutIncompleteStatus {
                     timed_out: 0,
                     cutoff,
                     max_timed_out_per_activation: self
                         .max_timed_out_per_activation,
-                    error: Some(msg),
+                    error: Some(InlineErrorChain::new(&err).to_string()),
                 };
             }
         };
