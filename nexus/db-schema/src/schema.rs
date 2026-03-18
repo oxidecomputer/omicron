@@ -2869,9 +2869,9 @@ table! {
         report -> Jsonb,
 
         reporter -> crate::enums::EreporterTypeEnum,
+        sled_id -> Nullable<Uuid>,
         slot_type -> crate::enums::SpTypeEnum,
         slot -> Int4,
-        sled_id -> Nullable<Uuid>,
     }
 }
 
