@@ -893,13 +893,13 @@ mod test {
             assert_eq!(*self, other);
         }
 
-        /// Creates a new blueprint based on the current target, inserts it, and
-        /// sets it as the new target.
-        pub async fn add_target_blueprint(
-            &mut self,
-            opctx: &OpContext,
-            datastore: &DataStore,
-        ) {
+        /// Creates a new blueprint based on the current target and inserts it
+        /// but does **not** set it as the new target.
+        pub async fn add_non_target_blueprint<'a, 'b>(
+            &'a mut self,
+            opctx: &'b OpContext,
+            datastore: &'b DataStore,
+        ) -> (BlueprintUuid, &'a TargetRow) {
             // Find the highest-versioned target blueprint that we loaded and
             // read the whole blueprint.
             let parent_blueprint_target = self
@@ -907,7 +907,6 @@ mod test {
                 .iter()
                 .last()
                 .expect("at least one bp_target row");
-            let enabled = parent_blueprint_target.enabled;
             let parent_blueprint = datastore
                 .blueprint_read(
                     opctx,
@@ -939,25 +938,39 @@ mod test {
                 .blueprint_insert(opctx, &new_blueprint)
                 .await
                 .expect("inserting new blueprint");
+            self.all_blueprint_ids.insert(new_blueprint.id);
+            (new_blueprint.id, parent_blueprint_target)
+        }
+
+        /// Creates a new blueprint based on the current target, inserts it, and
+        /// sets it as the new target.
+        pub async fn add_target_blueprint(
+            &mut self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+        ) {
+            let (new_blueprint_id, old_target) =
+                self.add_non_target_blueprint(opctx, datastore).await;
+
             datastore
                 .blueprint_target_set_current(
                     opctx,
                     BlueprintTarget {
-                        target_id: new_blueprint.id,
-                        enabled,
+                        target_id: new_blueprint_id,
+                        enabled: old_target.enabled,
                         time_made_target: Utc::now(),
                     },
                 )
                 .await
                 .expect("setting new blueprint as target");
 
-            // Update our state to reflect the new blueprint.
-            self.all_blueprint_ids.insert(new_blueprint.id);
-            self.target_rows.push_back(TargetRow {
-                id: new_blueprint.id,
-                version: parent_blueprint_target.version + 1,
-                enabled,
-            });
+            let target_row = TargetRow {
+                id: new_blueprint_id,
+                version: old_target.version + 1,
+                enabled: old_target.enabled,
+            };
+
+            self.target_rows.push_back(target_row);
         }
 
         /// Removes the oldest N target rows and their associated blueprints
@@ -1222,8 +1235,7 @@ mod test {
         }
 
         // Reload the database state.
-        let blueprints =
-            BlueprintDatabaseState::load(opctx, datastore).await;
+        let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
         // Verify that there are now fewer blueprints in the database than
         // target rows.
         assert_eq!(blueprints.all_blueprint_ids.len(), nblueprints - ndeleted);
@@ -1258,10 +1270,88 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    /// Tests that pruning does not remove blueprints that were never the target
+    #[tokio::test]
+    async fn test_no_prune_non_target_blueprint() {
+        let logctx =
+            dev::test_setup_log("blueprint_pruner_non_target_blueprint");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add a non-target blueprint.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        let (blueprint_id, _) =
+            blueprints.add_non_target_blueprint(opctx, datastore).await;
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Add several more target blueprints and make sure our representation
+        // of the database state matches up with the real thing.
+        for _ in 0..10 {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+        let nblueprints = blueprints.all_blueprint_ids.len();
+
+        // Now, prune.
+        let details =
+            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
+                .await
+                .expect("successful prune");
+        println!("{details:?}");
+        assert!(details.warnings.is_empty());
+
+        // This is the crux of the test: the database state should still contain
+        // the blueprint id.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        assert!(blueprints.all_blueprint_ids.contains(&blueprint_id));
+
+        // Just to be really sure, let's add enough new blueprints to prune all
+        // the existing ones and make sure we still never wind up pruning the
+        // one that was never a target.
+        let target_blueprints_before: BTreeSet<_> =
+            blueprints.target_rows.iter().map(|r| r.id).collect();
+        let nblueprints = target_blueprints_before.len() + 1;
+        for _ in 0..nblueprints {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        let details =
+            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
+                .await
+                .expect("successful prune");
+        println!("{details:?}");
+        assert!(details.warnings.is_empty());
+        assert_eq!(details.deleted.len(), target_blueprints_before.len() + 1);
+
+        // Reload the database state.
+        let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
+        // We should still have the non-target blueprint.
+        assert!(blueprints.all_blueprint_ids.contains(&blueprint_id));
+        // We should have replaced all of the previous target blueprints.
+        for t in &blueprints.target_rows {
+            assert!(!target_blueprints_before.contains(&t.id));
+        }
+
+        // Finally, one more prune operation should still prune nothing.
+        let details =
+            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
+                .await
+                .expect("successful prune");
+        assert!(details.warnings.is_empty());
+        assert_eq!(details.deleted.len(), 0);
+        assert_eq!(details.ntargets_removable, 0);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // XXX-dap TODO-coverage test:
     // - pruning with multiple SQL batches
     // - pruning where it takes multiple batches to determine how many to keep
-    // - extra blueprints (not referenced) are not touched
     // - case: gap in bp_target table
     // - same blueprint enabled/disabled a lot, at various points
 }
