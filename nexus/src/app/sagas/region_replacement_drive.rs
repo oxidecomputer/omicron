@@ -579,7 +579,7 @@ async fn check_from_previous_propolis_step(
     } else {
         // The VMM has not changed: check if the VMM is still active.
 
-        let state = current_vmm.runtime.state;
+        let state = current_vmm.state;
 
         info!(
             log,
@@ -921,7 +921,7 @@ async fn srrd_drive_region_replacement_prepare(
                         // request to the running Volume there if the runtime
                         // state is either running or rebooting.
 
-                        let state = vmm.runtime.state;
+                        let state = vmm.state;
 
                         info!(
                             log,

@@ -473,11 +473,9 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -495,11 +493,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -533,7 +529,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm1.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    generation: Generation(vmm1.runtime.generation.0.next()),
+                    generation: Generation(vmm1.generation.0.next()),
                     state: VmmState::Stopping,
                 },
                 Migrations {
@@ -555,7 +551,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm2.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    generation: Generation(vmm2.runtime.generation.0.next()),
+                    generation: Generation(vmm2.generation.0.next()),
                     state: VmmState::Running,
                 },
                 Migrations {
@@ -606,11 +602,9 @@ mod tests {
                     propolis_ip: "10.1.9.69".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -643,7 +637,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm2.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    generation: Generation(vmm2.runtime.generation.0.next()),
+                    generation: Generation(vmm2.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
                 Migrations {
@@ -667,7 +661,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm3.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    generation: Generation(vmm3.runtime.generation.0.next()),
+                    generation: Generation(vmm3.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
                 Migrations {

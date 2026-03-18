@@ -317,7 +317,6 @@ impl TqState {
         let baseboards: BTreeSet<_> = config
             .members
             .iter()
-            .cloned()
             .map(|id| {
                 Baseboard::new_pc(
                     id.serial_number.clone(),

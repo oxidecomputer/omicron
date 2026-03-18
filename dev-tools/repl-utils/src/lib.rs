@@ -6,7 +6,6 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
-use anyhow::bail;
 use camino::Utf8Path;
 use clap::Parser;
 use reedline::Prompt;
@@ -127,9 +126,11 @@ pub fn run_repl_on_stdin_customized<C: Parser>(
     prompt: &dyn Prompt,
     run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
 ) -> anyhow::Result<()> {
+    // Ensure new Signal variants would trigger a compile error.
+    #[allow(clippy::while_let_loop)]
     loop {
-        match ed.read_line(prompt) {
-            Ok(Signal::Success(buffer)) => {
+        match ed.read_line(prompt).context("unexpected error")? {
+            Signal::Success(buffer) => {
                 // Strip everything after '#' as a comment.
                 let entry = match buffer.split_once('#') {
                     Some((real, _comment)) => real,
@@ -140,10 +141,7 @@ pub fn run_repl_on_stdin_customized<C: Parser>(
                     LoopResult::Bail(error) => return Err(error),
                 }
             }
-            Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => break,
-            Err(error) => {
-                bail!("unexpected error: {:#}", error);
-            }
+            Signal::CtrlD | Signal::CtrlC => break,
         }
     }
 

@@ -15,6 +15,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use slog::Logger;
 use slog::{debug, error, info};
+use slog_error_chain::InlineErrorChain;
 use std::io::{Stdout, stdout};
 use std::net::SocketAddrV6;
 use std::time::Instant;
@@ -385,7 +386,7 @@ async fn run_event_listener(
                         Some(Ok(event)) => event,
                         Some(Err(e)) => {
                           // TODO: Issue a shutdown
-                          error!(log, "Failed to receive event: {:?}", e);
+                          error!(log, "Failed to receive event"; InlineErrorChain::new(&e));
                           return;
                         }
                     };

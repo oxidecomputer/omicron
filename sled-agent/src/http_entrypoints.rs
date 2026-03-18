@@ -158,8 +158,9 @@ impl SledAgentApi for SledAgentImpl {
                 };
                 let f = tokio::fs::File::open(&path).await.map_err(|e| {
                     HttpError::for_internal_error(format!(
-                        "failed to open zone bundle file at {}: {:?}",
-                        path, e,
+                        "failed to open zone bundle file at \"{}\": {}",
+                        path,
+                        InlineErrorChain::new(&e),
                     ))
                 })?;
                 let file_access =
@@ -206,7 +207,8 @@ impl SledAgentApi for SledAgentImpl {
                 for path in paths.into_iter() {
                     tokio::fs::remove_file(&path).await.map_err(|e| {
                         HttpError::for_internal_error(format!(
-                            "Failed to delete zone bundle: {e}"
+                            "Failed to delete zone bundle: {}",
+                            InlineErrorChain::new(&e),
                         ))
                     })?;
                 }
@@ -966,7 +968,8 @@ impl SledAgentApi for SledAgentImpl {
 
                 let config = bs.get_network_config().await.map_err(|e| {
                     HttpError::for_internal_error(format!(
-                        "failed to get bootstore: {e}"
+                        "failed to get bootstore: {}",
+                        InlineErrorChain::new(&e)
                     ))
                 })?;
 
@@ -1082,7 +1085,8 @@ impl SledAgentApi for SledAgentImpl {
                     .await
                     .map_err(|e| {
                         HttpError::for_internal_error(format!(
-                            "failed to write updated config to boot store: {e}"
+                            "failed to write updated config to boot store: {}",
+                            InlineErrorChain::new(&e)
                         ))
                     })?;
                 Ok(HttpResponseUpdatedNoContent())
@@ -1107,8 +1111,10 @@ impl SledAgentApi for SledAgentImpl {
                 )
                 .await
                 .map_err(|e| {
-                    let message =
-                        format!("Failed to add sled to rack cluster: {e}");
+                    let message = format!(
+                        "Failed to add sled to rack cluster: {}",
+                        InlineErrorChain::new(&e)
+                    );
                     HttpError {
                         status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                         error_code: None,
@@ -1155,8 +1161,8 @@ impl SledAgentApi for SledAgentImpl {
                     .get_status()
                     .await
                     .map_err(|e| {
-                        HttpError::from(
-                            omicron_common::api::external::Error::from(e),
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
                         )
                     })?
                     .into();

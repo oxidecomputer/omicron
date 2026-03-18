@@ -76,6 +76,7 @@ members = [
     "ipcc",
     "key-manager",
     "key-manager/types",
+    "ledger",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -253,6 +254,7 @@ default-members = [
     "ipcc",
     "key-manager",
     "key-manager/types",
+    "ledger",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -471,13 +473,13 @@ derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "main", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.12", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = "0.4.2"
+diesel = { version = "2.3.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel-dtrace = "0.5.0"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "c0bf0a3b536baab0393c96fec3204b32e4f9368b" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "b31ba90d14636ef6bba9dbb56d756efa249d4b4e" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.6.0"
 dropshot-api-manager-types = "0.6.0"
@@ -584,8 +586,8 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -619,7 +621,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 nexus-types-versions = { path = "nexus/types/versions" }
-nix = { version = "0.30", features = ["fs", "net"] }
+nix = { version = "0.31", features = ["fs", "net"] }
 nom = "7.1.3"
 nonempty = "0.12.0"
 num-integer = "0.1.46"
@@ -630,6 +632,7 @@ omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-cockroach-metrics = { path = "cockroach-metrics" }
 omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
+omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-ntp-admin = { path = "ntp-admin" }
@@ -718,7 +721,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
+rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -1040,8 +1043,6 @@ opt-level = 3
 # drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
-# dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }
-# dropshot-api-manager-types = { path = "../dropshot-api-manager/crates/dropshot-api-manager-types" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }

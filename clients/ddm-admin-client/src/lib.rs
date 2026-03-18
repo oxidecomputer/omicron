@@ -32,7 +32,7 @@ const DDMD_PORT: u16 = 8000;
 #[derive(Debug, Error, SlogInlineError)]
 pub enum DdmError {
     #[error("Failed to construct an HTTP client:")]
-    HttpClient(#[from] reqwest012::Error),
+    HttpClient(#[from] reqwest::Error),
 
     #[error("Failed making HTTP request to ddmd")]
     DdmdApi(#[from] Error<types::Error>),
@@ -58,9 +58,7 @@ impl Client {
         let log =
             log.new(slog::o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr)));
 
-        // Use reqwest012 because the rev-pinned maghemite ddm-admin-client
-        // is still on reqwest 0.12.
-        let inner = reqwest012::ClientBuilder::new()
+        let inner = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
             .build()?;

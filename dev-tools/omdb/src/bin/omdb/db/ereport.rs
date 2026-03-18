@@ -20,7 +20,8 @@ use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
-use diesel::dsl::{count_distinct, min};
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::{count, min};
 use diesel::prelude::*;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ereport as model;
@@ -371,7 +372,7 @@ async fn cmd_db_ereporters(
                     dsl::serial_number,
                     dsl::part_number,
                     min(dsl::time_collected),
-                    count_distinct(dsl::ena),
+                    count(dsl::ena).aggregate_distinct(),
                 ))
                 .into_boxed();
 

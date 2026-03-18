@@ -29,6 +29,7 @@ use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSource;
@@ -247,6 +248,7 @@ pub struct SledEditCounts {
     pub disks: EditCounts,
     pub datasets: EditCounts,
     pub zones: EditCounts,
+    pub measurements: EditCounts,
 }
 
 impl SledEditCounts {
@@ -255,14 +257,16 @@ impl SledEditCounts {
             disks: EditCounts::zeroes(),
             datasets: EditCounts::zeroes(),
             zones: EditCounts::zeroes(),
+            measurements: EditCounts::zeroes(),
         }
     }
 
     fn has_nonzero_counts(&self) -> bool {
-        let Self { disks, datasets, zones } = self;
+        let Self { disks, datasets, zones, measurements } = self;
         disks.has_nonzero_counts()
             || datasets.has_nonzero_counts()
             || zones.has_nonzero_counts()
+            || measurements.has_nonzero_counts()
     }
 
     fn difference_since(self, other: Self) -> Self {
@@ -270,6 +274,9 @@ impl SledEditCounts {
             disks: self.disks.difference_since(other.disks),
             datasets: self.datasets.difference_since(other.datasets),
             zones: self.zones.difference_since(other.zones),
+            measurements: self
+                .measurements
+                .difference_since(other.measurements),
         }
     }
 }
@@ -277,7 +284,12 @@ impl SledEditCounts {
 impl From<StorageEditCounts> for SledEditCounts {
     fn from(value: StorageEditCounts) -> Self {
         let StorageEditCounts { disks, datasets } = value;
-        Self { disks, datasets, zones: EditCounts::zeroes() }
+        Self {
+            disks,
+            datasets,
+            zones: EditCounts::zeroes(),
+            measurements: EditCounts::zeroes(),
+        }
     }
 }
 
@@ -359,6 +371,9 @@ pub(crate) enum Operation {
         sled_id: SledUuid,
         slot_a_updated: bool,
         slot_b_updated: bool,
+    },
+    SledNoopMeasurementsUpdated {
+        sled_id: SledUuid,
     },
 }
 
@@ -464,6 +479,13 @@ impl fmt::Display for Operation {
                     f,
                     "updated nexus generation from \
                      {current_generation} to {new_generation}"
+                )
+            }
+            Self::SledNoopMeasurementsUpdated { sled_id } => {
+                write!(
+                    f,
+                    "sled {sled_id}: performed all noop \
+                     measurements updates"
                 )
             }
         }
@@ -886,6 +908,18 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(editor.host_phase_2())
     }
 
+    pub fn current_sled_measurements(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<BlueprintMeasurements, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get measurements for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.measurements())
+    }
+
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(self, source: BlueprintSource) -> Blueprint {
         let blueprint_id = self.new_blueprint_id();
@@ -903,6 +937,12 @@ impl<'a> BlueprintBuilder<'a> {
             let EditedSled { config, edit_counts, scalar_edits } = edited_sled;
             sleds.insert(sled_id, config);
             if edit_counts.has_nonzero_counts() || scalar_edits.has_edits() {
+                let SledEditCounts {
+                    disks: disks_edits,
+                    datasets: datasets_edits,
+                    zones: zone_edits,
+                    measurements: measurement_edits,
+                } = edit_counts;
                 let EditedSledScalarEdits {
                     debug_force_generation_bump,
                     remove_mupdate_override,
@@ -911,9 +951,10 @@ impl<'a> BlueprintBuilder<'a> {
                     self.log, "sled modified in new blueprint";
                     "sled_id" => %sled_id,
                     "blueprint_id" => %blueprint_id,
-                    "disk_edits" => ?edit_counts.disks,
-                    "dataset_edits" => ?edit_counts.datasets,
-                    "zone_edits" => ?edit_counts.zones,
+                    "disk_edits" => ?disks_edits,
+                    "dataset_edits" => ?datasets_edits,
+                    "zone_edits" => ?zone_edits,
+                    "measurement_edits" => ?measurement_edits,
                     "debug_force_generation_bump" =>
                         debug_force_generation_bump,
                     "remove_mupdate_override_modified" =>
@@ -1333,17 +1374,22 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(|err| Error::SledEditError { sled_id, err })?;
         let final_counts = editor.edit_counts();
 
-        let SledEditCounts { disks, datasets, zones } =
+        let SledEditCounts { disks, datasets, zones, measurements } =
             final_counts.difference_since(initial_counts);
         debug_assert_eq!(
             disks,
             EditCounts::zeroes(),
-            "we only edited datasets"
+            "we only edited datasets but found disks with non-zero edit counts"
         );
         debug_assert_eq!(
             zones,
             EditCounts::zeroes(),
-            "we only edited datasets"
+            "we only edited datasets but zones with non-zero edit counts"
+        );
+        debug_assert_eq!(
+            measurements,
+            EditCounts::zeroes(),
+            "we only edited datasets but measurements with non-zero edit counts"
         );
         Ok(datasets.into())
     }
@@ -2117,6 +2163,22 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(())
     }
 
+    pub fn sled_set_measurements(
+        &mut self,
+        sled_id: SledUuid,
+        measurements: BlueprintMeasurements,
+    ) -> Result<usize, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change measurements on unknown sled {sled_id}"
+            ))
+        })?;
+        let initial_counts = editor.edit_counts();
+        editor.set_measurements(measurements);
+        let final_counts = editor.edit_counts();
+        Ok(final_counts.difference_since(initial_counts).measurements.updated)
+    }
+
     pub fn sled_set_host_phase_2_slot(
         &mut self,
         sled_id: SledUuid,
@@ -2344,6 +2406,8 @@ pub(crate) enum EnsureMupdateOverrideAction {
         prev_mgs_update: Option<Box<PendingMgsUpdate>>,
         /// The previous host phase 2 contents.
         prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
+        /// The previous measurements
+        prev_measurements: BlueprintMeasurements,
     },
     /// The inventory did not have an override but the blueprint did, and other
     /// conditions were met, so the blueprint's override was cleared.
@@ -2375,6 +2439,8 @@ pub(crate) enum EnsureMupdateOverrideAction {
         prev_mgs_update: Option<Box<PendingMgsUpdate>>,
         /// The previous host phase 2 contents.
         prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
+        /// The previous measurement contents.
+        prev_measurements: BlueprintMeasurements,
     },
 }
 
@@ -2396,11 +2462,12 @@ impl EnsureMupdateOverrideAction {
                 zones,
                 prev_mgs_update,
                 prev_host_phase_2,
+                prev_measurements,
             } => {
                 let zones_desc = zones_desc(zones);
                 let host_phase_2_desc =
                     host_phase_2_to_current_contents_desc(prev_host_phase_2);
-
+                let measurements_desc = prev_measurements.desc();
                 info!(
                     log,
                     "blueprint mupdate override updated to match inventory";
@@ -2408,6 +2475,7 @@ impl EnsureMupdateOverrideAction {
                     "prev_bp_override" => ?prev_bp_override,
                     "zones" => zones_desc,
                     "host_phase_2" => host_phase_2_desc,
+                    "measurements" => measurements_desc,
                 );
                 if let Some(prev_mgs_update) = prev_mgs_update {
                     info!(
@@ -2451,9 +2519,11 @@ impl EnsureMupdateOverrideAction {
                 bp_override,
                 prev_mgs_update,
                 prev_host_phase_2,
+                prev_measurements,
             } => {
                 let host_phase_2_desc =
                     host_phase_2_to_current_contents_desc(prev_host_phase_2);
+                let measurements_desc = prev_measurements.desc();
                 error!(
                     log,
                     "error getting mupdate override info for sled, \
@@ -2462,6 +2532,7 @@ impl EnsureMupdateOverrideAction {
                     "message" => %message,
                     "bp_override" => ?bp_override,
                     "prev_host_phase_2" => %host_phase_2_desc,
+                    "prev_measurements" => %measurements_desc,
                 );
                 if let Some(prev_mgs_update) = prev_mgs_update {
                     info!(

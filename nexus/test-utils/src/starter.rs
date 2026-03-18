@@ -419,7 +419,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
     pub async fn start_dendrite(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
-        debug!(log, "Starting Dendrite for {switch_slot}");
+        debug!(log, "Starting Dendrite"; "switch_slot" => ?switch_slot);
         let mgs = self.gateway.get(&switch_slot).unwrap();
         let mgs_addr =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
@@ -446,7 +446,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
-        debug!(log, "Starting mgd for {switch_slot}");
+        debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
 
         // Set up an instance of mgd
         let mgd = dev::maghemite::MgdInstance::start(0).await.unwrap();
@@ -469,8 +469,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         debug!(
             log,
             "Recording DNS for the switch zones";
-            "sled_id" => sled_id.to_string(),
-            "switch_slot" => switch_slot.to_string(),
+            "sled_id" => %sled_id,
+            "switch_slot" => ?switch_slot,
         );
 
         self.rack_init_builder

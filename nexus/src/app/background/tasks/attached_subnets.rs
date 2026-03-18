@@ -88,8 +88,8 @@ impl Manager {
         // Loop over each Dendrite instance, find the subnets it has and the
         // diff we need to apply.
         let mut res = HashMap::<_, DendriteSubnetDetails>::new();
-        for (loc, client) in clients.iter() {
-            let details = res.entry(*loc).or_default();
+        for (switch_slot, client) in clients.iter() {
+            let details = res.entry(*switch_slot).or_default();
             let existing_attachments = match client
                 .attached_subnet_list_stream(None)
                 .map(|entry| {
@@ -112,7 +112,7 @@ impl Manager {
                         log,
                         "failed to list existing attached subnets \
                         from switch, it will be skipped this time";
-                        "switch_location" => %loc,
+                        "switch_slot" => ?switch_slot,
                         "error" => err,
                     );
                     continue;
@@ -136,7 +136,7 @@ impl Manager {
                             log,
                             "deleted subnet from dendrite";
                             "subnet" => %subnet,
-                            "switch" => %loc,
+                            "switch_slot" => ?switch_slot,
                         );
                     }
                     Err(e) => {
@@ -146,7 +146,7 @@ impl Manager {
                             log,
                             "failed to delete subnet from dendrite";
                             "subnet" => %subnet,
-                            "switch" => %loc,
+                            "switch_slot" => ?switch_slot,
                             "error" => err,
                         );
                     }
@@ -164,7 +164,7 @@ impl Manager {
                             "created attached subnet on dendrite";
                             "subnet" => %subnet,
                             "target" => ?target,
-                            "switch" => %loc,
+                            "switch_slot" => ?switch_slot,
                         );
                     }
                     Err(e) => {
@@ -175,7 +175,7 @@ impl Manager {
                             "failed to create subnet on dendrite";
                             "subnet" => %subnet,
                             "target" => ?target,
-                            "switch" => %loc,
+                            "switch_slot" => ?switch_slot,
                             "error" => err,
                         );
                     }

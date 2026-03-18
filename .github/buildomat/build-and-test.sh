@@ -105,25 +105,25 @@ export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1
 # We're building once, so there's no need to incur the overhead of an incremental build.
 export CARGO_INCREMENTAL=0
-# This allows us to build with unstable options, which gives us access to some
-# timing information.
-#
-# If we remove "--timings=json" below, this would no longer be needed.
+# This allows us to use -Zbuild-analysis to collect per-crate build timing
+# data in JSONL format.
 export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
-# We report build progress to stderr, and the "--timings=json" output goes to stdout.
 #
 # The build graph ends up building several bin/test targets that depend on
 # omicron-nexus at the same time, which uses significant memory to compile on
 # illumos. To mitigate this we build everything except omicron-nexus's bin/test
 # targets first, then finish the build after.
-ptime -m cargo build -Z unstable-options --timings=json \
-    --workspace --exclude=omicron-nexus --tests --locked --verbose \
-    1>> "$OUTPUT_DIR/crate-build-timings.json"
-ptime -m cargo build -Z unstable-options --timings=json \
-    --workspace --tests --locked --verbose \
-    1>> "$OUTPUT_DIR/crate-build-timings.json"
+#
+# Both invocations use the same flags to avoid cache invalidation.
+# We collect timing data only from the second (full workspace) build.
+ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
+    --workspace --exclude=omicron-nexus --tests --locked --verbose
+ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
+    --workspace --tests --locked --verbose
+cp "$(ls -t "${CARGO_HOME:-$HOME/.cargo}/log/"*.jsonl | head -1)" \
+    "$OUTPUT_DIR/cargo-build-analysis.jsonl"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
