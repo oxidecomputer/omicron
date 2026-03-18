@@ -292,13 +292,8 @@ async fn cmd_db_ereport_info(
     println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
     match Reporter::try_from(reporter) {
         Err(err) => eprintln!("{err}"),
-        Ok(Reporter::Sp { sp_type, slot }) => {
-            println!(
-                "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} (service processor)"
-            )
-        }
-        Ok(Reporter::HostOs { sled }) => {
-            println!("    {REPORTER:>WIDTH$}: sled {sled:?} (host OS)");
+        Ok(reporter) => {
+            println!("    {REPORTER:>WIDTH$}: {reporter}");
         }
     }
     println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
@@ -361,8 +356,8 @@ async fn cmd_db_ereporters(
                     dsl::restart_id,
                     dsl::reporter,
                     dsl::sled_id,
-                    dsl::sp_slot,
-                    dsl::sp_type,
+                    dsl::slot,
+                    dsl::slot_type,
                     dsl::serial_number,
                     dsl::part_number
                 ))
@@ -379,7 +374,7 @@ async fn cmd_db_ereporters(
             if let Some(slot) = slot {
                 if slot_type.is_some() {
                     query = query
-                        .filter(dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
+                        .filter(dsl::slot.eq(db::model::SqlU16::new(slot)));
                 } else {
                     anyhow::bail!(
                         "cannot filter reporters by slot without a value for `--type`"
@@ -389,7 +384,7 @@ async fn cmd_db_ereporters(
 
             if let Some(slot_type) = slot_type {
                 query = query
-                    .filter(dsl::sp_type.eq(slot_type));
+                    .filter(dsl::slot_type.eq(slot_type));
             }
 
             if let Some(serial) = serial {

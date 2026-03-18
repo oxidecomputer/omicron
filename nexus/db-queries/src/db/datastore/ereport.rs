@@ -9,6 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::model::Ereport;
+use crate::db::model::EreporterType;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
@@ -235,8 +236,8 @@ impl DataStore {
             .group_by((
                 dsl::restart_id,
                 dsl::reporter,
-                dsl::sp_slot,
-                dsl::sp_type,
+                dsl::slot,
+                dsl::slot_type,
                 dsl::sled_id,
             ))
             .select((
@@ -266,15 +267,15 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         reporter: fm::Reporter,
     ) -> Result<Option<EreportId>, Error> {
-        let result = match reporter {
-            fm::Reporter::Sp { sp_type, slot } => {
-                let sp_type = sp_type.into();
-                let slot = SpMgsSlot::from(SqlU16::new(slot));
-                Self::sp_latest_ereport_id_query(sp_type, slot)
+        let result = match reporter.kind {
+            fm::ReporterKind::Sp => {
+                let slot_type = reporter.slot_type.into();
+                let slot = SpMgsSlot::from(SqlU16::new(reporter.slot));
+                Self::sp_latest_ereport_id_query(slot_type, slot)
                     .get_result_async(conn)
                     .await
             }
-            fm::Reporter::HostOs { sled } => {
+            fm::ReporterKind::HostOs { sled } => {
                 Self::host_latest_ereport_id_query(sled)
                     .get_result_async(conn)
                     .await
@@ -291,14 +292,15 @@ impl DataStore {
     }
 
     fn sp_latest_ereport_id_query(
-        sp_type: SpType,
+        slot_type: SpType,
         slot: SpMgsSlot,
     ) -> impl RunnableQuery<EreportIdTuple> {
         dsl::ereport
             .filter(
-                dsl::sp_type
-                    .eq(sp_type)
-                    .and(dsl::sp_slot.eq(slot))
+                dsl::reporter
+                    .eq(EreporterType::Sp)
+                    .and(dsl::slot_type.eq(slot_type))
+                    .and(dsl::slot.eq(slot))
                     .and(dsl::time_deleted.is_null()),
             )
             .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
@@ -311,8 +313,9 @@ impl DataStore {
     ) -> impl RunnableQuery<EreportIdTuple> {
         dsl::ereport
             .filter(
-                dsl::sled_id
-                    .eq(sled_id.into_untyped_uuid())
+                dsl::reporter
+                    .eq(EreporterType::Host)
+                    .and(dsl::sled_id.eq(sled_id.into_untyped_uuid()))
                     .and(dsl::time_deleted.is_null()),
             )
             .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
@@ -577,9 +580,10 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
-                fm::Reporter::Sp {
-                    sp_type: nexus_types::inventory::SpType::Sled,
+                fm::Reporter {
+                    slot_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
+                    kind: fm::ReporterKind::Sp,
                 },
                 vec![ereport.clone()],
             )

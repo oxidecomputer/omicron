@@ -296,9 +296,10 @@ mod tests {
                     class: Some("hw.pwr.remove.psu".to_string()),
                     report: serde_json::json!({}),
                 },
-                reporter: crate::fm::ereport::Reporter::Sp {
-                    sp_type: SpType::Power,
+                reporter: crate::fm::ereport::Reporter {
+                    slot_type: SpType::Power,
                     slot: 0,
+                    kind: crate::fm::ereport::ReporterKind::Sp,
                 },
             }),
             assigned_sitrep_id: created_sitrep_id,
@@ -321,9 +322,10 @@ mod tests {
                     class: Some("hw.pwr.insert.psu".to_string()),
                     report: serde_json::json!({}),
                 },
-                reporter: crate::fm::ereport::Reporter::Sp {
-                    sp_type: SpType::Power,
+                reporter: crate::fm::ereport::Reporter {
+                    slot_type: SpType::Power,
                     slot: 0,
+                    kind: crate::fm::ereport::ReporterKind::Sp,
                 },
             }),
             assigned_sitrep_id: closed_sitrep_id,

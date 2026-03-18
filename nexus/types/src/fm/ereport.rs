@@ -156,9 +156,32 @@ impl EreportData {
     Deserialize,
     Hash,
 )]
-#[serde(tag = "reporter")]
-pub enum Reporter {
-    Sp { sp_type: SpType, slot: u16 },
+pub struct Reporter {
+    /// The type of slot occupied by the reporter.
+    pub slot_type: SpType,
+    /// The slot number of the reporter.
+    pub slot: u16,
+    /// Whether this reporter is a service processor or the host OS.
+    pub kind: ReporterKind,
+}
+
+/// Whether an ereport reporter is a service processor or the host OS.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Hash,
+)]
+pub enum ReporterKind {
+    /// The reporter is a service processor.
+    Sp,
+    /// The reporter is the host OS on a sled.
     HostOs { sled: SledUuid },
 }
 
@@ -166,15 +189,16 @@ impl fmt::Display for Reporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Display format based on:
         // https://rfd.shared.oxide.computer/rfd/200#_labeling
-        match self {
-            Self::Sp { sp_type: sp_type @ SpType::Sled, slot } => {
-                write!(f, "{sp_type} {slot:<2} (SP)")
+        let Self { slot_type, slot, kind } = self;
+        match kind {
+            ReporterKind::Sp if *slot_type == SpType::Sled => {
+                write!(f, "{slot_type} {slot:<2} (SP)")
             }
-            Self::HostOs { sled } => {
-                write!(f, "{} {sled:?} (OS)", SpType::Sled)
+            ReporterKind::HostOs { sled } => {
+                write!(f, "{slot_type} {slot:<2} (OS, sled {sled})")
             }
-            Self::Sp { sp_type, slot } => {
-                write!(f, "{sp_type} {slot}")
+            ReporterKind::Sp => {
+                write!(f, "{slot_type} {slot}")
             }
         }
     }

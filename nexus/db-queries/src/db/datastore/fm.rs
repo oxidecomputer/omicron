@@ -1044,7 +1044,7 @@ mod tests {
     use ereport_types;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
-    use nexus_types::fm::ereport::{EreportData, Reporter};
+    use nexus_types::fm::ereport::{EreportData, Reporter, ReporterKind};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -1718,9 +1718,10 @@ mod tests {
         };
 
         // Insert the ereports
-        let reporter = Reporter::Sp {
-            sp_type: nexus_types::inventory::SpType::Sled,
+        let reporter = Reporter {
+            slot_type: nexus_types::inventory::SpType::Sled,
             slot: 0,
+            kind: ReporterKind::Sp,
         };
 
         datastore
