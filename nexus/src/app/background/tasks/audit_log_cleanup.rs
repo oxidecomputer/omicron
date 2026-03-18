@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -28,8 +29,16 @@ impl AuditLogCleanup {
         retention_days: NonZeroU32,
         max_deleted_per_activation: u32,
     ) -> Self {
-        let retention = TimeDelta::try_days(i64::from(retention_days.get()))
-            .expect("retention_days must be representable as a TimeDelta");
+        // i64::from on a u32 can never produce a negative value, so the
+        // only failure mode here is a value too large for TimeDelta.
+        let Some(retention) =
+            TimeDelta::try_days(i64::from(retention_days.get()))
+        else {
+            panic!(
+                "invalid retention_days {retention_days} \
+                 (must be representable as a TimeDelta)"
+            );
+        };
         Self { datastore, retention, max_deleted_per_activation }
     }
 
@@ -63,13 +72,12 @@ impl AuditLogCleanup {
         {
             Ok(count) => count,
             Err(err) => {
-                let msg = format!("audit log cleanup failed: {err:#}");
-                slog::error!(&opctx.log, "{msg}");
+                slog::error!(&opctx.log, "audit log cleanup failed"; &err);
                 return AuditLogCleanupStatus {
                     rows_deleted: 0,
                     cutoff,
                     max_deleted_per_activation: self.max_deleted_per_activation,
-                    error: Some(msg),
+                    error: Some(InlineErrorChain::new(&err).to_string()),
                 };
             }
         };
