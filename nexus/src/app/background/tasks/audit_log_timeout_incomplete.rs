@@ -18,7 +18,7 @@ use std::time::Duration;
 
 pub struct AuditLogTimeoutIncomplete {
     datastore: Arc<DataStore>,
-    timeout: Duration,
+    timeout: TimeDelta,
     max_timed_out_per_activation: u32,
 }
 
@@ -28,6 +28,8 @@ impl AuditLogTimeoutIncomplete {
         timeout: Duration,
         max_timed_out_per_activation: u32,
     ) -> Self {
+        let timeout = TimeDelta::from_std(timeout)
+            .expect("timeout must be representable as a TimeDelta");
         Self { datastore, timeout, max_timed_out_per_activation }
     }
 
@@ -35,22 +37,7 @@ impl AuditLogTimeoutIncomplete {
         &mut self,
         opctx: &OpContext,
     ) -> AuditLogTimeoutIncompleteStatus {
-        let timeout_delta = match TimeDelta::from_std(self.timeout) {
-            Ok(d) => d,
-            Err(e) => {
-                let msg = format!("invalid timeout duration: {e:#}");
-                slog::error!(&opctx.log, "{msg}");
-                return AuditLogTimeoutIncompleteStatus {
-                    timed_out: 0,
-                    cutoff: Utc::now(),
-                    max_timed_out_per_activation: self
-                        .max_timed_out_per_activation,
-                    error: Some(msg),
-                };
-            }
-        };
-
-        let cutoff = Utc::now() - timeout_delta;
+        let cutoff = Utc::now() - self.timeout;
         let timed_out = match self
             .datastore
             .audit_log_timeout_incomplete(
