@@ -1656,6 +1656,7 @@ dependencies = [
  "proptest",
  "schemars 0.8.22",
  "serde",
+ "slog-error-chain",
  "test-strategy",
  "thiserror 2.0.18",
 ]
