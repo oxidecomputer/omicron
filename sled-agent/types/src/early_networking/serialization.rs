@@ -340,7 +340,7 @@ macro_rules! from_body_for_envelope {
                     // as JSON, which (a) should never happen and (b) we
                     // should catch immediately in tests.
                     body: serde_json::to_value(value).expect(concat!(
-                        stringify!($path),
+                        stringify!($body_type),
                         " can be serialized as JSON"
                     )),
                 }
