@@ -502,7 +502,6 @@ mod test {
                 description: "Test saga state validation".to_string(),
             },
             multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 70, 0, 100))),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
