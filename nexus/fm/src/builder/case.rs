@@ -67,6 +67,7 @@ impl AllCases {
                     comment: String::new(),
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
+                    support_bundles_requested: Default::default(),
                 };
                 entry.insert(CaseBuilder::new(
                     &self.log, sitrep_id, case, case_rng,

@@ -8,12 +8,16 @@
 //! They are shared between the support bundle collector and FM case types.
 
 use crate::fm::ereport::EreportFilters;
+use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 
 /// Describes the category of support bundle data.
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleDataCategory {
     /// Collects reconfigurator state (some of the latest blueprints,
     /// information about the target blueprint).
@@ -35,7 +39,8 @@ pub enum BundleDataCategory {
 /// For categories without additional parameters, the variant is a unit variant.
 /// For categories that can be filtered or configured, the variant contains
 /// that configuration data.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleData {
     Reconfigurator,
     HostInfo(SledSelection),
@@ -56,12 +61,40 @@ impl BundleData {
     }
 }
 
+/// Displayer for pretty-printing [`BundleData`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayBundleData<'a> {
+    data: &'a BundleData,
+}
+
+impl BundleData {
+    pub fn display(&self) -> DisplayBundleData<'_> {
+        DisplayBundleData { data: self }
+    }
+}
+
+impl fmt::Display for DisplayBundleData<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.data {
+            BundleData::Reconfigurator => write!(f, "reconfigurator"),
+            BundleData::HostInfo(selection) => {
+                write!(f, "host_info({})", selection.display())
+            }
+            BundleData::SledCubbyInfo => write!(f, "sled_cubby_info"),
+            BundleData::SpDumps => write!(f, "sp_dumps"),
+            BundleData::Ereports(filters) => {
+                write!(f, "ereports({})", filters.display())
+            }
+        }
+    }
+}
+
 /// A collection of bundle data specifications.
 ///
 /// This wrapper ensures that categories and data always match - you can't
 /// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
 /// because each BundleData determines its own category.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
     data: HashMap<BundleDataCategory, BundleData>,
 }
@@ -91,6 +124,32 @@ impl BundleDataSelection {
 
     pub fn get(&self, category: BundleDataCategory) -> Option<&BundleData> {
         self.data.get(&category)
+    }
+}
+
+/// Displayer for pretty-printing [`BundleDataSelection`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayBundleDataSelection<'a> {
+    selection: &'a BundleDataSelection,
+    indent: usize,
+}
+
+impl BundleDataSelection {
+    pub fn display(&self, indent: usize) -> DisplayBundleDataSelection<'_> {
+        DisplayBundleDataSelection { selection: self, indent }
+    }
+}
+
+impl fmt::Display for DisplayBundleDataSelection<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let indent = self.indent;
+        for (i, item) in self.selection.data.values().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{:>indent$}- {}", "", item.display())?;
+        }
+        Ok(())
     }
 }
 
@@ -126,8 +185,64 @@ impl Default for BundleDataSelection {
 
 /// The set of sleds to include. This can either be all sleds, or a set of
 /// specific sleds.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum SledSelection {
     All,
     Specific(HashSet<SledUuid>),
+}
+
+/// Displayer for pretty-printing [`SledSelection`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplaySledSelection<'a> {
+    selection: &'a SledSelection,
+}
+
+impl SledSelection {
+    pub fn display(&self) -> DisplaySledSelection<'_> {
+        DisplaySledSelection { selection: self }
+    }
+}
+
+impl fmt::Display for DisplaySledSelection<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.selection {
+            SledSelection::All => write!(f, "all"),
+            SledSelection::Specific(ids) => {
+                write!(f, "{}", ids.iter().format(", "))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+    use proptest::prelude::*;
+
+    impl Arbitrary for BundleDataSelection {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            prop::collection::vec(any::<BundleData>(), 0..=5)
+                .prop_map(|data| data.into_iter().collect())
+                .boxed()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+
+    #[proptest]
+    fn bundle_data_selection_serde_round_trip(selection: BundleDataSelection) {
+        let json = serde_json::to_string(&selection).unwrap();
+        let deserialized: BundleDataSelection =
+            serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(selection, deserialized);
+    }
 }
