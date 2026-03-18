@@ -10,7 +10,6 @@ use anyhow::bail;
 use chrono::Utc;
 use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target_disabled;
-use dns_service_client::ClientInfo;
 use live_tests_macros::live_test;
 use nexus_lockstep_client::types::BackgroundTasksActivateRequest;
 use nexus_lockstep_client::types::BlueprintTargetSet;
@@ -50,7 +49,7 @@ async fn test_execute_expunged_zone(lc: &LiveTestContext) {
 
     // Safety check: If running this test multiple times, we may leave behind
     // underreplicated cockroach ranges. We shouldn't attempt to proceed if
-    // those haven't been repair yet. Get the latest inventory collection and
+    // those haven't been repaired yet. Get the latest inventory collection and
     // check.
     match datastore.inventory_get_latest_collection(opctx).await {
         Ok(Some(collection)) => {
@@ -143,7 +142,7 @@ async fn test_execute_expunged_zone_of_kind(
     // * One zone that did not exist the last time a blueprint was executed
     //   exists in the blueprint but with the expunged disposition
     // * One zone that did not exist the last time a blueprint was executed
-    //   exists and is should be put into service
+    //   exists and should be put into service
 
     // Disable planning and execution.
     disable_blueprint_planning(nexus, log).await;
@@ -339,7 +338,7 @@ async fn test_execute_expunged_zone_of_kind(
                 return Err(CondCheckError::NotYet);
             }
 
-            // Check that execution completely cleanly.
+            // Check that execution completed cleanly.
             if let Some(err) = details.execution_error {
                 warn!(
                     log, "execution had an error";
@@ -505,8 +504,8 @@ fn event_report_has_problems(
             TerminalKind::Completed => (),
             TerminalKind::Failed | TerminalKind::Aborted => {
                 warn!(
-                    log, "execution ended with unexpected terminal status";
-                    "stats" => ?info.kind,
+                    log, "execution ended with unexpected terminal kind";
+                    "kind" => ?info.kind,
                 );
                 return true;
             }
@@ -642,7 +641,7 @@ async fn wait_for_cockroach_cluster_to_be_healthy(
         &Duration::from_secs(20 * 60),
     )
     .await
-    .expect("cockroach cluster failed to become healthy sufficently quickly");
+    .expect("cockroach cluster failed to become healthy sufficiently quickly");
 }
 
 fn validate_cockroach_is_healthy_according_to_inventory(

@@ -183,7 +183,7 @@ where
             target_id: blueprint2.id,
         })
         .await
-        .expect("setting new target");
+        .context("setting new target")?;
     info!(log, "finished editing target blueprint";
         "old_target_id" => %blueprint1.id,
         "new_target_id" => %blueprint2.id,
