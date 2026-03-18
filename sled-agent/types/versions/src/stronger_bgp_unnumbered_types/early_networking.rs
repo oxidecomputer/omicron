@@ -439,3 +439,148 @@ pub struct WriteNetworkConfigRequest {
     pub generation: u64,
     pub body: EarlyNetworkConfigBody,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use crate::v20::early_networking::RouterLifetimeConfig;
+
+    use super::*;
+
+    #[test]
+    fn test_uplink_address_conversions() {
+        // Confirm we can convert old -> new -> old. In some cases the `new ->
+        // old` produces an `old` that isn't quite the same; we fill in
+        // `expected_old` in those cases. Specifically: `old` could contain an
+        // address of `None`, `Some("0.0.0.0/x")`, or `Some("::/x")`, which will
+        // always come back as `None` after the round trip.
+        for (old, new, expected_old) in [
+            (
+                Some("10.0.0.0/8".parse::<IpNet>().unwrap()),
+                UplinkAddress::Address {
+                    ip_net: "10.0.0.0/8".parse().unwrap(),
+                },
+                None,
+            ),
+            (
+                Some("fe80:1234::/64".parse::<IpNet>().unwrap()),
+                UplinkAddress::Address {
+                    ip_net: "fe80:1234::/64".parse().unwrap(),
+                },
+                None,
+            ),
+            (None, UplinkAddress::LinkLocal, None),
+            (
+                Some("0.0.0.0/8".parse::<IpNet>().unwrap()),
+                UplinkAddress::LinkLocal,
+                Some(None),
+            ),
+            (
+                Some("::/128".parse::<IpNet>().unwrap()),
+                UplinkAddress::LinkLocal,
+                Some(None),
+            ),
+        ] {
+            for vlan_id in [Some(1234), None] {
+                let expected_old = expected_old.unwrap_or(old);
+                let old = v20::UplinkAddressConfig { address: old, vlan_id };
+                let new = UplinkAddressConfig { address: new, vlan_id };
+                let expected_old =
+                    v20::UplinkAddressConfig { address: expected_old, vlan_id };
+
+                assert_eq!(UplinkAddressConfig::from(old), new);
+                assert_eq!(v20::UplinkAddressConfig::from(new), expected_old);
+            }
+        }
+    }
+
+    #[test]
+    fn test_router_peer_address_conversions() {
+        fn make_new_bgp_peer_config(addr: RouterPeerAddress) -> BgpPeerConfig {
+            BgpPeerConfig {
+                asn: 1,
+                port: "port".to_owned(),
+                addr,
+                hold_time: None,
+                idle_hold_time: None,
+                delay_open: None,
+                connect_retry: None,
+                keepalive: None,
+                remote_asn: None,
+                min_ttl: None,
+                md5_auth_key: None,
+                multi_exit_discriminator: None,
+                communities: Vec::new(),
+                local_pref: None,
+                enforce_first_as: false,
+                allowed_import: v1::ImportExportPolicy::NoFiltering,
+                allowed_export: v1::ImportExportPolicy::NoFiltering,
+                vlan_id: None,
+                router_lifetime: RouterLifetimeConfig::default(),
+            }
+        }
+        fn make_old_bgp_peer_config(addr: IpAddr) -> v20::BgpPeerConfig {
+            v20::BgpPeerConfig {
+                asn: 1,
+                port: "port".to_owned(),
+                addr,
+                hold_time: None,
+                idle_hold_time: None,
+                delay_open: None,
+                connect_retry: None,
+                keepalive: None,
+                remote_asn: None,
+                min_ttl: None,
+                md5_auth_key: None,
+                multi_exit_discriminator: None,
+                communities: Vec::new(),
+                local_pref: None,
+                enforce_first_as: false,
+                allowed_import: v1::ImportExportPolicy::NoFiltering,
+                allowed_export: v1::ImportExportPolicy::NoFiltering,
+                vlan_id: None,
+                router_lifetime: RouterLifetimeConfig::default(),
+            }
+        }
+
+        // Confirm we can convert old -> new -> old. In some cases the `new ->
+        // old` produces an `old` that isn't quite the same; we fill in
+        // `expected_old` in those cases. Specifically: `old` could contain an
+        // address of `0.0.0.0` or `::`; either will come back as `::` after the
+        // round trip.
+        for (old, new, expected_old) in [
+            (
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                RouterPeerAddress::Numbered { ip: "10.0.0.1".parse().unwrap() },
+                None,
+            ),
+            (
+                "fe80:1234::3".parse().unwrap(),
+                RouterPeerAddress::Numbered {
+                    ip: "fe80:1234::3".parse().unwrap(),
+                },
+                None,
+            ),
+            (
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                RouterPeerAddress::Unnumbered,
+                Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+            ),
+            (
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                RouterPeerAddress::Unnumbered,
+                None,
+            ),
+        ] {
+            let expected_old = expected_old.unwrap_or(old);
+
+            let old = make_old_bgp_peer_config(old);
+            let new = make_new_bgp_peer_config(new);
+            let expected_old = make_old_bgp_peer_config(expected_old);
+
+            assert_eq!(BgpPeerConfig::from(old), new);
+            assert_eq!(v20::BgpPeerConfig::from(new), expected_old);
+        }
+    }
+}
