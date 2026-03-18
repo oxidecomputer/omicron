@@ -8,6 +8,8 @@ use nexus_db_schema::schema::support_bundle;
 
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::support_bundle as support_bundle_types;
+use omicron_uuid_kinds::CaseKind;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -95,6 +97,7 @@ pub struct SupportBundle {
     pub dataset_id: DbTypedUuid<DatasetKind>,
     pub assigned_nexus: Option<DbTypedUuid<OmicronZoneKind>>,
     pub user_comment: Option<String>,
+    pub fm_case_id: Option<DbTypedUuid<CaseKind>>,
 }
 
 impl SupportBundle {
@@ -115,6 +118,30 @@ impl SupportBundle {
             dataset_id: dataset_id.into(),
             assigned_nexus: Some(nexus_id.into()),
             user_comment,
+            fm_case_id: None,
+        }
+    }
+
+    /// Create a new support bundle requested by the FM subsystem.
+    pub fn new_for_fm(
+        id: SupportBundleUuid,
+        reason_for_creation: String,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        nexus_id: OmicronZoneUuid,
+        fm_case_id: CaseUuid,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            time_created: Utc::now(),
+            reason_for_creation,
+            reason_for_failure: None,
+            state: SupportBundleState::Collecting,
+            zpool_id: zpool_id.into(),
+            dataset_id: dataset_id.into(),
+            assigned_nexus: Some(nexus_id.into()),
+            user_comment: None,
+            fm_case_id: Some(fm_case_id.into()),
         }
     }
 

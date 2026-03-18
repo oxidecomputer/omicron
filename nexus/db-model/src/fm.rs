@@ -25,6 +25,18 @@ mod case;
 pub use case::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod sb_req_ereports;
+pub use sb_req_ereports::*;
+mod sb_req_host_info;
+pub use sb_req_host_info::*;
+mod sb_req_reconfigurator;
+pub use sb_req_reconfigurator::*;
+mod sb_req_sled_cubby_info;
+pub use sb_req_sled_cubby_info::*;
+mod sb_req_sp_dumps;
+pub use sb_req_sp_dumps::*;
+mod support_bundle_request;
+pub use support_bundle_request::*;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_sitrep)]
