@@ -11,6 +11,7 @@ use chrono::Utc;
 use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target_disabled;
 use live_tests_macros::live_test;
+use nexus_lockstep_client::ClientInfo;
 use nexus_lockstep_client::types::BackgroundTasksActivateRequest;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::LastResult;
