@@ -70,7 +70,6 @@ pub struct RackInitializeRequest {
     pub rack_network_config: RackNetworkConfig,
 
     /// IPs or subnets allowed to make requests to user-facing services
-    #[serde(default = "default_allowed_source_ips")]
     pub allowed_source_ips: AllowedSourceIps,
 }
 
