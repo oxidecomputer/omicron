@@ -398,6 +398,12 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .find(|p| p.addr.is_unnumbered())
         .expect("Should have an unnumbered peer");
     assert_eq!(
+        unnumbered_peer.addr,
+        RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default()
+        }
+    );
+    assert_eq!(
         unnumbered_peer.remote_asn,
         Some(65000),
         "Unnumbered peer should have remote_asn 65000"
