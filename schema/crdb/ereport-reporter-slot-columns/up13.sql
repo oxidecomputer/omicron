@@ -1,5 +1,7 @@
 ALTER TABLE omicron.public.ereport
-    ADD CONSTRAINT reporter_identity_validity CHECK (
+ADD CONSTRAINT IF NOT EXISTS
+    reporter_identity_validity
+CHECK (
     (
         -- ereports from SPs must not have a sled ID.
         reporter = 'sp'
@@ -11,4 +13,4 @@ ALTER TABLE omicron.public.ereport
             AND slot_type = 'sled'
             AND sled_id IS NOT NULL
     )
-    );
+);
