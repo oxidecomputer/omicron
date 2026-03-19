@@ -38,7 +38,7 @@ pub enum BundleDataCategory {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum BundleData {
     Reconfigurator,
-    HostInfo(HashSet<SledSelection>),
+    HostInfo(SledSelection),
     SledCubbyInfo,
     SpDumps,
     Ereports(EreportFilters),
@@ -111,7 +111,7 @@ impl Default for BundleDataSelection {
     fn default() -> Self {
         [
             BundleData::Reconfigurator,
-            BundleData::HostInfo(HashSet::from([SledSelection::All])),
+            BundleData::HostInfo(SledSelection::All),
             BundleData::SledCubbyInfo,
             BundleData::SpDumps,
             BundleData::Ereports(EreportFilters {
@@ -124,12 +124,10 @@ impl Default for BundleDataSelection {
     }
 }
 
-/// The set of sleds to include.
-///
-/// Multiple values of this enum are joined together into a HashSet.
-/// Therefore "SledSelection::All" overrides specific sleds.
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+/// The set of sleds to include. This can either be all sleds, or a set of
+/// specific sleds.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SledSelection {
     All,
-    Specific(SledUuid),
+    Specific(HashSet<SledUuid>),
 }

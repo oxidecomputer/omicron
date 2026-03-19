@@ -46,14 +46,13 @@ impl BundleRequest {
     }
 
     pub fn include_sled_host_info(&self, id: SledUuid) -> bool {
-        let selection =
-            match self.data_selection.get(BundleDataCategory::HostInfo) {
-                Some(BundleData::HostInfo(selection)) => selection,
-                _ => return false,
-            };
-
-        selection.contains(&SledSelection::Specific(id))
-            || selection.contains(&SledSelection::All)
+        match self.data_selection.get(BundleDataCategory::HostInfo) {
+            Some(BundleData::HostInfo(SledSelection::All)) => true,
+            Some(BundleData::HostInfo(SledSelection::Specific(sleds))) => {
+                sleds.contains(&id)
+            }
+            _ => false,
+        }
     }
 
     pub fn get_ereport_filters(&self) -> Option<&EreportFilters> {
