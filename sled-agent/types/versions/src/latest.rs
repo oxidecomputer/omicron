@@ -74,7 +74,7 @@ pub mod early_networking {
     pub use crate::v29::early_networking::EarlyNetworkConfigBody;
     pub use crate::v29::early_networking::PortConfig;
     pub use crate::v29::early_networking::RackNetworkConfig;
-    pub use crate::v29::early_networking::RouterPeerAddress;
+    pub use crate::v29::early_networking::RouterPeerType;
     pub use crate::v29::early_networking::SpecifiedIpAddr;
     pub use crate::v29::early_networking::SpecifiedIpNet;
     pub use crate::v29::early_networking::UnspecifiedIpError;

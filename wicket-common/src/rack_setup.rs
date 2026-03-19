@@ -24,7 +24,7 @@ use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SpecifiedIpNet;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
@@ -304,7 +304,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     // mapping.
     #[serde(with = "bgp_peer_addr_serde")]
     #[schemars(with = "String")]
-    pub addr: RouterPeerAddress,
+    pub addr: RouterPeerType,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
@@ -358,31 +358,29 @@ pub struct UserSpecifiedBgpPeerConfig {
 /// Special handling to serialize/deserialize [`RouterPeerAddress`] as a flat
 /// string for a nicer TOML representation.
 mod bgp_peer_addr_serde {
-    use super::{RouterPeerAddress, UserSpecifiedBgpPeerConfig};
+    use super::{RouterPeerType, UserSpecifiedBgpPeerConfig};
     use serde::{Deserialize, Deserializer, Serializer};
     use sled_agent_types::early_networking::SpecifiedIpAddr;
     use std::net::IpAddr;
 
     pub fn serialize<S: Serializer>(
-        addr: &RouterPeerAddress,
+        addr: &RouterPeerType,
         s: S,
     ) -> Result<S::Ok, S::Error> {
         match addr {
-            RouterPeerAddress::Unnumbered => {
+            RouterPeerType::Unnumbered => {
                 s.serialize_str(UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER)
             }
-            RouterPeerAddress::Numbered { ip } => {
-                s.serialize_str(&ip.to_string())
-            }
+            RouterPeerType::Numbered { ip } => s.serialize_str(&ip.to_string()),
         }
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(
         d: D,
-    ) -> Result<RouterPeerAddress, D::Error> {
+    ) -> Result<RouterPeerType, D::Error> {
         let s = String::deserialize(d)?;
         if s.eq_ignore_ascii_case(UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER) {
-            Ok(RouterPeerAddress::Unnumbered)
+            Ok(RouterPeerType::Unnumbered)
         } else {
             let ip: IpAddr = s.parse().map_err(|_| {
                 serde::de::Error::custom(format!(
@@ -397,7 +395,7 @@ mod bgp_peer_addr_serde {
                      use `unnumbered` for unnumbered peers",
                 ))
             })?;
-            Ok(RouterPeerAddress::Numbered { ip })
+            Ok(RouterPeerType::Numbered { ip })
         }
     }
 }
@@ -767,13 +765,13 @@ mod tests {
     #[test]
     fn roundtrip_router_peer_address() {
         let inputs = [
-            (RouterPeerAddress::Unnumbered, "unnumbered"),
+            (RouterPeerType::Unnumbered, "unnumbered"),
             (
-                RouterPeerAddress::Numbered { ip: "1.1.1.1".parse().unwrap() },
+                RouterPeerType::Numbered { ip: "1.1.1.1".parse().unwrap() },
                 "1.1.1.1",
             ),
             (
-                RouterPeerAddress::Numbered { ip: "ff80::1".parse().unwrap() },
+                RouterPeerType::Numbered { ip: "ff80::1".parse().unwrap() },
                 "ff80::1",
             ),
         ];
@@ -827,7 +825,7 @@ mod tests {
         // This attribute matches the one on `UserSpecifiedBgpPeerConfig::addr`
         // above.
         #[serde(with = "bgp_peer_addr_serde")]
-        pub addr: RouterPeerAddress,
+        pub addr: RouterPeerType,
     }
 
     #[test]

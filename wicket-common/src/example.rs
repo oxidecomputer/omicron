@@ -14,7 +14,7 @@ use omicron_common::{
 };
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, RouterPeerAddress,
+    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, RouterPeerType,
     TxEqConfig, UplinkAddress,
 };
 use sled_hardware_types::Baseboard;
@@ -100,7 +100,7 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: RouterPeerAddress::Unnumbered,
+                addr: RouterPeerType::Unnumbered,
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -123,7 +123,7 @@ impl ExampleRackSetupData {
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
-                addr: RouterPeerAddress::Numbered {
+                addr: RouterPeerType::Numbered {
                     ip: "10.2.3.5".parse().unwrap(),
                 },
                 port: "port0".into(),
@@ -151,9 +151,7 @@ impl ExampleRackSetupData {
 
         let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
             asn: 47,
-            addr: RouterPeerAddress::Numbered {
-                ip: "10.2.3.4".parse().unwrap(),
-            },
+            addr: RouterPeerType::Numbered { ip: "10.2.3.4".parse().unwrap() },
             port: "port0".into(),
             hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
             idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),

@@ -69,7 +69,7 @@ progenitor::generate_api!(
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
         RecoverySiloConfig = sled_agent_types_versions::latest::rack_init::RecoverySiloConfig,
-        RouterPeerAddress = sled_agent_types::early_networking::RouterPeerAddress,
+        RouterPeerType = sled_agent_types::early_networking::RouterPeerType,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,

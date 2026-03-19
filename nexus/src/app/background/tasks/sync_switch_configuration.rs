@@ -62,7 +62,7 @@ use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
-use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
@@ -1168,8 +1168,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         // TODO-cleanup Push `RouterPeerAddress` down to all the
                         // datastore methods below instead of an `Option`.
                         let peer_addr_for_lookup = match peer.addr {
-                            RouterPeerAddress::Unnumbered => None,
-                            RouterPeerAddress::Numbered { ip } => {
+                            RouterPeerType::Unnumbered => None,
+                            RouterPeerType::Numbered { ip } => {
                                 Some(IpNetwork::from(IpAddr::from(ip)))
                             }
                         };

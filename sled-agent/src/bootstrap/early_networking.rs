@@ -40,7 +40,7 @@ use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
-    PortSpeed, RackNetworkConfig, RouterPeerAddress, SwitchSlot, UplinkAddress,
+    PortSpeed, RackNetworkConfig, RouterPeerType, SwitchSlot, UplinkAddress,
 };
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -556,7 +556,7 @@ impl<'a> EarlyNetworkSetup<'a> {
 
                 match peer.addr {
                     // Numbered peer - identified by address
-                    RouterPeerAddress::Numbered { ip: addr } => {
+                    RouterPeerType::Numbered { ip: addr } => {
                         let bpc = MgBgpPeerConfig {
                             name: format!("{}", addr),
                             host: format!("{}:179", addr),
@@ -607,7 +607,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
 
                     // Unnumbered peer - identified by interface
-                    RouterPeerAddress::Unnumbered => {
+                    RouterPeerType::Unnumbered => {
                         let bpc = MgUnnumberedBgpPeerConfig {
                             name: format!("unnumbered-{}", port.port),
                             interface: format!("tfport{}_0", port.port),

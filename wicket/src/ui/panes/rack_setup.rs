@@ -36,7 +36,7 @@ use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
@@ -921,10 +921,10 @@ fn rss_config_text<'a>(
                 } = p;
 
                 let addr_string = match addr {
-                    RouterPeerAddress::Unnumbered => Cow::Borrowed(
+                    RouterPeerType::Unnumbered => Cow::Borrowed(
                         UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER,
                     ),
-                    RouterPeerAddress::Numbered { ip } => {
+                    RouterPeerType::Numbered { ip } => {
                         Cow::Owned(ip.to_string())
                     }
                 };

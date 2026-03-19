@@ -19,7 +19,7 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
-use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::RouterPeerType;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -183,9 +183,10 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
         // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
         // `::`) to be converted to `RouterPeerAddress::Unnumbered`. Should we
         // add db constraints to squish that down to one (probably NULL)?
-        let addr = RouterPeerAddress::from_optional_ip_treating_unspecified_as_unnumbered(
-            value.addr.map(|addr| addr.ip()),
-        );
+        let addr =
+            RouterPeerType::from_optional_ip_treating_unspecified_as_unnumbered(
+                value.addr.map(|addr| addr.ip()),
+            );
 
         // TODO-correctness We should have db constraints to ensure this can't
         // fail.

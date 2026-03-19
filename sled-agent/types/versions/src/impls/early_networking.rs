@@ -12,7 +12,7 @@ use crate::latest::early_networking::PortFec;
 use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
-use crate::latest::early_networking::RouterPeerAddress;
+use crate::latest::early_networking::RouterPeerType;
 use crate::latest::early_networking::SpecifiedIpAddr;
 use crate::latest::early_networking::SpecifiedIpNet;
 use crate::latest::early_networking::SwitchSlot;
@@ -190,7 +190,7 @@ impl FromStr for SpecifiedIpAddr {
     }
 }
 
-impl RouterPeerAddress {
+impl RouterPeerType {
     /// In contexts where we cannot use this strong type to describe
     /// "unnumbered" addresses, we have two or three possible representations:
     ///
@@ -204,7 +204,7 @@ impl RouterPeerAddress {
     pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
     /// Squash this address down to an [`Option<IpAddr>`] by converting
-    /// [`RouterPeerAddress::Unnumbered`] to `None`.
+    /// [`RouterPeerType::Unnumbered`] to `None`.
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
@@ -216,8 +216,8 @@ impl RouterPeerAddress {
     }
 
     /// Squash this address down to an [`IpAddr`] by converting
-    /// [`RouterPeerAddress::Unnumbered`] to
-    /// [`RouterPeerAddress::UNNUMBERED_SENTINEL`].
+    /// [`RouterPeerType::Unnumbered`] to
+    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
@@ -228,9 +228,9 @@ impl RouterPeerAddress {
         }
     }
 
-    /// Convert an arbitrary `Option<IpAddr>` into a [`RouterPeerAddress`] by
+    /// Convert an arbitrary `Option<IpAddr>` into a [`RouterPeerType`] by
     /// converting both `None` and `Some(UNSPECIFIED)`
-    /// [`RouterPeerAddress::Unnumbered`].
+    /// [`RouterPeerType::Unnumbered`].
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.

@@ -15,8 +15,8 @@
 //!   [`UplinkAddressConfig::address`], which was previously an
 //!   [`Option<IpNet>`] where both `None` and `Some(UNSPECIFIED)` were treated
 //!   as link-local.
-//! * Introduce [`RouterPeerAddress`], a stronger type for specifying
-//!   possibly-unnumbered BGP peer addresses. This is the new type of
+//! * Introduce [`RouterPeerType`], a stronger type for specifying
+//!   possibly-unnumbered BGP peers. This is the new type of
 //!   [`BgpPeerConfig::addr`], which was previously an [`IpAddr`] where an
 //!   unspecified address was treated as unnumbered.
 //! * Update types that transitively contain the newly-updated
@@ -71,7 +71,7 @@ pub enum UplinkAddress {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum RouterPeerAddress {
+pub enum RouterPeerType {
     Unnumbered,
     Numbered { ip: SpecifiedIpAddr },
 }
@@ -252,7 +252,7 @@ pub struct BgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    pub addr: RouterPeerAddress,
+    pub addr: RouterPeerType,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6.
     pub hold_time: Option<u64>,
@@ -302,8 +302,8 @@ pub struct BgpPeerConfig {
 impl From<v20::BgpPeerConfig> for BgpPeerConfig {
     fn from(value: v20::BgpPeerConfig) -> Self {
         let addr = match SpecifiedIpAddr::try_from(value.addr) {
-            Ok(ip) => RouterPeerAddress::Numbered { ip },
-            Err(UnspecifiedIpError) => RouterPeerAddress::Unnumbered,
+            Ok(ip) => RouterPeerType::Numbered { ip },
+            Err(UnspecifiedIpError) => RouterPeerType::Unnumbered,
         };
         Self {
             asn: value.asn,
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_router_peer_address_conversions() {
-        fn make_new_bgp_peer_config(addr: RouterPeerAddress) -> BgpPeerConfig {
+        fn make_new_bgp_peer_config(addr: RouterPeerType) -> BgpPeerConfig {
             BgpPeerConfig {
                 asn: 1,
                 port: "port".to_owned(),
@@ -545,25 +545,25 @@ mod tests {
         for (old, new, expected_old) in [
             (
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
-                RouterPeerAddress::Numbered { ip: "10.0.0.1".parse().unwrap() },
+                RouterPeerType::Numbered { ip: "10.0.0.1".parse().unwrap() },
                 None,
             ),
             (
                 "fe80:1234::3".parse().unwrap(),
-                RouterPeerAddress::Numbered {
+                RouterPeerType::Numbered {
                     ip: "fe80:1234::3".parse().unwrap(),
                 },
                 None,
             ),
             (
                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                RouterPeerAddress::Unnumbered,
-                Some(RouterPeerAddress::UNNUMBERED_SENTINEL),
+                RouterPeerType::Unnumbered,
+                Some(RouterPeerType::UNNUMBERED_SENTINEL),
             ),
             (
                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                RouterPeerAddress::Unnumbered,
-                Some(RouterPeerAddress::UNNUMBERED_SENTINEL),
+                RouterPeerType::Unnumbered,
+                Some(RouterPeerType::UNNUMBERED_SENTINEL),
             ),
         ] {
             let expected_old = expected_old.unwrap_or(old);

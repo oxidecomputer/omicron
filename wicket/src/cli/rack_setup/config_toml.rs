@@ -11,7 +11,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
@@ -443,10 +443,10 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         peer.insert(
             "addr",
             string_item(match addr {
-                RouterPeerAddress::Unnumbered => {
+                RouterPeerType::Unnumbered => {
                     UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER.to_owned()
                 }
-                RouterPeerAddress::Numbered { ip } => ip.to_string(),
+                RouterPeerType::Numbered { ip } => ip.to_string(),
             }),
         );
 
