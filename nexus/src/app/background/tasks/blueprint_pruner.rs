@@ -115,6 +115,7 @@ use serde_json::json;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -153,6 +154,7 @@ impl BackgroundTask for BlueprintPruner {
                 &opctx.log,
                 MAX_NKEEP,
                 MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
+                SQL_BATCH_SIZE,
             )
             .await
             {
@@ -183,12 +185,14 @@ async fn prune_blueprints(
     log: &Logger,
     nkeep: usize,
     max_delete_attempts: usize,
+    batch_size: NonZeroU32,
 ) -> Result<BlueprintPrunerDetails, anyhow::Error> {
     // Clamp `nkeep` at 3 on the low end.
     let nkeep = nkeep.clamp(3, usize::MAX);
     // Figure out the maximum version that we'd consider pruning.
     let target_table_status =
-        determine_bp_target_rows_to_keep(opctx, datastore, nkeep).await?;
+        determine_bp_target_rows_to_keep(opctx, datastore, nkeep, batch_size)
+            .await?;
     let keep_version = match target_table_status.keep {
         KeepWhat::All => {
             info!(
@@ -234,6 +238,7 @@ async fn prune_blueprints(
         keep_version,
         nblueprints_found: target_table_status.nfound,
         max_delete_attempts,
+        batch_size,
     };
     let mut pop = PruneTracker::new();
     let details = loop {
@@ -272,6 +277,7 @@ async fn determine_bp_target_rows_to_keep(
     opctx: &OpContext,
     datastore: &DataStore,
     nkeep: usize,
+    batch_size: NonZeroU32,
 ) -> Result<TargetTableStatus, anyhow::Error> {
     // There are lots of ways to do this.  We'll do it by paging backwards
     // through the table until we identify MAX_NKEEP distinct blueprints.
@@ -301,7 +307,7 @@ async fn determine_bp_target_rows_to_keep(
     let mut nscanned = 0;
     let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> = BTreeSet::new();
     let mut paginator =
-        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Descending);
+        Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
 
     while let Some(p) = paginator.next() {
         let records_batch = datastore
@@ -338,6 +344,7 @@ struct PruneArgs<'a> {
     keep_version: u32,
     max_delete_attempts: usize,
     nblueprints_found: usize,
+    batch_size: NonZeroU32,
 }
 
 /// Tracks progress and errors for the overall prune activation
@@ -418,7 +425,7 @@ async fn prune_batch(
     let firstpageparams = DataPageParams {
         marker: None,
         direction: dropshot::PaginationOrder::Ascending,
-        limit: SQL_BATCH_SIZE,
+        limit: pargs.batch_size,
     };
     let candidates = match datastore
         .bp_target_list_page(opctx, &firstpageparams)
@@ -760,6 +767,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
+    use std::num::NonZeroU32;
 
     /// Describes the `bp_target` rows and blueprints stored in the database
     #[derive(Eq, PartialEq, Debug)]
@@ -1046,10 +1054,16 @@ mod test {
         nkeep: usize,
         nmax: usize,
     ) -> BlueprintPrunerDetails {
-        let details =
-            prune_blueprints(opctx, datastore, &opctx.log, nkeep, nmax)
-                .await
-                .expect("successful prune");
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            nkeep,
+            nmax,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
         println!("{details:?}");
         // Verify no problems encountered.
         assert!(details.warnings.is_empty());
@@ -1244,10 +1258,16 @@ mod test {
 
         // Now, prune.
         let nkeep = 5;
-        let details =
-            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
-                .await
-                .expect("successful prune");
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            5,
+            nblueprints,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
         println!("{details:?}");
         assert!(details.warnings.is_empty());
 
@@ -1297,10 +1317,16 @@ mod test {
         let nblueprints = blueprints.all_blueprint_ids.len();
 
         // Now, prune.
-        let details =
-            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
-                .await
-                .expect("successful prune");
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            5,
+            nblueprints,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
         println!("{details:?}");
         assert!(details.warnings.is_empty());
 
@@ -1319,10 +1345,16 @@ mod test {
         for _ in 0..nblueprints {
             blueprints.add_target_blueprint(opctx, datastore).await;
         }
-        let details =
-            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
-                .await
-                .expect("successful prune");
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            5,
+            nblueprints,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
         println!("{details:?}");
         assert!(details.warnings.is_empty());
         assert_eq!(details.deleted.len(), target_blueprints_before.len() + 1);
@@ -1337,10 +1369,16 @@ mod test {
         }
 
         // Finally, one more prune operation should still prune nothing.
-        let details =
-            prune_blueprints(opctx, datastore, &opctx.log, 5, nblueprints)
-                .await
-                .expect("successful prune");
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            5,
+            nblueprints,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
         assert!(details.warnings.is_empty());
         assert_eq!(details.deleted.len(), 0);
         assert_eq!(details.ntargets_removable, 0);
@@ -1349,8 +1387,66 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    /// Tests when multiple SQL pagination requests are required to either find
+    /// the blueprints to keep or to prune a whole round of blueprints.
+    #[tokio::test]
+    async fn test_blueprint_pruner_pagination() {
+        let logctx = dev::test_setup_log("blueprint_pruner_pagination");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add several more target blueprints and make sure our representation
+        // of the database state matches up with the real thing.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        for _ in 0..18 {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+        let nblueprints = blueprints.all_blueprint_ids.len();
+
+        // Now do a prune operation where:
+        // - it requires scanning more than `batch_size` rows to find all the
+        //   target blueprints that we want to keep
+        // - we wind up pruning more than `batch_sized` bp_target rows
+        // To do this, we'll use a batch size of 3, keep 10 blueprints, and
+        // remove 9.
+        let nkeep = 10;
+        // unwrap(): 3 != 0
+        let batch_size = NonZeroU32::new(3).unwrap();
+        let ndelete = nblueprints - nkeep;
+        assert!(nkeep > 2 * usize::try_from(batch_size.get()).unwrap());
+        assert!(ndelete > 2 * usize::try_from(batch_size.get()).unwrap());
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            nkeep,
+            nblueprints,
+            batch_size,
+        )
+        .await
+        .expect("successful prune");
+        println!("{details:?}");
+        // Verify no problems encountered.
+        assert!(details.warnings.is_empty());
+        // Verify that we deleted the oldest blueprints.
+        assert_eq!(ndelete, details.deleted.len());
+        let oldest = blueprints.drop_oldest(ndelete);
+        for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
+            assert_eq!(old.id, pruned.id);
+        }
+
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // XXX-dap TODO-coverage test:
-    // - pruning with multiple SQL batches
     // - pruning where it takes multiple batches to determine how many to keep
     // - case: gap in bp_target table
     // - same blueprint enabled/disabled a lot, at various points
