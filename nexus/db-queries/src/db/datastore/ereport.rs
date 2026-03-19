@@ -17,12 +17,15 @@ use crate::db::model::SqlU32;
 use crate::db::model::ereport as model;
 use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -249,6 +252,104 @@ impl DataStore {
             .order_by(dsl::restart_id)
     }
 
+    /// Record a restart ID for a reporter location, if it has not already been
+    /// recorded.
+    pub async fn ereporter_restart_insert(
+        &self,
+        opctx: &OpContext,
+        reporter: fm::Reporter,
+        restart_id: EreporterRestartUuid,
+    ) -> CreateResult<()> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        // diesel::insert_into(restart_dsl::ereporter_restart)
+        todo!()
+    }
+
+    fn restart_insert_query(
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SqlU16,
+        restart_id: EreporterRestartUuid,
+    ) -> TypedSqlQuery<()> {
+        // use nexus_db_schema::schema::ereporter_restart;
+        // // Subquery to determine the prior generation to increment.
+        // let (restart, restart2) = diesel::alias!(
+        //     ereporter_restart as restart,
+        //     ereporter_restart as restart2
+        // );
+
+        // sql_function! { fn coalesce(x: Nullable<Int8>, y: Int8) -> Int8; }
+
+        // let last_generation = restart
+        //     .filter(restart_dsl::reporter_type.eq(reporter_type))
+        //     .filter(restart_dsl::slot_type.eq(slot_type))
+        //     .filter(restart_dsl::slot.eq(slot))
+        //     .select(coalesce(restart.fields(restart_dsl::generation), 0))
+        //     .order_by(restart.fields(restart_dsl::generation))
+        //     .limit(1);
+
+        // diesel::insert_into(restart2)
+        //     .values((
+        //         restart_dsl::reporter_type.eq(reporter_type),
+        //         restart_dsl::slot_type.eq(slot_type),
+        //         restart_dsl::slot.eq(slot),
+        //         restart_dsl::restart_id.eq(restart_id),
+        //     ))
+        //     .on_conflict((restart_dsl::reporter_id, restart_dsl::restart_id))
+        //     .do_update()
+        //     .set(
+        //         ereporter_restart2
+        //             .generation
+        //             .eq(ereporter_restart2.generation + 1),
+        //     )
+        //
+        let mut builder = QueryBuilder::new();
+        builder
+            .sql(
+                "WITH previous AS ( \
+                    SELECT generation \
+                    FROM omicron.public.ereporter_restart \
+                    WHERE reporter_type = ",
+            )
+            .param()
+            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
+            .sql(" AND slot_type = ")
+            .param()
+            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
+            .sql(" AND slot = ")
+            .param()
+            .bind::<sql_types::Int4, _>(slot)
+            .sql(
+                "
+                    ORDER BY generation DESC \
+                    LIMIT 1 \
+                )
+                INSERT INTO omicron.public.ereporter_restart ( \
+                    id, \
+                    generation, \
+                    reporter_type, \
+                    slot_type, \
+                    slot, \
+                    time_first_seen \
+                ) VALUES ( ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
+            .sql(", COALESCE((SELECT generation FROM previous) + 1, 0), ")
+            .param()
+            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
+            .sql(", ")
+            .param()
+            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
+            .sql(", ")
+            .param()
+            .bind::<sql_types::Int4, _>(slot)
+            .sql(", NOW())");
+        builder.query::<()>()
+    }
+
     pub async fn latest_ereport_id(
         &self,
         opctx: &OpContext,
@@ -362,6 +463,8 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+    use diesel::pg::Pg;
     use dropshot::PaginationOrder;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -542,6 +645,58 @@ mod tests {
             .expect("Failed to explain query - is it valid SQL?");
 
         eprintln!("--- explanation: {explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_insert_restart_query() {
+        let query = DataStore::restart_insert_query(
+            nexus_db_model::EreporterType::Host,
+            SpType::Sled,
+            SqlU16::from(16u16),
+            EreporterRestartUuid::nil(),
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereporter_restart_insert.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_insert_restart_query() {
+        let logctx = dev::test_setup_log("explain_insert_restart_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::restart_insert_query(
+            nexus_db_model::EreporterType::Host,
+            SpType::Sled,
+            SqlU16::from(16u16),
+            EreporterRestartUuid::nil(),
+        );
+
+        // Before trying to explain the query, let's start by making sure it's
+        // valid SQL...
+        let q = diesel::debug_query::<Pg, _>(&query).to_string();
+        match dev::db::format_sql(&q).await {
+            Ok(q) => eprintln!("query: {q}"),
+            Err(e) => panic!("query is malformed: {e}\n{q}"),
+        }
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
