@@ -1980,15 +1980,12 @@ mod test {
             .await
             .expect("insert failed");
 
-        // Phase 2: Perform many small mutations — each one is a tiny
-        // WAL entry that may sit in Pebble's user-space write buffer.
-        // With disable_synchronization_unsafe, Sync() is a no-op, so
-        // the buffer is only flushed when full. We do many UPDATEs so
-        // the last few are likely still buffered when we kill.
-        //
-        // We update each row individually to maximize the number of
-        // separate WAL entries, increasing the chance that the final
-        // entries haven't been flushed.
+        // Phase 2: Perform many small mutations that may sit in
+        // Pebble's user-space write buffer. With
+        // disable_synchronization_unsafe, Sync() is a no-op, so the
+        // buffer is only flushed when full. We issue many batch UPDATEs
+        // (each updating 100 rows) so the last few WAL entries are
+        // likely still buffered when we shut down.
         for batch_start in (1..=5000).step_by(100) {
             let batch_end = std::cmp::min(batch_start + 99, 5000);
             client
