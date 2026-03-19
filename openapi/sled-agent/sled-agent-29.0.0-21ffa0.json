@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "28.0.0"
+    "version": "29.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -8637,7 +8637,7 @@
         ]
       },
       "ResolvedVpcFirewallRule": {
-        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus.",
         "type": "object",
         "properties": {
           "action": {
@@ -10267,6 +10267,29 @@
                 "type": "string",
                 "enum": [
                   "icmp"
+                ]
+              },
+              "value": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VpcFirewallIcmpFilter"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp6"
                 ]
               },
               "value": {

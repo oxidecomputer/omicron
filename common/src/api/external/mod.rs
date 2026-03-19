@@ -1877,8 +1877,7 @@ pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
     Icmp(Option<VpcFirewallIcmpFilter>),
-    // TODO: IPv6 not supported by instances.
-    // Icmpv6(Option<VpcFirewallIcmpFilter>),
+    Icmp6(Option<VpcFirewallIcmpFilter>),
     // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
     // Other(u16),
 }
@@ -1900,6 +1899,12 @@ impl FromStr for VpcFirewallRuleProtocol {
             }
             (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
                 Ok(Self::Icmp(Some(rhs.parse()?)))
+            }
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp6") => {
+                Ok(Self::Icmp6(None))
+            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => {
+                Ok(Self::Icmp6(Some(rhs.parse()?)))
             }
             (lhs, None) => Err(Error::invalid_value(
                 "vpc_firewall_rule_protocol",
@@ -1930,6 +1935,8 @@ impl Display for VpcFirewallRuleProtocol {
             VpcFirewallRuleProtocol::Udp => write!(f, "udp"),
             VpcFirewallRuleProtocol::Icmp(None) => write!(f, "icmp"),
             VpcFirewallRuleProtocol::Icmp(Some(v)) => write!(f, "icmp:{v}"),
+            VpcFirewallRuleProtocol::Icmp6(None) => write!(f, "icmp6"),
+            VpcFirewallRuleProtocol::Icmp6(Some(v)) => write!(f, "icmp6:{v}"),
         }
     }
 }

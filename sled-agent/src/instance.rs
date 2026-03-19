@@ -2095,7 +2095,11 @@ impl Instance {
             requested_nics: local_config.nics,
             external_ips: local_config.external_ips,
             multicast_groups: local_config.multicast_groups,
-            firewall_rules: local_config.firewall_rules,
+            firewall_rules: local_config
+                .firewall_rules
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             dhcp_config,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
@@ -3771,7 +3775,11 @@ mod tests {
                 requested_nics: local_config.nics,
                 external_ips: local_config.external_ips,
                 multicast_groups: local_config.multicast_groups,
-                firewall_rules: local_config.firewall_rules,
+                firewall_rules: local_config
+                    .firewall_rules
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
                 dhcp_config,
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,
