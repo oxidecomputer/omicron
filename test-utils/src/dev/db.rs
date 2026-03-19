@@ -768,14 +768,20 @@ impl Drop for CockroachInstance {
                 unsafe { libc::kill(pid, libc::SIGTERM) };
 
                 // Poll the child_process until it exits.
+                //
+                // Note that nextest has a timeout for tests
+                // with the filter 'rdeps(omicron-test-utils)'.
+                //
+                // As a consequence, we can loop "as long as the test runner
+                // lets us" waiting for CockroachDB to gracefully terminate. In
+                // reality, this is typically on the order of ~one second after
+                // a test failure.
                 loop {
                     match child_process.try_wait() {
-                        Ok(Some(_status)) => {
-                            break;
-                        }
                         Ok(None) => {} // still running
-                        Err(_) => {
-                            // Already reaped (e.g. ECHILD).
+                        Ok(Some(_)) | Err(_) => {
+                            // Terminated successfully or already reaped (e.g.
+                            // ECHILD).
                             break;
                         }
                     }
