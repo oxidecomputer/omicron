@@ -8570,7 +8570,6 @@ dependencies = [
  "rdb-types",
  "ref-cast",
  "regex",
- "reqwest 0.12.28",
  "reqwest 0.13.2",
  "ring",
  "rustls 0.22.4",
