@@ -776,15 +776,7 @@ impl Drop for CockroachInstance {
                 // lets us" waiting for CockroachDB to gracefully terminate. In
                 // reality, this is typically on the order of ~one second after
                 // a test failure.
-                loop {
-                    match child_process.try_wait() {
-                        Ok(None) => {} // still running
-                        Ok(Some(_)) | Err(_) => {
-                            // Terminated successfully or already reaped (e.g.
-                            // ECHILD).
-                            break;
-                        }
-                    }
+                while let Ok(None) = child_process.try_wait() {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
             }
