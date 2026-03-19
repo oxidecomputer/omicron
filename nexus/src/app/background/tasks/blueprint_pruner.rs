@@ -239,6 +239,7 @@ async fn prune_blueprints(
         nblueprints_found: target_table_status.nfound,
         max_delete_attempts,
         batch_size,
+        target_blueprint_id: target_table_status.target_id,
     };
     let mut pop = PruneTracker::new();
     let details = loop {
@@ -259,6 +260,8 @@ struct TargetTableStatus {
     nfound: usize,
     /// which rows to keep
     keep: KeepWhat,
+    /// id of the latest target blueprint
+    target_id: BlueprintUuid,
 }
 
 /// Describes which versions in `bp_target` to keep, based on how many were
@@ -309,7 +312,7 @@ async fn determine_bp_target_rows_to_keep(
     let mut paginator =
         Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
     let mut last_version_seen = None;
-    // XXX-dap add latest target id and make sure we never try to delete that
+    let mut latest_target_id = None;
 
     while let Some(p) = paginator.next() {
         let records_batch = datastore
@@ -319,6 +322,10 @@ async fn determine_bp_target_rows_to_keep(
         paginator = p.found_batch(&records_batch, &|m: &BpTarget| m.version);
         for row in records_batch {
             nscanned += 1;
+            let blueprint_id = BlueprintUuid::from(row.blueprint_id);
+            if latest_target_id.is_none() {
+                latest_target_id = Some(blueprint_id);
+            }
 
             // This is pretty subtle: we don't want to stop as soon as we find
             // the Nth distinct blueprint id.  That's because if we keep going,
@@ -334,12 +341,14 @@ async fn determine_bp_target_rows_to_keep(
                 && !blueprint_ids_to_keep.contains(&row.blueprint_id.into())
             {
                 // unwrap(): cannot have entries in `blueprint_ids_to_keep`  if
-                // we have not seen any versions.
+                // we have not seen any versions or a target id.
                 let version = last_version_seen.unwrap();
+                let target_id = latest_target_id.unwrap();
                 return Ok(TargetTableStatus {
                     nscanned,
                     nfound: blueprint_ids_to_keep.len(),
                     keep: KeepWhat::StartingFromVersion(version),
+                    target_id,
                 });
             }
 
@@ -352,6 +361,7 @@ async fn determine_bp_target_rows_to_keep(
         nscanned,
         nfound: blueprint_ids_to_keep.len(),
         keep: KeepWhat::All,
+        target_id: latest_target_id.ok_or_else(|| anyhow!("no rows found"))?,
     });
 }
 
@@ -364,6 +374,7 @@ struct PruneArgs<'a> {
     max_delete_attempts: usize,
     nblueprints_found: usize,
     batch_size: NonZeroU32,
+    target_blueprint_id: BlueprintUuid,
 }
 
 /// Tracks progress and errors for the overall prune activation
@@ -692,6 +703,17 @@ async fn prune_batch_blueprints_impl(
         }
 
         let blueprint_id = BlueprintUuid::from(row.blueprint_id);
+
+        // This condition should be impossible because of the way the table is
+        // structured.  But if somehow we wound up with the target blueprint id,
+        // bail out rather than light the system on fire.
+        if blueprint_id == pargs.target_blueprint_id {
+            return ControlFlow::Break(batch.record_error(anyhow!(
+                "unexpectedly tried to delete target blueprint {}",
+                blueprint_id,
+            )));
+        }
+
         let authz_blueprint = authz::Blueprint::new_for_id(blueprint_id);
         debug!(
             log,
@@ -1038,10 +1060,6 @@ mod test {
 
         /// Removes the oldest N target rows and their associated blueprints
         /// from just the in-memory state.
-        // XXX-dap is it a problem that we assume we can delete a blueprint if
-        // we find a bp_target row referencing it because what if a different,
-        // *later* row references it?  I guess we can say that such rows must be
-        // contiguous, at least.
         pub fn drop_oldest(&mut self, count: usize) -> Vec<TargetRow> {
             assert!(
                 count < self.target_rows.len(),
@@ -1681,6 +1699,94 @@ mod test {
         blueprints.verify_database_matches(opctx, datastore).await;
         assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
         assert_eq!(blueprints.target_rows.len(), 4 * nkeep);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests that even with a horribly corrupted `bp_target` table, we'll never
+    /// remove the system's current target blueprint.
+    #[tokio::test]
+    async fn test_blueprint_pruner_never_deletes_target() {
+        let logctx =
+            dev::test_setup_log("blueprint_pruner_never_deletes_target");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add several more target blueprints.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        let nblueprints = 10usize;
+        for _ in 0..(nblueprints - 1) {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Now, do something terrible: write a new `bp_target` row reflecting
+        // that the an earlier blueprint is now again the target.  The system
+        // should never do this.  However, if we're not careful, this kind of
+        // corruption could cause the pruner to delete the system's current
+        // target blueprint, which would be so bad that we go out of our way to
+        // make sure we never do that.
+        let first_blueprint_id = blueprints.target_rows[0].id;
+        let second_blueprint_id = blueprints.target_rows[1].id;
+        let latest_version =
+            blueprints.target_rows[blueprints.target_rows.len() - 1].version;
+        {
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("getting db connection");
+            use async_bb8_diesel::AsyncRunQueryDsl;
+            use nexus_db_schema::schema::bp_target::dsl;
+            diesel::insert_into(dsl::bp_target)
+                .values(BpTarget::new(
+                    latest_version + 1,
+                    BlueprintTarget {
+                        target_id: second_blueprint_id,
+                        enabled: false,
+                        time_made_target: Utc::now(),
+                    },
+                ))
+                .execute_async(&*conn)
+                .await
+                .expect("inserting questionable bp_target row");
+        }
+
+        let nkeep = 0;
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            nkeep,
+            nblueprints,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
+        println!("{details:?}");
+        // Verify that we reported an error.
+        assert!(!details.warnings.is_empty());
+        // We ought to have deleted the first blueprint, before we ran into the
+        // error.
+        assert_eq!(details.deleted.len(), 1);
+        assert_eq!(details.deleted[0].id, blueprints.target_rows[0].id);
+        assert_eq!(details.ntargets_deleted, 1);
+        assert_eq!(details.ntargets_removable, 1);
+
+        // Load the database state again and confirm that the first blueprint is
+        // gone but the latest one is not.
+        let new_blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        assert!(
+            new_blueprints.all_blueprint_ids.contains(&second_blueprint_id)
+        );
+        assert!(
+            !new_blueprints.all_blueprint_ids.contains(&first_blueprint_id)
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
