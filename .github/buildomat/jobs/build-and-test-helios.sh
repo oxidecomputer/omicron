@@ -9,6 +9,7 @@
 #:	"%/work/oxidecomputer/omicron/target/nextest/ci/junit.xml",
 #:	"%/work/oxidecomputer/omicron/target/live-tests-archive.tgz",
 #:	"=/tmp/nextest-run-archive.zip",
+#:	"=/tmp/nextest-chrome-trace.json",
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
@@ -41,5 +42,10 @@
 #: series = "nextest-recording-helios"
 #: name = "nextest-run-archive.zip"
 #: from_output = "/tmp/nextest-run-archive.zip"
+#:
+#: [[publish]]
+#: series = "nextest-recording-helios"
+#: name = "nextest-chrome-trace.json"
+#: from_output = "/tmp/nextest-chrome-trace.json"
 
 exec .github/buildomat/build-and-test.sh illumos

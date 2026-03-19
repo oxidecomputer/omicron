@@ -6652,6 +6652,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS audit_log_by_time_completed
     ON omicron.public.audit_log (time_completed, id)
     WHERE time_completed IS NOT NULL;
 
+-- Supports "find stale incomplete rows ordered by time_started".
+CREATE INDEX IF NOT EXISTS audit_log_incomplete_by_time_started
+    ON omicron.public.audit_log (time_started, id)
+    WHERE time_completed IS NULL;
+
 -- View of audit log entries that have been "completed". This lets us treat that
 -- subset of rows as its own table in the data model code. Completing an entry
 -- means updating the entry after an operation is complete with the result of
@@ -8259,7 +8264,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '241.0.0', NULL)
+    (TRUE, NOW(), NOW(), '242.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
