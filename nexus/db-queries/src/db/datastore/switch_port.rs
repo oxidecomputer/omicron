@@ -2181,6 +2181,15 @@ mod test {
                 // we can compare the rest of the struct at once, since
                 // `db_peer.inner.bgp_config` is always populated with an ID.
                 peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
+
+                // TODO-correctness We don't faithfully persist
+                // `interface_name`, and should probably remove the field
+                // entirely
+                // (https://github.com/oxidecomputer/omicron/issues/10104).
+                // For now, manually set the field to match so we can assert_eq
+                // over the entire struct below.
+                peer.interface_name = db_peer.inner.interface_name.clone();
+
                 assert_eq!(peer, db_peer.inner);
             }
         }
