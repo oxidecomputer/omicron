@@ -305,7 +305,7 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    err.into()
+                    Error::from(err)
                 } else {
                     public_error_from_diesel(
                         e,
@@ -399,7 +399,7 @@ impl DataStore {
                     }
                 }
                 else if let Some(err) = create_err.take() {
-                    err.into()
+                    Error::from(err)
                 }
                 else {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -1589,25 +1589,18 @@ async fn do_switch_port_settings_create(
             .addr
             .map(|a| a.ip())
             .unwrap_or(RouterPeerType::UNNUMBERED_SENTINEL);
-        let (allowed_import, allowed_export, communities) = (
-            peer_by_addr
-                .get(&lookup_addr)
-                .map(|x| x.allowed_import.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering),
-            peer_by_addr
-                .get(&lookup_addr)
-                .map(|x| x.allowed_export.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering),
-            peer_by_addr
-                .get(&lookup_addr)
-                .map(|x| x.communities.clone())
-                .unwrap_or(Vec::new()),
-        );
+        let Some(peer) = peer_by_addr.get(&lookup_addr) else {
+            return Err(err.bail(
+                SwitchPortSettingsCreateError::InternalError(
+                    format!("unexpectedly missing peer {}", p.bgp_config_id),
+                ),
+            ));
+        };
         let peer_result = BgpPeerFromDbBuilder {
             peer_config: &p,
-            communities,
-            allowed_import,
-            allowed_export,
+            communities: peer.communities.clone(),
+            allowed_import: peer.allowed_import.clone(),
+            allowed_export: peer.allowed_export.clone(),
         }
         .build();
         let peer = match peer_result {
