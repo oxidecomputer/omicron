@@ -140,6 +140,46 @@ impl DataStore {
         Ok(())
     }
 
+    /// Hard-delete completed audit log entries older than `cutoff`.
+    ///
+    /// Deletes up to `limit` rows where `time_completed IS NOT NULL` and
+    /// `time_completed < cutoff`, and returns the number of rows deleted.
+    ///
+    /// We must never delete an entry before it has been completed, because
+    /// incomplete entries are not yet visible in the audit log.  Deleting
+    /// one would mean the operation never appears in the log at all.  The
+    /// `audit_log_timeout_incomplete` task ensures that even crash-orphaned
+    /// entries get completed (with result_kind = timeout) well before the
+    /// retention cutoff, but the `time_completed IS NOT NULL` filter is the
+    /// structural guarantee that we cannot delete something that hasn't
+    /// appeared in the log yet.
+    pub async fn audit_log_cleanup(
+        &self,
+        opctx: &OpContext,
+        cutoff: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<usize, omicron_common::api::external::Error> {
+        opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
+
+        // Diesel's DeleteStatement doesn't support ORDER BY or LIMIT, so we use
+        // raw SQL. We could use a subquery instead and use the DSL, but this
+        // feels like a more direct and literal a representation of what we're
+        // doing. The semantics of the query are checked by the integration test
+        // for the background task.
+        diesel::sql_query(
+            "DELETE FROM omicron.public.audit_log \
+             WHERE time_completed IS NOT NULL \
+               AND time_completed < $1 \
+             ORDER BY time_completed, id \
+             LIMIT $2",
+        )
+        .bind::<diesel::sql_types::Timestamptz, _>(cutoff)
+        .bind::<diesel::sql_types::BigInt, _>(i64::from(limit))
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Transition stale incomplete audit log rows to `result_kind = timeout`.
     ///
     /// Finds up to `limit` rows where `time_completed IS NULL` and

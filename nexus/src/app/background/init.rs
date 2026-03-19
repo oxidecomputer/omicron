@@ -92,6 +92,7 @@ use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::attached_subnets;
+use super::tasks::audit_log_cleanup;
 use super::tasks::audit_log_timeout_incomplete;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
@@ -248,6 +249,7 @@ impl BackgroundTasksInitializer {
             task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
+            task_audit_log_cleanup: Activator::new(),
             task_audit_log_timeout_incomplete: Activator::new(),
             task_vpc_route_manager: Activator::new(),
             task_saga_recovery: Activator::new(),
@@ -365,6 +367,7 @@ impl BackgroundTasksInitializer {
             task_attached_subnet_manager,
             task_session_cleanup,
             task_audit_log_timeout_incomplete,
+            task_audit_log_cleanup,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1211,7 +1214,7 @@ impl BackgroundTasksInitializer {
             period: config.audit_log_timeout_incomplete.period_secs,
             task_impl: Box::new(
                 audit_log_timeout_incomplete::AuditLogTimeoutIncomplete::new(
-                    datastore,
+                    datastore.clone(),
                     config.audit_log_timeout_incomplete.timeout_secs,
                     config
                         .audit_log_timeout_incomplete
@@ -1221,6 +1224,21 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_audit_log_timeout_incomplete,
+        });
+
+        driver.register(TaskDefinition {
+            name: "audit_log_cleanup",
+            description: "hard-deletes completed audit log entries older \
+                 than the retention period",
+            period: config.audit_log_cleanup.period_secs,
+            task_impl: Box::new(audit_log_cleanup::AuditLogCleanup::new(
+                datastore,
+                config.audit_log_cleanup.retention_days,
+                config.audit_log_cleanup.max_deleted_per_activation,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_audit_log_cleanup,
         });
 
         driver
