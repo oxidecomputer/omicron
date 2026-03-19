@@ -873,9 +873,6 @@
         "properties": {
           "allowed_source_ips": {
             "description": "IPs or subnets allowed to make requests to user-facing services",
-            "default": {
-              "allow": "any"
-            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/AllowedSourceIps"
@@ -957,6 +954,7 @@
           }
         },
         "required": [
+          "allowed_source_ips",
           "bootstrap_discovery",
           "dns_servers",
           "external_certificates",
