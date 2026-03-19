@@ -158,6 +158,252 @@ impl DataStore {
             })
     }
 
+    /// Creates a new support bundle on behalf of the FM subsystem.
+    ///
+    /// This is similar to [`DataStore::support_bundle_create`], but uses a
+    /// caller-provided bundle UUID (from the `SupportBundleRequest`), sets
+    /// `fm_case_id`, and maps a duplicate primary key to [`Error::conflict`]
+    /// rather than a server error (since the FM reconciler may attempt to
+    /// create the same bundle twice).
+    ///
+    /// Data selection is not stored on the bundle row. The collector retrieves
+    /// it by querying the FM per-variant request tables.
+    pub async fn support_bundle_create_for_fm(
+        &self,
+        opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+        this_nexus_id: OmicronZoneUuid,
+        fm_case_id: omicron_uuid_kinds::CaseUuid,
+        reason_for_creation: String,
+    ) -> Result<SupportBundle, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        #[derive(Debug)]
+        enum FmBundleError {
+            TooManyBundles,
+            AlreadyExists,
+        }
+
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("support_bundle_create_for_fm")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let reason_for_creation = reason_for_creation.clone();
+
+                async move {
+                    use diesel::result::DatabaseErrorKind;
+                    use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
+                    use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
+
+                    // Find a free dataset, same as support_bundle_create.
+                    let free_dataset = dataset_dsl::rendezvous_debug_dataset
+                        .filter(dataset_dsl::time_tombstoned.is_null())
+                        .left_join(support_bundle_dsl::support_bundle.on(
+                            dataset_dsl::id.eq(support_bundle_dsl::dataset_id),
+                        ))
+                        .filter(support_bundle_dsl::dataset_id.is_null())
+                        .select(RendezvousDebugDataset::as_select())
+                        .first_async(&conn)
+                        .await
+                        .optional()?;
+
+                    let Some(dataset) = free_dataset else {
+                        return Err(
+                            err.bail(FmBundleError::TooManyBundles)
+                        );
+                    };
+
+                    let bundle = SupportBundle::new_for_fm(
+                        bundle_id,
+                        reason_for_creation,
+                        dataset.pool_id(),
+                        dataset.id(),
+                        this_nexus_id,
+                        fm_case_id,
+                    );
+
+                    let result = diesel::insert_into(
+                        support_bundle_dsl::support_bundle,
+                    )
+                    .values(bundle.clone())
+                    .execute_async(&conn)
+                    .await;
+
+                    match result {
+                        Ok(_) => Ok(bundle),
+                        Err(diesel::result::Error::DatabaseError(
+                            DatabaseErrorKind::UniqueViolation,
+                            _,
+                        )) => Err(err.bail(FmBundleError::AlreadyExists)),
+                        Err(e) => Err(e),
+                    }
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        FmBundleError::TooManyBundles => {
+                            return external::Error::insufficient_capacity(
+                                CANNOT_ALLOCATE_ERR_MSG,
+                                "Support Bundle storage exhausted",
+                            );
+                        }
+                        FmBundleError::AlreadyExists => {
+                            return external::Error::conflict(format!(
+                                "support bundle {bundle_id} already exists",
+                            ));
+                        }
+                    }
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Retrieves the data selection for an FM-originated support bundle.
+    ///
+    /// Returns `None` if the bundle is not FM-originated (`fm_case_id` is
+    /// NULL), or if no per-variant data selection rows exist for the
+    /// corresponding request (meaning "collect everything").
+    ///
+    /// This is called by the support bundle collector to determine what
+    /// data to include in an FM-requested bundle.
+    pub async fn support_bundle_data_selection(
+        &self,
+        opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+    ) -> Result<Option<nexus_types::support_bundle::BundleDataSelection>, Error>
+    {
+        use crate::db::model::fm::{
+            SbReqEreports, SbReqHostInfo, SbReqReconfigurator,
+            SbReqSledCubbyInfo, SbReqSpDumps,
+        };
+        use nexus_db_schema::schema::fm_sb_req_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::fm_sb_req_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::fm_sb_req_reconfigurator::dsl as reconf_dsl;
+        use nexus_db_schema::schema::fm_sb_req_sled_cubby_info::dsl as cubby_dsl;
+        use nexus_db_schema::schema::fm_sb_req_sp_dumps::dsl as sp_dumps_dsl;
+        use nexus_db_schema::schema::support_bundle::dsl as sb_dsl;
+        use nexus_types::support_bundle::{BundleData, BundleDataSelection};
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Look up the bundle's fm_case_id. If NULL, this isn't an FM bundle.
+        let fm_case_id: Option<Uuid> = sb_dsl::support_bundle
+            .filter(sb_dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .select(sb_dsl::fm_case_id)
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to look up bundle fm_case_id")
+            })?
+            .flatten();
+
+        let Some(_fm_case_id) = fm_case_id else {
+            return Ok(None);
+        };
+
+        // Query each per-variant table by request_id = bundle_id.
+        // The bundle UUID is the same as the request UUID in
+        // fm_support_bundle_request, so we can filter directly.
+        let bundle_uuid = bundle_id.into_untyped_uuid();
+
+        let reconf: Option<SbReqReconfigurator> =
+            reconf_dsl::fm_sb_req_reconfigurator
+                .filter(reconf_dsl::request_id.eq(bundle_uuid))
+                .select(SbReqReconfigurator::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to query sb_req_reconfigurator",
+                        )
+                })?;
+
+        let cubby: Option<SbReqSledCubbyInfo> =
+            cubby_dsl::fm_sb_req_sled_cubby_info
+                .filter(cubby_dsl::request_id.eq(bundle_uuid))
+                .select(SbReqSledCubbyInfo::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to query sb_req_sled_cubby_info",
+                        )
+                })?;
+
+        let sp_dumps: Option<SbReqSpDumps> = sp_dumps_dsl::fm_sb_req_sp_dumps
+            .filter(sp_dumps_dsl::request_id.eq(bundle_uuid))
+            .select(SbReqSpDumps::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to query sb_req_sp_dumps")
+            })?;
+
+        let host_info: Option<SbReqHostInfo> =
+            host_info_dsl::fm_sb_req_host_info
+                .filter(host_info_dsl::request_id.eq(bundle_uuid))
+                .select(SbReqHostInfo::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to query sb_req_host_info")
+                })?;
+
+        let ereports: Option<SbReqEreports> = ereports_dsl::fm_sb_req_ereports
+            .filter(ereports_dsl::request_id.eq(bundle_uuid))
+            .select(SbReqEreports::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to query sb_req_ereports")
+            })?;
+
+        // If no variant rows exist, return None (collect everything).
+        if reconf.is_none()
+            && cubby.is_none()
+            && sp_dumps.is_none()
+            && host_info.is_none()
+            && ereports.is_none()
+        {
+            return Ok(None);
+        }
+
+        // Assemble the BundleDataSelection from the variant rows.
+        let mut selection = BundleDataSelection::new();
+        if reconf.is_some() {
+            selection.insert(BundleData::Reconfigurator);
+        }
+        if cubby.is_some() {
+            selection.insert(BundleData::SledCubbyInfo);
+        }
+        if sp_dumps.is_some() {
+            selection.insert(BundleData::SpDumps);
+        }
+        if let Some(hi) = host_info {
+            selection.insert(BundleData::HostInfo(hi.into_sled_selections()));
+        }
+        if let Some(er) = ereports {
+            selection.insert(BundleData::Ereports(er.into_ereport_filters()));
+        }
+
+        Ok(Some(selection))
+    }
+
     /// Looks up a single support bundle
     pub async fn support_bundle_get(
         &self,
@@ -1544,6 +1790,76 @@ mod test {
                 bundle_id
             );
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_support_bundle_create_for_fm() {
+        use omicron_uuid_kinds::CaseUuid;
+
+        let logctx = dev::test_setup_log("test_support_bundle_create_for_fm");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create a sled with zpools so we have debug datasets.
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+
+        let bundle_id = SupportBundleUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let reason = "sled is misbehaving".to_string();
+
+        // Create the bundle.
+        let bundle = datastore
+            .support_bundle_create_for_fm(
+                &opctx,
+                bundle_id,
+                this_nexus_id,
+                case_id,
+                reason.clone(),
+            )
+            .await
+            .expect("Should be able to create FM bundle");
+
+        assert_eq!(SupportBundleUuid::from(bundle.id), bundle_id);
+        assert_eq!(bundle.reason_for_creation, reason);
+        assert_eq!(bundle.fm_case_id, Some(case_id.into()));
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+        assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
+
+        // Creating the same bundle again should return a conflict error.
+        let err = datastore
+            .support_bundle_create_for_fm(
+                &opctx,
+                bundle_id,
+                this_nexus_id,
+                case_id,
+                reason.clone(),
+            )
+            .await
+            .expect_err("Should get conflict for duplicate bundle ID");
+        assert!(
+            matches!(err, Error::Conflict { .. }),
+            "Expected Conflict error, got: {err:?}"
+        );
+
+        // A different bundle ID should still succeed (uses second dataset).
+        let bundle_id_2 = SupportBundleUuid::new_v4();
+        let bundle2 = datastore
+            .support_bundle_create_for_fm(
+                &opctx,
+                bundle_id_2,
+                this_nexus_id,
+                case_id,
+                "another reason".to_string(),
+            )
+            .await
+            .expect("Should be able to create second FM bundle");
+
+        assert_eq!(SupportBundleUuid::from(bundle2.id), bundle_id_2);
+        assert_eq!(bundle2.fm_case_id, Some(case_id.into()));
 
         db.terminate().await;
         logctx.cleanup_successful();
