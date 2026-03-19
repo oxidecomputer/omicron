@@ -293,7 +293,7 @@ async fn determine_bp_target_rows_to_keep(
     // Alternative considered: have the database tell us the version that's
     // `MAX_NKEEP` rows from the end.  e.g., something like
     //
-    //     SELECT version FROM bp_target ORDER BY version DESC OFFSET `MAX_NKEEP`
+    //   SELECT version FROM bp_target ORDER BY version DESC OFFSET `MAX_NKEEP`
     //
     // That query is somewhat expensive (well, proportional to `MAX_NKEEP`) and
     // still has the problem of not keeping enough blueprints if some of these
@@ -308,6 +308,8 @@ async fn determine_bp_target_rows_to_keep(
     let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> = BTreeSet::new();
     let mut paginator =
         Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
+    let mut last_version_seen = None;
+    // XXX-dap add latest target id and make sure we never try to delete that
 
     while let Some(p) = paginator.next() {
         let records_batch = datastore
@@ -317,15 +319,32 @@ async fn determine_bp_target_rows_to_keep(
         paginator = p.found_batch(&records_batch, &|m: &BpTarget| m.version);
         for row in records_batch {
             nscanned += 1;
-            blueprint_ids_to_keep.insert(row.blueprint_id.into());
 
-            if blueprint_ids_to_keep.len() >= nkeep {
+            // This is pretty subtle: we don't want to stop as soon as we find
+            // the Nth distinct blueprint id.  That's because if we keep going,
+            // we might find more rows that refer to the same blueprint id (if
+            // someone toggled the enabled/disabled bit).  If we stopped here,
+            // the caller would see those rows and erroneously determine they
+            // could prune this blueprint, but we were counting on it being
+            // one of the ones being kept.
+            //
+            // Instead, we need to go far enough back to see a different
+            // blueprint id.
+            if blueprint_ids_to_keep.len() >= nkeep
+                && !blueprint_ids_to_keep.contains(&row.blueprint_id.into())
+            {
+                // unwrap(): cannot have entries in `blueprint_ids_to_keep`  if
+                // we have not seen any versions.
+                let version = last_version_seen.unwrap();
                 return Ok(TargetTableStatus {
                     nscanned,
                     nfound: blueprint_ids_to_keep.len(),
-                    keep: KeepWhat::StartingFromVersion(*row.version),
+                    keep: KeepWhat::StartingFromVersion(version),
                 });
             }
+
+            blueprint_ids_to_keep.insert(row.blueprint_id.into());
+            last_version_seen = Some(*row.version);
         }
     }
 
@@ -951,6 +970,41 @@ mod test {
             (new_blueprint.id, parent_blueprint_target)
         }
 
+        /// Creates a new entry in `bp_target` that toggles the `enabled` bit
+        /// on the latest row.
+        pub async fn toggle_target_blueprint(
+            &mut self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+        ) {
+            let target = self
+                .target_rows
+                .iter()
+                .last()
+                .expect("at least one bp_target row");
+
+            let enabled = !target.enabled;
+            datastore
+                .blueprint_target_set_current_enabled(
+                    opctx,
+                    BlueprintTarget {
+                        target_id: target.id,
+                        enabled,
+                        time_made_target: Utc::now(),
+                    },
+                )
+                .await
+                .expect("toggling target");
+
+            let target_row = TargetRow {
+                id: target.id,
+                version: target.version + 1,
+                enabled,
+            };
+
+            self.target_rows.push_back(target_row);
+        }
+
         /// Creates a new blueprint based on the current target, inserts it, and
         /// sets it as the new target.
         pub async fn add_target_blueprint(
@@ -1552,6 +1606,83 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // XXX-dap TODO-coverage test:
-    // - same blueprint enabled/disabled a lot, at various points
+    /// Tests that we preserve enough blueprints even when there's a lot of
+    /// enable/disable entries in the `bp_target` table.
+    ///
+    /// This case tests the (bogus) assumption that the implementation might
+    /// make that all the rows in `bp_target` point to unique blueprints.
+    #[tokio::test]
+    async fn test_blueprint_pruner_dups() {
+        let logctx = dev::test_setup_log("blueprint_pruner_dups");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add several more target blueprints.  For each one, toggle
+        // enable/disable a few times.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        blueprints.toggle_target_blueprint(opctx, datastore).await;
+        blueprints.toggle_target_blueprint(opctx, datastore).await;
+        blueprints.toggle_target_blueprint(opctx, datastore).await;
+
+        let nblueprints = 15usize;
+        for _ in 0..(nblueprints - 1) {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+            blueprints.toggle_target_blueprint(opctx, datastore).await;
+            blueprints.toggle_target_blueprint(opctx, datastore).await;
+            blueprints.toggle_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Prune and verify the results.
+        let nkeep = 10;
+        let nmax_attempts = 4 * nblueprints;
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            nkeep,
+            nmax_attempts,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
+        println!("{details:?}");
+        // Verify no problems encountered.
+        assert!(details.warnings.is_empty());
+
+        // This is a little tricky:
+        //
+        // - we will be left with 10 blueprints
+        // - we will have pruned 5 blueprints
+        //   (because we had 15 and are keeping 10)
+        // - we will be left with 40 bp_target rows (because each blueprint
+        //   we're keeping has four rows because we toggled enabled/disabled 3
+        //   times after creating it)
+        // - we will have removed 20 bp_target rows (similarly, each pruned
+        //   blueprint has 4 associated rows)
+        let ndeleted = nblueprints - usize::from(nkeep);
+        assert_eq!(details.nkept_by_policy, nkeep);
+        assert_eq!(details.deleted.len(), ndeleted);
+        assert_eq!(details.ntargets_deleted, 4 * ndeleted);
+        assert_eq!(details.ntargets_removable, 4 * ndeleted);
+
+        // Verify that whatever blueprints we deleted were the oldest ones.
+        // Eliminate duplicate blueprint ids from `oldest` that result from the
+        // enable/disable toggling.
+        let mut oldest = blueprints.drop_oldest(4 * ndeleted);
+        oldest.dedup_by(|l, r| l.id == r.id);
+        for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
+            assert_eq!(old.id, pruned.id);
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+        assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
+        assert_eq!(blueprints.target_rows.len(), 4 * nkeep);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
