@@ -1,2 +1,2 @@
 ALTER TABLE omicron.public.ereport
-    ALTER COLUMN slot SET NOT NULL;
+    DROP CONSTRAINT IF EXISTS reporter_identity_validity;
