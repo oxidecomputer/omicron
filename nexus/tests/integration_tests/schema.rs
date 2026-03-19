@@ -2851,7 +2851,7 @@ const PORT_SETTINGS_ID_165_0: &str = "1e700b64-79e0-4515-9771-bcc2391b6d4d";
 const PORT_SETTINGS_ID_165_1: &str = "c6b015ff-1c98-474f-b9e9-dfc30546094f";
 const PORT_SETTINGS_ID_165_2: &str = "8b777d9b-62a3-4c4d-b0b7-314315c2a7fc";
 const PORT_SETTINGS_ID_165_3: &str = "7c675e89-74b1-45da-9577-cf75f028107a";
-const PORT_SETTINGS_ID_165_4: &str = "e2413d63-9307-4918-b9c4-bce959c63042";
+const PORT_SETTINGS_ID_165_4: &str = "e2423d63-9307-4918-b9c4-bce959c63042";
 const PORT_SETTINGS_ID_165_5: &str = "05df929f-1596-42f4-b78f-aebb5d7028c4";
 
 // Insert records using the `local_pref` column before it's renamed and its
@@ -4506,28 +4506,28 @@ fn after_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-// --- Migration 241: ereport reporter slot columns ---
+// --- Migration 242: ereport reporter slot columns ---
 
-// UUIDs for migration 241 test data.
+// UUIDs for migration 242 test data.
 // "E7E6" -> "Erep"ort
-const EREPORT_241_SP_RESTART: Uuid =
+const EREPORT_242_SP_RESTART: Uuid =
     Uuid::from_u128(0x1111E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_HOST_RESTART: Uuid =
+const EREPORT_242_HOST_RESTART: Uuid =
     Uuid::from_u128(0x2222E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_HOST_UNRESOLVABLE_RESTART: Uuid =
+const EREPORT_242_HOST_UNRESOLVABLE_RESTART: Uuid =
     Uuid::from_u128(0x3333E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_COLLECTOR: Uuid =
+const EREPORT_242_COLLECTOR: Uuid =
     Uuid::from_u128(0x4444E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_SLED: Uuid =
+const EREPORT_242_SLED: Uuid =
     Uuid::from_u128(0x5555E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_UNRESOLVABLE_SLED: Uuid =
+const EREPORT_242_UNRESOLVABLE_SLED: Uuid =
     Uuid::from_u128(0x6666E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_INV_COLLECTION: Uuid =
+const EREPORT_242_INV_COLLECTION: Uuid =
     Uuid::from_u128(0x7777E7E6_aaaa_4647_83b0_8f3515da7be1);
-const EREPORT_241_HW_BASEBOARD: Uuid =
+const EREPORT_242_HW_BASEBOARD: Uuid =
     Uuid::from_u128(0x8888E7E6_aaaa_4647_83b0_8f3515da7be1);
 
-fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_242_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Set up inventory data that the migration will use to backfill
         // host OS ereports.
@@ -4537,13 +4537,13 @@ fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 INSERT INTO omicron.public.inv_collection
                     (id, time_started, time_done, collector)
                 VALUES
-                    ('{EREPORT_241_INV_COLLECTION}', now(), now(),
+                    ('{EREPORT_242_INV_COLLECTION}', now(), now(),
                      'test-collector');
 
                 INSERT INTO omicron.public.hw_baseboard_id
                     (id, part_number, serial_number)
                 VALUES
-                    ('{EREPORT_241_HW_BASEBOARD}', 'test-pn', 'test-sn');
+                    ('{EREPORT_242_HW_BASEBOARD}', 'test-pn', 'test-sn');
 
                 INSERT INTO omicron.public.inv_sled_agent
                     (inv_collection_id, time_collected, source,
@@ -4559,9 +4559,9 @@ fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                      measurement_manifest_source,
                      cpu_family)
                 VALUES
-                    ('{EREPORT_241_INV_COLLECTION}', now(),
+                    ('{EREPORT_242_INV_COLLECTION}', now(),
                      'http://[::1]:12345',
-                     '{EREPORT_241_SLED}', '{EREPORT_241_HW_BASEBOARD}',
+                     '{EREPORT_242_SLED}', '{EREPORT_242_HW_BASEBOARD}',
                      '::1', 12345, 'gimlet',
                      64, 137438953472, 68719476736,
                      'not-yet-run',
@@ -4577,15 +4577,15 @@ fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                      source, sp_type, sp_slot,
                      baseboard_revision, hubris_archive_id, power_state)
                 VALUES
-                    ('{EREPORT_241_INV_COLLECTION}',
-                     '{EREPORT_241_HW_BASEBOARD}', now(),
+                    ('{EREPORT_242_INV_COLLECTION}',
+                     '{EREPORT_242_HW_BASEBOARD}', now(),
                      'http://[::1]:12345',
                      'sled', 7,
                      0, 'test-archive', 'A0');
                 "
             ))
             .await
-            .expect("failed to insert inventory data for migration 241");
+            .expect("failed to insert inventory data for migration 242");
 
         // Insert ereports using the OLD schema (sp_type/sp_slot columns).
         ctx.client
@@ -4596,8 +4596,8 @@ fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     (restart_id, ena, time_collected, collector_id,
                      report, reporter, sp_type, sp_slot)
                 VALUES
-                    ('{EREPORT_241_SP_RESTART}', 1, now(),
-                     '{EREPORT_241_COLLECTOR}',
+                    ('{EREPORT_242_SP_RESTART}', 1, now(),
+                     '{EREPORT_242_COLLECTOR}',
                      '{{}}', 'sp', 'sled', 3);
 
                 -- Host OS ereport with resolvable sled: has sled_id, no
@@ -4606,9 +4606,9 @@ fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     (restart_id, ena, time_collected, collector_id,
                      report, reporter, sled_id)
                 VALUES
-                    ('{EREPORT_241_HOST_RESTART}', 1, now(),
-                     '{EREPORT_241_COLLECTOR}',
-                     '{{}}', 'host', '{EREPORT_241_SLED}');
+                    ('{EREPORT_242_HOST_RESTART}', 1, now(),
+                     '{EREPORT_242_COLLECTOR}',
+                     '{{}}', 'host', '{EREPORT_242_SLED}');
 
                 -- Host OS ereport with UNRESOLVABLE sled (not in inventory):
                 -- should be deleted by the migration
@@ -4616,17 +4616,17 @@ fn before_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     (restart_id, ena, time_collected, collector_id,
                      report, reporter, sled_id)
                 VALUES
-                    ('{EREPORT_241_HOST_UNRESOLVABLE_RESTART}', 1, now(),
-                     '{EREPORT_241_COLLECTOR}',
-                     '{{}}', 'host', '{EREPORT_241_UNRESOLVABLE_SLED}');
+                    ('{EREPORT_242_HOST_UNRESOLVABLE_RESTART}', 1, now(),
+                     '{EREPORT_242_COLLECTOR}',
+                     '{{}}', 'host', '{EREPORT_242_UNRESOLVABLE_SLED}');
                 "
             ))
             .await
-            .expect("failed to insert ereports for migration 241");
+            .expect("failed to insert ereports for migration 242");
     })
 }
 
-fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_242_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Verify the SP ereport was migrated: old sp_type/sp_slot should now
         // be in the new slot_type/slot columns.
@@ -4636,12 +4636,12 @@ fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &format!(
                     "SELECT slot_type::TEXT, slot, sled_id
                      FROM omicron.public.ereport
-                     WHERE restart_id = '{EREPORT_241_SP_RESTART}'"
+                     WHERE restart_id = '{EREPORT_242_SP_RESTART}'"
                 ),
                 &[],
             )
             .await
-            .expect("failed to query SP ereport after migration 241");
+            .expect("failed to query SP ereport after migration 242");
         assert_eq!(rows.len(), 1, "SP ereport should still exist");
         let slot_type: &str = rows[0].get("slot_type");
         assert_eq!(slot_type, "sled");
@@ -4658,12 +4658,12 @@ fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &format!(
                     "SELECT slot_type::TEXT, slot, sled_id
                      FROM omicron.public.ereport
-                     WHERE restart_id = '{EREPORT_241_HOST_RESTART}'"
+                     WHERE restart_id = '{EREPORT_242_HOST_RESTART}'"
                 ),
                 &[],
             )
             .await
-            .expect("failed to query host ereport after migration 241");
+            .expect("failed to query host ereport after migration 242");
         assert_eq!(rows.len(), 1, "resolvable host ereport should exist");
         let slot_type: &str = rows[0].get("slot_type");
         assert_eq!(
@@ -4673,7 +4673,7 @@ fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         let slot: i32 = rows[0].get("slot");
         assert_eq!(slot, 7, "host ereport slot should match inventory sp_slot");
         let sled_id: Option<Uuid> = rows[0].get("sled_id");
-        assert_eq!(sled_id, Some(EREPORT_241_SLED));
+        assert_eq!(sled_id, Some(EREPORT_242_SLED));
 
         // Verify the unresolvable host OS ereport was deleted.
         let rows = ctx
@@ -4682,13 +4682,13 @@ fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &format!(
                     "SELECT 1 FROM omicron.public.ereport
                      WHERE restart_id = \
-                     '{EREPORT_241_HOST_UNRESOLVABLE_RESTART}'"
+                     '{EREPORT_242_HOST_UNRESOLVABLE_RESTART}'"
                 ),
                 &[],
             )
             .await
             .expect(
-                "failed to query unresolvable host ereport after migration 241",
+                "failed to query unresolvable host ereport after migration 242",
             );
         assert_eq!(
             rows.len(),
@@ -4702,20 +4702,20 @@ fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 "
                 SET LOCAL disallow_full_table_scans = 'off';
                 DELETE FROM omicron.public.ereport
-                    WHERE restart_id IN ('{EREPORT_241_SP_RESTART}',
-                                         '{EREPORT_241_HOST_RESTART}');
+                    WHERE restart_id IN ('{EREPORT_242_SP_RESTART}',
+                                         '{EREPORT_242_HOST_RESTART}');
                 DELETE FROM omicron.public.inv_service_processor
-                    WHERE hw_baseboard_id = '{EREPORT_241_HW_BASEBOARD}';
+                    WHERE hw_baseboard_id = '{EREPORT_242_HW_BASEBOARD}';
                 DELETE FROM omicron.public.inv_sled_agent
-                    WHERE sled_id = '{EREPORT_241_SLED}';
+                    WHERE sled_id = '{EREPORT_242_SLED}';
                 DELETE FROM omicron.public.hw_baseboard_id
-                    WHERE id = '{EREPORT_241_HW_BASEBOARD}';
+                    WHERE id = '{EREPORT_242_HW_BASEBOARD}';
                 DELETE FROM omicron.public.inv_collection
-                    WHERE id = '{EREPORT_241_INV_COLLECTION}';
+                    WHERE id = '{EREPORT_242_INV_COLLECTION}';
                 "
             ))
             .await
-            .expect("failed to clean up migration 241 test data");
+            .expect("failed to clean up migration 242 test data");
     })
 }
 
@@ -4862,8 +4862,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_231_0_0).after(after_231_0_0),
     );
     map.insert(
-        Version::new(241, 0, 0),
-        DataMigrationFns::new().before(before_241_0_0).after(after_241_0_0),
+        Version::new(242, 0, 0),
+        DataMigrationFns::new().before(before_242_0_0).after(after_242_0_0),
     );
     map
 }
