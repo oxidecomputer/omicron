@@ -110,6 +110,14 @@ impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
                             }
                         }))
                     }
+                    VpcFirewallRuleProtocol::Icmp6(v) => {
+                        ProtoFilter::Icmpv6(v.map(|v| {
+                            oxide_vpc::api::IcmpFilter {
+                                ty: v.icmp_type,
+                                codes: v.code.map(Into::into),
+                            }
+                        }))
+                    }
                 })
                 .collect(),
             _ => vec![ProtoFilter::Any],

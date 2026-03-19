@@ -79,7 +79,7 @@ pub mod early_networking {
 }
 
 pub mod firewall_rules {
-    pub use crate::v11::firewall_rules::VpcFirewallRulesEnsureBody;
+    pub use crate::v29::firewall_rules::VpcFirewallRulesEnsureBody;
 }
 
 pub mod instance {
@@ -100,10 +100,9 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v18::instance::InstanceEnsureBody;
-    pub use crate::v18::instance::InstanceSledLocalConfig;
-
-    pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
+    pub use crate::v29::instance::InstanceEnsureBody;
+    pub use crate::v29::instance::InstanceSledLocalConfig;
+    pub use crate::v29::instance::ResolvedVpcFirewallRule;
 }
 
 pub mod inventory {
