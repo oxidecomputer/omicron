@@ -228,18 +228,6 @@ impl RouterPeerAddress {
         }
     }
 
-    /// Convert an arbitrary [`IpAddr`] into a [`RouterPeerAddress`] by
-    /// converting an unspecified IP to [`RouterPeerAddress::Unnumbered`].
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn from_ip_treating_unspecified_as_unnumbered(ip: IpAddr) -> Self {
-        match SpecifiedIpAddr::try_from(ip) {
-            Ok(ip) => Self::Numbered { ip },
-            Err(UnspecifiedIpError) => Self::Unnumbered,
-        }
-    }
-
     /// Convert an arbitrary `Option<IpAddr>` into a [`RouterPeerAddress`] by
     /// converting both `None` and `Some(UNSPECIFIED)`
     /// [`RouterPeerAddress::Unnumbered`].
@@ -252,7 +240,10 @@ impl RouterPeerAddress {
         let Some(ip) = ip else {
             return Self::Unnumbered;
         };
-        Self::from_ip_treating_unspecified_as_unnumbered(ip)
+        match SpecifiedIpAddr::try_from(ip) {
+            Ok(ip) => Self::Numbered { ip },
+            Err(UnspecifiedIpError) => Self::Unnumbered,
+        }
     }
 }
 
