@@ -7292,7 +7292,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
     generation INT8 NOT NULL,
 
     /*
-     * The location of the reporter.
+     * The location (slot type and slot) and reporter type of the reporter.
      */
     reporter_type omicron.public.ereporter_type NOT NULL,
     slot_type omicron.public.sp_type NOT NULL,
@@ -7300,6 +7300,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
 
     time_first_seen TIMESTAMPTZ NOT NULL,
 
+    /*
+     * Host OS ereports can (currently) only come from sleds.
+     */
     CONSTRAINT reporter_identity_validity CHECK (
         (slot_type = 'sled' AND reporter_type = 'host') OR
         reporter_type != 'host'
