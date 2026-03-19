@@ -384,7 +384,9 @@ impl DataStore {
                 let selector = NameOrId::Id(id);
                 async move {
                     do_switch_port_settings_delete(&conn, &selector, delete_err).await?;
-                    do_switch_port_settings_create(&conn, Some(id), params, create_err).await
+                    do_switch_port_settings_create(
+                        &conn, Some(id), params, create_err,
+                    ).await
                 }
             })
             .await
