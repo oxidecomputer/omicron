@@ -14,6 +14,10 @@ Generate database changes for this repository. This includes changes to:
 
 Follow these steps in order. Do not skip ahead.
 
+### Step 0: Read the README
+
+You MUST read `schema/crdb/README.adoc` first. Pay attention to important instructions and limitations, such as the requirement for idempotency and the inability to rename columns.
+
 ### Step 1: Ascertain the scope of the request
 
 If not already provided, prompt the user whether they'd like to:
@@ -101,7 +105,3 @@ When creating a migration that affects existing data (like adding columns to exi
 - Add the version to the `get_migration_checks()` map.
 
 This ensures old rows can be migrated smoothly in production.
-
-## Reference
-
-Consult `schema/crdb/README.adoc` for more information.
