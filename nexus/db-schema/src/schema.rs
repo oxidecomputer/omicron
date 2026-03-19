@@ -1590,6 +1590,7 @@ table! {
 
         assigned_nexus -> Nullable<Uuid>,
         user_comment -> Nullable<Text>,
+        fm_case_id -> Nullable<Uuid>,
     }
 }
 
@@ -3182,6 +3183,41 @@ table! {
         payload -> Jsonb,
     }
 }
+
+// FM support bundle requests, stored per-sitrep like alert requests.
+table! {
+    fm_support_bundle_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+    }
+}
+
+// Per-category data selection for support bundle requests.
+// One row per selected BundleData category. Row existence means
+// "include this category in the bundle." No rows for a request means
+// "collect everything."
+table! {
+    fm_sb_req_data_selection (sitrep_id, request_id, category) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        category -> crate::enums::BundleDataCategoryEnum,
+        // HostInfo fields (non-null iff category = 'host_info')
+        all_sleds -> Nullable<Bool>,
+        sled_ids -> Nullable<Array<Uuid>>,
+        // Ereports fields (non-null iff category = 'ereports')
+        ereport_start_time -> Nullable<Timestamptz>,
+        ereport_end_time -> Nullable<Timestamptz>,
+        ereport_only_serials -> Nullable<Array<Text>>,
+        ereport_only_classes -> Nullable<Array<Text>>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    fm_support_bundle_request,
+    fm_sb_req_data_selection,
+);
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

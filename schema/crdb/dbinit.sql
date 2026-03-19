@@ -3156,7 +3156,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     -- and later managing its storage.
     assigned_nexus UUID,
 
-    user_comment TEXT
+    user_comment TEXT,
+
+    -- If this bundle was requested by the FM subsystem, the case UUID.
+    fm_case_id UUID
 
 );
 
@@ -7445,6 +7448,64 @@ CREATE INDEX IF NOT EXISTS
     lookup_fm_alert_requests_for_case
 ON omicron.public.fm_alert_request (sitrep_id, case_id);
 
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
+    -- Requested support bundle UUID.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the bundle was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the bundle was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this request belongs.
+    case_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_requests_for_case
+ON omicron.public.fm_support_bundle_request (sitrep_id, case_id);
+
+CREATE TYPE IF NOT EXISTS omicron.public.bundle_data_category AS ENUM (
+    'reconfigurator',
+    'host_info',
+    'sled_cubby_info',
+    'sp_dumps',
+    'ereports'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_data_selection (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    category omicron.public.bundle_data_category NOT NULL,
+
+    -- HostInfo fields (non-null iff category = 'host_info')
+    all_sleds BOOL,
+    sled_ids UUID[],
+
+    -- Ereports fields (non-null iff category = 'ereports')
+    ereport_start_time TIMESTAMPTZ,
+    ereport_end_time TIMESTAMPTZ,
+    ereport_only_serials TEXT[],
+    ereport_only_classes TEXT[],
+
+    PRIMARY KEY (sitrep_id, request_id, category),
+
+    -- HostInfo: both fields present iff category = 'host_info'.
+    CHECK ((category = 'host_info') = (all_sleds IS NOT NULL)),
+    CHECK ((category = 'host_info') = (sled_ids IS NOT NULL)),
+    -- all_sleds = true means no specific sled IDs, and vice versa.
+    CHECK (all_sleds IS NULL OR all_sleds = (cardinality(sled_ids) = 0)),
+
+    -- Ereports: serials and classes present iff category = 'ereports'.
+    CHECK ((category = 'ereports') = (ereport_only_serials IS NOT NULL)),
+    CHECK ((category = 'ereports') = (ereport_only_classes IS NOT NULL)),
+    -- Time bounds are optional within ereports, but must be NULL otherwise.
+    CHECK (category = 'ereports' OR ereport_start_time IS NULL),
+    CHECK (category = 'ereports' OR ereport_end_time IS NULL)
+);
+
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
  * instance local storage.
@@ -8275,7 +8336,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '241.0.0', NULL)
+    (TRUE, NOW(), NOW(), '242.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
