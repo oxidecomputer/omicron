@@ -21,7 +21,9 @@ Define a struct for the task's activation status. Derive `Clone, Debug, Deserial
 
 ### 2. Task implementation (`nexus/src/app/background/tasks/<name>.rs`)
 
-Create the task module. The struct holds whatever state it needs (typically `Arc<DataStore>` plus config). Implement `BackgroundTask::activate` by delegating to an `async fn actually_activate(&mut self, opctx) -> YourStatus` method, then serialize the status to `serde_json::Value`. The `actually_activate` pattern makes unit testing easy without going through the trait.
+Create the task module. The struct holds whatever state it needs (typically `Arc<DataStore>` plus config). Implement `BackgroundTask::activate` by delegating to an `actually_activate` helper, then serialize the status to `serde_json::Value`. The `actually_activate` pattern makes unit testing easy without going through the trait.
+
+`actually_activate` can either build and return the status (`async fn actually_activate(&mut self, opctx) -> YourStatus`), or take a mutable reference to one (`async fn actually_activate(&mut self, opctx, status: &mut YourStatus) -> Result<(), Error>`). The first is simpler and works well when the task either fully succeeds or fully fails. The second is better when the task can partially complete (e.g., it loops over work items): `activate` creates the status struct up front, passes it in, and serializes it afterward regardless of `Ok`/`Err`, so any progress already recorded in `status` (items processed, partial counts, earlier errors) is preserved even if the method bails out with `?` later.
 
 Logging conventions: `debug` when there's nothing to do, `info` when routine work was done, `warn` when the work done indicates something is wrong (e.g., cleaning up after a crash), `error` on failure. Log errors as structured fields with the `; &err` slog syntax (which uses the `SlogInlineError` trait), not by interpolating into the message string. For the error string in the status struct, use `InlineErrorChain::new(&err).to_string()` (from `slog_error_chain`) to capture the full cause chain. Status error strings should not repeat the task name — omdb already shows which task you're looking at.
 
