@@ -441,7 +441,6 @@ mod test {
     use super::*;
 
     use crate::app::background::tasks::support_bundle::perfetto;
-    use crate::app::background::tasks::support_bundle::request::BundleData;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
     use illumos_utils::zpool::ZpoolHealth;
@@ -456,6 +455,7 @@ mod test {
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleData;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;

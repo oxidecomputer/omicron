@@ -6,6 +6,7 @@
 
 use crate::app::background::tasks::support_bundle::collection::BundleCollection;
 use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
+use nexus_types::fm::ereport::EreportFilters;
 
 use anyhow::Context;
 use camino::Utf8Path;
@@ -13,7 +14,6 @@ use camino::Utf8PathBuf;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
-use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::fm::Ereport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;

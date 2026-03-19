@@ -27,6 +27,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
 use nexus_types::fm::ereport as fm;
+use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -46,44 +47,6 @@ pub struct EreporterRestartBySerial {
     pub first_seen_at: DateTime<Utc>,
     pub reporter_kind: fm::Reporter,
     pub ereports: u32,
-}
-
-/// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EreportFilters {
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or later.
-    ///
-    /// If `end_time` is also present, this value *must* be earlier than
-    /// `end_time`.
-    pub start_time: Option<DateTime<Utc>>,
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or before.
-    ///
-    /// If `start_time` is also present, this value *must* be later than
-    /// `start_time`.
-    pub end_time: Option<DateTime<Utc>>,
-    /// If this list is non-empty, include only ereports that were reported by
-    /// systems with the provided serial numbers.
-    pub only_serials: Vec<String>,
-    /// If this list is non-empty, include only ereports with the provided class
-    /// strings.
-    // TODO(eliza): globbing could be nice to add here eventually...
-    pub only_classes: Vec<String>,
-}
-
-impl EreportFilters {
-    fn check_time_range(&self) -> Result<(), Error> {
-        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
-            if start > end {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl DataStore {
