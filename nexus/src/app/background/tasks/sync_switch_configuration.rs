@@ -45,7 +45,7 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::external::DataPageParams,
+    api::external::{DataPageParams, Name},
 };
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
@@ -75,11 +75,12 @@ use std::{
     hash::Hash,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-const PHY0: &str = "phy0";
+static PHY0: LazyLock<Name> =
+    LazyLock::new(|| "phy0".parse().expect("phy0 is a valid Name"));
 
 // This is more of an implementation detail of the BGP implementation. It
 // defines the maximum time the peering engine will wait for external messages
@@ -532,6 +533,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     for peer in &settings.bgp_peers {
                         let bgp_config_id = peer.bgp_config_id();
                         let port_settings_id = peer.port_settings_id();
+                        let interface_name = peer.interface_name();
                         let peer = peer.as_bgp_peer();
 
                         // since we only have one bgp config per switch, we only need to fetch it once
@@ -642,7 +644,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
                             port_settings_id,
-                            &peer.interface_name.to_string(),
+                            interface_name,
                             peer_addr,
                         ).await {
                             Ok(cs) => cs,
@@ -666,7 +668,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             port_settings_id,
-                            &peer.interface_name.to_string(),
+                            interface_name,
                             peer_addr,
                         ).await {
                             Ok(cs) => cs,
@@ -734,7 +736,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             port_settings_id,
-                            &peer.interface_name.to_string(),
+                            interface_name,
                             peer_addr,
                         ).await {
                             Ok(cs) => cs,
@@ -1202,7 +1204,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .communities_for_peer(
                                 opctx,
                                 port.port_settings_id.unwrap(),
-                                PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                                &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                                 peer_addr_for_lookup,
                             ).await {
                                 Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
@@ -1220,7 +1222,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
-                            PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                             peer_addr_for_lookup,
                         ).await {
                             Ok(cs) => cs,
@@ -1244,7 +1246,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
-                            PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                             peer_addr_for_lookup,
                         ).await {
                             Ok(cs) => cs,

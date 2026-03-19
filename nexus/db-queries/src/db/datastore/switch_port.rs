@@ -56,12 +56,14 @@ use uuid::Uuid;
 /// * [`BgpPeerFromDb::bgp_config_id`] is guaranteed to be an ID, unlike the
 ///   inner [`networking::BgpPeer::bgp_config`] which might be an ID or might be
 ///   a [`Name`].
-/// * Adds [`BgpPeerFromDb::port_settings_id`], which doesn't exist in
-///   inner [`networking::BgpPeer`].
+/// * Adds [`BgpPeerFromDb::port_settings_id`] and
+///   [`BgpPeerFromDb::interface_name`], which don't exist in the inner
+///   [`networking::BgpPeer`].
 #[derive(Clone, Debug)]
 pub struct BgpPeerFromDb {
     port_settings_id: Uuid,
     bgp_config_id: Uuid,
+    interface_name: external::Name,
     inner: networking::BgpPeer,
 }
 
@@ -82,6 +84,10 @@ impl BgpPeerFromDb {
 
     pub fn as_bgp_peer(&self) -> &networking::BgpPeer {
         &self.inner
+    }
+
+    pub fn interface_name(&self) -> &external::Name {
+        &self.interface_name
     }
 }
 
@@ -138,9 +144,9 @@ impl BgpPeerFromDbBuilder<'_> {
         Ok(BgpPeerFromDb {
             port_settings_id: p.port_settings_id,
             bgp_config_id: p.bgp_config_id,
+            interface_name: p.interface_name.clone().into(),
             inner: networking::BgpPeer {
                 bgp_config: p.bgp_config_id.into(),
-                interface_name: p.interface_name.clone().into(),
                 addr,
                 hold_time: p.hold_time.into(),
                 idle_hold_time: p.idle_hold_time.into(),
@@ -1995,7 +2001,6 @@ mod test {
                     bgp_config: NameOrId::Name(
                         "test-bgp-config".parse().unwrap(),
                     ),
-                    interface_name: "qsfp0".parse().unwrap(),
                     addr: RouterPeerType::Numbered {
                         ip: "192.168.1.1".parse().unwrap(),
                     },
@@ -2203,7 +2208,7 @@ mod test {
         let mut db_peers = HashMap::new();
 
         for peer in db_settings.bgp_peers {
-            db_peers.insert(peer.inner.interface_name.clone(), peer);
+            db_peers.insert(peer.interface_name.clone(), peer);
         }
 
         for config in settings.bgp_peers {
@@ -2237,15 +2242,6 @@ mod test {
                 // we can compare the rest of the struct at once, since
                 // `db_peer.inner.bgp_config` is always populated with an ID.
                 peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
-
-                // TODO-correctness We don't faithfully persist
-                // `interface_name`, and should probably remove the field
-                // entirely
-                // (https://github.com/oxidecomputer/omicron/issues/10104).
-                // For now, manually set the field to match so we can assert_eq
-                // over the entire struct below.
-                peer.interface_name = db_peer.inner.interface_name.clone();
-
                 assert_eq!(peer, db_peer.inner);
             }
         }

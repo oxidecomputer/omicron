@@ -315,7 +315,6 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Numbered peer - identified by address
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                interface_name: "phy0".parse().unwrap(),
                 addr: RouterPeerType::Numbered {
                     ip: "1.2.3.4".parse().unwrap(),
                 },
@@ -338,7 +337,6 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Unnumbered peer - identified by interface only
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                interface_name: "phy0".parse().unwrap(),
                 addr: RouterPeerType::Unnumbered {
                     router_lifetime: RouterLifetimeConfig::default(),
                 },

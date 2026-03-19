@@ -18,6 +18,7 @@ use nexus_db_model::{
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
@@ -839,7 +840,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &str,
+        interface_name: &external::Name,
         addr: Option<IpAddr>,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
@@ -851,7 +852,7 @@ impl DataStore {
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
-            .filter(dsl::interface_name.eq(interface_name.to_owned()))
+            .filter(dsl::interface_name.eq(interface_name.to_string()))
             .filter(dsl::addr.eq(db_addr))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -871,7 +872,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &str,
+        interface_name: &external::Name,
         addr: Option<IpAddr>,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
@@ -906,7 +907,7 @@ impl DataStore {
                         peer_dsl::switch_port_settings_bgp_peer_config
                             .filter(db_peer::port_settings_id.eq(port_settings_id))
                             .filter(db_peer::addr.is_null())
-                            .filter(db_peer::interface_name.eq(interface_name.to_owned()))
+                            .filter(db_peer::interface_name.eq(interface_name.to_string()))
                             .select(db_peer::allow_export_list_active)
                             .limit(1)
                             .first_async::<bool>(&conn)
@@ -937,7 +938,7 @@ impl DataStore {
                         )
                         .filter(
                             db_allow::interface_name
-                                .eq(interface_name.to_owned()),
+                                .eq(interface_name.to_string()),
                         )
                         .filter(db_allow::addr.eq(db_addr))
                         .load_async(&conn)
@@ -966,7 +967,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &str,
+        interface_name: &external::Name,
         addr: Option<IpAddr>,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
@@ -1002,7 +1003,7 @@ impl DataStore {
                         peer_dsl::switch_port_settings_bgp_peer_config
                             .filter(db_peer::port_settings_id.eq(port_settings_id))
                             .filter(db_peer::addr.is_null())
-                            .filter(db_peer::interface_name.eq(interface_name.to_owned()))
+                            .filter(db_peer::interface_name.eq(interface_name.to_string()))
                             .select(db_peer::allow_import_list_active)
                             .limit(1)
                             .first_async::<bool>(&conn)
@@ -1033,7 +1034,7 @@ impl DataStore {
                         )
                         .filter(
                             db_allow::interface_name
-                                .eq(interface_name.to_owned()),
+                                .eq(interface_name.to_string()),
                         )
                         .filter(db_allow::addr.eq(db_addr))
                         .load_async(&conn)

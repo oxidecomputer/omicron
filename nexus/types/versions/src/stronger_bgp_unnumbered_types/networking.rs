@@ -10,6 +10,7 @@
 //!     "unnumbered": `None`, `Some(0.0.0.0)`, and `Some(::)`).
 //!   * [`BgpPeer::router_lifetime`] is now [`RouterLifetimeConfig`] instead of
 //!     `u16`, adding enforcement of bounds.
+//! * Remove `BgpPeer::interface_name` (omicron#10104).
 //! * Define new versions of types that transitively include [`BgpPeer`]:
 //!   * [`BgpPeerConfig`]
 //!   * [`SwitchPortSettings`]
@@ -43,12 +44,6 @@ pub struct BgpPeer {
     /// The global BGP configuration used for establishing a session with this
     /// peer.
     pub bgp_config: NameOrId,
-
-    /// The name of interface to peer on. This is relative to the port
-    /// configuration this BGP peer configuration is a part of. For example this
-    /// value could be phy0 to refer to a primary physical interface. Or it
-    /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: Name,
 
     /// The address of the host to peer with, or specifying that an unnumbered
     /// BGP session that will be established over the interface specified by
@@ -149,7 +144,6 @@ impl TryFrom<crate::v2026_02_13_01::networking::BgpPeer> for BgpPeer {
 
         Ok(Self {
             bgp_config: value.bgp_config,
-            interface_name: value.interface_name,
             addr,
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
@@ -172,6 +166,17 @@ impl TryFrom<crate::v2026_02_13_01::networking::BgpPeer> for BgpPeer {
 
 impl From<BgpPeer> for crate::v2026_02_13_01::networking::BgpPeer {
     fn from(value: BgpPeer) -> Self {
+        // TODO-correctness What should we backfill here? We've dropped this
+        // field because we weren't actually using it. We can't return an empty
+        // string because that's not a legal `Name`.
+        //
+        // The other option is to return an error to old API clients, but that
+        // seems worse than having placeholder data in a field that was never
+        // used...
+        let interface_name = "interface-name-unavailable"
+            .parse()
+            .expect("constant is a valid Name");
+
         let (addr, router_lifetime) = match value.addr {
             RouterPeerType::Numbered { ip } => {
                 // The previous `BgpPeer` always contained a `router_lifetime`,
@@ -183,9 +188,10 @@ impl From<BgpPeer> for crate::v2026_02_13_01::networking::BgpPeer {
                 (None, router_lifetime.as_u16())
             }
         };
+
         Self {
             bgp_config: value.bgp_config,
-            interface_name: value.interface_name,
+            interface_name,
             addr,
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
