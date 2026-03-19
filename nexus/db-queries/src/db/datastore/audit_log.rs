@@ -108,13 +108,6 @@ impl DataStore {
     }
 
     /// Complete an audit log entry with the request's outcome.
-    ///
-    /// The `time_completed IS NULL` filter is critical: once an entry has been
-    /// completed — whether by the normal request path or by the background
-    /// timeout task — it is part of the immutable audit log. Overwriting it
-    /// would change its `time_completed` timestamp, shifting its position in
-    /// the `(time_completed, id)` pagination order and violating the guarantee
-    /// that past query results are stable.
     pub async fn audit_log_entry_complete(
         &self,
         opctx: &OpContext,
@@ -125,6 +118,12 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
         let rows = diesel::update(audit_log::table)
             .filter(audit_log::id.eq(entry.id))
+            // This filter is very important: once an entry has been completed
+            // — whether by the normal request path or by the background
+            // timeout task — it is part of the immutable audit log. Overwriting
+            // it would change its `time_completed` timestamp, shifting its
+            // position in the `(time_completed, id)` pagination order and
+            // violating the guarantee that past query results are stable.
             .filter(audit_log::time_completed.is_null())
             .set(completion)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -160,7 +159,7 @@ impl DataStore {
         let audit_log_sub =
             diesel::alias!(nexus_db_schema::schema::audit_log as audit_log_sub);
 
-        let subquery = audit_log_sub
+        let stale_ids = audit_log_sub
             .filter(audit_log_sub.field(audit_log::time_completed).is_null())
             .filter(audit_log_sub.field(audit_log::time_started).lt(cutoff))
             .order((
@@ -174,7 +173,7 @@ impl DataStore {
             AuditLogCompletion::Timeout.into();
 
         diesel::update(audit_log::table)
-            .filter(audit_log::id.eq_any(subquery))
+            .filter(audit_log::id.eq_any(stale_ids))
             .set(completion)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
