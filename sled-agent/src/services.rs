@@ -81,8 +81,8 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, PrivateIpConfig,
-    SledIdentifiers,
+    ExternalIpConfig, ExternalIps, ExternalIpv4Config, ExternalIpv6Config,
+    PrivateIpConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -1143,16 +1143,21 @@ impl ServiceManager {
                 zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
             ) => {
                 let eip = match external_ip {
-                    IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ipv4])
-                        .build()
-                        .map(Into::into),
-                    IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ipv6])
-                        .build()
-                        .map(Into::into),
-                }
-                .expect("guaranteed to have exactly one floating IP");
+                    IpAddr::V4(ipv4) => ExternalIpConfig {
+                        v4: Some(ExternalIpv4Config {
+                            floating_ips: vec![*ipv4],
+                            ..Default::default()
+                        }),
+                        v6: None,
+                    },
+                    IpAddr::V6(ipv6) => ExternalIpConfig {
+                        v6: Some(ExternalIpv6Config {
+                            floating_ips: vec![*ipv6],
+                            ..Default::default()
+                        }),
+                        v4: None,
+                    },
+                };
                 (zone_type.kind(), nic, eip)
             }
             Some(
@@ -1163,16 +1168,21 @@ impl ServiceManager {
                 },
             ) => {
                 let eip = match dns_address.ip() {
-                    IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![ipv4])
-                        .build()
-                        .map(Into::into),
-                    IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![ipv6])
-                        .build()
-                        .map(Into::into),
-                }
-                .expect("guaranteed to have exactly one floating IP");
+                    IpAddr::V4(ipv4) => ExternalIpConfig {
+                        v4: Some(ExternalIpv4Config {
+                            floating_ips: vec![ipv4],
+                            ..Default::default()
+                        }),
+                        v6: None,
+                    },
+                    IpAddr::V6(ipv6) => ExternalIpConfig {
+                        v6: Some(ExternalIpv6Config {
+                            floating_ips: vec![ipv6],
+                            ..Default::default()
+                        }),
+                        v4: None,
+                    },
+                };
                 (zone_type.kind(), nic, eip)
             }
             Some(
@@ -1181,17 +1191,21 @@ impl ServiceManager {
                 },
             ) => {
                 let eip = if let Some(snat) = snat_cfg.try_as_ipv4() {
-                    ExternalIpConfigBuilder::new()
-                        .with_source_nat(snat)
-                        .build()
-                        .expect("guaranteed to have exactly one SNAT")
-                        .into()
+                    ExternalIpConfig {
+                        v4: Some(ExternalIpv4Config {
+                            source_nat: Some(snat),
+                            ..Default::default()
+                        }),
+                        v6: None,
+                    }
                 } else if let Some(snat) = snat_cfg.try_as_ipv6() {
-                    ExternalIpConfigBuilder::new()
-                        .with_source_nat(snat)
-                        .build()
-                        .expect("guaranteed to have exactly one SNAT")
-                        .into()
+                    ExternalIpConfig {
+                        v6: Some(ExternalIpv6Config {
+                            source_nat: Some(snat),
+                            ..Default::default()
+                        }),
+                        v4: None,
+                    }
                 } else {
                     unreachable!("Generic SNAT IP must be IPv4 or IPv6");
                 };
@@ -1205,12 +1219,6 @@ impl ServiceManager {
         // Nexus will plumb them down later but services' default OPTE
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
-        //
-        // This is kind of silly, but we wrap the external IP configuration in
-        // an option and immediately unwrap it below. The PortCreateParams is
-        // used for instances, which technically can have no external IP
-        // configuration at all, hence it being optional there.
-        let external_ips = Some(external_ips);
         let port = port_manager
             .create_port(PortCreateParams {
                 nic,
@@ -1224,9 +1232,6 @@ impl ServiceManager {
                 service: zone_kind,
                 err: Box::new(err),
             })?;
-        let Some(external_ips) = external_ips else {
-            unreachable!("wrapped into Option::Some(_) above");
-        };
         let nat_data = extract_nat_data_for_external_ip_config(&external_ips);
 
         for dpd_client in &dpd_clients {
@@ -4284,11 +4289,11 @@ fn extract_nat_data_for_external_ip_config(
     external_ips: &ExternalIpConfig,
 ) -> Vec<NatData> {
     let mut nat_data = Vec::new();
-    if let Some(cfg) = external_ips.ipv4_config() {
+    if let Some(cfg) = external_ips.v4.as_ref() {
         nat_data
             .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
     }
-    if let Some(cfg) = external_ips.ipv6_config() {
+    if let Some(cfg) = external_ips.v6.as_ref() {
         nat_data
             .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
     }
@@ -4299,7 +4304,7 @@ fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
     cfg: &ExternalIps<T>,
 ) -> Vec<NatData> {
     let mut nat_data = Vec::new();
-    if let Some(snat) = cfg.source_nat() {
+    if let Some(snat) = cfg.source_nat.as_ref() {
         let (first_port, last_port) = snat.port_range_raw();
         nat_data.push(NatData {
             ip: snat.ip.into_ipaddr(),
@@ -4307,14 +4312,14 @@ fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
             last_port,
         });
     }
-    if let Some(ip) = cfg.ephemeral_ip() {
+    if let Some(ip) = cfg.ephemeral_ip.as_ref() {
         nat_data.push(NatData {
             ip: ip.into_ipaddr(),
             first_port: 0,
             last_port: MAX_PORT,
         });
     }
-    for ip in cfg.floating_ips() {
+    for ip in cfg.floating_ips.iter() {
         nat_data.push(NatData {
             ip: ip.into_ipaddr(),
             first_port: 0,

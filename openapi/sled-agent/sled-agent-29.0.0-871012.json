@@ -5310,7 +5310,6 @@
         ]
       },
       "ExternalIpv4Config": {
-        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
         "type": "object",
         "properties": {
           "ephemeral_ip": {
@@ -5342,7 +5341,6 @@
         ]
       },
       "ExternalIpv6Config": {
-        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
         "type": "object",
         "properties": {
           "ephemeral_ip": {

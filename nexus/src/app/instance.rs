@@ -64,7 +64,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::ExternalIpConfig;
-use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::ExternalIps;
 use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
@@ -2614,7 +2613,7 @@ impl super::Nexus {
 
 fn build_external_ip_config(
     ips: &[ExternalIp],
-) -> Result<Option<ExternalIpConfig>, Error> {
+) -> Result<ExternalIpConfig, Error> {
     // Partition into concrete IPv4 and IPv6 addresses, using subset of data
     // needed for the concrete conversions only.
     let (ipv4, ipv6): (Vec<_>, Vec<_>) =
@@ -2634,24 +2633,17 @@ fn build_external_ip_config(
                 attach_state: ip.state,
             }),
         });
-    let ipv4_config = if ipv4.is_empty() {
+    let v4 = if ipv4.is_empty() {
         None
     } else {
         Some(build_concrete_external_ip_config(ipv4)?)
     };
-    let ipv6_config = if ipv6.is_empty() {
+    let v6 = if ipv6.is_empty() {
         None
     } else {
         Some(build_concrete_external_ip_config(ipv6)?)
     };
-    match (ipv4_config, ipv6_config) {
-        (None, None) => Ok(None),
-        (None, Some(v6)) => Ok(Some(ExternalIpConfig::V6(v6))),
-        (Some(v4), None) => Ok(Some(ExternalIpConfig::V4(v4))),
-        (Some(v4), Some(v6)) => {
-            Ok(Some(ExternalIpConfig::DualStack { v4, v6 }))
-        }
-    }
+    Ok(ExternalIpConfig { v4, v6 })
 }
 
 // Subset of an `ExternalIp` needed to build the `ExternalIpConfig` for the
@@ -2670,9 +2662,8 @@ fn build_concrete_external_ip_config<T>(
 where
     T: ConcreteIp,
 {
-    let mut builder = ExternalIpConfigBuilder::new();
-    let mut seen_snat_ip = false;
-    let mut seen_ephemeral_ip = false;
+    let mut source_nat = None;
+    let mut ephemeral_ip = None;
     let mut floating_ips = Vec::new();
     for ip in ips.iter() {
         if ip.attach_state != IpAttachState::Attached {
@@ -2682,9 +2673,8 @@ where
             ));
         }
         match ip.kind {
-            IpKind::SNat if !seen_snat_ip => {
-                seen_snat_ip = true;
-                let source_nat =
+            IpKind::SNat if source_nat.is_none() => {
+                source_nat = Some(
                     SourceNatConfig::new(ip.ip, ip.first_port, ip.last_port)
                         .map_err(|e| {
                             Error::internal_error(
@@ -2693,17 +2683,16 @@ where
                                 )
                                 .as_str(),
                             )
-                        })?;
-                builder = builder.with_source_nat(source_nat);
+                        })?,
+                );
             }
             IpKind::SNat => {
                 return Err(Error::internal_error(
                     "Expected at most one SNAT IP address for an instance",
                 ));
             }
-            IpKind::Ephemeral if !seen_ephemeral_ip => {
-                seen_ephemeral_ip = true;
-                builder = builder.with_ephemeral_ip(ip.ip);
+            IpKind::Ephemeral if ephemeral_ip.is_none() => {
+                ephemeral_ip = Some(ip.ip);
             }
             IpKind::Ephemeral => {
                 return Err(Error::internal_error(
@@ -2715,7 +2704,8 @@ where
     }
 
     // Ensure limit to the number of non-SNAT IPs.
-    let n_external_ips = usize::from(seen_ephemeral_ip) + floating_ips.len();
+    let n_external_ips =
+        usize::from(ephemeral_ip.is_some()) + floating_ips.len();
     if n_external_ips > MAX_EXTERNAL_IPS_PER_INSTANCE {
         return Err(Error::internal_error(
             format!(
@@ -2726,11 +2716,7 @@ where
             .as_str(),
         ));
     }
-    builder.with_floating_ips(floating_ips).build().map_err(|e| {
-        Error::internal_error(
-            format!("Failed to build external IPs: {e}").as_str(),
-        )
-    })
+    Ok(ExternalIps { source_nat, ephemeral_ip, floating_ips })
 }
 
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the

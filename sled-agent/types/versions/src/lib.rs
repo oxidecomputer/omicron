@@ -71,6 +71,8 @@ pub mod v28;
 pub mod v29;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
+#[path = "make_all_external_ip_fields_optional/mod.rs"]
+pub mod v30;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

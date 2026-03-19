@@ -37,6 +37,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (30, MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL),
     (29, ADD_ICMPV6_FIREWALL_SUPPORT),
     (28, MODIFY_SERVICES_IN_INVENTORY),
     (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
@@ -432,13 +433,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..
+        versions = VERSION_MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..VERSION_MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL
+    }]
+    async fn vmm_register_v29(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v29::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -451,7 +466,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v18::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v29(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {

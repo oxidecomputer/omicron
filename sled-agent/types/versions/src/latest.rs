@@ -100,9 +100,9 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v29::instance::InstanceEnsureBody;
-    pub use crate::v29::instance::InstanceSledLocalConfig;
     pub use crate::v29::instance::ResolvedVpcFirewallRule;
+    pub use crate::v30::instance::InstanceEnsureBody;
+    pub use crate::v30::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {
