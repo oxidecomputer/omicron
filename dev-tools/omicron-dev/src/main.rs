@@ -9,11 +9,13 @@ use futures::StreamExt;
 use gateway_client::ClientInfo as _;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
+use mg_common::test as mg_test;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
-use std::fs;
+use std::{fs, net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6}};
+use slog::{o, Drain};
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
@@ -253,8 +255,8 @@ struct RunMultipleArgs {
     #[clap(long, default_value_t = 1)]
     count: u8,
     /// Launch peer router mgd instances
-    #[clap(long)]
-    peer_routers: bool,
+    #[clap(long, default_value_t = 0)]
+    peer_routers: u8,
 }
 
 impl Configurable for RunMultipleArgs {
@@ -265,6 +267,12 @@ impl Configurable for RunMultipleArgs {
 
 impl RunMultipleArgs {
     async fn exec(&self) -> Result<(), anyhow::Error> {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+
+        let log = slog::Logger::root(drain, o!());
+
         // Start a stream listening for SIGINT
         let mut signal_stream = start_stream();
 
@@ -272,6 +280,64 @@ impl RunMultipleArgs {
         let mut config = read_config(self)?;
 
         let mut contexts = vec![];
+
+        let mut peer_routers = vec![];
+
+        let mut loopback_manager = mg_test::LoopbackIpManager::new("loopback_manager", log.clone());
+
+        for n in 0..self.peer_routers {
+
+            let mgd_bgp_addr = SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
+
+            loopback_manager.add(&[mgd_bgp_addr.ip()]);
+
+            let mgd = omicron_test_utils::dev::maghemite::MgdInstance::start(0, mgd_bgp_addr.into(), None)
+                .await
+                .unwrap();
+
+            println!(
+                "peer router {n}: mgd api:                http://[::1]:{}",
+                mgd.port
+            );
+
+            println!(
+                "peer router {n}: mgd bgp-dispatcher:     tcp {}",
+                mgd_bgp_addr
+            );
+
+            if let Some(dir) = &mgd.data_dir {
+                println!(
+                    "peer router {n} tmp dir:                 {}",
+                    dir.display()
+                );
+            }
+
+            let api_socket_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgd.port, 0, 0);
+
+            let client = mg_admin_client::Client::new(
+                &format!("http://{api_socket_addr}"),
+                slog::Logger::new(&log, o!(
+                    "component" => "MgdClient",
+                    "peer_router" => n,
+                )),
+            );
+
+            let router = mg_admin_client::types::Router {
+                asn: 65100 + n as u32,
+                id: 65100 + n as u32,
+                graceful_shutdown: true,
+                listen: mgd.bgp_dispatcher_addr.to_string(),
+            };
+
+            println!(
+                "peer router {n}: bgp ASN:                {}\n",
+                router.asn,
+            );
+
+            client.create_router(&router).await?;
+
+            peer_routers.push(mgd);
+        }
 
         for n in 0..self.count {
             config
@@ -292,19 +358,11 @@ impl RunMultipleArgs {
             config.deployment.techport_external_server_port = 0;
 
             println!("\nomicron-dev: setting up all services for rack {n}... ");
-            let cptestctx = if self.peer_routers {
-                nexus_test_utils::omicron_dev_setup_with_config_and_peer_routers::<
+            let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
                     omicron_nexus::Server,
                 >(&mut config, 1, self.gateway_config.clone())
                 .await
-                .context("error setting up services")?
-            } else {
-                nexus_test_utils::omicron_dev_setup_with_config::<
-                    omicron_nexus::Server,
-                >(&mut config, 1, self.gateway_config.clone())
-                .await
-                .context("error setting up services")?
-            };
+                .context("error setting up services")?;
 
             println!("omicron-dev: Adding disks to first sled agent");
 
@@ -402,8 +460,13 @@ impl RunMultipleArgs {
             }
             for (location, mgd) in &cptestctx.mgd {
                 println!(
-                    "omicron-dev: maghemite:              http://[::1]:{} ({})",
+                    "omicron-dev: mgd api:                http://[::1]:{} ({})",
                     mgd.port, location,
+                );
+
+                println!(
+                    "omicron-dev: mgd bgp-dispatcher:     tcp {} ({})",
+                    mgd.bgp_dispatcher_addr, location,
                 );
             }
             println!(
@@ -431,6 +494,12 @@ impl RunMultipleArgs {
 
         for context in contexts {
             context.teardown().await;
+        }
+
+        for mut router in peer_routers {
+            if let Err(e) = router.cleanup().await {
+                eprintln!("error cleaning up peer router: {e}")
+            }
         }
 
         Ok(())

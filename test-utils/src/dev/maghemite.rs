@@ -20,15 +20,15 @@ use tokio::{
 /// Specifies the amount of time we will wait for `mgd` to launch,
 /// which is currently confirmed by watching `mgd`'s log output
 /// for a message specifying the address and port `mgd` is listening on.
-pub const MGD_TIMEOUT: Duration = Duration::new(5, 0);
+pub const MGD_TIMEOUT: Duration = Duration::new(10, 0);
 
 pub struct MgdInstance {
     /// Port number the mgd instance is listening on. This can be provided
     /// manually, or dynamically determined if a value of 0 is provided.
     pub port: u16,
-    /// Port number that the mgd bgp dispatcher is listening on. This can be provided
+    /// `SocketAddr` number that the mgd bgp dispatcher is listening on. This can be provided
     /// manually, or dynamically determined if a value of 0 is provided.
-    pub dispatcher_port: u16,
+    pub bgp_dispatcher_addr: SocketAddr,
     /// Arguments provided to the `mgd` cli command.
     pub args: Vec<String>,
     /// Child process spawned by running `mgd`
@@ -41,7 +41,7 @@ pub struct MgdInstance {
 impl MgdInstance {
     pub async fn start(
         mut port: u16,
-        mut dispatcher_port: u16,
+        bgp_dispatcher_addr: SocketAddr,
         mgs_address: Option<SocketAddr>,
     ) -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
@@ -52,7 +52,6 @@ impl MgdInstance {
             "::1".into(),
             "--admin-port".into(),
             port.to_string(),
-            "--no-bgp-dispatcher".into(),
             "--data-dir".into(),
             temp_dir.path().display().to_string(),
             "--rack-uuid".into(),
@@ -60,7 +59,7 @@ impl MgdInstance {
             "--sled-uuid".into(),
             uuid::Uuid::new_v4().to_string(),
             "--bgp-dispatcher-addr".into(),
-            format!("[::1]:{dispatcher_port}"),
+            bgp_dispatcher_addr.to_string(),
         ];
 
         if let Some(socket_addr) = mgs_address {
@@ -94,22 +93,9 @@ impl MgdInstance {
             })?;
         }
 
-        if dispatcher_port == 0 {
-            dispatcher_port = discover_bgp_dispatcher_port(
-                temp_dir.join("mgd_stdout").display().to_string(),
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to discover mgd port from files in {}",
-                    temp_dir.display()
-                )
-            })?;
-        }
-
         Ok(Self {
             port,
-            dispatcher_port,
+            bgp_dispatcher_addr,
             args,
             child,
             data_dir: Some(temp_dir),
@@ -179,7 +165,7 @@ async fn discover_bgp_dispatcher_port(
         find_mgd_bgp_dispatcher_port_in_log(logfile),
     )
     .await
-    .context("time out while discovering mgd port number")?
+    .context("time out while discovering bgp dispatcher port number")?
 }
 
 async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
@@ -190,7 +176,7 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
 async fn find_mgd_bgp_dispatcher_port_in_log(
     logfile: String,
 ) -> Result<u16, anyhow::Error> {
-    let re = regex::Regex::new(r#"TcpListener \{ addr: \[::1?\]:([0-9]+)"#)
+    let re = regex::Regex::new(r#"TcpListener \{ addr: 127.0.0.1:([0-9]+)"#)
         .unwrap();
     find_pattern_in_logfile(logfile, re).await
 }
@@ -268,7 +254,7 @@ mod tests {
     async fn test_discover_bgp_dispatcher_port() {
         // Write some data to a fake log file
         // This line is representative of the kind of output that mgd currently logs
-        let line = r#"msg":"TcpListener created","v":0,"name":"slog-rs","level":30,"time":"2026-03-09T22:00:02.987824162Z","hostname":"sled01","pid":3605,"unit":"dispatcher","module":"neighbor","component":"bgp","listener":"TcpListener { addr: [::]:4676, fd: 10 }"#;
+        let line = r#"msg":"TcpListener created","v":0,"name":"slog-rs","level":30,"time":"2026-03-09T22:00:02.987824162Z","hostname":"sled01","pid":3605,"unit":"dispatcher","module":"neighbor","component":"bgp","listener":"TcpListener { addr: 127.0.0.1:4676, fd: 10 }"#;
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "A garbage line").unwrap();
         writeln!(file, "{}", line).unwrap();

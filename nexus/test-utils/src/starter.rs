@@ -108,6 +108,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
+use std::net::SocketAddrV4;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -482,7 +483,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up an instance of mgd
-        let mgd = dev::maghemite::MgdInstance::start(0, 0, Some(mgs_addr))
+        let bgp_addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into();
+        let mgd = dev::maghemite::MgdInstance::start(0, bgp_addr, Some(mgs_addr))
             .await
             .unwrap();
         let port = mgd.port;
