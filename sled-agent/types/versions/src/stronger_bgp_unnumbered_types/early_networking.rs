@@ -53,8 +53,8 @@ pub struct UnspecifiedIpError;
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UplinkAddress {
-    LinkLocal,
-    Address { ip_net: SpecifiedIpNet },
+    AddrConf,
+    Static { ip_net: SpecifiedIpNet },
 }
 
 #[derive(
@@ -165,8 +165,8 @@ pub struct UplinkAddressConfig {
 impl From<v20::UplinkAddressConfig> for UplinkAddressConfig {
     fn from(value: v20::UplinkAddressConfig) -> Self {
         let address = match value.address.map(SpecifiedIpNet::try_from) {
-            Some(Ok(ip_net)) => UplinkAddress::Address { ip_net },
-            Some(Err(UnspecifiedIpError)) | None => UplinkAddress::LinkLocal,
+            Some(Ok(ip_net)) => UplinkAddress::Static { ip_net },
+            Some(Err(UnspecifiedIpError)) | None => UplinkAddress::AddrConf,
         };
         Self { address, vlan_id: value.vlan_id }
     }
@@ -175,8 +175,8 @@ impl From<v20::UplinkAddressConfig> for UplinkAddressConfig {
 impl From<UplinkAddressConfig> for v20::UplinkAddressConfig {
     fn from(value: UplinkAddressConfig) -> Self {
         let address = match value.address {
-            UplinkAddress::LinkLocal => None,
-            UplinkAddress::Address { ip_net } => Some(ip_net.into()),
+            UplinkAddress::AddrConf => None,
+            UplinkAddress::Static { ip_net } => Some(ip_net.into()),
         };
         Self { address, vlan_id: value.vlan_id }
     }
@@ -453,27 +453,25 @@ mod tests {
         for (old, new, expected_old) in [
             (
                 Some("10.0.0.0/8".parse::<IpNet>().unwrap()),
-                UplinkAddress::Address {
-                    ip_net: "10.0.0.0/8".parse().unwrap(),
-                },
+                UplinkAddress::Static { ip_net: "10.0.0.0/8".parse().unwrap() },
                 None,
             ),
             (
                 Some("fe80:1234::/64".parse::<IpNet>().unwrap()),
-                UplinkAddress::Address {
+                UplinkAddress::Static {
                     ip_net: "fe80:1234::/64".parse().unwrap(),
                 },
                 None,
             ),
-            (None, UplinkAddress::LinkLocal, None),
+            (None, UplinkAddress::AddrConf, None),
             (
                 Some("0.0.0.0/8".parse::<IpNet>().unwrap()),
-                UplinkAddress::LinkLocal,
+                UplinkAddress::AddrConf,
                 Some(None),
             ),
             (
                 Some("::/128".parse::<IpNet>().unwrap()),
-                UplinkAddress::LinkLocal,
+                UplinkAddress::AddrConf,
                 Some(None),
             ),
         ] {

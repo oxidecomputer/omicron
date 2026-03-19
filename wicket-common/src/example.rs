@@ -214,7 +214,7 @@ impl ExampleRackSetupData {
             switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig {
-                        address: UplinkAddress::LinkLocal,
+                        address: UplinkAddress::AddrConf,
                         vlan_id: Some(1),
                     }],
                     routes: vec![RouteConfig {

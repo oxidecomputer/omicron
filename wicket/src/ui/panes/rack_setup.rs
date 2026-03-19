@@ -872,10 +872,10 @@ fn rss_config_text<'a>(
             let addresses = addresses.iter().map(|a| {
                 let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
                 let addr_description = match address {
-                    UplinkAddress::LinkLocal => Cow::Borrowed(
-                        UserSpecifiedUplinkAddressConfig::LINK_LOCAL,
+                    UplinkAddress::AddrConf => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::ADDR_CONF,
                     ),
-                    UplinkAddress::Address { ip_net } => {
+                    UplinkAddress::Static { ip_net } => {
                         Cow::Owned(ip_net.to_string())
                     }
                 };

@@ -75,7 +75,7 @@ rack_subnet_address = "fd00:1122:3344:100::"
 
 [rack_network_config.switch0.port0]
 routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
-addresses = [{ address = "link-local", vlan_id = 1 }]
+addresses = [{ address = "addrconf", vlan_id = 1 }]
 uplink_port_speed = "speed400_g"
 uplink_port_fec = "firecode"
 autoneg = true

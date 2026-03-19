@@ -258,33 +258,33 @@ impl RouterPeerAddress {
 
 impl UplinkAddress {
     /// Squash this address down to a flat IP address by converting
-    /// [`UplinkAddress::LinkLocal`] to `::`.
+    /// [`UplinkAddress::AddrConf`] to `::`.
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
     pub fn addr_squashing_link_local_to_unspecified(&self) -> IpAddr {
         match self {
-            UplinkAddress::LinkLocal => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            UplinkAddress::Address { ip_net } => ip_net.addr().into(),
+            UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            UplinkAddress::Static { ip_net } => ip_net.addr().into(),
         }
     }
 
     /// Squash this address down to an [`IpNet`] address by converting
-    /// [`UplinkAddress::LinkLocal`] to `::/128`.
+    /// [`UplinkAddress::AddrConf`] to `::/128`.
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
     pub fn ip_net_squashing_link_local_to_unspecified(&self) -> IpNet {
         match *self {
-            UplinkAddress::LinkLocal => {
+            UplinkAddress::AddrConf => {
                 IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
             }
-            UplinkAddress::Address { ip_net } => ip_net.into(),
+            UplinkAddress::Static { ip_net } => ip_net.into(),
         }
     }
 
     /// Convert an arbitrary [`IpNet`] into an [`UplinkAddress`] by converting
-    /// an unspecified IP to [`UplinkAddress::LinkLocal`].
+    /// an unspecified IP to [`UplinkAddress::AddrConf`].
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
@@ -292,8 +292,8 @@ impl UplinkAddress {
         ip_net: IpNet,
     ) -> Self {
         match SpecifiedIpNet::try_from(ip_net) {
-            Ok(ip_net) => Self::Address { ip_net },
-            Err(UnspecifiedIpError) => Self::LinkLocal,
+            Ok(ip_net) => Self::Static { ip_net },
+            Err(UnspecifiedIpError) => Self::AddrConf,
         }
     }
 }
@@ -302,14 +302,14 @@ impl UplinkAddressConfig {
     /// Helper to construct an `UplinkAddressConfig` with a specified IP net and
     /// no VLAN ID.
     pub fn without_vlan(ip_net: SpecifiedIpNet) -> Self {
-        Self { address: UplinkAddress::Address { ip_net }, vlan_id: None }
+        Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
     }
 
     /// Format `self` appropriately for passing to `uplinkd`'s SMF properties.
     pub fn to_uplinkd_smf_property(&self) -> String {
         let addr: &dyn fmt::Display = match &self.address {
-            UplinkAddress::LinkLocal => &"link-local",
-            UplinkAddress::Address { ip_net } => ip_net,
+            UplinkAddress::AddrConf => &"link-local",
+            UplinkAddress::Static { ip_net } => ip_net,
         };
 
         match self.vlan_id {
@@ -392,7 +392,7 @@ mod tests {
     fn test_uplink_smf_property_formatting() {
         for (address, expected_addr) in [
             (
-                UplinkAddress::Address {
+                UplinkAddress::Static {
                     ip_net: SpecifiedIpNet::try_from(IpNet::V6(
                         Ipv6Net::new("ff80::123".parse().unwrap(), 16).unwrap(),
                     ))
@@ -401,7 +401,7 @@ mod tests {
                 "ff80::123/16",
             ),
             (
-                UplinkAddress::Address {
+                UplinkAddress::Static {
                     ip_net: SpecifiedIpNet::try_from(IpNet::V4(
                         Ipv4Net::new("10.0.0.1".parse().unwrap(), 8).unwrap(),
                     ))
@@ -409,7 +409,7 @@ mod tests {
                 },
                 "10.0.0.1/8",
             ),
-            (UplinkAddress::LinkLocal, "link-local"),
+            (UplinkAddress::AddrConf, "link-local"),
         ] {
             for (vlan_id, expected_vlan) in
                 [(Some(1), ";1"), (Some(1234), ";1234"), (None, "")]

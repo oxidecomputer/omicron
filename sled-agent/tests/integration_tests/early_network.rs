@@ -166,7 +166,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![UplinkAddressConfig {
-                        address: UplinkAddress::LinkLocal,
+                        address: UplinkAddress::AddrConf,
                         vlan_id: Some(1),
                     }],
                     switch: SwitchSlot::Switch1,

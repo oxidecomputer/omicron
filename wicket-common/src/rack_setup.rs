@@ -226,14 +226,14 @@ impl From<UserSpecifiedUplinkAddressConfig> for UplinkAddressConfig {
 }
 
 impl UserSpecifiedUplinkAddressConfig {
-    /// String representation for [`UplinkAddress::LinkLocal`] when
+    /// String representation for [`UplinkAddress::AddrConf`] when
     /// serializing/deserializing [`UserSpecifiedUplinkAddressConfig`].
-    pub const LINK_LOCAL: &str = "link-local";
+    pub const ADDR_CONF: &str = "addrconf";
 
     /// Helper to construct a `UserSpecifiedUplinkAddressConfig` with a
     /// specified IP net and no VLAN ID.
     pub fn without_vlan(ip_net: SpecifiedIpNet) -> Self {
-        Self { address: UplinkAddress::Address { ip_net }, vlan_id: None }
+        Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
     }
 }
 
@@ -250,10 +250,10 @@ mod uplink_address_serde {
         s: S,
     ) -> Result<S::Ok, S::Error> {
         match addr {
-            UplinkAddress::LinkLocal => {
-                s.serialize_str(UserSpecifiedUplinkAddressConfig::LINK_LOCAL)
+            UplinkAddress::AddrConf => {
+                s.serialize_str(UserSpecifiedUplinkAddressConfig::ADDR_CONF)
             }
-            UplinkAddress::Address { ip_net } => {
+            UplinkAddress::Static { ip_net } => {
                 s.serialize_str(&ip_net.to_string())
             }
         }
@@ -263,24 +263,23 @@ mod uplink_address_serde {
         d: D,
     ) -> Result<UplinkAddress, D::Error> {
         let s = String::deserialize(d)?;
-        if s.eq_ignore_ascii_case(UserSpecifiedUplinkAddressConfig::LINK_LOCAL)
-        {
-            Ok(UplinkAddress::LinkLocal)
+        if s.eq_ignore_ascii_case(UserSpecifiedUplinkAddressConfig::ADDR_CONF) {
+            Ok(UplinkAddress::AddrConf)
         } else {
             let ip_net: IpNet = s.parse().map_err(|_| {
                 serde::de::Error::custom(format!(
                     "invalid uplink address `{s}`: \
-                     expected `link-local` or an IP network",
+                     expected `addrconf` or an IP network",
                 ))
             })?;
             let ip_net = SpecifiedIpNet::try_from(ip_net).map_err(|_| {
                 serde::de::Error::custom(format!(
                     "invalid uplink address `{s}`: \
                      uplink addresses cannot have an unspecified IP; \
-                     use `link-local` for link local addresses",
+                     use `addrconf` for link local addresses",
                 ))
             })?;
-            Ok(UplinkAddress::Address { ip_net })
+            Ok(UplinkAddress::Static { ip_net })
         }
     }
 }
@@ -834,15 +833,13 @@ mod tests {
     #[test]
     fn roundtrip_uplink_address() {
         let inputs = [
-            (UplinkAddress::LinkLocal, "link-local"),
+            (UplinkAddress::AddrConf, "addrconf"),
             (
-                UplinkAddress::Address {
-                    ip_net: "1.1.1.0/24".parse().unwrap(),
-                },
+                UplinkAddress::Static { ip_net: "1.1.1.0/24".parse().unwrap() },
                 "1.1.1.0/24",
             ),
             (
-                UplinkAddress::Address { ip_net: "ff80::/64".parse().unwrap() },
+                UplinkAddress::Static { ip_net: "ff80::/64".parse().unwrap() },
                 "ff80::/64",
             ),
         ];

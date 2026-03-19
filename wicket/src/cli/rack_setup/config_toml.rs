@@ -378,10 +378,10 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         x.insert(
             "address",
             string_value(match address {
-                UplinkAddress::LinkLocal => {
-                    UserSpecifiedUplinkAddressConfig::LINK_LOCAL.to_owned()
+                UplinkAddress::AddrConf => {
+                    UserSpecifiedUplinkAddressConfig::ADDR_CONF.to_owned()
                 }
-                UplinkAddress::Address { ip_net } => ip_net.to_string(),
+                UplinkAddress::Static { ip_net } => ip_net.to_string(),
             }),
         );
         if let Some(vlan_id) = vlan_id {

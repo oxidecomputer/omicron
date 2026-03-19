@@ -382,7 +382,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     'waiting_for_addr: loop {
                         match addr.address {
                             // When we are using numbered uplinks
-                            UplinkAddress::Address { ip_net: uplink_cidr } => {
+                            UplinkAddress::Static { ip_net: uplink_cidr } => {
                                 let ipadm_out = match execute_command(&[
                                     IPADM,
                                     "show-addr",
@@ -414,7 +414,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 }
                             }
                             // unnumbered uplinks
-                            UplinkAddress::LinkLocal => {
+                            UplinkAddress::AddrConf => {
                                 // look for a new unnumbered uplink
                                 let new_count = match execute_command(&[
                                     IPADM,

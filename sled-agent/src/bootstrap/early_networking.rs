@@ -834,8 +834,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
             match a.address {
-                UplinkAddress::LinkLocal => continue,
-                UplinkAddress::Address { ip_net } => {
+                UplinkAddress::AddrConf => continue,
+                UplinkAddress::Static { ip_net } => {
                     // TODO We're discarding the `uplink_cidr.prefix()` here and
                     // only using the IP address; at some point we probably need
                     // to give the full CIDR to dendrite?
