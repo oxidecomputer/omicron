@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
 
 use super::DataStore;
 use crate::context::OpContext;
@@ -651,10 +650,11 @@ impl DataStore {
                         .await?;
 
                 for p in peers.iter() {
-                    // For unnumbered peers (addr is None), use the sentinel value
-                    // (UNSPECIFIED address) for lookups since that's how they're stored.
+                    // For unnumbered peers (addr is None), use the sentinel
+                    // value (UNSPECIFIED address) for lookups since that's how
+                    // they're stored.
                     let lookup_addr: IpNetwork = p.addr.unwrap_or_else(|| {
-                        IpNetwork::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                        IpNetwork::from(RouterPeerType::UNNUMBERED_SENTINEL)
                     });
 
                     let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
