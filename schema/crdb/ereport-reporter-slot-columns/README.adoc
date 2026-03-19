@@ -1,0 +1,74 @@
+== Overview
+
+This is a large, and somewhat brutish, migration which attempts to correct my
+past lack of forethought in designing the `omicron.public.ereport` schema. In
+particular, a younger, dumber version of Eliza foolishly chose to make the
+physical location of the reporter in the rack (the `sp_type` and `sp_slot`
+columns) nullable, and only incldue them when the reporter is a SP, and *not*
+when it's a sled's host OS. This made a lot of people++footnote:[Well...mostly
+just me]++ very unhappy, and is widely regarded as a bad move.
+
+While SP reporters are uniquely indexed by the `sp_type` and `sp_slot (as
+they are the keys Nexus uses to request SP ereports from MGS), host OS
+ereports are identified by the sled UUID (as it's the primary key of the entry
+in the `sled` table through which Nexus will  discover the address of the
+`sled-agent` that it asks for the sled's ereports). At the time, I thought that
+we would only need to hang onto the sled UUID, as we could always get the
+physical slot of the sled by going and doing some JOINs to look that up by sled
+UUID. However, it's much less pleasant to do that than I had anticipated, as
+turning a sled UUID into a slot requires looking up the `hw_baseboard_id` for
+the sled in the inventory's `inv_sled_agent` table, and then using the
+`hw_baseboard_id` in the `inv_service_processor` table, which actually knows
+the slot. This is a bit of a pain to do, and because old inventory collections
+and `sled` entries are deleted, we may no longer be able to find the slot for
+a sled UUID that references a sled that no longer exists. Thus, we really
+should have been recording the physical location in the ereport table if we
+want to be able to have it for historic ereports.
+
+This migration rights these wrongs by replacing the nullable `sp_type` and
+`sp_slot` columns in the `ereport` table with non-null `slot_type` and `slot`
+columns (renamed to reflect that they are no longer specifically for SPs), and
+changing the `CHECK` constraints to permit host OS ereports to also have those
+columns.
+
+=== Backfilling
+
+We attempt to backfill the slot for host OS ereports using the nasty
+join chain I described above. If we are unable to do this for a host OS ereport
+because it refers to a sled UUID that no longer exists in the inventory, we
+just delete it. This feels *quite* icky, but it's worth noting that, at time of
+writing, we simply *don't have* any code for collecting ereports from the host
+OS into CRDB anyway, so there aren't actually going to be any actual ereports
+getting dropped here -- making an attempt to backfill them is really just an
+intellectual exercise, but it made me feel better.
+
+== Migration Steps
+
+This migration performs the following steps:
+
+. `up01.sql` and `up02.sql` add the new `slot_type` and `slot` columns,
+  respectively
+. Backfill values for the new columns:
+.. `up03.sql` sets `slot_type` and `slot` to the existing `sp_type` and
+   `sp_slot` columns if they are not NULL (backfilling any SP ereporters)
+.. `up04.sql` attempts to backfill `slot_type` and `slot` for host OS ereports
+   by looking up the slots for the sled UUID in the inventory.
+. `up05.sql` deletes any records where `slot_type` or `slot` are still `NULL`
+  (again, this feels very yucky but is actually fine since we just straight-up
+  don't have any host OS ereports, as discussed in <<backfilling>>, above).
+. `up06.sql` and `up07.sql` make the `slot_type` and `slot` columns
+  `NOT NULL`, respectively.
+. Delete the old columns (after deleting everything referencing them)
+.. `up08.sql` drops the `reporter_identity_validity` constraint, as we are
+   about to delete the columns it references. We shall create a new one later.
+.. `up09.sql` and `up10.sql` drop the `lookup_ereports_by_sp_slot` and
+   `lookup_ereports_by_serial` indices, respectively. We shall create new
+   indices later.
+.. `up11.sql` and `up12.sql` actually drop the `sp_type` and `sp_slot` columns,
+   respectively.
+. `up13.sql` adds a new `reporter_identity_validity` constraint, which just
+  requires that host OS ereports have non-`NULL` `sled_id`s, and SP ereports
+  have `NULL` `sled_id`s.
+. `up14.sql` creates a new `lookup_ereports_by_slot` index to replace the old
+  `lookup_ereports_by_sp_slot`.
+. `up15.sql` creates a new version of `lookup_ereports_by_serial`.
