@@ -747,10 +747,75 @@ impl Drop for CockroachInstance {
                 temporary directory leaked)"
             );
 
-            // Still, make a best effort.
-            #[allow(unused_must_use)]
+            // Send SIGTERM so CockroachDB can flush its WAL to disk,
+            // making the leaked temp directory useful for post-mortem
+            // debugging.
+            //
+            // Background: test CRDB instances set
+            // `kv.raft_log.disable_synchronization_unsafe = true`
+            // which skips per-commit fdatasync for performance. Data
+            // is still written to the WAL but may only exist in
+            // Pebble's user-space write buffer. SIGTERM triggers
+            // Pebble's DB.Close() which flushes and fsyncs the WAL
+            // before exiting.
+            // See: https://github.com/oxidecomputer/omicron/issues/10085
             if let Some(child_process) = self.child_process.as_mut() {
-                child_process.start_kill();
+                let pid = self.pid as libc::pid_t;
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+
+                // Wait for the child to exit. We use
+                // waitpid(WNOHANG) in a poll loop rather than:
+                //
+                // - `process_running` (kill -0): fails because the
+                //   child becomes a zombie after exit and kill -0
+                //   still succeeds on zombies, so we'd never detect
+                //   the exit.
+                //
+                // - `waitpid` without WNOHANG: would block this
+                //   thread indefinitely if CRDB doesn't exit, with
+                //   no way to fall back to SIGKILL.
+                //
+                // - `child_process.wait().await`: not available
+                //   because we're in a synchronous Drop impl with
+                //   no async executor.
+                //
+                // WNOHANG makes waitpid return immediately: it
+                // returns the pid if the child has exited (reaping
+                // the zombie), 0 if still running, or -1 on error
+                // (e.g. ECHILD if tokio's SIGCHLD handler already
+                // reaped it). Both the pid and -1 cases mean the
+                // process has exited. This lets us poll with a
+                // timeout and fall back to SIGKILL.
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(5);
+                let mut exited = false;
+                while std::time::Instant::now() < deadline {
+                    let mut status: libc::c_int = 0;
+                    let wr = unsafe {
+                        libc::waitpid(pid, &mut status, libc::WNOHANG)
+                    };
+                    if wr == pid || wr == -1 {
+                        // wr == pid: child exited, we reaped it.
+                        // wr == -1: ECHILD — already reaped (e.g.
+                        //   by tokio's SIGCHLD handler).
+                        exited = true;
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+
+                // If SIGTERM didn't work within the timeout, fall back
+                // to SIGKILL. Warn that the on-disk data may be stale.
+                if !exited {
+                    eprintln!(
+                        "WARN: CockroachDB did not exit after SIGTERM; \
+                         sending SIGKILL. On-disk data may be stale."
+                    );
+                    #[allow(unused_must_use)]
+                    {
+                        child_process.start_kill();
+                    }
+                }
             }
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
@@ -1901,6 +1966,142 @@ mod test {
             ))
         );
         assert_eq!(addr.port(), 12345);
+    }
+
+    // Test that data written to CockroachDB survives when the instance is
+    // dropped without calling cleanup(). This exercises the Drop impl path
+    // that fires during test failures (when cleanup is unreachable due to
+    // a panic) or when cleanup is accidentally omitted.
+    //
+    // With `disable_synchronization_unsafe = true`, committed data may
+    // only exist in Pebble's user-space write buffer (not yet write()-ed
+    // to the WAL file on disk). A graceful shutdown (SIGTERM) triggers
+    // Pebble's DB.Close() which flushes and fsyncs the WAL, making data
+    // durable. SIGKILL destroys the process immediately, losing any
+    // buffered WAL data.
+    //
+    // See: https://github.com/oxidecomputer/omicron/issues/10085
+    #[tokio::test]
+    async fn test_data_survives_drop_without_cleanup() {
+        let store_dir = tempdir().expect("failed to create temp dir");
+        let data_dir = store_dir.path().join("data");
+
+        // Start CRDB with a persistent store directory
+        let starter = new_builder()
+            .store_dir(&data_dir)
+            .build()
+            .expect("failed to build starter");
+        let database = starter.start().await.expect("failed to start CRDB");
+
+        // Enable the unsafe sync setting (as setup_database does)
+        database
+            .disable_synchronization()
+            .await
+            .expect("failed to disable sync");
+
+        // Phase 1: Write enough data to overflow Pebble's internal WAL
+        // write buffer, ensuring it gets write()-ed to the kernel and
+        // is durable on disk.
+        let client = database.connect().await.expect("failed to connect");
+        client
+            .batch_execute(
+                "CREATE DATABASE test_db; \
+                 USE test_db; \
+                 CREATE TABLE test_data (id INT PRIMARY KEY, payload STRING); \
+                 INSERT INTO test_data (id, payload) \
+                 SELECT i, repeat('x', 1024) \
+                 FROM generate_series(1, 5000) AS g(i);",
+            )
+            .await
+            .expect("insert failed");
+
+        // Phase 2: Perform many small mutations — each one is a tiny
+        // WAL entry that may sit in Pebble's user-space write buffer.
+        // With disable_synchronization_unsafe, Sync() is a no-op, so
+        // the buffer is only flushed when full. We do many UPDATEs so
+        // the last few are likely still buffered when we kill.
+        //
+        // We update each row individually to maximize the number of
+        // separate WAL entries, increasing the chance that the final
+        // entries haven't been flushed.
+        for batch_start in (1..=5000).step_by(100) {
+            let batch_end = std::cmp::min(batch_start + 99, 5000);
+            client
+                .batch_execute(&format!(
+                    "UPDATE test_db.test_data \
+                     SET payload = 'updated' \
+                     WHERE id BETWEEN {batch_start} AND {batch_end};",
+                ))
+                .await
+                .expect("update failed");
+        }
+
+        // One final write that we'll check for specifically — this
+        // is the most likely to be lost since it's the last WAL entry.
+        client
+            .batch_execute(
+                "INSERT INTO test_db.test_data (id, payload) \
+                 VALUES (99999, 'canary');",
+            )
+            .await
+            .expect("canary insert failed");
+
+        // Drop without cleanup — this triggers the Drop impl.
+        // Save the temp dir path so we can clean it up after
+        // verification (the Drop impl intentionally leaks it).
+        let leaked_temp_dir = database.temp_dir().to_owned();
+        drop(client);
+        drop(database);
+
+        // Restart CRDB on the same store directory.
+        let starter2 = new_builder()
+            .store_dir(&data_dir)
+            .build()
+            .expect("failed to build second starter");
+        let mut database2 =
+            starter2.start().await.expect("failed to restart CRDB");
+
+        let client2 = database2.connect().await.expect("failed to reconnect");
+
+        // Check that the canary row survived.
+        let rows = client2
+            .query(
+                "SELECT payload FROM test_db.test_data WHERE id = 99999",
+                &[],
+            )
+            .await
+            .expect("canary query failed");
+        assert_eq!(
+            rows.len(),
+            1,
+            "canary row (id=99999) did not survive shutdown"
+        );
+        let payload: String = rows[0].get(0);
+        assert_eq!(payload, "canary", "canary row has wrong payload");
+
+        // Check that updates survived — sample a few rows.
+        let rows = client2
+            .query(
+                "SELECT count(*) FROM test_db.test_data \
+                 WHERE payload = 'updated'",
+                &[],
+            )
+            .await
+            .expect("update check query failed");
+        let updated_count: i64 = rows[0].get(0);
+        assert_eq!(
+            updated_count, 5000,
+            "updates did not survive shutdown: \
+             expected 5000 updated rows, got {updated_count}"
+        );
+
+        client2.cleanup().await.expect("client2 cleanup failed");
+        database2.cleanup().await.expect("database2 cleanup failed");
+
+        // Clean up the temp dir leaked by the first instance's Drop.
+        fs::remove_dir_all(&leaked_temp_dir)
+            .await
+            .expect("failed to clean up leaked temp dir");
     }
 
     // Tests the way `process_exited()` checks and interprets the exit status
