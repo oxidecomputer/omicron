@@ -26,6 +26,7 @@ use oxnet::Ipv6Net;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
@@ -190,6 +191,18 @@ impl FromStr for SpecifiedIpAddr {
 }
 
 impl RouterPeerAddress {
+    /// In contexts where we cannot use this strong type to describe
+    /// "unnumbered" addresses, we have two or three possible representations:
+    ///
+    /// * In a context where we need a non-optional `IpAddr`, we could use
+    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
+    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
+    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
+    ///
+    /// In the optional case, we always prefer `None`. In the non-optional case,
+    /// we choose this sentinel value.
+    pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
     /// Squash this address down to an [`Option<IpAddr>`] by converting
     /// [`RouterPeerAddress::Unnumbered`] to `None`.
     ///
@@ -199,6 +212,19 @@ impl RouterPeerAddress {
         match *self {
             Self::Unnumbered => None,
             Self::Numbered { ip } => Some(ip.into()),
+        }
+    }
+
+    /// Squash this address down to an [`IpAddr`] by converting
+    /// [`RouterPeerAddress::Unnumbered`] to
+    /// [`RouterPeerAddress::UNNUMBERED_SENTINEL`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
+        match *self {
+            Self::Unnumbered => Self::UNNUMBERED_SENTINEL,
+            Self::Numbered { ip } => ip.into(),
         }
     }
 

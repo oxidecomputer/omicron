@@ -32,7 +32,7 @@ use crate::v26::early_networking as v26;
 use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::IpAddr;
 
 #[derive(Debug, thiserror::Error)]
 #[error("IP address must not be the unspecified address (0.0.0.0 or ::)")]
@@ -331,14 +331,10 @@ impl From<v20::BgpPeerConfig> for BgpPeerConfig {
 
 impl From<BgpPeerConfig> for v20::BgpPeerConfig {
     fn from(value: BgpPeerConfig) -> Self {
-        let addr = match value.addr {
-            RouterPeerAddress::Unnumbered => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            RouterPeerAddress::Numbered { ip } => ip.into(),
-        };
         Self {
             asn: value.asn,
             port: value.port,
-            addr,
+            addr: value.addr.ip_squashing_unnumbered_to_sentinel(),
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,
@@ -442,11 +438,10 @@ pub struct WriteNetworkConfigRequest {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
-
-    use crate::v20::early_networking::RouterLifetimeConfig;
-
     use super::*;
+    use crate::v20::early_networking::RouterLifetimeConfig;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     #[test]
     fn test_uplink_address_conversions() {
@@ -547,8 +542,8 @@ mod tests {
         // Confirm we can convert old -> new -> old. In some cases the `new ->
         // old` produces an `old` that isn't quite the same; we fill in
         // `expected_old` in those cases. Specifically: `old` could contain an
-        // address of `0.0.0.0` or `::`; either will come back as `::` after the
-        // round trip.
+        // address of `0.0.0.0` or `::`; either will come back as
+        // `UNNUMBERED_SENTINEL` after the round trip.
         for (old, new, expected_old) in [
             (
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
@@ -565,12 +560,12 @@ mod tests {
             (
                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                 RouterPeerAddress::Unnumbered,
-                Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+                Some(RouterPeerAddress::UNNUMBERED_SENTINEL),
             ),
             (
                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                 RouterPeerAddress::Unnumbered,
-                None,
+                Some(RouterPeerAddress::UNNUMBERED_SENTINEL),
             ),
         ] {
             let expected_old = expected_old.unwrap_or(old);
