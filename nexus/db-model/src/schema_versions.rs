@@ -28,7 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(242, "ereport-reporter-slot-columns"),
+        KnownVersion::new(242, "ereport-slots-non-null"),
         KnownVersion::new(241, "audit-log-incomplete-timeout"),
         KnownVersion::new(240, "multicast-drop-mvlan"),
         KnownVersion::new(239, "fm-alert-request"),
