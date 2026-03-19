@@ -51,6 +51,8 @@ use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BfdPeerConfig;
+use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
+use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -60,16 +62,12 @@ use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
+use sled_agent_types::early_networking::RouterPeerAddress;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::WriteNetworkConfigRequest;
-use sled_agent_types::early_networking::{
-    BgpConfig as SledBgpConfig, UplinkAddress,
-};
-use sled_agent_types::early_networking::{
-    BgpPeerConfig as SledBgpPeerConfig, RouterPeerAddress,
-};
 use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
