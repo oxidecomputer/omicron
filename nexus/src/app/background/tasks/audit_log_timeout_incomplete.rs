@@ -31,7 +31,8 @@ impl AuditLogTimeoutIncomplete {
     ) -> Self {
         let Ok(timeout) = TimeDelta::from_std(timeout) else {
             panic!(
-                "invalid timeout {timeout:?} \
+                "invalid audit_log_timeout_incomplete.timeout_secs \
+                 value {timeout:?} \
                  (must be representable as a TimeDelta)"
             );
         };
@@ -42,7 +43,9 @@ impl AuditLogTimeoutIncomplete {
         &mut self,
         opctx: &OpContext,
     ) -> AuditLogTimeoutIncompleteStatus {
-        let cutoff = Utc::now() - self.timeout;
+        let cutoff = Utc::now()
+            .checked_sub_signed(self.timeout)
+            .expect("now - timeout overflowed (timeout_secs is too large)");
         let timed_out = match self
             .datastore
             .audit_log_timeout_incomplete(
