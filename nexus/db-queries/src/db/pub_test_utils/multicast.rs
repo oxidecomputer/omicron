@@ -196,7 +196,6 @@ pub async fn create_test_group_with_state(
             description: format!("Test group: {group_name}"),
         },
         multicast_ip: Some(multicast_ip.parse().unwrap()),
-        mvlan: None,
         has_sources: false,
         ip_version: None,
     };

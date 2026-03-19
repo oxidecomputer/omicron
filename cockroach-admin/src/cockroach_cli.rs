@@ -7,6 +7,8 @@ use cockroach_admin_types::node::{NodeDecommission, NodeStatus, ParseError};
 use dropshot::HttpError;
 use illumos_utils::ExecutionError;
 use illumos_utils::output_to_exec_error;
+use slog::Logger;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
 use std::io;
@@ -159,20 +161,40 @@ impl CockroachCli {
 
     pub async fn node_status(
         &self,
+        log: &Logger,
     ) -> Result<Vec<NodeStatus>, CockroachCliError> {
-        self.invoke_cli_with_format_csv(
-            ["node", "status", "--all"],
-            NodeStatus::parse_from_csv,
-            "node status",
-        )
-        .await
+        let (statuses, errs) = self
+            .invoke_cli_with_format_csv(
+                ["node", "status", "--all"],
+                NodeStatus::parse_from_csv,
+                "node status",
+            )
+            .await?;
+        if !errs.is_empty() {
+            warn!(
+                log,
+                "partial failure parsing `node status --all` output: \
+                 successfully parsed {} of {} rows",
+                statuses.len(),
+                statuses.len() + errs.len(),
+            );
+            for err in errs {
+                warn!(
+                    log,
+                    "skipped row from `node status --all` due to parse error";
+                    InlineErrorChain::new(&err),
+                );
+            }
+        }
+        Ok(statuses)
     }
 
     pub async fn node_decommission(
         &self,
         node_id: &str,
+        log: &Logger,
     ) -> Result<NodeDecommission, CockroachCliError> {
-        let statuses = self.node_status().await?;
+        let statuses = self.node_status(log).await?;
         self.validate_node_decommissionable(node_id, statuses)?;
         self.invoke_node_decommission(node_id).await
     }
@@ -423,7 +445,8 @@ mod tests {
     #[tokio::test]
     async fn test_node_status_compatibility() {
         let logctx = dev::test_setup_log("test_node_status_compatibility");
-        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+        let log = &logctx.log;
+        let db = TestDatabase::new_populate_nothing(log).await;
         let db_url = db.crdb().listen_url().to_string();
 
         let expected_headers = "id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live,replicas_leaders,replicas_leaseholders,ranges,ranges_unavailable,ranges_underreplicated,live_bytes,key_bytes,value_bytes,intent_bytes,system_bytes,gossiped_replicas,is_decommissioning,membership,is_draining";
@@ -463,7 +486,7 @@ mod tests {
             cockroach_address,
             SocketAddr::V6(cockroach_address),
         );
-        let status = cli.node_status().await.expect("got node status");
+        let status = cli.node_status(log).await.expect("got node status");
 
         // We can't check all the fields exactly, but some we know based on the
         // fact that our test database is a single node.

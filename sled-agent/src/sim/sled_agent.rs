@@ -227,7 +227,7 @@ impl SledAgent {
         let ncpus = spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
-                &"could not allocate an instance: ran out of CPUs!",
+                "could not allocate an instance: ran out of CPUs!",
             ));
         };
 
@@ -890,8 +890,8 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
-        let smf_services_in_maintenance =
-            self.health_monitor.to_inventory().smf_services_in_maintenance;
+        let smf_services_enabled_not_online =
+            self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
@@ -992,7 +992,7 @@ impl SledAgent {
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
-            smf_services_in_maintenance,
+            smf_services_enabled_not_online,
             reference_measurements,
         })
     }

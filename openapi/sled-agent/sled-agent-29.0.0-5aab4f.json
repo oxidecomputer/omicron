@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "28.0.0"
+    "version": "29.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6123,44 +6123,8 @@
           "sled_role": {
             "$ref": "#/components/schemas/SledRole"
           },
-          "smf_services_in_maintenance": {
-            "x-rust-type": {
-              "crate": "std",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/SvcsInMaintenanceResult"
-                },
-                {
-                  "type": "string"
-                }
-              ],
-              "path": "::std::result::Result",
-              "version": "*"
-            },
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "$ref": "#/components/schemas/SvcsInMaintenanceResult"
-                  }
-                },
-                "required": [
-                  "ok"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err"
-                ]
-              }
-            ]
+          "smf_services_enabled_not_online": {
+            "$ref": "#/components/schemas/SvcsEnabledNotOnlineResult"
           },
           "usable_hardware_threads": {
             "type": "integer",
@@ -6189,7 +6153,7 @@
           "sled_agent_address",
           "sled_id",
           "sled_role",
-          "smf_services_in_maintenance",
+          "smf_services_enabled_not_online",
           "usable_hardware_threads",
           "usable_physical_ram",
           "zpools"
@@ -9545,12 +9509,15 @@
         "type": "string",
         "format": "uuid"
       },
-      "SvcInMaintenance": {
+      "Svc": {
         "description": "Information about an SMF service that is enabled but not running",
         "type": "object",
         "properties": {
           "fmri": {
             "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SvcState"
           },
           "zone": {
             "type": "string"
@@ -9558,11 +9525,73 @@
         },
         "required": [
           "fmri",
+          "state",
           "zone"
         ]
       },
-      "SvcsInMaintenanceResult": {
-        "description": "Lists services in maintenance status if any, and the time the health check for SMF services ran",
+      "SvcState": {
+        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events. See <https://illumos.org/man/7/smf> for more information.",
+        "oneOf": [
+          {
+            "description": "Initial state for all service instances.",
+            "type": "string",
+            "enum": [
+              "uninitialized"
+            ]
+          },
+          {
+            "description": "The instance is enabled, but not yet running or available to run.",
+            "type": "string",
+            "enum": [
+              "offline"
+            ]
+          },
+          {
+            "description": "The instance is enabled and running or is available to run.",
+            "type": "string",
+            "enum": [
+              "online"
+            ]
+          },
+          {
+            "description": "The instance is enabled and running or available to run. It is, however, functioning at a limited capacity in comparison to normal operation.",
+            "type": "string",
+            "enum": [
+              "degraded"
+            ]
+          },
+          {
+            "description": "The instance is enabled, but not able to run.",
+            "type": "string",
+            "enum": [
+              "maintenance"
+            ]
+          },
+          {
+            "description": "The instance is disabled.",
+            "type": "string",
+            "enum": [
+              "disabled"
+            ]
+          },
+          {
+            "description": "Represents a legacy instance that is not managed by the service management facility.",
+            "type": "string",
+            "enum": [
+              "legacy_run"
+            ]
+          },
+          {
+            "description": "We were unable to determine the state of the service instance.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          }
+        ]
+      },
+      "SvcsEnabledNotOnline": {
+        "description": "Lists services that are enabled but not in an online state if any, the time the sample was collected, and any errors that may have ocurred during the collection",
         "type": "object",
         "properties": {
           "errors": {
@@ -9574,18 +9603,187 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SvcInMaintenance"
+              "$ref": "#/components/schemas/Svc"
             }
           },
           "time_of_status": {
-            "nullable": true,
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "errors",
-          "services"
+          "services",
+          "time_of_status"
+        ]
+      },
+      "SvcsEnabledNotOnlineResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "svcs_enabled_not_online"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/SvcsEnabledNotOnline"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "svcs_cmd_error"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/SvcsError"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "data_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "SvcsError": {
+        "description": "Error that is a one to one mapping of `illumos_utils::ExecutionError`, which uses a String for any type in `ExecutionError` that is not cloneable.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "execution_start"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "command",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "command_failure"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "contract_failure"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  },
+                  "msg": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err",
+                  "msg"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "parse_failure"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_running"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "SwitchPorts": {

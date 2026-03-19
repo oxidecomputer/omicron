@@ -16,7 +16,9 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::backon_retry_policy_internal_service;
-use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
@@ -259,7 +261,7 @@ async fn sdd_delete_local_storage(
     };
 
     let log = osagactx.log().clone();
-    retry_operation_while(
+    retry_operation_while_indefinitely(
         backon_retry_policy_internal_service(),
         delete_operation,
         gone_check,

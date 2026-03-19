@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use illumos_utils::svcs::SvcsInMaintenanceResult;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -10,6 +11,7 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
+use std::fmt::Display;
 use std::net::SocketAddrV6;
 
 use crate::v1::inventory::InventoryDataset;
@@ -108,5 +110,43 @@ impl HealthMonitorInventory {
         } else {
             false
         }
+    }
+}
+
+/// Lists services in maintenance status if any, and the time the health check
+/// for SMF services ran
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SvcsInMaintenanceResult {
+    pub services: Vec<SvcInMaintenance>,
+    pub errors: Vec<String>,
+    pub time_of_status: Option<DateTime<Utc>>,
+}
+
+impl SvcsInMaintenanceResult {
+    pub fn new() -> Self {
+        Self { services: vec![], errors: vec![], time_of_status: None }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.services.is_empty()
+            && self.errors.is_empty()
+            && self.time_of_status == None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Information about an SMF service that is enabled but not running
+pub struct SvcInMaintenance {
+    fmri: String,
+    zone: String,
+}
+
+impl Display for SvcInMaintenance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let SvcInMaintenance { fmri, zone } = self;
+
+        writeln!(f, "FMRI: {} zone: {}", fmri, zone)
     }
 }

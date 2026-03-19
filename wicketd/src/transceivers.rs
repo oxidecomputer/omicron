@@ -135,8 +135,8 @@ impl Manager {
         debug!(
             self.log,
             "determined our switch locations, spawning transceiver fetch tasks";
-            "our_switch" => %our_switch_slot,
-            "other_switch" => %other_switch_slot,
+            "our_switch" => ?our_switch_slot,
+            "other_switch" => ?other_switch_slot,
         );
 
         // Now, spawn a task for each switch.

@@ -31,6 +31,7 @@ use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::error;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -335,7 +336,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .count();
 
                     // This includes the VLAN ID, if any
-                    let uplink_cfg = addr.to_string();
+                    let uplink_cfg = addr.to_uplinkd_smf_property();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -461,7 +462,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 )),
                                 format!(
                                     "timed out waiting for `uplink` to \
-                                 create {addr}"
+                                     create {uplink_cfg}"
                                 ),
                             )
                             .into();
@@ -868,10 +869,9 @@ fn build_port_settings(
 async fn execute_command(args: &[&str]) -> Result<String, String> {
     let mut command = Command::new(PFEXEC);
     command.env_clear().args(args);
-    let output = command
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute command: {err}"))?;
+    let output = command.output().await.map_err(|err| {
+        format!("failed to execute command: {}", InlineErrorChain::new(&err))
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -896,10 +896,9 @@ async fn execute_command_ignoring_status(
 ) -> Result<CommandOutput, String> {
     let mut command = Command::new(PFEXEC);
     command.env_clear().args(args);
-    let output = command
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute command: {err}"))?;
+    let output = command.output().await.map_err(|err| {
+        format!("failed to execute command: {}", InlineErrorChain::new(&err))
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);

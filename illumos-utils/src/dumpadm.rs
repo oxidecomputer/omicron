@@ -1,5 +1,6 @@
 use crate::{ExecutionError, execute};
 use camino::Utf8PathBuf;
+use slog_error_chain::SlogInlineError;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
@@ -17,22 +18,22 @@ pub const DUMP_VERSION: u32 = 10; // version of this dumphdr
 
 pub const DF_VALID: u32 = 0x00000001; // Dump is valid (savecore clears)
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum DumpHdrError {
-    #[error("I/O error while attempting to open raw disk: {0}")]
-    OpenRaw(std::io::Error),
+    #[error("I/O error while attempting to open raw disk")]
+    OpenRaw(#[source] std::io::Error),
 
-    #[error("I/O error while seeking to dumphdr offset: {0}")]
-    Seek(std::io::Error),
+    #[error("I/O error while seeking to dumphdr offset")]
+    Seek(#[source] std::io::Error),
 
-    #[error("I/O error while reading magic bytes: {0}")]
-    ReadMagic(std::io::Error),
+    #[error("I/O error while reading magic bytes")]
+    ReadMagic(#[source] std::io::Error),
 
-    #[error("I/O error while reading version bytes: {0}")]
-    ReadVersion(std::io::Error),
+    #[error("I/O error while reading version bytes")]
+    ReadVersion(#[source] std::io::Error),
 
-    #[error("I/O error while reading flag bytes: {0}")]
-    ReadFlags(std::io::Error),
+    #[error("I/O error while reading flag bytes")]
+    ReadFlags(#[source] std::io::Error),
 
     #[error("Invalid magic number {0} (expected 0xdefec8ed)")]
     InvalidMagic(u32),

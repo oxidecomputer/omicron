@@ -17,6 +17,15 @@ set target-release repo-0.0.1.zip
 sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --to-target-release
 
+# Measurements will block further planning progress, run a planning step
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+
 # Generate inventory, then do a planning run to ensure that all zones
 # are set to Artifact.
 inventory-generate
@@ -65,9 +74,9 @@ sled-update-host-phase2 serial0 --boot-disk B
 
 # Before generating the inventory that completes all updates on sled serial0,
 # mark sled serial1 as hidden in inventory. We should see a note in the planner
-# report that we have a blocked MGS update for serial1, specifically because
-# it's missing from inventory so we _don't know_ whether it needs an MGS-driven
-# update.
+# report that we are missing sled agent inventory for measurements on sled 1.
+# This will block any MGS updates that could be pending because we must
+# observe the expected measurements on all sleds before we proceed.
 sled-set serial1 inventory-hidden
 inventory-generate
 blueprint-plan latest latest

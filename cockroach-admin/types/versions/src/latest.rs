@@ -14,5 +14,6 @@ pub mod node {
 
     pub use crate::impls::node::DecommissionError;
     pub use crate::impls::node::NodeStatusError;
+    pub use crate::impls::node::NodeStatusRowError;
     pub use crate::impls::node::ParseError;
 }

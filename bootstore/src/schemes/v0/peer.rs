@@ -63,14 +63,6 @@ pub enum NodeRequestError {
     },
 }
 
-impl From<NodeRequestError> for omicron_common::api::external::Error {
-    fn from(error: NodeRequestError) -> Self {
-        omicron_common::api::external::Error::internal_error(
-            &InlineErrorChain::new(&error).to_string(),
-        )
-    }
-}
-
 /// A request sent to the `Node` task from the `NodeHandle`
 pub enum NodeApiRequest {
     /// Initialize a rack at the behest of RSS running on the same scrimlet as
@@ -448,7 +440,7 @@ impl Node {
                 self.accepted_connections.insert(addr, handle);
             }
             Err(err) => {
-                error!(self.log, "Failed to accept a connection: {err:?}");
+                error!(self.log, "Failed to accept a connection"; InlineErrorChain::new(&err));
             }
         }
     }

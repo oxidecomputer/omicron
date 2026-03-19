@@ -527,7 +527,7 @@ impl UpdatesRequired {
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state.is_terminal() {
+                if active_vmm.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -538,7 +538,7 @@ impl UpdatesRequired {
 
                     // If the active VMM's state is `Failed`, move the
                     // instance's new state to `Failed` rather than to `NoVmm`.
-                    if active_vmm.runtime.state == VmmState::Failed {
+                    if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
                     } else if snapshot.instance.intended_state
                         == InstanceIntendedState::Running
@@ -569,7 +569,7 @@ impl UpdatesRequired {
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
                 // XXX(eliza): AFAIK, target VMMs don't go to `Failed` until
                 // they become active, but...IDK. double-check that.
-                if target_vmm.runtime.state.is_terminal() {
+                if target_vmm.state.is_terminal() {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
@@ -1389,7 +1389,7 @@ fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
              reincarnation.";
             "instance_id" => %state.instance.id(),
             "auto_restart_config" => ?state.instance.auto_restart,
-            "runtime_state" => ?state.instance.runtime_state,
+            "runtime_state" => ?state.instance.runtime(),
             "intended_state" => %state.instance.intended_state,
         );
         osagactx
@@ -1969,7 +1969,7 @@ mod test {
                 &vmm_id,
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    generation: Generation(vmm.runtime.generation.0.next()),
+                    generation: Generation(vmm.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
             )
@@ -2629,7 +2629,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                generation: Generation(src_vmm.runtime.generation.0.next()),
+                generation: Generation(src_vmm.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2686,7 +2686,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                generation: Generation(target_vmm.runtime.generation.0.next()),
+                generation: Generation(target_vmm.generation.0.next()),
                 state: vmm_state,
             };
 

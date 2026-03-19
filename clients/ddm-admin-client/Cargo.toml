@@ -12,7 +12,6 @@ either.workspace = true
 oxnet.workspace = true
 progenitor-client.workspace = true
 reqwest = { workspace = true, features = ["json", "stream", "rustls"] }
-reqwest012 = { workspace = true }
 serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true

@@ -9,15 +9,16 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
+bootstore.workspace = true
 camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 indent_write.workspace = true
-async-trait.workspace = true
-bootstore.workspace = true
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

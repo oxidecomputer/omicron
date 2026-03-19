@@ -28,6 +28,7 @@ use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
+use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl};
 use iddqd::IdOrdMap;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
@@ -140,7 +141,6 @@ pub use disk::LocalStorageAllocation;
 pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-pub use ereport::EreportFilters;
 pub use external_ip::FloatingIpAllocation;
 pub use external_subnet::ExternalSubnetBeginOpResult;
 pub use external_subnet::ExternalSubnetCompleteOpResult;
@@ -600,6 +600,42 @@ enum ValidateTransition {
     No,
 }
 
+/// Result of a soft delete operation.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SoftDeleteResult {
+    /// The target row was updated by soft-deleting it.
+    SoftDeleteApplied,
+
+    /// The target row was already soft deleted.
+    AlreadySoftDeleted,
+
+    /// The target row does not exist.
+    ///
+    /// Depending on context, this may or may not be an error. See
+    /// [`SoftDeleteResult::into_did_soft_delete_bool()`] for a convenience
+    /// method to flatten this into an error.
+    NotFound,
+}
+
+impl SoftDeleteResult {
+    /// Flatten `self` into a `Result<_, _>` by the following mapping:
+    ///
+    /// * [`SoftDeleteResult::SoftDeleteApplied`] becomes `Ok(true)`
+    /// * [`SoftDeleteResult::AlreadySoftDeleted`] becomes `Ok(false)`
+    /// * [`SoftDeleteResult::NotFound`] becomes `Err(DieselError::NotFound)`
+    ///
+    /// This is consistent with existing APIs that want to return a
+    /// `Result<bool, _>` and treat an attempt to soft delete a nonexistent row
+    /// as an error.
+    pub fn into_did_soft_delete_bool(self) -> Result<bool, DieselError> {
+        match self {
+            Self::SoftDeleteApplied => Ok(true),
+            Self::AlreadySoftDeleted => Ok(false),
+            Self::NotFound => Err(DieselError::NotFound),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -850,6 +886,74 @@ mod test {
         let delete_again =
             datastore.session_hard_delete_by_token(&opctx, token.clone()).await;
         assert_eq!(delete_again, Ok(()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_session_cleanup_batch() {
+        let logctx = dev::test_setup_log("test_session_cleanup_batch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let authn_opctx = OpContext::for_background(
+            logctx.log.new(o!("component" => "TestExternalAuthn")),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::external_authn(),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+
+        let silo_user_id = SiloUserUuid::new_v4();
+        let now = Utc::now();
+
+        // Create 3 old sessions and 1 recent session
+        for i in 0..3 {
+            let session = ConsoleSession::new_with_times(
+                format!("old_{i}"),
+                silo_user_id,
+                now - Duration::hours(48 + i),
+                now - Duration::hours(48 + i),
+            );
+            datastore.session_create(&authn_opctx, session).await.unwrap();
+        }
+        let recent = ConsoleSession::new_with_times(
+            "recent".to_string(),
+            silo_user_id,
+            now - Duration::hours(1),
+            now - Duration::hours(1),
+        );
+        datastore.session_create(&authn_opctx, recent).await.unwrap();
+
+        let cutoff = now - Duration::hours(24);
+
+        // A cutoff in the distant past deletes nothing
+        let deleted = datastore
+            .session_cleanup_batch(opctx, now - Duration::hours(1000), 100)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0);
+
+        // Limit is respected: ask to delete at most 2
+        let deleted =
+            datastore.session_cleanup_batch(opctx, cutoff, 2).await.unwrap();
+        assert_eq!(deleted, 2);
+
+        // One old session remains
+        let deleted =
+            datastore.session_cleanup_batch(opctx, cutoff, 100).await.unwrap();
+        assert_eq!(deleted, 1);
+
+        // Nothing left to delete
+        let deleted =
+            datastore.session_cleanup_batch(opctx, cutoff, 100).await.unwrap();
+        assert_eq!(deleted, 0);
+
+        // The recent session is still there
+        let (_, fetched) = datastore
+            .session_lookup_by_token(&authn_opctx, "recent".to_string())
+            .await
+            .unwrap();
+        assert_eq!(fetched.token, "recent");
 
         db.terminate().await;
         logctx.cleanup_successful();

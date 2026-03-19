@@ -65,6 +65,7 @@ use omicron_uuid_kinds::WebhookDeliveryAttemptUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
+use slog_error_chain::InlineErrorChain;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -485,7 +486,7 @@ impl<'a> ReceiverClient<'a> {
                     "alert_class" => %alert_class,
                     "delivery_id" => %delivery.id,
                     "delivery_trigger" => %delivery.triggered_by,
-                    "error" => %e,
+                    "error" => InlineErrorChain::new(&e),
                     "payload" => ?payload,
                 );
                 return Err(e).context(MSG);
@@ -507,7 +508,7 @@ impl<'a> ReceiverClient<'a> {
                     "alert_class" => %alert_class,
                     "delivery_id" => %delivery.id,
                     "delivery_trigger" => %delivery.triggered_by,
-                    "error" => %e,
+                    "error" => InlineErrorChain::new(&e),
                 );
                 return Err(e).context(MSG);
             }
@@ -544,7 +545,7 @@ impl<'a> ReceiverClient<'a> {
                         "alert_class" => %alert_class,
                         "delivery_id" => %delivery.id,
                         "delivery_trigger" => %delivery.triggered_by,
-                        "error" => %e,
+                        "error" => InlineErrorChain::new(&e),
                     );
                     (result, None)
                 }

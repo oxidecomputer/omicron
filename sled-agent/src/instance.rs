@@ -51,6 +51,7 @@ use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
@@ -68,23 +69,23 @@ pub enum Error {
     #[error("Failed to wait for service: {0}")]
     Timeout(String),
 
-    #[error("Failed to create VNIC: {0}")]
+    #[error("Failed to create VNIC")]
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
-    #[error("Failure from Propolis Client: {0}")]
+    #[error("Failure from Propolis Client")]
     Propolis(#[from] PropolisClientError),
 
     // TODO: Remove this error; prefer to retry notifications.
-    #[error("Notifying Nexus failed: {0}")]
-    Notification(nexus_client::Error<nexus_client::types::Error>),
+    #[error("Notifying Nexus failed")]
+    Notification(#[source] nexus_client::Error<nexus_client::types::Error>),
 
     // TODO: This error type could become more specific
-    #[error("Error performing a state transition: {0}")]
-    Transition(omicron_common::api::external::Error),
+    #[error("Error performing a state transition")]
+    Transition(#[source] omicron_common::api::external::Error),
 
     // TODO: Add more specific errors
-    #[error("Failure during migration: {0}")]
-    Migration(anyhow::Error),
+    #[error("Failure during migration")]
+    Migration(#[source] anyhow::Error),
 
     #[error("requested NIC {0} has no virtio network backend in Propolis spec")]
     NicNotInPropolisSpec(Uuid),
@@ -101,7 +102,7 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("serde_json failure: {0}")]
+    #[error("serde_json failure")]
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error(transparent)]
@@ -111,7 +112,7 @@ pub enum Error {
     #[error("Invalid hostname: {0}")]
     InvalidHostname(&'static str),
 
-    #[error("Error resolving DNS name: {0}")]
+    #[error("Error resolving DNS name")]
     ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Propolis job with ID {0} is registered but not running")]
@@ -813,7 +814,7 @@ impl InstanceRunner {
                                     self.log,
                                     "Error handling request";
                                     "request" => request_variant,
-                                    "err" => ?err,
+                                    InlineErrorChain::new(&err),
                                 );
                             }
                         }
@@ -995,7 +996,7 @@ impl InstanceRunner {
             |err: Error, delay| {
                 warn!(self.log,
                       "Failed to publish instance state to Nexus: {}",
-                      err.to_string();
+                      InlineErrorChain::new(&err).to_string();
                       "instance_id" => %self.instance_id(),
                       "propolis_id" => %self.propolis_id,
                       "retry_after" => ?delay);
@@ -1006,7 +1007,7 @@ impl InstanceRunner {
         if let Err(e) = result {
             error!(
                 self.log,
-                "Failed to publish state to Nexus, will not retry: {:?}", e;
+                "Failed to publish state to Nexus, will not retry: {}", InlineErrorChain::new(&e);
                 "instance_id" => %self.instance_id(),
                 "propolis_id" => %self.propolis_id,
             );
@@ -2335,7 +2336,7 @@ impl InstanceRunner {
         let setup = match self.setup_propolis_zone().await {
             Ok(setup) => setup,
             Err(e) => {
-                error!(&self.log, "failed to set up Propolis zone"; "error" => ?e);
+                error!(&self.log, "failed to set up Propolis zone"; InlineErrorChain::new(&e));
                 return Err(e);
             }
         };
@@ -2348,7 +2349,7 @@ impl InstanceRunner {
             )
             .await
         {
-            error!(&self.log, "failed to create Propolis VM"; "error" => ?e);
+            error!(&self.log, "failed to create Propolis VM"; InlineErrorChain::new(&e));
             return Err(e);
         }
 
@@ -2655,7 +2656,7 @@ impl InstanceRunner {
                     warn!(
                         self.log,
                         "Error handling request to terminate instance";
-                        "err" => ?err,
+                        InlineErrorChain::new(&err),
                     );
                 }
 

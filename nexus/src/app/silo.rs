@@ -41,6 +41,7 @@ use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -1026,14 +1027,17 @@ impl super::Nexus {
                     .map_err(|e| {
                         Error::internal_error(&format!(
                             "failed to build reqwest client: {}",
-                            e
+                            InlineErrorChain::new(&e)
                         ))
                     })?;
 
                 let response = client.get(url).send().await.map_err(|e| {
                     Error::invalid_value(
                         "url",
-                        format!("error querying url: {e}"),
+                        format!(
+                            "error querying url: {}",
+                            InlineErrorChain::new(&e)
+                        ),
                     )
                 })?;
 
@@ -1047,7 +1051,10 @@ impl super::Nexus {
                 response.text().await.map_err(|e| {
                     Error::invalid_value(
                         "url",
-                        format!("error getting text from url: {e}"),
+                        format!(
+                            "error getting text from url: {}",
+                            InlineErrorChain::new(&e)
+                        ),
                     )
                 })?
             }

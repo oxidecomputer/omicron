@@ -21,6 +21,7 @@ use oxlog::SvcLogs;
 use rand::{Rng, distr::Alphanumeric};
 use regex::Regex;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use zip::{result::ZipError, write::FullFileOptions};
 
@@ -209,7 +210,7 @@ impl DiagnosticsSnapshot {
                     self.log,
                     "failed to destroy sled-diagnostics ZFS snapshot";
                     "snapshot" => %self.snapshot,
-                    "error" => ?e,
+                    e,
                 );
             })?;
             self.destroyed = true;
@@ -317,7 +318,7 @@ impl LogsHandle {
                 error!(
                     self.log,
                     "Failed to list ZFS snapshots when attempting to cleanup \
-                    old sled-diagnostics snapshots: {e}";
+                    old sled-diagnostics snapshots"; e
                 );
 
                 return;
@@ -350,9 +351,10 @@ impl LogsHandle {
                         "Found a ZFS snapshot with a name reserved for
                         sled diagnostics, but which does not have the \
                         sled-diagnostics-specific property. Bailing out, \
-                        rather than risking deletion of user data: {e}";
+                        rather than risking deletion of user data";
                         "snap_name" => &name,
-                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE
+                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -387,8 +389,9 @@ impl LogsHandle {
                 ),
                 Err(e) => error!(
                     self.log,
-                    "failed to destroy pre-existing snapshot on cleanup: {e}";
+                    "failed to destroy pre-existing snapshot on cleanup";
                     "snapshot" => %snapshot,
+                    e,
                 ),
             }
         }
@@ -471,7 +474,7 @@ impl LogsHandle {
                             self.log,
                             "Failed to read dir ent while processing \
                             sled-diagnostics current log files";
-                            "error" => %err
+                            InlineErrorChain::new(&err)
                         );
                     }
 
@@ -504,7 +507,7 @@ impl LogsHandle {
                         let system_mtime =
                             f.metadata().and_then(|m| m.modified()).inspect_err(|e| {
                                 warn!(&self.log, "sled-diagnostic failed to get mtime of logfile";
-                                    "error" => %e,
+                                    InlineErrorChain::new(&e),
                                     "logfile" => %logfile,
                                 );
                             }).ok();
@@ -759,9 +762,10 @@ fn write_log_to_zip<W: Write + Seek>(
         // are able to grab as many logs as possible for debugging purposes.
         error!(
             logger,
-            "Failed to write service log to zip file: {e}";
+            "Failed to write service log to zip file";
             "service" => %service,
             "log" => %snapshot_logfile,
+            InlineErrorChain::new(&e)
         );
     };
 
