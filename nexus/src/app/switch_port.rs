@@ -68,7 +68,7 @@ impl super::Nexus {
                             format!("peer {ip}")
                         }
                         RouterPeerType::Unnumbered { .. } => {
-                            format!("unnumbered peer on {}", p.interface_name)
+                            format!("unnumbered peer {}", p.bgp_config)
                         }
                     };
                     if key.len() > 80 {
