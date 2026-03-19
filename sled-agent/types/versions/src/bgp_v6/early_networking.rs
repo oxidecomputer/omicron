@@ -531,12 +531,12 @@ impl JsonSchema for RouterLifetimeConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum RouterLifetimeConfigError {
     #[error(
-        "router lifetime config cannot be greater than {}",
+        "router_lifetime cannot be greater than {}",
         RouterLifetimeConfig::MAX
     )]
     ValueTooLarge,
     #[error(
-        "router lifetime config must be an integer between {} and {}",
+        "router_lifetime must be an integer between {} and {}",
         RouterLifetimeConfig::DEFAULT,
         RouterLifetimeConfig::MAX
     )]
