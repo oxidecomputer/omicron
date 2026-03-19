@@ -831,9 +831,7 @@ mod test {
         // NOTE: The support bundle querying interface isn't supported on
         // the simulated sled agent (yet?) so we're using an empty sled selection.
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -910,9 +908,7 @@ mod test {
 
         // Collect the bundle
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1131,9 +1127,7 @@ mod test {
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1298,9 +1292,7 @@ mod test {
             nexus.id(),
         );
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1455,9 +1447,7 @@ mod test {
             nexus.id(),
         );
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1542,9 +1532,7 @@ mod test {
             nexus.id(),
         );
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1630,9 +1618,7 @@ mod test {
 
         // Collect the bundle
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(
-            SledSelection::Specific(HashSet::new()),
-        ));
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await

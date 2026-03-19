@@ -217,27 +217,72 @@ fn get_sp_metadata_string(
 }
 
 /// A set of filters for fetching ereports.
+///
+/// Construct using [`EreportFilters::new`] and the builder methods:
+///
+/// ```
+/// # use nexus_types::fm::ereport::EreportFilters;
+/// let filters = EreportFilters::new()
+///     .with_start_time(chrono::Utc::now() - chrono::Days::new(7))
+///     .expect("no end time set")
+///     .with_serials(["BRM6900420"])
+///     .with_classes(["hw.pwr.*"]);
+/// ```
+///
+/// Note: JSON deserialization validates the start_time/end_time constraints
+/// using `TryFrom<EreportFiltersUnvalidated>`.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "EreportFiltersUnvalidated")]
 pub struct EreportFilters {
     /// If present, include only ereports that were collected at the specified
     /// timestamp or later.
     ///
-    /// If `end_time` is also present, this value *must* be earlier than
-    /// `end_time`.
-    pub start_time: Option<DateTime<Utc>>,
+    /// If `end_time` is also present, this value *must* be at or before
+    /// `end_time`. This invariant is enforced by [`Self::with_start_time`].
+    start_time: Option<DateTime<Utc>>,
     /// If present, include only ereports that were collected at the specified
     /// timestamp or before.
     ///
-    /// If `start_time` is also present, this value *must* be later than
-    /// `start_time`.
-    pub end_time: Option<DateTime<Utc>>,
+    /// If `start_time` is also present, this value *must* be at or after
+    /// `start_time`. This invariant is enforced by [`Self::with_end_time`].
+    end_time: Option<DateTime<Utc>>,
     /// If this list is non-empty, include only ereports that were reported by
     /// systems with the provided serial numbers.
-    pub only_serials: Vec<String>,
+    only_serials: Vec<String>,
     /// If this list is non-empty, include only ereports with the provided class
     /// strings.
     // TODO(eliza): globbing could be nice to add here eventually...
-    pub only_classes: Vec<String>,
+    only_classes: Vec<String>,
+}
+
+/// Private deserialization helper for [`EreportFilters`] that validates the
+/// `start_time <= end_time` invariant.
+#[derive(Deserialize)]
+struct EreportFiltersUnvalidated {
+    start_time: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
+    only_serials: Vec<String>,
+    only_classes: Vec<String>,
+}
+
+impl TryFrom<EreportFiltersUnvalidated> for EreportFilters {
+    type Error = Error;
+
+    fn try_from(
+        unvalidated: EreportFiltersUnvalidated,
+    ) -> Result<Self, Self::Error> {
+        let mut f = Self::new();
+        if let Some(t) = unvalidated.start_time {
+            f = f.with_start_time(t)?;
+        }
+        if let Some(t) = unvalidated.end_time {
+            f = f.with_end_time(t)?;
+        }
+        f = f
+            .with_serials(unvalidated.only_serials)
+            .with_classes(unvalidated.only_classes);
+        Ok(f)
+    }
 }
 
 /// Displayer for pretty-printing [`EreportFilters`].
@@ -247,6 +292,88 @@ pub struct DisplayEreportFilters<'a> {
 }
 
 impl EreportFilters {
+    /// Creates an empty set of filters (no filtering).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Includes only ereports collected at or after `time`.
+    ///
+    /// Returns an error if `time` is after a previously set end time.
+    pub fn with_start_time(
+        mut self,
+        time: DateTime<Utc>,
+    ) -> Result<Self, Error> {
+        if let Some(end) = self.end_time {
+            if time > end {
+                return Err(Error::invalid_request(
+                    "start time must be before end time",
+                ));
+            }
+        }
+        self.start_time = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only ereports collected at or before `time`.
+    ///
+    /// Returns an error if `time` is before a previously set start time.
+    pub fn with_end_time(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(start) = self.start_time {
+            if start > time {
+                return Err(Error::invalid_request(
+                    "start time must be before end time",
+                ));
+            }
+        }
+        self.end_time = Some(time);
+        Ok(self)
+    }
+
+    /// Adds serial numbers to the inclusion filter.
+    ///
+    /// When one or more serials are present, only ereports reported by
+    /// systems with those serial numbers are included.
+    pub fn with_serials(
+        mut self,
+        serials: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.only_serials.extend(serials.into_iter().map(Into::into));
+        self
+    }
+
+    /// Adds ereport classes to the inclusion filter.
+    ///
+    /// When one or more classes are present, only ereports with those
+    /// class strings are included.
+    pub fn with_classes(
+        mut self,
+        classes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.only_classes.extend(classes.into_iter().map(Into::into));
+        self
+    }
+
+    /// Returns the start time filter, if set.
+    pub fn start_time(&self) -> Option<DateTime<Utc>> {
+        self.start_time
+    }
+
+    /// Returns the end time filter, if set.
+    pub fn end_time(&self) -> Option<DateTime<Utc>> {
+        self.end_time
+    }
+
+    /// Returns the serial number inclusion filter.
+    pub fn only_serials(&self) -> &[String] {
+        &self.only_serials
+    }
+
+    /// Returns the ereport class inclusion filter.
+    pub fn only_classes(&self) -> &[String] {
+        &self.only_classes
+    }
+
     pub fn display(&self) -> DisplayEreportFilters<'_> {
         DisplayEreportFilters { filters: self }
     }
@@ -270,27 +397,27 @@ impl fmt::Display for DisplayEreportFilters<'_> {
                 f.write_fmt(args)
             };
 
-        if let Some(start) = &filters.start_time {
+        if let Some(start) = filters.start_time() {
             fmt_part(f, format_args!("start: {start}"))?;
         }
-        if let Some(end) = &filters.end_time {
+        if let Some(end) = filters.end_time() {
             fmt_part(f, format_args!("end: {end}"))?;
         }
-        if !filters.only_serials.is_empty() {
+        if !filters.only_serials().is_empty() {
             fmt_part(
                 f,
                 format_args!(
                     "serials: {}",
-                    filters.only_serials.iter().format(", ")
+                    filters.only_serials().iter().format(", ")
                 ),
             )?;
         }
-        if !filters.only_classes.is_empty() {
+        if !filters.only_classes().is_empty() {
             fmt_part(
                 f,
                 format_args!(
                     "classes: {}",
-                    filters.only_classes.iter().format(", ")
+                    filters.only_classes().iter().format(", ")
                 ),
             )?;
         }
@@ -299,20 +426,6 @@ impl fmt::Display for DisplayEreportFilters<'_> {
         if empty {
             write!(f, "none")?;
         }
-        Ok(())
-    }
-}
-
-impl EreportFilters {
-    pub fn check_time_range(&self) -> Result<(), Error> {
-        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
-            if start > end {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
-        }
-
         Ok(())
     }
 }
@@ -339,16 +452,27 @@ pub(crate) mod test_utils {
                 prop::collection::vec(".*", 0..=3),
                 prop::collection::vec(".*", 0..=3),
             )
-                .prop_map(
-                    |(start_time, end_time, only_serials, only_classes)| {
-                        EreportFilters {
-                            start_time,
-                            end_time,
-                            only_serials,
-                            only_classes,
-                        }
-                    },
-                )
+                .prop_map(|(time_a, time_b, only_serials, only_classes)| {
+                    // Ensure start <= end when both are present.
+                    let (start_time, end_time) = match (time_a, time_b) {
+                        (Some(a), Some(b)) if a > b => (Some(b), Some(a)),
+                        other => other,
+                    };
+                    let mut filters = EreportFilters::new();
+                    if let Some(t) = start_time {
+                        filters = filters
+                            .with_start_time(t)
+                            .expect("no end time set yet");
+                    }
+                    if let Some(t) = end_time {
+                        filters = filters
+                            .with_end_time(t)
+                            .expect("start <= end by construction");
+                    }
+                    filters
+                        .with_serials(only_serials)
+                        .with_classes(only_classes)
+                })
                 .boxed()
         }
     }
