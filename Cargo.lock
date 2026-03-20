@@ -8444,6 +8444,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "chrono",
  "dns-service-client",
  "dropshot",
  "futures",
@@ -8466,11 +8467,14 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "serde",
+ "serde_json",
  "sled-agent-types",
  "slog",
  "slog-error-chain",
+ "strum 0.27.2",
  "textwrap 0.16.2",
  "tokio",
+ "update-engine",
  "uuid",
 ]
 
