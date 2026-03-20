@@ -2698,10 +2698,6 @@ mod test {
                 .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
-        instance
-            .disable_synchronization()
-            .await
-            .expect("Failed to disable synchronization");
 
         let client =
             instance.connect().await.expect("Failed to connect to CRDB");
@@ -2881,10 +2877,6 @@ mod test {
                 .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
-        instance
-            .disable_synchronization()
-            .await
-            .expect("Failed to disable synchronization");
 
         let client =
             instance.connect().await.expect("Failed to connect to CRDB");
@@ -3025,10 +3017,6 @@ mod test {
                 .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
-        instance
-            .disable_synchronization()
-            .await
-            .expect("Failed to disable synchronization");
 
         let client =
             instance.connect().await.expect("Failed to connect to CRDB");
@@ -3165,10 +3153,6 @@ mod test {
                 .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
-        instance
-            .disable_synchronization()
-            .await
-            .expect("Failed to disable synchronization");
 
         let client =
             instance.connect().await.expect("Failed to connect to CRDB");
@@ -3322,10 +3306,6 @@ mod test {
                 .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
-        instance
-            .disable_synchronization()
-            .await
-            .expect("Failed to disable synchronization");
 
         let client =
             instance.connect().await.expect("Failed to connect to CRDB");
@@ -3467,10 +3447,6 @@ mod test {
                 .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
-        instance
-            .disable_synchronization()
-            .await
-            .expect("Failed to disable synchronization");
 
         let client =
             instance.connect().await.expect("Failed to connect to CRDB");
