@@ -762,7 +762,10 @@ impl Drop for CockroachInstance {
             // written to the WAL but may only exist in Pebble's user-space
             // write buffer. SIGTERM triggers Pebble's DB.Close() which flushes
             // and fsyncs the WAL before exiting.
-            // See: https://github.com/oxidecomputer/omicron/issues/10085
+            //
+            // See also:
+            // - https://github.com/oxidecomputer/cockroach/blob/release-22.1-oxide/pkg/cli/start_unix.go#L37
+            // - https://github.com/oxidecomputer/omicron/issues/10085
             if let Some(child_process) = self.child_process.as_mut() {
                 let pid = self.pid as libc::pid_t;
                 unsafe { libc::kill(pid, libc::SIGTERM) };
