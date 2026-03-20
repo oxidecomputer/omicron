@@ -9768,6 +9768,7 @@ dependencies = [
  "peg",
  "qorb",
  "quote",
+ "rand 0.9.2",
  "reedline",
  "regex",
  "reqwest 0.13.2",
