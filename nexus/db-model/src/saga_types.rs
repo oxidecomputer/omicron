@@ -189,6 +189,17 @@ impl From<steno::SagaCachedState> for SagaState {
     }
 }
 
+impl From<SagaState> for nexus_types::inventory::SagaState {
+    fn from(value: SagaState) -> Self {
+        match value {
+            SagaState::Running => Self::Running,
+            SagaState::Unwinding => Self::Unwinding,
+            SagaState::Done => Self::Done,
+            SagaState::Abandoned => Self::Abandoned,
+        }
+    }
+}
+
 /// Represents a row in the "Saga" table
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga)]

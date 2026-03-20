@@ -472,6 +472,13 @@ impl DataStore {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
+        // TODO-K: Make nicer and actually the same as the others
+        let inv_stale_sagas = &collection.stale_sagas;
+        println!("SAGAS!");
+        for saga in inv_stale_sagas {
+            println!("{saga:?}");
+        }
+
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
         // means we don't have to worry about other readers seeing a
@@ -4417,6 +4424,8 @@ impl DataStore {
             cockroach_status,
             ntp_timesync,
             internal_dns_generation_status,
+            // TODO-K: Fill in once there is something in the DB
+            stale_sagas: vec![],
         })
     }
 
