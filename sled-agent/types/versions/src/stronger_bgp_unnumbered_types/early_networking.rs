@@ -6,7 +6,7 @@
 //!
 //! Changes in this version:
 //!
-//! * Introduce [`SpecifiedIpNet`], a newtype wrapper around [`IpNet`] that does
+//! * Introduce [`UplinkIpNet`], a newtype wrapper around [`IpNet`] that does
 //!   not allow unspecified IP addresses.
 //! * Introduce [`RouterPeerIpAddr`], a newtype wrapper around [`IpAddr`] that
 //!   enforces several requirements for valid peer addresses.
@@ -193,7 +193,7 @@ impl<'de> Deserialize<'de> for RouterPeerIpAddr {
     }
 }
 
-// As with `SpecifiedIpNet`, these conversion implementations are defined here
+// As with `UplinkIpNet`, these conversion implementations are defined here
 // instead of in `crate::impls::*` because they're tied to how we derive
 // `Deserialize` and `Serialize`.
 impl From<RouterPeerIpAddr> for IpAddr {
