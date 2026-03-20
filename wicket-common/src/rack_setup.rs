@@ -31,6 +31,7 @@ use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::UplinkIpNet;
 use sled_hardware_types::Baseboard;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -244,6 +245,7 @@ mod uplink_address_serde {
     use oxnet::IpNet;
     use serde::{Deserialize, Deserializer, Serializer};
     use sled_agent_types::early_networking::UplinkIpNet;
+    use slog_error_chain::InlineErrorChain;
 
     pub fn serialize<S: Serializer>(
         addr: &UplinkAddress,
@@ -268,16 +270,12 @@ mod uplink_address_serde {
         } else {
             let ip_net: IpNet = s.parse().map_err(|_| {
                 serde::de::Error::custom(format!(
-                    "invalid uplink address `{s}`: \
+                    "invalid uplink ipnet `{s}`: \
                      expected `addrconf` or an IP network",
                 ))
             })?;
-            let ip_net = UplinkIpNet::try_from(ip_net).map_err(|_| {
-                serde::de::Error::custom(format!(
-                    "invalid uplink address `{s}`: \
-                     uplink addresses cannot have an unspecified IP; \
-                     use `addrconf` for link local addresses",
-                ))
+            let ip_net = UplinkIpNet::try_from(ip_net).map_err(|err| {
+                serde::de::Error::custom(InlineErrorChain::new(&err))
             })?;
             Ok(UplinkAddress::Static { ip_net })
         }
@@ -398,16 +396,12 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
         } else {
             let ip: IpAddr = s.parse().map_err(|_| {
                 serde::de::Error::custom(format!(
-                    "invalid BGP peer address `{s}`: \
+                    "invalid router peer address `{s}`: \
                      expected `unnumbered` or an IP address",
                 ))
             })?;
-            let ip = RouterPeerIpAddr::try_from(ip).map_err(|_| {
-                serde::de::Error::custom(format!(
-                    "invalid BGP peer address `{s}`: \
-                     peer address cannot be an unspecified IP; \
-                     use `unnumbered` for unnumbered peers",
-                ))
+            let ip = RouterPeerIpAddr::try_from(ip).map_err(|err| {
+                serde::de::Error::custom(InlineErrorChain::new(&err))
             })?;
             Ok(Self::Numbered(ip))
         }
@@ -825,7 +819,7 @@ mod tests {
                     let err = err.to_string();
                     assert!(
                         err.contains(&format!(
-                            "invalid BGP peer address `{input}`"
+                            "invalid router peer address `{input}`"
                         )),
                         "unexpected error for input `{input}`: {err}"
                     );
@@ -878,7 +872,14 @@ mod tests {
 
     #[test]
     fn invalid_uplink_address() {
-        let invalid_inputs = ["0.0.0.0/0", "::/128", "foobar"];
+        let invalid_inputs = [
+            "0.0.0.0/0",
+            "::/128",
+            "255.255.255.255/16",
+            "ff80::1/64",
+            "fe80::1/64",
+            "foobar",
+        ];
 
         for input in invalid_inputs {
             let toml_input = format!("addr = \"{input}\"\n");
@@ -888,7 +889,7 @@ mod tests {
                     let err = err.to_string();
                     assert!(
                         err.contains(&format!(
-                            "invalid uplink address `{input}`"
+                            "invalid uplink ipnet `{input}`"
                         )),
                         "unexpected error for input `{input}`: {err}"
                     );

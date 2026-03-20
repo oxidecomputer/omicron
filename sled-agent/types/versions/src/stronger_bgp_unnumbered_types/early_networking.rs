@@ -138,7 +138,7 @@ impl From<UplinkIpNet> for IpNet {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("invalid uplink ipnet {ip_net}")]
+#[error("invalid uplink ipnet `{ip_net}`")]
 pub struct UplinkIpNetError {
     pub ip_net: IpNet,
     #[source]
@@ -203,7 +203,7 @@ impl From<RouterPeerIpAddr> for IpAddr {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("invalid router peer address {ip}")]
+#[error("invalid router peer address `{ip}`")]
 pub struct RouterPeerIpAddrError {
     pub ip: IpAddr,
     #[source]
