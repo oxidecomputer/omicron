@@ -154,7 +154,7 @@ fn slot_to_pci_bdf(
     //
     // 0               1
     // 0123456789ABCDEF0123456789ABCDEF
-    //         NNNNNNNNDDDDDDDDC DDDD
+    //         NNNNNNNNDDDDDDDDCVDDDD
     //                           ^^^^
     //
     // The additional disks at the end (marked with ^) were added to support up
