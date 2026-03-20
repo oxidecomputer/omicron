@@ -118,6 +118,7 @@ enum PciDeviceKind {
     Disk,
     Nic,
     CloudInitDisk,
+    Vsock,
 }
 
 impl std::fmt::Display for PciDeviceKind {
@@ -129,6 +130,7 @@ impl std::fmt::Display for PciDeviceKind {
                 Self::Disk => "disk",
                 Self::Nic => "network interface",
                 Self::CloudInitDisk => "cloud-init data disk",
+                Self::Vsock => "vsock",
             }
         )
     }
@@ -147,7 +149,8 @@ fn slot_to_pci_bdf(
 ) -> Result<PciPath, Error> {
     // Use the mappings Propolis used when it was responsible for converting
     // slot numbers to device numbers: NICs get device numbers 8 through 15,
-    // disks get 16 through 23, and the cloud-init disk is device 24:
+    // disks get 16 through 23, cloud-init disk is device 24, and the vsock
+    // device is 25:
     //
     // 0               1
     // 0123456789ABCDEF0123456789ABCDEF
@@ -165,6 +168,9 @@ fn slot_to_pci_bdf(
         PciDeviceKind::Disk if (8..12).contains(&logical_slot) => {
             (logical_slot - 8) + 0x1A
         }
+        // NB: This will eventually become our first multi function device, but
+        // for now it will be the only device at this device num
+        PciDeviceKind::Vsock if logical_slot == 0 => 0x19,
         _ => {
             return Err(Error::invalid_value(
                 format!("{kind} with slot {logical_slot}"),
@@ -344,7 +350,8 @@ impl Default for Components {
                 component_names::VSOCK,
                 Component::VirtioSocket(VirtioSocket {
                     guest_cid: VSOCK_GUEST_CID,
-                    pci_path: PciPath { bus: 0, device: 0x19, function: 0 },
+                    pci_path: slot_to_pci_bdf(0, PciDeviceKind::Vsock)
+                        .expect("vsock bdf (0, 25, 0)"),
                 }),
             ),
         ]
