@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_data_selection (
     CHECK ((category = 'host_info') = (all_sleds IS NOT NULL)),
     CHECK ((category = 'host_info') = (sled_ids IS NOT NULL)),
     -- all_sleds = true means no specific sled IDs, and vice versa.
-    CHECK (all_sleds IS NULL OR all_sleds = (array_length(sled_ids, 1) IS NULL)),
+    CHECK (all_sleds IS NULL OR all_sleds = (cardinality(sled_ids) = 0)),
 
     -- Ereports: serials and classes present iff category = 'ereports'.
     CHECK ((category = 'ereports') = (ereport_only_serials IS NOT NULL)),

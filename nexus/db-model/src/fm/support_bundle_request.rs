@@ -6,6 +6,7 @@
 
 use crate::DbTypedUuid;
 use crate::impl_enum_type;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{
     fm_sb_req_data_selection, fm_support_bundle_request,
@@ -175,56 +176,65 @@ impl SbReqDataSelection {
 
     /// Convert a set of data selection rows back into a `BundleDataSelection`.
     /// Empty input produces the default selection (collect everything).
-    pub fn into_data_selection(rows: Vec<Self>) -> BundleDataSelection {
-        rows.into_iter().map(Self::into_bundle_data).collect()
+    pub fn into_data_selection(
+        rows: Vec<Self>,
+    ) -> anyhow::Result<BundleDataSelection> {
+        rows.into_iter()
+            .map(Self::into_bundle_data)
+            .collect::<anyhow::Result<BundleDataSelection>>()
     }
 
-    fn into_bundle_data(self) -> BundleData {
+    fn into_bundle_data(self) -> anyhow::Result<BundleData> {
         match self.category {
-            BundleDataCategory::Reconfigurator => BundleData::Reconfigurator,
-            BundleDataCategory::SledCubbyInfo => BundleData::SledCubbyInfo,
-            BundleDataCategory::SpDumps => BundleData::SpDumps,
+            BundleDataCategory::Reconfigurator => {
+                Ok(BundleData::Reconfigurator)
+            }
+            BundleDataCategory::SledCubbyInfo => Ok(BundleData::SledCubbyInfo),
+            BundleDataCategory::SpDumps => Ok(BundleData::SpDumps),
             BundleDataCategory::HostInfo => {
-                if self.all_sleds.expect(
-                    "CHECK constraint guarantees all_sleds IS NOT NULL \
-                     for host_info rows",
-                ) {
-                    BundleData::HostInfo(SledSelection::All)
+                let all_sleds = self.all_sleds.context(
+                    "illegal database state (CHECK constraint broken?!): \
+                     all_sleds is NULL for host_info row",
+                )?;
+                if all_sleds {
+                    Ok(BundleData::HostInfo(SledSelection::All))
                 } else {
-                    let ids = self.sled_ids.expect(
-                        "CHECK constraint guarantees sled_ids IS NOT NULL \
-                         for host_info rows",
-                    );
-                    BundleData::HostInfo(SledSelection::Specific(
+                    let ids = self.sled_ids.context(
+                        "illegal database state (CHECK constraint broken?!): \
+                         sled_ids is NULL for host_info row",
+                    )?;
+                    Ok(BundleData::HostInfo(SledSelection::Specific(
                         ids.into_iter()
                             .map(SledUuid::from_untyped_uuid)
                             .collect(),
-                    ))
+                    )))
                 }
             }
             BundleDataCategory::Ereports => {
                 let mut filters = EreportFilters::new();
                 if let Some(t) = self.ereport_start_time {
-                    filters = filters.with_start_time(t).expect(
-                        "CHECK constraint guarantees start_time <= end_time",
-                    );
+                    filters = filters.with_start_time(t).context(
+                        "illegal database state (CHECK constraint broken?!): \
+                         start_time > end_time",
+                    )?;
                 }
                 if let Some(t) = self.ereport_end_time {
-                    filters = filters.with_end_time(t).expect(
-                        "CHECK constraint guarantees start_time <= end_time",
-                    );
+                    filters = filters.with_end_time(t).context(
+                        "illegal database state (CHECK constraint broken?!): \
+                         start_time > end_time",
+                    )?;
                 }
-                filters =
-                    filters.with_serials(self.ereport_only_serials.expect(
-                        "CHECK constraint guarantees ereport_only_serials \
-                         IS NOT NULL for ereports rows",
-                    ));
-                filters =
-                    filters.with_classes(self.ereport_only_classes.expect(
-                        "CHECK constraint guarantees ereport_only_classes \
-                         IS NOT NULL for ereports rows",
-                    ));
-                BundleData::Ereports(filters)
+                let serials = self.ereport_only_serials.context(
+                    "illegal database state (CHECK constraint broken?!): \
+                     ereport_only_serials is NULL for ereports row",
+                )?;
+                filters = filters.with_serials(serials);
+                let classes = self.ereport_only_classes.context(
+                    "illegal database state (CHECK constraint broken?!): \
+                     ereport_only_classes is NULL for ereports row",
+                )?;
+                filters = filters.with_classes(classes);
+                Ok(BundleData::Ereports(filters))
             }
         }
     }
