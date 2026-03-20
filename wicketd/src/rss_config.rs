@@ -24,6 +24,7 @@ use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
 use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
@@ -623,7 +624,7 @@ fn validate_rack_network_config(
         return Err(anyhow!("Must have at least one port configured"));
     }
 
-    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
+    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range.
     let infra_ip_range = match (config.infra_ip_first, config.infra_ip_last) {
         (IpAddr::V4(first), IpAddr::V4(last)) => Ipv4Range::new(first, last)
             .map_err(|s: String| {
@@ -640,23 +641,42 @@ fn validate_rack_network_config(
         )),
     }?;
 
-    // TODO this implies a single contiguous range for port IPs which is over
-    // constraining
-    // iterate through each port config
     for (_, _, port_config) in config.iter_uplinks() {
+        // Check that `infra_ip_{first...last}` contains every `uplink_ip`.
+        //
+        // TODO this implies a single contiguous range for port IPs which is
+        // over constraining
         for addr in &port_config.addresses {
             let addr: IpAddr = match addr.address {
                 UplinkAddress::AddrConf => continue,
                 UplinkAddress::Static { ip_net } => ip_net.addr(),
             };
-            // ... and check that it contains `uplink_ip`.
             if addr < infra_ip_range.first_address()
                 || addr > infra_ip_range.last_address()
             {
                 bail!(
-                    "`uplink_cidr`'s IP address must be in the range defined \
-                     by `infra_ip_first` and `infra_ip_last`"
+                    "`uplink_cidr` IP address {addr} is not covered by the \
+                     range defined by `infra_ip_first` ({}) and \
+                     `infra_ip_last` ({})",
+                    infra_ip_range.first_address(),
+                    infra_ip_range.last_address(),
                 );
+            }
+        }
+
+        // Check that router_lifetime is only specified for unnumbered peers
+        for peer in &port_config.bgp_peers {
+            match peer.addr {
+                UserSpecifiedRouterPeerAddr::Unnumbered => (),
+                UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                    if peer.router_lifetime != RouterLifetimeConfig::default() {
+                        bail!(
+                            "numbered BGP peer {ip} specifies a \
+                             router_lifetime, but router_lifetime is only \
+                             supported for unnumbered BGP peers"
+                        );
+                    }
+                }
             }
         }
     }
@@ -872,6 +892,94 @@ mod tests {
     use wicket_common::example::ExampleRackSetupData;
 
     use super::*;
+
+    #[test]
+    fn test_router_lifetime_unnumbered_only() {
+        // Default should be okay and have at least one BGP peer.
+        let example = ExampleRackSetupData::non_empty();
+        let bgp_auth_keys = {
+            let mut m = BTreeMap::new();
+            for id in example.bgp_auth_keys {
+                m.insert(
+                    id,
+                    Some(BgpAuthKey::TcpMd5 { key: "dummy".to_owned() }),
+                );
+            }
+            m
+        };
+        let rack_network_config = example.put_insensitive.rack_network_config;
+        validate_rack_network_config(&rack_network_config, &bgp_auth_keys)
+            .expect("base config is valid");
+        assert!(
+            !rack_network_config
+                .switch0
+                .first_key_value()
+                .expect("at least one switch0 port")
+                .1
+                .bgp_peers
+                .is_empty()
+        );
+
+        // Combine unnumbered with a non-default router_lifetime - fine.
+        let mut valid_router_lifetime = rack_network_config.clone();
+        {
+            let peer = valid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.addr = UserSpecifiedRouterPeerAddr::Unnumbered;
+            peer.router_lifetime = RouterLifetimeConfig::new(1234).unwrap();
+        }
+        validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
+            .expect("unnumbered with non-zero router_lifetime is ok");
+
+        // Keep non-default router_lifetime but change to a numbered peer -
+        // should fail with a reasonable error.
+        let mut invalid_router_lifetime = valid_router_lifetime.clone();
+        {
+            let peer = invalid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.addr = UserSpecifiedRouterPeerAddr::Numbered(
+                "1.2.3.4".parse().unwrap(),
+            );
+        }
+        let err = validate_rack_network_config(
+            &invalid_router_lifetime,
+            &bgp_auth_keys,
+        )
+        .expect_err("numbered with non-zero router_lifetime is not ok");
+        assert_eq!(
+            format!("{err:#}"),
+            "numbered BGP peer 1.2.3.4 specifies a router_lifetime, but \
+             router_lifetime is only supported for unnumbered BGP peers"
+        );
+
+        // Keep numbered peer but switch router_lifetime back to default - fine.
+        let mut valid_router_lifetime = invalid_router_lifetime.clone();
+        {
+            let peer = valid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.router_lifetime = RouterLifetimeConfig::default()
+        }
+        validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
+            .expect("numbered with zero router_lifetime is ok");
+    }
 
     #[test]
     fn test_bgp_auth_key_states() {
