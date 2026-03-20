@@ -527,7 +527,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
 
                     for peer in &settings.bgp_peers {
-                        let bgp_config_id = peer.bgp_config_id;
+                        let bgp_config_id = peer.bgp_config_id();
+                        let port_settings_id = peer.port_settings_id();
+                        let peer = peer.as_bgp_peer();
 
                         // since we only have one bgp config per switch, we only need to fetch it once
                         let bgp_config = match switch_bgp_config.entry(*switch_slot) {
@@ -622,12 +624,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
-                        let ttl = peer.min_ttl.map(|x| x.0);
+                        let ttl = peer.min_ttl;
 
                         // Determine if this is a numbered or unnumbered peer
                         // (None or unspecified address = unnumbered)
                         let peer_addr = match peer.addr {
-                            Some(addr) if !addr.ip().is_unspecified() => Some(addr),
+                            Some(addr) if !addr.is_unspecified() => Some(addr),
                             _ => None,
                         };
 
@@ -635,7 +637,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
-                            peer.port_settings_id,
+                            port_settings_id,
                             &peer.interface_name.to_string(),
                             peer_addr,
                         ).await {
@@ -659,7 +661,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
-                            peer.port_settings_id,
+                            port_settings_id,
                             &peer.interface_name.to_string(),
                             peer_addr,
                         ).await {
@@ -727,7 +729,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
-                            peer.port_settings_id,
+                            port_settings_id,
                             &peer.interface_name.to_string(),
                             peer_addr,
                         ).await {
@@ -797,20 +799,20 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         if let Some(addr) = peer_addr {
                             // now that the peer passes the above validations, add it to the list for configuration
                             let peer_config = BgpPeerConfig {
-                                name: format!("{}", addr.ip()),
-                                host: format!("{}:179", addr.ip()),
-                                hold_time: peer.hold_time.0.into(),
-                                idle_hold_time: peer.idle_hold_time.0.into(),
-                                delay_open: peer.delay_open.0.into(),
-                                connect_retry: peer.connect_retry.0.into(),
-                                keepalive: peer.keepalive.0.into(),
+                                name: format!("{}", addr),
+                                host: format!("{}:179", addr),
+                                hold_time: peer.hold_time.into(),
+                                idle_hold_time: peer.idle_hold_time.into(),
+                                delay_open: peer.delay_open.into(),
+                                connect_retry: peer.connect_retry.into(),
+                                keepalive: peer.keepalive.into(),
                                 resolution: BGP_SESSION_RESOLUTION,
                                 passive: false,
-                                remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                                remote_asn: peer.remote_asn,
                                 min_ttl: ttl,
                                 md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
-                                local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                                multi_exit_discriminator: peer.multi_exit_discriminator,
+                                local_pref: peer.local_pref,
                                 enforce_first_as: peer.enforce_first_as,
                                 communities: communities.into_iter().map(|c| c.community.0).collect(),
                                 ipv4_unicast: Some(Ipv4UnicastConfig{
@@ -823,7 +825,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: import_policy6,
                                     export_policy: export_policy6,
                                 }),
-                                vlan_id: peer.vlan_id.map(|x| x.0),
+                                vlan_id: peer.vlan_id,
                                 //TODO plumb these out to the external API
                                 connect_retry_jitter: Some(JitterRange {
                                     max: 1.0,
@@ -851,18 +853,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             let peer_config = UnnumberedBgpPeerConfig {
                                 name: format!("unnumbered-{}", port.port_name),
                                 interface: format!("tfport{}_0", port.port_name),
-                                hold_time: peer.hold_time.0.into(),
-                                idle_hold_time: peer.idle_hold_time.0.into(),
-                                delay_open: peer.delay_open.0.into(),
-                                connect_retry: peer.connect_retry.0.into(),
-                                keepalive: peer.keepalive.0.into(),
+                                hold_time: peer.hold_time.into(),
+                                idle_hold_time: peer.idle_hold_time.into(),
+                                delay_open: peer.delay_open.into(),
+                                connect_retry: peer.connect_retry.into(),
+                                keepalive: peer.keepalive.into(),
                                 resolution: BGP_SESSION_RESOLUTION,
                                 passive: false,
-                                remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                                remote_asn: peer.remote_asn,
                                 min_ttl: ttl,
                                 md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
-                                local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                                multi_exit_discriminator: peer.multi_exit_discriminator,
+                                local_pref: peer.local_pref,
                                 enforce_first_as: peer.enforce_first_as,
                                 communities: communities.into_iter().map(|c| c.community.0).collect(),
                                 ipv4_unicast: Some(Ipv4UnicastConfig{
@@ -875,14 +877,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: import_policy6,
                                     export_policy: export_policy6,
                                 }),
-                                vlan_id: peer.vlan_id.map(|x| x.0),
+                                vlan_id: peer.vlan_id,
                                 connect_retry_jitter: Some(JitterRange {
                                     max: 1.0,
                                     min: 0.75,
                                 }),
                                 deterministic_collision_resolution: false,
                                 idle_hold_jitter: None,
-                                router_lifetime: peer.router_lifetime.0,
+                                router_lifetime: peer.router_lifetime,
                             };
 
                             // update the stored vec if it exists, create a new on if it doesn't exist
@@ -1164,7 +1166,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let peer_addr_for_lookup = if peer.addr.is_unspecified() {
                             None
                         } else {
-                            Some(IpNetwork::from(peer.addr))
+                            Some(peer.addr)
                         };
 
                         peer.communities = match self
