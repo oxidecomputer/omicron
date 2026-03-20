@@ -100,8 +100,9 @@ use nexus_auth::authz;
 use nexus_db_model::BpTarget;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::BpTargetPruneable;
+use nexus_db_queries::db::datastore::KeepWhat;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::internal_api::background::BlueprintPrunerDetails;
 use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::DeletedBlueprint;
@@ -114,7 +115,6 @@ use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -190,19 +190,19 @@ async fn prune_blueprints(
     // Clamp `nkeep` at 3 on the low end.
     let nkeep = nkeep.clamp(3, usize::MAX);
     // Figure out the maximum version that we'd consider pruning.
-    let target_table_status =
-        determine_bp_target_rows_to_keep(opctx, datastore, nkeep, batch_size)
-            .await?;
-    let keep_version = match target_table_status.keep {
+    let pruneable = datastore
+        .bp_target_determine_pruneable(opctx, nkeep, batch_size)
+        .await?;
+    let keep_version = match &pruneable.keep {
         KeepWhat::All => {
             info!(
                 log,
                 "keeping all blueprints";
-                "nfound" => target_table_status.nfound,
-                "nscanned" => target_table_status.nscanned,
+                "nfound" => pruneable.nfound,
+                "nscanned" => pruneable.nscanned,
             );
             return Ok(BlueprintPrunerDetails {
-                nkept_by_policy: target_table_status.nfound,
+                nkept_by_policy: pruneable.nfound,
                 deleted: vec![],
                 ntargets_deleted: 0,
                 ntargets_removable: 0,
@@ -213,12 +213,12 @@ async fn prune_blueprints(
             info!(
                 log,
                 "will prune blueprints up through version";
-                "nfound" => target_table_status.nfound,
-                "nscanned" => target_table_status.nscanned,
+                "nfound" => pruneable.nfound,
+                "nscanned" => pruneable.nscanned,
                 "version" => version,
             );
 
-            version
+            *version
         }
     };
 
@@ -236,10 +236,9 @@ async fn prune_blueprints(
         datastore,
         log,
         keep_version,
-        nblueprints_found: target_table_status.nfound,
         max_delete_attempts,
         batch_size,
-        target_blueprint_id: target_table_status.target_id,
+        pruneable,
     };
     let mut pop = PruneTracker::new();
     let details = loop {
@@ -252,119 +251,6 @@ async fn prune_blueprints(
     Ok(details)
 }
 
-/// Summarizes the most recent rows of the `bp_target` table
-struct TargetTableStatus {
-    /// how many rows we scanned (starting at the end of the table)
-    nscanned: usize,
-    /// how many distinct blueprint ids we found
-    nfound: usize,
-    /// which rows to keep
-    keep: KeepWhat,
-    /// id of the latest target blueprint
-    target_id: BlueprintUuid,
-}
-
-/// Describes which versions in `bp_target` to keep, based on how many were
-/// requested to be kept and what we actually found in the table
-enum KeepWhat {
-    /// Keep everything because there aren't more than the requested number
-    All,
-    /// Keep only rows after (and including) the provided version
-    StartingFromVersion(u32),
-}
-
-/// Look at the most recent rows from the `bp_target` table and determine which
-/// version(s) can be deleted, assuming we want to keep `nkeep` distinct
-/// blueprints.
-async fn determine_bp_target_rows_to_keep(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    nkeep: usize,
-    batch_size: NonZeroU32,
-) -> Result<TargetTableStatus, anyhow::Error> {
-    // There are lots of ways to do this.  We'll do it by paging backwards
-    // through the table until we identify MAX_NKEEP distinct blueprints.
-    //
-    // Alternative considered: take MAX(version) and subtract MAX_NKEEP.  This
-    // is easy to do, but might result in keeping fewer blueprints if some of
-    // those rows just involve having enabled or disabled the target.  That's
-    // not a big deal while MAX_NKEEP = 1000, given how uncommon it is to
-    // enable/disable the target.  But it could also be *very* wrong if for
-    // whatever reason somebody has already removed rows near the end of the
-    // table.  This too should be impossible, but there's no need to rely on it.
-    //
-    // Alternative considered: have the database tell us the version that's
-    // `MAX_NKEEP` rows from the end.  e.g., something like
-    //
-    //   SELECT version FROM bp_target ORDER BY version DESC OFFSET `MAX_NKEEP`
-    //
-    // That query is somewhat expensive (well, proportional to `MAX_NKEEP`) and
-    // still has the problem of not keeping enough blueprints if some of these
-    // rows correspond to just enabling/disabling the current target.
-    //
-    // By comparison, the approach we pick here is just a paginated scan (no
-    // exotic SQL), each query's cost is proportional to the page size (rather
-    // than `MAX_NKEEP`), and it allows us to keep the right number of distinct
-    // blueprints.
-
-    let mut nscanned = 0;
-    let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> = BTreeSet::new();
-    let mut paginator =
-        Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
-    let mut last_version_seen = None;
-    let mut latest_target_id = None;
-
-    while let Some(p) = paginator.next() {
-        let records_batch = datastore
-            .bp_target_list_page(opctx, &p.current_pagparams())
-            .await
-            .context("fetching page of bp_target rows")?;
-        paginator = p.found_batch(&records_batch, &|m: &BpTarget| m.version);
-        for row in records_batch {
-            nscanned += 1;
-            let blueprint_id = BlueprintUuid::from(row.blueprint_id);
-            if latest_target_id.is_none() {
-                latest_target_id = Some(blueprint_id);
-            }
-
-            // This is pretty subtle: we don't want to stop as soon as we find
-            // the Nth distinct blueprint id.  That's because if we keep going,
-            // we might find more rows that refer to the same blueprint id (if
-            // someone toggled the enabled/disabled bit).  If we stopped here,
-            // the caller would see those rows and erroneously determine they
-            // could prune this blueprint, but we were counting on it being
-            // one of the ones being kept.
-            //
-            // Instead, we need to go far enough back to see a different
-            // blueprint id.
-            if blueprint_ids_to_keep.len() >= nkeep
-                && !blueprint_ids_to_keep.contains(&row.blueprint_id.into())
-            {
-                // unwrap(): cannot have entries in `blueprint_ids_to_keep`  if
-                // we have not seen any versions or a target id.
-                let version = last_version_seen.unwrap();
-                let target_id = latest_target_id.unwrap();
-                return Ok(TargetTableStatus {
-                    nscanned,
-                    nfound: blueprint_ids_to_keep.len(),
-                    keep: KeepWhat::StartingFromVersion(version),
-                    target_id,
-                });
-            }
-
-            blueprint_ids_to_keep.insert(row.blueprint_id.into());
-            last_version_seen = Some(*row.version);
-        }
-    }
-
-    return Ok(TargetTableStatus {
-        nscanned,
-        nfound: blueprint_ids_to_keep.len(),
-        keep: KeepWhat::All,
-        target_id: latest_target_id.ok_or_else(|| anyhow!("no rows found"))?,
-    });
-}
-
 /// Combines a bunch of state used by a bunch of the helpers below
 struct PruneArgs<'a> {
     opctx: &'a OpContext,
@@ -372,9 +258,8 @@ struct PruneArgs<'a> {
     log: &'a Logger,
     keep_version: u32,
     max_delete_attempts: usize,
-    nblueprints_found: usize,
     batch_size: NonZeroU32,
-    target_blueprint_id: BlueprintUuid,
+    pruneable: BpTargetPruneable,
 }
 
 /// Tracks progress and errors for the overall prune activation
@@ -423,7 +308,7 @@ impl PruneTracker {
 
     fn into_details(self, pargs: &PruneArgs) -> BlueprintPrunerDetails {
         BlueprintPrunerDetails {
-            nkept_by_policy: pargs.nblueprints_found,
+            nkept_by_policy: pargs.pruneable.nfound,
             deleted: self.deleted,
             ntargets_removable: self.ntargets_removable,
             ntargets_deleted: self.ntargets_deleted,
@@ -481,7 +366,7 @@ async fn prune_batch(
         // error because its contract is that there were no errors up through
         // `highest_deleted`.
         let result = datastore
-            .bp_target_delete_up_to(opctx, deleted_up_to)
+            .bp_target_delete_up_to(opctx, &pargs.pruneable, deleted_up_to)
             .await
             .with_context(|| {
                 format!("deleting bp_target rows up to {deleted_up_to}")
@@ -707,7 +592,7 @@ async fn prune_batch_blueprints_impl(
         // This condition should be impossible because of the way the table is
         // structured.  But if somehow we wound up with the target blueprint id,
         // bail out rather than light the system on fire.
-        if blueprint_id == pargs.target_blueprint_id {
+        if blueprint_id == pargs.pruneable.target_id {
             return ControlFlow::Break(batch.record_error(anyhow!(
                 "unexpectedly tried to delete target blueprint {}",
                 blueprint_id,
