@@ -14,14 +14,15 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
+use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
-use sled_agent_types::early_networking::{BgpPeerConfig, SpecifiedIpAddr};
-use sled_agent_types::early_networking::{
-    ImportExportPolicy, UnspecifiedIpError,
-};
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -173,6 +174,8 @@ pub struct BgpPeerView {
 pub enum BgpPeerConfigDataError {
     #[error("database contains illegal router lifetime value")]
     RouterLifetime(#[source] RouterLifetimeConfigError),
+    #[error("database contains illegal router peer address")]
+    Address(#[source] RouterPeerIpAddrError),
 }
 
 impl TryFrom<BgpPeerView> for BgpPeerConfig {
@@ -187,17 +190,35 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
 
         // Convert weaker database representation IP address back to a
         // strongly-typed `RouterPeerType`.
-        //
-        // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
-        // `::`) to be converted to `RouterPeerType::Unnumbered`. Should we
-        // add db constraints to squish that down to one (probably NULL)?
-        let addr =
-            match value.addr.map(|addr| SpecifiedIpAddr::try_from(addr.ip())) {
-                Some(Ok(ip)) => RouterPeerType::Numbered { ip },
-                Some(Err(UnspecifiedIpError)) | None => {
-                    RouterPeerType::Unnumbered { router_lifetime }
-                }
-            };
+        let addr = match value
+            .addr
+            .map(|addr| RouterPeerIpAddr::try_from(addr.ip()))
+        {
+            Some(Ok(ip)) => RouterPeerType::Numbered { ip },
+
+            // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
+            // `::`) to be converted to `RouterPeerType::Unnumbered`. Should we
+            // add db constraints to squish that down to one (probably NULL)?
+            Some(Err(RouterPeerIpAddrError {
+                err: InvalidIpAddrError::UnspecifiedAddress,
+                ..
+            }))
+            | None => RouterPeerType::Unnumbered { router_lifetime },
+
+            // We should never any other kind of invalid address as a peer -
+            // those will fail if we try to send them to maghemite anyway. Bail
+            // out as early as we can.
+            Some(Err(
+                err @ RouterPeerIpAddrError {
+                    err:
+                        InvalidIpAddrError::LoopbackAddress
+                        | InvalidIpAddrError::MulticastAddress
+                        | InvalidIpAddrError::Ipv4Broadcast
+                        | InvalidIpAddrError::Ipv6UnicastLinkLocal,
+                    ..
+                },
+            )) => return Err(BgpPeerConfigDataError::Address(err)),
+        };
 
         Ok(Self {
             asn: *value.asn,

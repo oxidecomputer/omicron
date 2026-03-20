@@ -8,8 +8,8 @@
 //!
 //! * Introduce [`SpecifiedIpNet`], a newtype wrapper around [`IpNet`] that does
 //!   not allow unspecified IP addresses.
-//! * Introduce [`SpecifiedIpAddr`], a newtype wrapper around [`IpAddr`] that
-//!   does not allow unspecified IP addresses.
+//! * Introduce [`RouterPeerIpAddr`], a newtype wrapper around [`IpAddr`] that
+//!   enforces several requirements for valid peer addresses.
 //! * Introduce [`UplinkAddress`], a stronger type for specifying
 //!   possibly-link-local IP nets. This is the new type of
 //!   [`UplinkAddressConfig::address`], which was previously an
@@ -35,11 +35,22 @@ use crate::v26::early_networking as v26;
 use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 
-#[derive(Debug, thiserror::Error)]
-#[error("IP address must not be the unspecified address (0.0.0.0 or ::)")]
-pub struct UnspecifiedIpError;
+#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
+pub enum InvalidIpAddrError {
+    #[error("unspecified address is not allowed")]
+    UnspecifiedAddress,
+    #[error("loopback address is not allowed")]
+    LoopbackAddress,
+    #[error("multicast addresses are not allowed")]
+    MulticastAddress,
+    #[error("IPv4 broadcast address is not allowed")]
+    Ipv4Broadcast,
+    #[error("IPv6 unicast link-local addresses are not allowed")]
+    Ipv6UnicastLinkLocal,
+}
 
 #[derive(
     Clone,
@@ -57,7 +68,7 @@ pub struct UnspecifiedIpError;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UplinkAddress {
     AddrConf,
-    Static { ip_net: SpecifiedIpNet },
+    Static { ip_net: UplinkIpNet },
 }
 
 #[derive(
@@ -81,7 +92,7 @@ pub enum RouterPeerType {
     },
     Numbered {
         /// IP address for numbered BGP peers.
-        ip: SpecifiedIpAddr,
+        ip: RouterPeerIpAddr,
     },
 }
 
@@ -89,7 +100,6 @@ pub enum RouterPeerType {
     Clone,
     Copy,
     Debug,
-    Deserialize,
     Serialize,
     PartialEq,
     Eq,
@@ -98,26 +108,55 @@ pub enum RouterPeerType {
     PartialOrd,
     Ord,
 )]
-#[serde(try_from = "IpNet", into = "IpNet")]
-pub struct SpecifiedIpNet(pub(crate) IpNet);
+// We'd also like to have `#[serde(try_from = "IpNet")]`, but that loses the
+// detailed error messages we produce. We manually implement Deserialize per
+// https://github.com/serde-rs/serde/issues/2211#issuecomment-1627628399.
+#[serde(into = "IpNet")]
+#[schemars(with = "IpNet")]
+pub struct UplinkIpNet(pub(crate) IpNet);
+
+impl<'de> Deserialize<'de> for UplinkIpNet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        IpNet::deserialize(deserializer).and_then(|ip_net| {
+            Self::try_from(ip_net).map_err(|err| {
+                serde::de::Error::custom(InlineErrorChain::new(&err))
+            })
+        })
+    }
+}
 
 // These conversion implementations are defined here instead of in
 // `crate::impls::*` because they're tied to how we derive `Deserialize` and
 // `Serialize`.
-impl From<SpecifiedIpNet> for IpNet {
-    fn from(value: SpecifiedIpNet) -> Self {
+impl From<UplinkIpNet> for IpNet {
+    fn from(value: UplinkIpNet) -> Self {
         value.0
     }
 }
 
-impl TryFrom<IpNet> for SpecifiedIpNet {
-    type Error = UnspecifiedIpError;
+#[derive(Debug, thiserror::Error)]
+#[error("invalid uplink ipnet {ip_net}")]
+pub struct UplinkIpNetError {
+    pub ip_net: IpNet,
+    #[source]
+    pub err: InvalidIpAddrError,
+}
+
+impl TryFrom<IpNet> for UplinkIpNet {
+    type Error = UplinkIpNetError;
 
     fn try_from(value: IpNet) -> Result<Self, Self::Error> {
-        if value.addr().is_unspecified() {
-            Err(UnspecifiedIpError)
-        } else {
-            Ok(Self(value))
+        // Apply the same validation rules we use for `RouterPeerIpAddr`. If the
+        // IP fails, steal the specific error out and wrap it in our error type
+        // instead.
+        match RouterPeerIpAddr::try_from(value.addr()) {
+            Ok(_) => Ok(Self(value)),
+            Err(RouterPeerIpAddrError { err, .. }) => {
+                Err(UplinkIpNetError { ip_net: value, err })
+            }
         }
     }
 }
@@ -126,7 +165,6 @@ impl TryFrom<IpNet> for SpecifiedIpNet {
     Clone,
     Copy,
     Debug,
-    Deserialize,
     Serialize,
     PartialEq,
     Eq,
@@ -135,27 +173,83 @@ impl TryFrom<IpNet> for SpecifiedIpNet {
     PartialOrd,
     Ord,
 )]
-#[serde(try_from = "IpAddr", into = "IpAddr")]
-pub struct SpecifiedIpAddr(pub(crate) IpAddr);
+// We'd also like to have `#[serde(try_from = "IpAddr")]`, but that loses the
+// detailed error messages we produce. We manually implement Deserialize per
+// https://github.com/serde-rs/serde/issues/2211#issuecomment-1627628399.
+#[serde(into = "IpAddr")]
+#[schemars(with = "IpAddr")]
+pub struct RouterPeerIpAddr(pub(crate) IpAddr);
+
+impl<'de> Deserialize<'de> for RouterPeerIpAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        IpAddr::deserialize(deserializer).and_then(|ip| {
+            Self::try_from(ip).map_err(|err| {
+                serde::de::Error::custom(InlineErrorChain::new(&err))
+            })
+        })
+    }
+}
 
 // As with `SpecifiedIpNet`, these conversion implementations are defined here
 // instead of in `crate::impls::*` because they're tied to how we derive
 // `Deserialize` and `Serialize`.
-impl From<SpecifiedIpAddr> for IpAddr {
-    fn from(value: SpecifiedIpAddr) -> Self {
+impl From<RouterPeerIpAddr> for IpAddr {
+    fn from(value: RouterPeerIpAddr) -> Self {
         value.0
     }
 }
 
-impl TryFrom<IpAddr> for SpecifiedIpAddr {
-    type Error = UnspecifiedIpError;
+#[derive(Debug, thiserror::Error)]
+#[error("invalid router peer address {ip}")]
+pub struct RouterPeerIpAddrError {
+    pub ip: IpAddr,
+    #[source]
+    pub err: InvalidIpAddrError,
+}
 
-    fn try_from(value: IpAddr) -> Result<Self, Self::Error> {
-        if value.is_unspecified() {
-            Err(UnspecifiedIpError)
-        } else {
-            Ok(Self(value))
-        }
+impl TryFrom<IpAddr> for RouterPeerIpAddr {
+    type Error = RouterPeerIpAddrError;
+
+    fn try_from(ip: IpAddr) -> Result<Self, Self::Error> {
+        let err = match ip {
+            IpAddr::V4(ipv4) => {
+                // Perform the same validity checks we require in maghemite.
+                // We deliberately do not flag Class E (240.0.0.0/4) or
+                // Link-Local (169.254.0.0/16) ranges as invalid, as some
+                // networks have deployed these as if they were standard
+                // routable unicast addresses, which we need to handle.
+                if ipv4.is_loopback() {
+                    InvalidIpAddrError::LoopbackAddress
+                } else if ipv4.is_multicast() {
+                    InvalidIpAddrError::MulticastAddress
+                } else if ipv4.is_broadcast() {
+                    InvalidIpAddrError::Ipv4Broadcast
+                } else if ipv4.is_unspecified() {
+                    InvalidIpAddrError::UnspecifiedAddress
+                } else {
+                    return Ok(Self(ip));
+                }
+            }
+            IpAddr::V6(ipv6) => {
+                // As above, perform validity checks we require in maghemite.
+                if ipv6.is_loopback() {
+                    InvalidIpAddrError::LoopbackAddress
+                } else if ipv6.is_multicast() {
+                    InvalidIpAddrError::MulticastAddress
+                } else if ipv6.is_unspecified() {
+                    InvalidIpAddrError::UnspecifiedAddress
+                } else if ipv6.is_unicast_link_local() {
+                    InvalidIpAddrError::Ipv6UnicastLinkLocal
+                } else {
+                    return Ok(Self(ip));
+                }
+            }
+        };
+
+        Err(RouterPeerIpAddrError { ip, err })
     }
 }
 
@@ -171,13 +265,31 @@ pub struct UplinkAddressConfig {
     pub vlan_id: Option<u16>,
 }
 
-impl From<v20::UplinkAddressConfig> for UplinkAddressConfig {
-    fn from(value: v20::UplinkAddressConfig) -> Self {
-        let address = match value.address.map(SpecifiedIpNet::try_from) {
+impl TryFrom<v20::UplinkAddressConfig> for UplinkAddressConfig {
+    type Error = UplinkIpNetError;
+
+    fn try_from(value: v20::UplinkAddressConfig) -> Result<Self, Self::Error> {
+        let address = match value.address.map(UplinkIpNet::try_from) {
             Some(Ok(ip_net)) => UplinkAddress::Static { ip_net },
-            Some(Err(UnspecifiedIpError)) | None => UplinkAddress::AddrConf,
+            None => UplinkAddress::AddrConf,
+            Some(Err(err)) => match err.err {
+                // v20::UplinkAddressConfig should have represented addrconf IPs
+                // as `None` (handled above), but it's also possible we could
+                // have an unspecified IP as a sentinel value; peel that error
+                // out and convert to addrconf. Forward any other kind of
+                // invalid address out as a failure - we should not have any of
+                // these, and if we do, we're going to reject them somewhere
+                // down the line at runtime anyway.
+                InvalidIpAddrError::UnspecifiedAddress => {
+                    UplinkAddress::AddrConf
+                }
+                InvalidIpAddrError::LoopbackAddress
+                | InvalidIpAddrError::MulticastAddress
+                | InvalidIpAddrError::Ipv4Broadcast
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal => return Err(err),
+            },
         };
-        Self { address, vlan_id: value.vlan_id }
+        Ok(Self { address, vlan_id: value.vlan_id })
     }
 }
 
@@ -218,20 +330,40 @@ pub struct PortConfig {
     pub tx_eq: Option<v1::TxEqConfig>,
 }
 
-impl From<v20::PortConfig> for PortConfig {
-    fn from(value: v20::PortConfig) -> Self {
-        Self {
+#[derive(Debug, thiserror::Error)]
+pub enum PortConfigConversionError {
+    #[error(transparent)]
+    UplinkIpNet(#[from] UplinkIpNetError),
+    #[error(transparent)]
+    RouterPeerIpAddr(#[from] RouterPeerIpAddrError),
+}
+
+impl TryFrom<v20::PortConfig> for PortConfig {
+    type Error = PortConfigConversionError;
+
+    fn try_from(value: v20::PortConfig) -> Result<Self, Self::Error> {
+        let addresses = value
+            .addresses
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect::<Result<_, _>>()?;
+        let bgp_peers = value
+            .bgp_peers
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
             routes: value.routes,
-            addresses: value.addresses.into_iter().map(From::from).collect(),
+            addresses,
             switch: value.switch,
             port: value.port,
             uplink_port_speed: value.uplink_port_speed,
             uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: value.bgp_peers.into_iter().map(From::from).collect(),
+            bgp_peers,
             autoneg: value.autoneg,
             lldp: value.lldp,
             tx_eq: value.tx_eq,
-        }
+        })
     }
 }
 
@@ -305,15 +437,31 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<u16>,
 }
 
-impl From<v20::BgpPeerConfig> for BgpPeerConfig {
-    fn from(value: v20::BgpPeerConfig) -> Self {
-        let addr = match SpecifiedIpAddr::try_from(value.addr) {
+impl TryFrom<v20::BgpPeerConfig> for BgpPeerConfig {
+    type Error = RouterPeerIpAddrError;
+
+    fn try_from(value: v20::BgpPeerConfig) -> Result<Self, Self::Error> {
+        let addr = match RouterPeerIpAddr::try_from(value.addr) {
             Ok(ip) => RouterPeerType::Numbered { ip },
-            Err(UnspecifiedIpError) => RouterPeerType::Unnumbered {
-                router_lifetime: value.router_lifetime,
+            Err(err) => match err.err {
+                // v20::BgpPeerConfig represented unnumbered peers as
+                // unspecified addresses; peel that error out and convert to an
+                // unnumbered address. Forward any other kind of invalid address
+                // out as a failure - we should not have any of these, and if we
+                // do, we're going to reject them somewhere down the line at
+                // runtime anyway.
+                InvalidIpAddrError::UnspecifiedAddress => {
+                    RouterPeerType::Unnumbered {
+                        router_lifetime: value.router_lifetime,
+                    }
+                }
+                InvalidIpAddrError::LoopbackAddress
+                | InvalidIpAddrError::MulticastAddress
+                | InvalidIpAddrError::Ipv4Broadcast
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal => return Err(err),
             },
         };
-        Self {
+        Ok(Self {
             asn: value.asn,
             port: value.port,
             addr,
@@ -332,7 +480,7 @@ impl From<v20::BgpPeerConfig> for BgpPeerConfig {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-        }
+        })
     }
 }
 
@@ -401,20 +549,24 @@ impl EarlyNetworkConfigBody {
     pub const SCHEMA_VERSION: u32 = 4;
 }
 
-// We're required to implement `TryFrom` for our deserialization machinery, but
-// this conversion is infallible.
 impl TryFrom<v26::EarlyNetworkConfigBody> for EarlyNetworkConfigBody {
     type Error = anyhow::Error;
 
     fn try_from(old: v26::EarlyNetworkConfigBody) -> Result<Self, Self::Error> {
         let old = old.rack_network_config;
 
+        let ports = old
+            .ports
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect::<Result<_, _>>()?;
+
         Ok(Self {
             rack_network_config: RackNetworkConfig {
                 rack_subnet: old.rack_subnet,
                 infra_ip_first: old.infra_ip_first,
                 infra_ip_last: old.infra_ip_last,
-                ports: old.ports.into_iter().map(From::from).collect(),
+                ports,
                 bgp: old.bgp,
                 bfd: old.bfd,
             },
@@ -473,9 +625,9 @@ mod tests {
                 None,
             ),
             (
-                Some("fe80:1234::/64".parse::<IpNet>().unwrap()),
+                Some("fd00:1234::/64".parse::<IpNet>().unwrap()),
                 UplinkAddress::Static {
-                    ip_net: "fe80:1234::/64".parse().unwrap(),
+                    ip_net: "fd00:1234::/64".parse().unwrap(),
                 },
                 None,
             ),
@@ -498,7 +650,7 @@ mod tests {
                 let expected_old =
                     v20::UplinkAddressConfig { address: expected_old, vlan_id };
 
-                assert_eq!(UplinkAddressConfig::from(old), new);
+                assert_eq!(UplinkAddressConfig::try_from(old).unwrap(), new);
                 assert_eq!(v20::UplinkAddressConfig::from(new), expected_old);
             }
         }
@@ -568,10 +720,10 @@ mod tests {
                 None,
             ),
             (
-                "fe80:1234::3".parse().unwrap(),
+                "fd00:1234::3".parse().unwrap(),
                 v20::RouterLifetimeConfig::default(),
                 RouterPeerType::Numbered {
-                    ip: "fe80:1234::3".parse().unwrap(),
+                    ip: "fd00:1234::3".parse().unwrap(),
                 },
                 None,
             ),
@@ -600,7 +752,7 @@ mod tests {
             let expected_old =
                 make_old_bgp_peer_config(expected_old_ip, old_router_lifetime);
 
-            assert_eq!(BgpPeerConfig::from(old), new);
+            assert_eq!(BgpPeerConfig::try_from(old).unwrap(), new);
             assert_eq!(v20::BgpPeerConfig::from(new), expected_old);
         }
     }

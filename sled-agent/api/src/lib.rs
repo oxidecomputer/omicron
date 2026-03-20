@@ -24,6 +24,7 @@ use sled_agent_types_versions::{
     v25, v26, v29,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -761,7 +762,16 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v20::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::uplink_ensure(rqctx, body.map(From::from)).await
+        Self::uplink_ensure(
+            rqctx,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
     }
 
     #[endpoint {

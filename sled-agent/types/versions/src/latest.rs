@@ -72,14 +72,16 @@ pub mod early_networking {
 
     pub use crate::v29::early_networking::BgpPeerConfig;
     pub use crate::v29::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v29::early_networking::InvalidIpAddrError;
     pub use crate::v29::early_networking::PortConfig;
     pub use crate::v29::early_networking::RackNetworkConfig;
+    pub use crate::v29::early_networking::RouterPeerIpAddr;
+    pub use crate::v29::early_networking::RouterPeerIpAddrError;
     pub use crate::v29::early_networking::RouterPeerType;
-    pub use crate::v29::early_networking::SpecifiedIpAddr;
-    pub use crate::v29::early_networking::SpecifiedIpNet;
-    pub use crate::v29::early_networking::UnspecifiedIpError;
     pub use crate::v29::early_networking::UplinkAddress;
     pub use crate::v29::early_networking::UplinkAddressConfig;
+    pub use crate::v29::early_networking::UplinkIpNet;
+    pub use crate::v29::early_networking::UplinkIpNetError;
     pub use crate::v29::early_networking::WriteNetworkConfigRequest;
 }
 

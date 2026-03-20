@@ -24,12 +24,12 @@ use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::SpecifiedIpAddr;
-use sled_agent_types::early_networking::SpecifiedIpNet;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::early_networking::UplinkIpNet;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -232,7 +232,7 @@ impl UserSpecifiedUplinkAddressConfig {
 
     /// Helper to construct a `UserSpecifiedUplinkAddressConfig` with a
     /// specified IP net and no VLAN ID.
-    pub fn without_vlan(ip_net: SpecifiedIpNet) -> Self {
+    pub fn without_vlan(ip_net: UplinkIpNet) -> Self {
         Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
     }
 }
@@ -243,7 +243,7 @@ mod uplink_address_serde {
     use super::{UplinkAddress, UserSpecifiedUplinkAddressConfig};
     use oxnet::IpNet;
     use serde::{Deserialize, Deserializer, Serializer};
-    use sled_agent_types::early_networking::SpecifiedIpNet;
+    use sled_agent_types::early_networking::UplinkIpNet;
 
     pub fn serialize<S: Serializer>(
         addr: &UplinkAddress,
@@ -272,7 +272,7 @@ mod uplink_address_serde {
                      expected `addrconf` or an IP network",
                 ))
             })?;
-            let ip_net = SpecifiedIpNet::try_from(ip_net).map_err(|_| {
+            let ip_net = UplinkIpNet::try_from(ip_net).map_err(|_| {
                 serde::de::Error::custom(format!(
                     "invalid uplink address `{s}`: \
                      uplink addresses cannot have an unspecified IP; \
@@ -354,7 +354,7 @@ pub struct UserSpecifiedBgpPeerConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum UserSpecifiedRouterPeerAddr {
     Unnumbered,
-    Numbered(SpecifiedIpAddr),
+    Numbered(RouterPeerIpAddr),
 }
 
 impl UserSpecifiedRouterPeerAddr {
@@ -402,7 +402,7 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
                      expected `unnumbered` or an IP address",
                 ))
             })?;
-            let ip = SpecifiedIpAddr::try_from(ip).map_err(|_| {
+            let ip = RouterPeerIpAddr::try_from(ip).map_err(|_| {
                 serde::de::Error::custom(format!(
                     "invalid BGP peer address `{s}`: \
                      peer address cannot be an unspecified IP; \

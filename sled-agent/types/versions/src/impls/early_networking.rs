@@ -5,6 +5,7 @@
 //! Implementations for early networking types.
 
 use crate::latest::early_networking::BgpPeerConfig;
+use crate::latest::early_networking::InvalidIpAddrError;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
@@ -12,13 +13,14 @@ use crate::latest::early_networking::PortFec;
 use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::RouterPeerIpAddr;
+use crate::latest::early_networking::RouterPeerIpAddrError;
 use crate::latest::early_networking::RouterPeerType;
-use crate::latest::early_networking::SpecifiedIpAddr;
-use crate::latest::early_networking::SpecifiedIpNet;
 use crate::latest::early_networking::SwitchSlot;
-use crate::latest::early_networking::UnspecifiedIpError;
 use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
+use crate::latest::early_networking::UplinkIpNet;
+use crate::latest::early_networking::UplinkIpNetError;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
@@ -123,47 +125,34 @@ impl std::fmt::Display for RouterLifetimeConfig {
     }
 }
 
-impl std::fmt::Display for SpecifiedIpNet {
+impl std::fmt::Display for UplinkIpNet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        IpNet::from(*self).fmt(f)
+    }
+}
+
+impl std::fmt::Display for RouterPeerIpAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl std::fmt::Display for SpecifiedIpAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl SpecifiedIpNet {
-    pub const fn addr(&self) -> SpecifiedIpAddr {
-        let ip = self.0.addr();
-
-        // We're bypassing `SpecifiedIpAddr::try_from()` so we can remain a
-        // `const` function, and because we enforce the same invariants. This
-        // check documents that fact and provides a runtime guard if we
-        // accidentally break it.
-        if ip.is_unspecified() {
-            panic!(
-                "SpecifiedIpNet contains an unspecified IP address \
-                 (this should be impossible!)"
-            );
-        }
-
-        SpecifiedIpAddr(ip)
+impl UplinkIpNet {
+    pub const fn addr(&self) -> IpAddr {
+        self.0.addr()
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SpecifiedIpNetParseError {
+pub enum UplinkIpNetParseError {
     #[error("invalid IP net")]
     IpNetParseError(#[from] IpNetParseError),
     #[error(transparent)]
-    UnspecifiedIpError(#[from] UnspecifiedIpError),
+    InvalidIpError(#[from] UplinkIpNetError),
 }
 
-impl FromStr for SpecifiedIpNet {
-    type Err = SpecifiedIpNetParseError;
+impl FromStr for UplinkIpNet {
+    type Err = UplinkIpNetParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let ip = IpNet::from_str(s)?;
@@ -173,15 +162,15 @@ impl FromStr for SpecifiedIpNet {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SpecifiedIpAddrParseError {
+pub enum RouterPeerIpAddrParseError {
     #[error(transparent)]
     AddrParseError(#[from] AddrParseError),
     #[error(transparent)]
-    UnspecifiedIpError(#[from] UnspecifiedIpError),
+    InvalidIpAddr(#[from] RouterPeerIpAddrError),
 }
 
-impl FromStr for SpecifiedIpAddr {
-    type Err = SpecifiedIpAddrParseError;
+impl FromStr for RouterPeerIpAddr {
+    type Err = RouterPeerIpAddrParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let ip = IpAddr::from_str(s)?;
@@ -249,12 +238,18 @@ impl UplinkAddress {
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
-    pub fn from_ip_net_treating_unspecified_as_link_local(
+    pub fn try_from_ip_net_treating_unspecified_as_link_local(
         ip_net: IpNet,
-    ) -> Self {
-        match SpecifiedIpNet::try_from(ip_net) {
-            Ok(ip_net) => Self::Static { ip_net },
-            Err(UnspecifiedIpError) => Self::AddrConf,
+    ) -> Result<Self, InvalidIpAddrError> {
+        match UplinkIpNet::try_from(ip_net) {
+            Ok(ip_net) => Ok(Self::Static { ip_net }),
+            Err(err) => match err.err {
+                InvalidIpAddrError::UnspecifiedAddress => Ok(Self::AddrConf),
+                InvalidIpAddrError::LoopbackAddress
+                | InvalidIpAddrError::MulticastAddress
+                | InvalidIpAddrError::Ipv4Broadcast
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal => Err(err.err),
+            },
         }
     }
 }
@@ -262,7 +257,7 @@ impl UplinkAddress {
 impl UplinkAddressConfig {
     /// Helper to construct an `UplinkAddressConfig` with a specified IP net and
     /// no VLAN ID.
-    pub fn without_vlan(ip_net: SpecifiedIpNet) -> Self {
+    pub fn without_vlan(ip_net: UplinkIpNet) -> Self {
         Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
     }
 
@@ -344,8 +339,9 @@ impl fmt::Display for PortFec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
+    use crate::v29::early_networking::InvalidIpAddrError;
     use oxnet::Ipv4Net;
+    use proptest::prelude::*;
     use serde::{Deserialize, Serialize};
     use test_strategy::proptest;
 
@@ -354,16 +350,16 @@ mod tests {
         for (address, expected_addr) in [
             (
                 UplinkAddress::Static {
-                    ip_net: SpecifiedIpNet::try_from(IpNet::V6(
-                        Ipv6Net::new("ff80::123".parse().unwrap(), 16).unwrap(),
+                    ip_net: UplinkIpNet::try_from(IpNet::V6(
+                        Ipv6Net::new("fd80::123".parse().unwrap(), 16).unwrap(),
                     ))
                     .unwrap(),
                 },
-                "ff80::123/16",
+                "fd80::123/16",
             ),
             (
                 UplinkAddress::Static {
-                    ip_net: SpecifiedIpNet::try_from(IpNet::V4(
+                    ip_net: UplinkIpNet::try_from(IpNet::V4(
                         Ipv4Net::new("10.0.0.1".parse().unwrap(), 8).unwrap(),
                     ))
                     .unwrap(),
@@ -386,96 +382,230 @@ mod tests {
         }
     }
 
+    // We want our proptests below to hit all the invalid categories of IPs, so
+    // define our own input mapping that chooses from all the particular
+    // categories we want to reject.
+    //
+    // Returns an IP and the expected kind of error we should get if we try to
+    // parse it, if any.
+    fn arb_ip_addr()
+    -> impl Strategy<Value = (IpAddr, Option<InvalidIpAddrError>)> {
+        prop_oneof![
+            // ipv4 unspecified
+            Just((
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                Some(InvalidIpAddrError::UnspecifiedAddress)
+            )),
+            // ipv6 unspecified
+            Just((
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                Some(InvalidIpAddrError::UnspecifiedAddress)
+            )),
+            // ipv4 loopback
+            Just((
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                Some(InvalidIpAddrError::LoopbackAddress)
+            )),
+            // ipv6 loopback
+            Just((
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+                Some(InvalidIpAddrError::LoopbackAddress)
+            )),
+            // ipv4 multicast: 224.0.0.0 – 239.255.255.255
+            (224u8..=239u8, any::<[u8; 3]>()).prop_map(|(hi, rest)| {
+                (
+                    IpAddr::V4(Ipv4Addr::new(hi, rest[0], rest[1], rest[2])),
+                    Some(InvalidIpAddrError::MulticastAddress),
+                )
+            }),
+            // ipv6 multicast: ff00::/8
+            any::<[u8; 15]>().prop_map(|rest| {
+                let mut octets = [0u8; 16];
+                octets[0] = 0xff;
+                octets[1..].copy_from_slice(&rest);
+                (
+                    IpAddr::V6(Ipv6Addr::from(octets)),
+                    Some(InvalidIpAddrError::MulticastAddress),
+                )
+            }),
+            // ipv4 broadcast
+            Just((
+                IpAddr::V4(Ipv4Addr::BROADCAST),
+                Some(InvalidIpAddrError::Ipv4Broadcast)
+            )),
+            // ipv6 unicast link-local: fe80::/10
+            any::<[u8; 15]>().prop_map(|rest| {
+                let mut octets = [0u8; 16];
+                octets[0] = 0xfe;
+                octets[1] = 0x80 | (rest[0] & 0x3f);
+                octets[2..].copy_from_slice(&rest[1..]);
+                (
+                    IpAddr::V6(Ipv6Addr::from(octets)),
+                    Some(InvalidIpAddrError::Ipv6UnicastLinkLocal),
+                )
+            }),
+            // any other ipv4 (filtered)
+            any::<[u8; 4]>()
+                .prop_map(|b| Ipv4Addr::from(b))
+                .prop_filter(
+                    "not unspecified, loopback, multicast, or broadcast",
+                    |ip| {
+                        !ip.is_unspecified()
+                            && !ip.is_loopback()
+                            && !ip.is_multicast()
+                            && !ip.is_broadcast()
+                    }
+                )
+                .prop_map(IpAddr::V4)
+                .prop_map(|ip| (ip, None)),
+            // any other ipv6 (filtered)
+            any::<[u8; 16]>()
+                .prop_map(|b| Ipv6Addr::from(b))
+                .prop_filter(
+                    "not unspecified, loopback, multicast, or link-local",
+                    |ip| {
+                        !ip.is_unspecified()
+                            && !ip.is_loopback()
+                            && !ip.is_multicast()
+                            && !ip.is_unicast_link_local()
+                    }
+                )
+                .prop_map(IpAddr::V6)
+                .prop_map(|ip| (ip, None)),
+        ]
+    }
+
     #[proptest]
-    fn test_specified_ip_parsing(ip: IpAddr) {
-        // Test both SpecifiedIpAddr and SpecifiedIpNet; we don't bother
+    fn test_ip_parsing(
+        #[strategy(arb_ip_addr())] input: (IpAddr, Option<InvalidIpAddrError>),
+    ) {
+        let (ip, expected_err) = input;
+        // Test both RouterPeerIpAddr and UplinkIpNet; we don't bother
         // proptesting the network side of `IpNet` because that's not relevant
         // to any of our specific parsing.
         let ip_net = IpNet::new(ip, 24).unwrap();
         let ip_string = ip.to_string();
         let ip_net_string = ip_net.to_string();
-        let ip_result = ip_string.parse::<SpecifiedIpAddr>();
-        let ip_net_result = ip_net_string.parse::<SpecifiedIpNet>();
+        let ip_result = ip_string.parse::<RouterPeerIpAddr>();
+        let ip_net_result = ip_net_string.parse::<UplinkIpNet>();
 
-        if ip.is_unspecified() {
-            assert_matches!(
-                ip_result,
-                Err(SpecifiedIpAddrParseError::UnspecifiedIpError(
-                    UnspecifiedIpError
-                ))
-            );
-            assert_matches!(
-                ip_net_result,
-                Err(SpecifiedIpNetParseError::UnspecifiedIpError(
-                    UnspecifiedIpError
-                ))
-            );
+        if let Some(expected_err) = expected_err {
+            let ip_err = ip_result.expect_err("parsing failed");
+            match ip_err {
+                RouterPeerIpAddrParseError::AddrParseError(_) => {
+                    panic!("unexpected error {ip_err:?}")
+                }
+                RouterPeerIpAddrParseError::InvalidIpAddr(ip_err) => {
+                    assert_eq!(ip_err.ip, ip);
+                    assert_eq!(ip_err.err, expected_err);
+                }
+            }
+            let ip_net_err = ip_net_result.expect_err("parsing failed");
+            match ip_net_err {
+                UplinkIpNetParseError::IpNetParseError(_) => {
+                    panic!("unexpected error {ip_net_err:?}")
+                }
+                UplinkIpNetParseError::InvalidIpError(ip_net_err) => {
+                    assert_eq!(ip_net_err.ip_net, ip_net);
+                    assert_eq!(ip_net_err.err, expected_err);
+                }
+            }
         } else {
             let parsed_ip = ip_result.expect("parsing succeeded");
             assert_eq!(parsed_ip.0, ip);
             let parsed_ip_net = ip_net_result.expect("parsing succeeded");
-            assert_eq!(parsed_ip_net.0, ip_net);
+            assert_eq!(IpNet::from(parsed_ip_net), ip_net);
         }
     }
 
     #[proptest]
-    fn test_specified_ip_serialization(ip: IpAddr) {
-        // Test both SpecifiedIpAddr and SpecifiedIpNet; we don't bother
-        // proptesting the network side of `IpNet` because that's not relevant
-        // to any of our specific serialization.
+    fn test_router_peer_ip_addr_serialization(
+        #[strategy(arb_ip_addr())] input: (IpAddr, Option<InvalidIpAddrError>),
+    ) {
+        let (ip, expected_err) = input;
+
         #[derive(Debug, Serialize, Deserialize)]
-        struct PlainWrapper {
+        struct WrapIp {
             ip: IpAddr,
+        }
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct WrapRouterIp {
+            ip: RouterPeerIpAddr,
+        }
+
+        let wrapped = WrapIp { ip };
+
+        let jsonified = serde_json::to_string(&wrapped).unwrap();
+        let tomlified = toml::to_string(&wrapped).unwrap();
+
+        let json_result = serde_json::from_str::<WrapRouterIp>(&jsonified);
+        let toml_result = toml::from_str::<WrapRouterIp>(&tomlified);
+
+        if let Some(expected_err) = expected_err {
+            let expected_err = expected_err.to_string();
+            let err =
+                json_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
+            );
+            let err =
+                toml_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
+            );
+        } else {
+            let json_result = json_result.expect("deserialization succeeded");
+            assert_eq!(json_result.ip.0, ip);
+            let toml_result = toml_result.expect("deserialization succeeded");
+            assert_eq!(toml_result.ip.0, ip);
+        }
+    }
+
+    #[proptest]
+    fn test_uplink_ip_net_serialization(
+        #[strategy(arb_ip_addr())] input: (IpAddr, Option<InvalidIpAddrError>),
+    ) {
+        let (ip, expected_err) = input;
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct WrapIpNet {
             ip_net: IpNet,
         }
         #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-        struct SpecifiedWrapper {
-            ip: SpecifiedIpAddr,
-            ip_net: SpecifiedIpNet,
+        struct WrapUplinkIpNet {
+            ip_net: UplinkIpNet,
         }
 
         let ip_net = IpNet::new(ip, 24).unwrap();
-        let plain_wrapped = PlainWrapper { ip, ip_net };
+        let wrapped = WrapIpNet { ip_net };
 
-        let jsonified = serde_json::to_string(&plain_wrapped).unwrap();
-        let tomlified = toml::to_string(&plain_wrapped).unwrap();
+        let jsonified = serde_json::to_string(&wrapped).unwrap();
+        let tomlified = toml::to_string(&wrapped).unwrap();
 
-        if ip.is_unspecified() {
-            // We should fail to deserialize unspecified IPs...
-            let json_result =
-                serde_json::from_str::<SpecifiedWrapper>(&jsonified);
-            let toml_result = toml::from_str::<SpecifiedWrapper>(&tomlified);
-            assert_matches!(
-                json_result,
-                Err(err)
-                    if err
-                        .to_string()
-                        .contains("must not be the unspecified address")
+        let json_result = serde_json::from_str::<WrapUplinkIpNet>(&jsonified);
+        let toml_result = toml::from_str::<WrapUplinkIpNet>(&tomlified);
+
+        if let Some(expected_err) = expected_err {
+            let expected_err = expected_err.to_string();
+            let err =
+                json_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
             );
-            assert_matches!(
-                toml_result,
-                Err(err)
-                    if err
-                        .to_string()
-                        .contains("must not be the unspecified address")
+            let err =
+                toml_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
             );
         } else {
-            // ... but successfully deserialize specified ones. And our
-            // serialized form should exactly match the wrapped types.
-            let json_result =
-                serde_json::from_str::<SpecifiedWrapper>(&jsonified)
-                    .expect("deserialized");
-            let toml_result = toml::from_str::<SpecifiedWrapper>(&tomlified)
-                .expect("deserialized");
-
-            assert_eq!(json_result, toml_result);
-            assert_eq!(json_result.ip.0, ip);
-            assert_eq!(json_result.ip_net.0, ip_net);
-
-            let jsonified2 = serde_json::to_string(&json_result).unwrap();
-            let tomlified2 = toml::to_string(&json_result).unwrap();
-            assert_eq!(jsonified, jsonified2);
-            assert_eq!(tomlified, tomlified2);
+            let json_result = json_result.expect("deserialization succeeded");
+            assert_eq!(IpNet::from(json_result.ip_net), ip_net);
+            let toml_result = toml_result.expect("deserialization succeeded");
+            assert_eq!(IpNet::from(toml_result.ip_net), ip_net);
         }
     }
 }
