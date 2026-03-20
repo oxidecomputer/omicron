@@ -212,7 +212,7 @@ impl UplinkAddress {
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
-    pub fn addr_squashing_link_local_to_unspecified(&self) -> IpAddr {
+    pub fn ip_squashing_addrconf_to_unspecified(&self) -> IpAddr {
         match self {
             UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             UplinkAddress::Static { ip_net } => ip_net.addr().into(),
@@ -224,7 +224,7 @@ impl UplinkAddress {
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
-    pub fn ip_net_squashing_link_local_to_unspecified(&self) -> IpNet {
+    pub fn ip_net_squashing_addrconf_to_unspecified(&self) -> IpNet {
         match *self {
             UplinkAddress::AddrConf => {
                 IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
@@ -238,7 +238,7 @@ impl UplinkAddress {
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
-    pub fn try_from_ip_net_treating_unspecified_as_link_local(
+    pub fn try_from_ip_net_treating_unspecified_as_addrconf(
         ip_net: IpNet,
     ) -> Result<Self, InvalidIpAddrError> {
         match UplinkIpNet::try_from(ip_net) {

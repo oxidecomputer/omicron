@@ -1108,7 +1108,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         .addresses
                         .iter()
                         .map(|a| {
-                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_link_local(a.address)?;
+                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
                              Ok(UplinkAddressConfig {
                                  address,
                                  vlan_id: a.vlan_id
@@ -1746,7 +1746,7 @@ fn uplinks(
             .addresses
             .iter()
             .map(|a| {
-                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_link_local(a.address)?;
+                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
                  Ok(UplinkAddressConfig {
                      address,
                      vlan_id: a.vlan_id

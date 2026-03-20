@@ -556,7 +556,7 @@ impl super::Nexus {
                     // API (omicron#9832).
                     address: a
                         .address
-                        .ip_net_squashing_link_local_to_unspecified(),
+                        .ip_net_squashing_addrconf_to_unspecified(),
                     vlan_id: a.vlan_id,
                 })
                 .collect();

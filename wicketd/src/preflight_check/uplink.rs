@@ -845,7 +845,7 @@ fn build_port_settings(
     let addrs = uplink
         .addresses
         .iter()
-        .map(|a| a.address.addr_squashing_link_local_to_unspecified())
+        .map(|a| a.address.ip_squashing_addrconf_to_unspecified())
         .collect();
 
     port_settings.links.insert(
