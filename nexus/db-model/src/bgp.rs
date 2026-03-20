@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbSwitchSlot;
 use crate::{SqlU8, SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
@@ -13,8 +14,14 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfigError;
 use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 #[derive(
@@ -142,7 +149,7 @@ impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
 #[derive(Queryable, Selectable, Clone, Debug, Serialize, Deserialize)]
 #[diesel(table_name = bgp_peer_view)]
 pub struct BgpPeerView {
-    pub switch_location: String,
+    pub switch_slot: DbSwitchSlot,
     pub port_name: String,
     pub addr: Option<IpNetwork>,
     pub asn: SqlU32,
@@ -152,11 +159,60 @@ pub struct BgpPeerView {
     pub idle_hold_time: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
     pub md5_auth_key: Option<String>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BgpPeerConfigDataError {
+    #[error("database contains illegal router lifetime value")]
+    RouterLifetime(#[source] RouterLifetimeConfigError),
+}
+
+impl TryFrom<BgpPeerView> for BgpPeerConfig {
+    type Error = BgpPeerConfigDataError;
+
+    fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
+        // For unnumbered peers (addr is None), use UNSPECIFIED
+        let addr = match value.addr {
+            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            Some(addr) => addr.ip(),
+        };
+
+        // TODO-correctness We should have db constraints to ensure these can't
+        // fail.
+        let router_lifetime =
+            RouterLifetimeConfig::new(value.router_lifetime.0)
+                .map_err(BgpPeerConfigDataError::RouterLifetime)?;
+        let min_ttl = value.min_ttl.map(|val| val.0);
+
+        Ok(Self {
+            asn: *value.asn,
+            port: value.port_name,
+            addr,
+            hold_time: Some(value.hold_time.0.into()),
+            idle_hold_time: Some(value.idle_hold_time.0.into()),
+            delay_open: Some(value.delay_open.0.into()),
+            connect_retry: Some(value.connect_retry.0.into()),
+            keepalive: Some(value.keepalive.0.into()),
+            enforce_first_as: value.enforce_first_as,
+            local_pref: value.local_pref.map(|x| x.into()),
+            md5_auth_key: value.md5_auth_key,
+            min_ttl,
+            multi_exit_discriminator: value
+                .multi_exit_discriminator
+                .map(|x| x.into()),
+            remote_asn: value.remote_asn.map(|x| x.into()),
+            communities: Vec::new(),
+            allowed_export: ImportExportPolicy::NoFiltering,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            vlan_id: value.vlan_id.map(|x| x.0),
+            router_lifetime,
+        })
+    }
 }

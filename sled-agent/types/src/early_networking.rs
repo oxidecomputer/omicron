@@ -5,3 +5,10 @@
 //! Types for network setup required to bring up the control plane.
 
 pub use sled_agent_types_versions::latest::early_networking::*;
+
+// Early network serialization/deserialization is complex enough we stash it off
+// in its own module.
+mod serialization;
+
+pub use self::serialization::EarlyNetworkConfigEnvelope;
+pub use self::serialization::EarlyNetworkConfigEnvelopeError;

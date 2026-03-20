@@ -76,7 +76,7 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -117,49 +117,52 @@ pub enum Error {
     #[error("Could not find boot disk")]
     BootDiskNotFound,
 
-    #[error("Configuration error: {0}")]
+    #[error("Configuration error")]
     Config(#[from] crate::config::ConfigError),
 
-    #[error("Error setting up backing filesystems: {0}")]
+    #[error("Error setting up backing filesystems")]
     BackingFs(#[from] crate::backing_fs::BackingFsError),
 
-    #[error("Error setting up swap device: {0}")]
+    #[error("Error setting up swap device")]
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
 
-    #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(illumos_utils::ExecutionError),
+    #[error("Failed to acquire etherstub")]
+    Etherstub(#[source] illumos_utils::ExecutionError),
 
-    #[error("Failed to acquire etherstub VNIC: {0}")]
-    EtherstubVnic(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to acquire etherstub VNIC")]
+    EtherstubVnic(#[source] illumos_utils::dladm::CreateVnicError),
 
-    #[error("Bootstrap error: {0}")]
+    #[error("Bootstrap error")]
     Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
-    #[error("Failed to remove Omicron address: {0}")]
+    #[error("Failed to remove Omicron address")]
     DeleteAddress(#[from] illumos_utils::ExecutionError),
 
-    #[error("Failed to operate on underlay device: {0}")]
+    #[error("Failed to operate on underlay device")]
     Underlay(#[from] underlay::Error),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
-    #[error("Failed to create Sled Subnet: {err}")]
-    SledSubnet { err: illumos_utils::zone::EnsureGzAddressError },
+    #[error("Failed to create Sled Subnet")]
+    SledSubnet {
+        #[source]
+        err: illumos_utils::zone::EnsureGzAddressError,
+    },
 
-    #[error("Error managing instances: {0}")]
+    #[error("Error managing instances")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error updating: {0}")]
+    #[error("Error updating")]
     Download(#[from] crate::updates::Error),
 
-    #[error("Error managing guest networking: {0}")]
+    #[error("Error managing guest networking")]
     Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Error monitoring hardware: {0}")]
     Hardware(String),
 
-    #[error("Error resolving DNS name: {0}")]
+    #[error("Error resolving DNS name")]
     ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error(transparent)]
@@ -168,19 +171,19 @@ pub enum Error {
     #[error(transparent)]
     EarlyNetworkError(#[from] EarlyNetworkSetupError),
 
-    #[error("Bootstore Error: {0}")]
+    #[error("Bootstore Error")]
     Bootstore(#[from] bootstore::NodeRequestError),
 
-    #[error("Failed to deserialize early network config: {0}")]
-    EarlyNetworkDeserialize(serde_json::Error),
+    #[error("Failed to deserialize early network config")]
+    EarlyNetworkDeserialize(#[source] serde_json::Error),
 
     #[error("Support bundle error: {0}")]
     SupportBundle(String),
 
-    #[error("Zone bundle error: {0}")]
+    #[error("Zone bundle error")]
     ZoneBundle(#[from] BundleError),
 
-    #[error("Metrics error: {0}")]
+    #[error("Metrics error")]
     Metrics(#[from] crate::metrics::Error),
 
     #[error("Expected revision to fit in a u32, but found {0}")]
@@ -202,7 +205,7 @@ impl From<Error> for omicron_common::api::external::Error {
             // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
-                internal_message: err.to_string(),
+                internal_message: InlineErrorChain::new(&err).to_string(),
             },
         }
     }
@@ -228,7 +231,9 @@ impl From<Error> for dropshot::HttpError {
                     err @ crate::instance::Error::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
-                            err.to_string(),
+                            // InlineErrorChain isn't really necessary here, but include it anyway,
+                            // in case the code that returns it starts using #[from] one day.
+                            InlineErrorChain::new(&err).to_string(),
                         )
                     }
                     crate::instance::Error::Propolis(propolis_error) => {
@@ -269,24 +274,33 @@ impl From<Error> for dropshot::HttpError {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
-                            instance_error.to_string(),
+                            // InlineErrorChain isn't strictly necessary for this type of error,
+                            // but we might as well be consistent, in case that changes in the
+                            // future.
+                            InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
                     err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
                         HttpError::for_client_error(
                             Some(SUBNET_ALREADY_ATTACHED.to_string()),
                             ClientErrorStatusCode::CONFLICT,
-                            err.to_string(),
+                            // As above, InlineErrorChain isn't strictly necessary here.
+                            InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(e.to_string()),
+                    e => HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
-                e.to_string(),
+                // NoSuchVmm has no source error, so it's currently not necessary to use a
+                // chain-logging adapter here, but if that changes in the future, the compiler
+                // won't complain.
+                InlineErrorChain::new(&e).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
@@ -307,13 +321,17 @@ impl From<Error> for dropshot::HttpError {
                         inner.to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(err.to_string()),
+                _ => HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                ),
             },
             Error::Services(err) => {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(e.to_string()),
+            e => HttpError::for_internal_error(
+                InlineErrorChain::new(&e).to_string(),
+            ),
         }
     }
 }
@@ -387,7 +405,7 @@ struct SledAgentInner {
     rot_attestor: RotAttestationHandle,
 
     // The rack network config provided at RSS time.
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -614,7 +632,11 @@ impl SledAgent {
                 .bootstore
                 .get_network_config()
                 .await
-                .map_err(|err| BackoffError::transient(err.to_string()))?
+                .map_err(|err| {
+                    BackoffError::transient(
+                        InlineErrorChain::new(&err).to_string(),
+                    )
+                })?
                 .ok_or_else(|| {
                     BackoffError::transient(
                         "Missing early network config in bootstore".to_string(),
@@ -622,15 +644,15 @@ impl SledAgent {
                 })?;
 
             let early_network_config =
-                EarlyNetworkConfig::deserialize_bootstore_config(
-                    &log,
+                EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
                     &serialized_config,
                 )
+                .and_then(|envelope| envelope.deserialize_body())
                 .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            Ok(early_network_config.body.rack_network_config)
+            Ok(early_network_config.rack_network_config)
         };
-        let rack_network_config: Option<RackNetworkConfig> =
+        let rack_network_config: RackNetworkConfig =
             retry_notify::<_, String, _, _, _, _>(
                 retry_policy_internal_service_aggressive(),
                 get_network_config,
@@ -1199,11 +1221,8 @@ impl SledAgent {
         let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let smf_services_in_maintenance = self
-            .inner
-            .health_monitor
-            .to_inventory()
-            .smf_services_in_maintenance;
+        let smf_services_enabled_not_online =
+            self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1230,7 +1249,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            smf_services_in_maintenance,
+            smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
         })
     }
@@ -1369,7 +1388,9 @@ impl SledAgent {
             additional_options: None,
         })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
             name: &delegated_zvol.volume_name(),
@@ -1472,7 +1493,9 @@ impl SledAgent {
                 DestroyDatasetErrorVariant::NotFound => Ok(()),
 
                 DestroyDatasetErrorVariant::Other(e) => {
-                    Err(HttpError::for_internal_error(e.to_string()))
+                    Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ))
                 }
             },
         }
@@ -1542,7 +1565,7 @@ pub enum AddSledError {
     DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
-    #[error("Failed to initialize {sled_id}: {err}")]
+    #[error("Failed to initialize {sled_id}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
         #[source]

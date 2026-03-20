@@ -131,16 +131,20 @@ const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
-    #[error("Failed to initialize CockroachDb: {err}")]
+    #[error("Failed to initialize CockroachDb")]
     CockroachInit {
         #[source]
         err: RunCommandError,
     },
 
-    #[error("Cannot serialize TOML to file: {path}: {err}")]
-    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
+    #[error("Cannot serialize TOML to file: {path}")]
+    TomlSerialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: toml::ser::Error,
+    },
 
-    #[error("Failed to perform I/O: {message}: {err}")]
+    #[error("Failed to perform I/O: {message}")]
     Io {
         message: String,
         #[source]
@@ -153,16 +157,16 @@ pub enum Error {
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
 
-    #[error("Switch zone error: {0}")]
-    SwitchZone(anyhow::Error),
+    #[error("Switch zone error")]
+    SwitchZone(#[source] anyhow::Error),
 
-    #[error("Failed to issue SMF command: {0}")]
+    #[error("Failed to issue SMF command")]
     SmfCommand(#[from] illumos_utils::smf_helper::Error),
 
     #[error("{}", display_zone_init_errors(.0))]
     ZoneInitialize(Vec<(String, Box<Error>)>),
 
-    #[error("Failed to do '{intent}' by running command in zone: {err}")]
+    #[error("Failed to do '{intent}' by running command in zone")]
     ZoneCommand {
         intent: String,
         #[source]
@@ -186,7 +190,7 @@ pub enum Error {
         err: Box<illumos_utils::zone::DeleteAddressError>,
     },
 
-    #[error("Failed to boot zone: {0}")]
+    #[error("Failed to boot zone")]
     ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
@@ -198,43 +202,45 @@ pub enum Error {
     #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
-    #[error("Failed to access underlay device: {0}")]
+    #[error("Failed to access underlay device")]
     Underlay(#[from] underlay::Error),
 
-    #[error("Failed to create OPTE port for service {}: {err}", service.report_str())]
+    #[error("Failed to create OPTE port for service {}", service.report_str())]
     ServicePortCreation {
         service: ZoneKind,
+        #[source]
         err: Box<illumos_utils::opte::Error>,
     },
 
-    #[error("Error contacting dpd: {0}")]
+    #[error("Error contacting dpd")]
     DpdError(#[from] DpdError<DpdTypes::Error>),
 
-    #[error("Failed to create Vnic in the switch zone: {0}")]
-    SwitchZoneVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create Vnic in the switch zone")]
+    SwitchZoneVnicCreation(#[source] illumos_utils::dladm::CreateVnicError),
 
-    #[error("Failed to add GZ addresses: {message}: {err}")]
+    #[error("Failed to add GZ addresses: {message}")]
     GzAddress {
         message: String,
+        #[source]
         err: illumos_utils::zone::EnsureGzAddressError,
     },
 
     #[error("Could not initialize service {service} as requested: {message}")]
     BadServiceRequest { service: String, message: String },
 
-    #[error("Failed to get address: {0}")]
+    #[error("Failed to get address")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
 
-    #[error("Execution error: {0}")]
+    #[error("Execution error")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
 
-    #[error("Error resolving DNS name: {0}")]
+    #[error("Error resolving DNS name")]
     ResolveError(#[from] internal_dns_resolver::ResolveError),
 
-    #[error("Serde error: {0}")]
+    #[error("Serde error")]
     SerdeError(#[from] serde_json::Error),
 
     #[error("Sidecar revision error")]
@@ -255,8 +261,8 @@ pub enum Error {
     #[error("Requested generation {0} with different zones than before")]
     RequestedConfigConflicts(Generation),
 
-    #[error("Error migrating old-format services ledger: {0:#}")]
-    ServicesMigration(anyhow::Error),
+    #[error("Error migrating old-format services ledger")]
+    ServicesMigration(#[source] anyhow::Error),
 
     #[error(
         "Invalid filesystem_pool in new zone config: \
@@ -276,7 +282,7 @@ pub enum Error {
 
     #[error(
         "Couldn't find requested zone image ({hash}) for \
-        {zone_kind:?} {id} in artifact store: {err}"
+        {zone_kind:?} {id} in artifact store"
     )]
     ZoneArtifactNotFound {
         hash: ArtifactHash,
@@ -303,14 +309,19 @@ impl From<Error> for omicron_common::api::external::Error {
             | Error::InvalidFilesystemPoolZoneConfig { .. }
             | Error::ZoneIsRunningOnRamdisk { .. } => {
                 omicron_common::api::external::Error::invalid_request(
-                    &err.to_string(),
+                    // InlineErrorChain is not strictly necessary here, but use it in case that
+                    // changes later on.
+                    &InlineErrorChain::new(&err).to_string(),
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                omicron_common::api::external::Error::conflict(&err.to_string())
+                // InlineErrorChain also isn't strictly necessary here.
+                omicron_common::api::external::Error::conflict(
+                    InlineErrorChain::new(&err).to_string(),
+                )
             }
             _ => omicron_common::api::external::Error::InternalError {
-                internal_message: err.to_string(),
+                internal_message: InlineErrorChain::new(&err).to_string(),
             },
         }
     }
@@ -321,20 +332,25 @@ impl From<Error> for omicron_common::api::external::Error {
 #[derive(Debug, Clone)]
 pub struct UnderlayInfo {
     pub ip: Ipv6Addr,
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: RackNetworkConfig,
 }
 
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     if errors.len() == 1 {
         return format!(
             "Failed to initialize zone: {} errored with {}",
-            errors[0].0, errors[0].1
+            errors[0].0,
+            InlineErrorChain::new(&errors[0].1)
         );
     }
 
     let mut output = format!("Failed to initialize {} zones:\n", errors.len());
     for (zone_name, error) in errors {
-        output.push_str(&format!("  - {}: {}\n", zone_name, error));
+        output.push_str(&format!(
+            "  - {}: {}\n",
+            zone_name,
+            InlineErrorChain::new(&error)
+        ));
     }
     output
 }
@@ -616,7 +632,7 @@ struct SledAgentInfo {
     resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
     metrics_queue: MetricsRequestQueue,
 }
 
@@ -817,7 +833,7 @@ impl ServiceManager {
         port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
-        rack_network_config: Option<RackNetworkConfig>,
+        rack_network_config: RackNetworkConfig,
         metrics_queue: MetricsRequestQueue,
     ) -> Result<(), Error> {
         info!(
@@ -1098,17 +1114,6 @@ impl ServiceManager {
             ..
         } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
-        let Some(rack_network_config) = rack_network_config.as_ref() else {
-            // If we're in a test/dev environments with no uplinks, we have
-            // nothing to do; print a warning in the (hopefully unlikely) event
-            // we land here on a real rack.
-            warn!(
-                self.inner.log,
-                "No rack network config present; skipping OPTE NAT config",
-            );
-            return Ok(vec![]);
-        };
-
         let uplinked_switch_zone_addrs =
             EarlyNetworkSetup::new(&self.inner.log)
                 .lookup_uplinked_switch_zone_underlay_addrs(
@@ -1254,7 +1259,7 @@ impl ServiceManager {
             let log_failure = |error, _| {
                 warn!(
                     self.inner.log, "failed to create NAT entry for service";
-                    "error" => ?error,
+                    InlineErrorChain::new(&error),
                     "zone_type" => zone_kind.report_str(),
                 );
             };
@@ -3242,7 +3247,7 @@ impl ServiceManager {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&["/usr/platform/oxide/bin/tmpx", "-Z"]);
         if let Err(e) = execute(cmd) {
-            warn!(self.inner.log, "Updating [wu]tmpx databases failed: {}", e);
+            warn!(self.inner.log, "Updating [wu]tmpx databases failed"; e);
         }
     }
 
@@ -3414,23 +3419,13 @@ impl ServiceManager {
         // but we probably don't want to use backoff here.
         const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-        // We can only ensure uplinks if we have a rack network config.
-        //
-        // It'd be surprising to have `underlay_info` containing our underlay IP
-        // without a rack network config, but it is technically possible. These
-        // bits of information are ledgered separately, and we could have
-        // ledgered our underlay IP, then crashed before the bootstore gossip
-        // happened to tell us the rack network config, and are now restarting.
-        let Some(rack_network_config) = &underlay_info.rack_network_config
-        else {
-            return;
-        };
+        let rack_network_config = &underlay_info.rack_network_config;
 
         loop {
             match self
                 .ensure_switch_zone_uplinks_configured(
                     underlay_info.ip,
-                    &rack_network_config,
+                    rack_network_config,
                 )
                 .await
             {
@@ -3546,8 +3541,8 @@ impl ServiceManager {
         for port_config in &our_ports {
             for addr in &port_config.addrs {
                 usmfh.addpropvalue_type(
-                    &format!("uplinks/{}_0", port_config.port,),
-                    &addr.to_string(),
+                    format!("uplinks/{}_0", port_config.port),
+                    addr.to_uplinkd_smf_property(),
                     "astring",
                 )?;
             }
@@ -3560,7 +3555,9 @@ impl ServiceManager {
                 apv(
                     &lsmfh,
                     &format!("{group_name}/status"),
-                    &Some(lldp_config.status.to_string()),
+                    &Some(
+                        lldp_config.status.to_lldpd_smf_property().to_owned(),
+                    ),
                 )?;
                 apv(
                     &lsmfh,
@@ -3732,7 +3729,18 @@ impl ServiceManager {
                         }) {
                         Ok(_) => (),
                         Err(e) => {
-                            if e.to_string().contains("entry exists") {
+                            fn route_already_exists(
+                                e: &dyn std::error::Error,
+                            ) -> bool {
+                                e.to_string().contains("entry exists")
+                                    || match e.source() {
+                                        Some(source) => {
+                                            route_already_exists(source)
+                                        }
+                                        None => false,
+                                    }
+                            }
+                            if route_already_exists(&e) {
                                 info!(
                                     self.inner.log,
                                     "Underlay route already exists";

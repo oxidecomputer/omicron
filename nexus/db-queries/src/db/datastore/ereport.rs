@@ -19,13 +19,15 @@ use crate::db::pagination::{paginated, paginated_multicolumn};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::dsl::{count_distinct, min};
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::{count, min};
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
 use nexus_types::fm::ereport as fm;
+use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -45,44 +47,6 @@ pub struct EreporterRestartBySerial {
     pub first_seen_at: DateTime<Utc>,
     pub reporter_kind: fm::Reporter,
     pub ereports: u32,
-}
-
-/// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EreportFilters {
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or later.
-    ///
-    /// If `end_time` is also present, this value *must* be earlier than
-    /// `end_time`.
-    pub start_time: Option<DateTime<Utc>>,
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or before.
-    ///
-    /// If `start_time` is also present, this value *must* be later than
-    /// `start_time`.
-    pub end_time: Option<DateTime<Utc>>,
-    /// If this list is non-empty, include only ereports that were reported by
-    /// systems with the provided serial numbers.
-    pub only_serials: Vec<String>,
-    /// If this list is non-empty, include only ereports with the provided class
-    /// strings.
-    // TODO(eliza): globbing could be nice to add here eventually...
-    pub only_classes: Vec<String>,
-}
-
-impl EreportFilters {
-    fn check_time_range(&self) -> Result<(), Error> {
-        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
-            if start > end {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl DataStore {
@@ -242,7 +206,7 @@ impl DataStore {
                 dsl::restart_id,
                 model::Reporter::as_select(),
                 min(dsl::time_collected),
-                count_distinct(dsl::ena),
+                count(dsl::ena).aggregate_distinct(),
             ))
             .order_by(dsl::restart_id)
     }

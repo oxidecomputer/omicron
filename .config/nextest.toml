@@ -3,7 +3,7 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.117", recommended = "0.9.125" }
+nextest-version = { required = "0.9.131", recommended = "0.9.131" }
 
 experimental = ["benchmarks", "setup-scripts"]
 
@@ -17,9 +17,14 @@ setup = 'crdb-seed'
 
 [profile.ci]
 fail-fast = false
+retries = 2
+flaky-result = "fail"
 
 [profile.ci.junit]
 path = "junit.xml"
+# Mark flaky-fail tests as passing in JUnit output since we care about that
+# output for analysis, not visualization.
+flaky-fail-status = "success"
 
 [scripts.setup.crdb-seed]
 # Use the test profile for this executable since that's how almost all

@@ -92,6 +92,8 @@ use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::attached_subnets;
+use super::tasks::audit_log_cleanup;
+use super::tasks::audit_log_timeout_incomplete;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
@@ -105,6 +107,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
@@ -129,6 +132,7 @@ use super::tasks::region_snapshot_replacement_start::*;
 use super::tasks::region_snapshot_replacement_step::*;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
+use super::tasks::session_cleanup;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
@@ -245,6 +249,8 @@ impl BackgroundTasksInitializer {
             task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
+            task_audit_log_cleanup: Activator::new(),
+            task_audit_log_timeout_incomplete: Activator::new(),
             task_vpc_route_manager: Activator::new(),
             task_saga_recovery: Activator::new(),
             task_lookup_region_port: Activator::new(),
@@ -262,10 +268,12 @@ impl BackgroundTasksInitializer {
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
+            task_fm_rendezvous: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
             task_trust_quorum_manager: Activator::new(),
             task_attached_subnet_manager: Activator::new(),
+            task_session_cleanup: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -352,10 +360,14 @@ impl BackgroundTasksInitializer {
             task_reconfigurator_config_loader,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
+            task_fm_rendezvous,
             task_probe_distributor,
             task_multicast_reconciler,
             task_trust_quorum_manager,
             task_attached_subnet_manager,
+            task_session_cleanup,
+            task_audit_log_timeout_incomplete,
+            task_audit_log_cleanup,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -712,7 +724,6 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
                 resolver.clone(),
-                rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -1122,6 +1133,18 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "fm_rendezvous",
+            description:
+                "updates externally visible database tables to match the \
+                 current fault management sitrep",
+            period: config.fm.rendezvous_period_secs,
+            task_impl: Box::new(FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(sitrep_watcher.clone())],
+            activator: task_fm_rendezvous,
+        });
+
+        driver.register(TaskDefinition {
             name: "fm_sitrep_gc",
             description: "garbage collects fault management situation reports",
             period: config.fm.sitrep_load_period_secs,
@@ -1161,11 +1184,61 @@ impl BackgroundTasksInitializer {
             description: "distributes attached subnets to sleds and switch",
             period: config.attached_subnet_manager.period_secs,
             task_impl: Box::new(attached_subnets::Manager::new(
-                resolver, datastore,
+                resolver,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_attached_subnet_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "session_cleanup",
+            description: "hard-deletes expired console sessions based on \
+                 absolute timeout",
+            period: config.session_cleanup.period_secs,
+            task_impl: Box::new(session_cleanup::SessionCleanup::new(
+                datastore.clone(),
+                args.console_session_absolute_timeout,
+                config.session_cleanup.max_delete_per_activation,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_session_cleanup,
+        });
+
+        driver.register(TaskDefinition {
+            name: "audit_log_timeout_incomplete",
+            description: "transitions stale incomplete audit log entries to \
+                 timeout status so they become visible in the audit log",
+            period: config.audit_log_timeout_incomplete.period_secs,
+            task_impl: Box::new(
+                audit_log_timeout_incomplete::AuditLogTimeoutIncomplete::new(
+                    datastore.clone(),
+                    config.audit_log_timeout_incomplete.timeout_secs,
+                    config
+                        .audit_log_timeout_incomplete
+                        .max_timed_out_per_activation,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_audit_log_timeout_incomplete,
+        });
+
+        driver.register(TaskDefinition {
+            name: "audit_log_cleanup",
+            description: "hard-deletes completed audit log entries older \
+                 than the retention period",
+            period: config.audit_log_cleanup.period_secs,
+            task_impl: Box::new(audit_log_cleanup::AuditLogCleanup::new(
+                datastore,
+                config.audit_log_cleanup.retention_days,
+                config.audit_log_cleanup.max_deleted_per_activation,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_audit_log_cleanup,
         });
 
         driver
@@ -1210,6 +1283,9 @@ pub struct BackgroundTasksData {
     /// Channel for exposing the latest loaded fault-management sitrep.
     pub sitrep_load_tx:
         watch::Sender<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+    /// Console session absolute timeout, from
+    /// `pkg.console.session_absolute_timeout_minutes`.
+    pub console_session_absolute_timeout: chrono::TimeDelta,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

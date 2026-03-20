@@ -20,7 +20,7 @@ use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -142,7 +142,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let mgs_url = cptestctx
         .gateway
-        .get(&SwitchLocation::Switch0)
+        .get(&SwitchSlot::Switch0)
         .expect("nexus_test always sets up MGS on switch 0")
         .client
         .baseurl();
@@ -332,6 +332,10 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     if initial_blueprint.cockroachdb_setting_preserve_downgrade.is_set() {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
+
+    // The `reconfigurator_config_watcher` task's output depends on
+    // whether it has had time to complete an activation.
+    redactor.field("config updated:", r"\w+");
 
     // The `tuf_artifact_replication` task's output depends on how
     // many sleds happened to register with Nexus before its first

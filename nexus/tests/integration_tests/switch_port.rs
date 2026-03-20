@@ -14,18 +14,18 @@ use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
     BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettings, SwitchPortSettingsCreate,
+    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPort,
+    SwitchPortApplySettings, SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
-    NameOrId, SwitchPort,
+    NameOrId,
 };
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -490,7 +490,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .body(Some(&apply_settings))
         .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -506,7 +506,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::DELETE,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .expect_status(Some(StatusCode::NO_CONTENT)),
     )
@@ -618,7 +618,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchLocation::Switch0];
+    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
     let mgd_client = mg_admin_client::Client::new(
         &format!("http://[::1]:{}", mgd.port),
         ctx.logctx.log.clone(),
@@ -642,7 +642,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .body(Some(&apply_settings))
         .expect_status(Some(StatusCode::NO_CONTENT)),

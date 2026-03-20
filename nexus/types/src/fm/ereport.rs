@@ -6,6 +6,7 @@
 
 use crate::inventory::SpType;
 use chrono::{DateTime, Utc};
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -211,6 +212,144 @@ fn get_sp_metadata_string(
                 "restart_id" => ?restart_id,
             );
             None
+        }
+    }
+}
+
+/// A set of filters for fetching ereports.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EreportFilters {
+    /// If present, include only ereports that were collected at the specified
+    /// timestamp or later.
+    ///
+    /// If `end_time` is also present, this value *must* be earlier than
+    /// `end_time`.
+    pub start_time: Option<DateTime<Utc>>,
+    /// If present, include only ereports that were collected at the specified
+    /// timestamp or before.
+    ///
+    /// If `start_time` is also present, this value *must* be later than
+    /// `start_time`.
+    pub end_time: Option<DateTime<Utc>>,
+    /// If this list is non-empty, include only ereports that were reported by
+    /// systems with the provided serial numbers.
+    pub only_serials: Vec<String>,
+    /// If this list is non-empty, include only ereports with the provided class
+    /// strings.
+    // TODO(eliza): globbing could be nice to add here eventually...
+    pub only_classes: Vec<String>,
+}
+
+/// Displayer for pretty-printing [`EreportFilters`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayEreportFilters<'a> {
+    filters: &'a EreportFilters,
+}
+
+impl EreportFilters {
+    pub fn display(&self) -> DisplayEreportFilters<'_> {
+        DisplayEreportFilters { filters: self }
+    }
+}
+
+impl fmt::Display for DisplayEreportFilters<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use itertools::Itertools;
+
+        let filters = self.filters;
+
+        // Writes a semicolon-separated part to the formatter, tracking whether
+        // we've written anything yet.
+        let mut empty = true;
+        let mut fmt_part =
+            |f: &mut fmt::Formatter, args: fmt::Arguments| -> fmt::Result {
+                if !empty {
+                    write!(f, "; ")?;
+                }
+                empty = false;
+                f.write_fmt(args)
+            };
+
+        if let Some(start) = &filters.start_time {
+            fmt_part(f, format_args!("start: {start}"))?;
+        }
+        if let Some(end) = &filters.end_time {
+            fmt_part(f, format_args!("end: {end}"))?;
+        }
+        if !filters.only_serials.is_empty() {
+            fmt_part(
+                f,
+                format_args!(
+                    "serials: {}",
+                    filters.only_serials.iter().format(", ")
+                ),
+            )?;
+        }
+        if !filters.only_classes.is_empty() {
+            fmt_part(
+                f,
+                format_args!(
+                    "classes: {}",
+                    filters.only_classes.iter().format(", ")
+                ),
+            )?;
+        }
+
+        // If no filters are set, display "none" rather than empty output.
+        if empty {
+            write!(f, "none")?;
+        }
+        Ok(())
+    }
+}
+
+impl EreportFilters {
+    pub fn check_time_range(&self) -> Result<(), Error> {
+        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
+            if start > end {
+                return Err(Error::invalid_request(
+                    "start time must be before end time",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_datetime() -> impl Strategy<Value = DateTime<Utc>> {
+        // Generate timestamps in a reasonable range (2020-2030).
+        (1577836800i64..1893456000i64)
+            .prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
+    }
+
+    impl Arbitrary for EreportFilters {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            (
+                prop::option::of(arb_datetime()),
+                prop::option::of(arb_datetime()),
+                prop::collection::vec(".*", 0..=3),
+                prop::collection::vec(".*", 0..=3),
+            )
+                .prop_map(
+                    |(start_time, end_time, only_serials, only_classes)| {
+                        EreportFilters {
+                            start_time,
+                            end_time,
+                            only_serials,
+                            only_classes,
+                        }
+                    },
+                )
+                .boxed()
         }
     }
 }

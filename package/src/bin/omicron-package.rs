@@ -493,9 +493,8 @@ async fn do_unpack(
     artifact_dir: &Utf8Path,
     install_dir: &Utf8Path,
 ) -> Result<()> {
-    create_dir_all(&install_dir).map_err(|err| {
-        anyhow!("Cannot create installation directory: {}", err)
-    })?;
+    create_dir_all(&install_dir)
+        .context("Cannot create installation directory")?;
 
     // Copy all packages to the install location in parallel.
     let packages =
@@ -512,13 +511,11 @@ async fn do_unpack(
                 "src" => %src,
                 "dst" => %dst,
             );
-            std::fs::copy(&src, &dst).map_err(|err| {
-                anyhow!(
-                    "Failed to copy {src} to {dst}: {err}",
-                    src = src,
-                    dst = dst
-                )
-            })?;
+            std::fs::copy(&src, &dst).context(format!(
+                "Failed to copy {src} to {dst}",
+                src = src,
+                dst = dst,
+            ))?;
             Ok(())
         },
     )?;

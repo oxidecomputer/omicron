@@ -16,8 +16,8 @@ use nexus_reconfigurator_planning::{
 };
 use nexus_types::{
     deployment::{
-        Blueprint, BlueprintTarget, ExternalIpPolicy, SledFilter,
-        UnstableReconfiguratorState,
+        Blueprint, BlueprintTarget, CockroachDbSettings, ExternalIpPolicy,
+        SledFilter, UnstableReconfiguratorState,
     },
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::{CabooseWhich, Collection},
@@ -520,7 +520,9 @@ impl SimSystemBuilder {
 
         let system_res =
             self.inner.load_serialized_inner(state, primary_collection_id, res);
-        self.log.push(SimSystemLogEntry::LoadSerialized(system_res.clone()));
+        self.log.push(SimSystemLogEntry::LoadSerialized(Box::new(
+            system_res.clone(),
+        )));
         system_res
     }
 
@@ -704,7 +706,7 @@ pub enum SimSystemLogEntry {
         internal_dns_version: Generation,
         external_dns_version: Generation,
     },
-    LoadSerialized(LoadSerializedSystemResult),
+    LoadSerialized(Box<LoadSerializedSystemResult>),
     AddCollection(CollectionUuid),
     AddBlueprint(BlueprintUuid),
     AddInternalDns(Generation),
@@ -773,6 +775,9 @@ pub struct LoadSerializedSystemResult {
     /// The external IP policy.
     pub external_ip_policy: ExternalIpPolicy,
 
+    /// The CockroachDB settings.
+    pub cockroachdb_settings: CockroachDbSettings,
+
     /// Internal DNS generations.
     pub internal_dns_generations: Vec<Generation>,
 
@@ -789,6 +794,7 @@ impl LoadSerializedSystemResult {
             collection_ids: Vec::new(),
             blueprint_ids: Vec::new(),
             external_ip_policy: ExternalIpPolicy::empty(),
+            cockroachdb_settings: CockroachDbSettings::empty(),
             internal_dns_generations: Vec::new(),
             external_dns_generations: Vec::new(),
         }
@@ -818,6 +824,11 @@ impl fmt::Display for LoadSerializedSystemResult {
             f,
             "loaded external IP policy: {:?}",
             self.external_ip_policy,
+        )?;
+        writeln!(
+            f,
+            "loaded cockroachdb settings: {}",
+            self.cockroachdb_settings,
         )?;
         writeln!(
             f,
@@ -1060,6 +1071,12 @@ impl SimSystemBuilderInner {
 
         self.set_internal_dns(state.internal_dns);
         self.set_external_dns(state.external_dns);
+
+        self.system.description.set_cockroachdb_settings(
+            state.planning_input.cockroachdb_settings().clone(),
+        );
+        system_res.cockroachdb_settings =
+            state.planning_input.cockroachdb_settings().clone();
 
         self.system
             .description

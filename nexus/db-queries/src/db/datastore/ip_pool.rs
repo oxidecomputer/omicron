@@ -32,6 +32,8 @@ use crate::db::raw_query_builder::SelectableSql;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::count;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
@@ -917,7 +919,7 @@ impl DataStore {
         external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
-            .select(diesel::dsl::count_distinct(external_ip::ip))
+            .select(count(external_ip::ip).aggregate_distinct())
             .first_async::<i64>(conn)
             .await
     }

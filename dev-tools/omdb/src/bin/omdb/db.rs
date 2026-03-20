@@ -4651,7 +4651,7 @@ async fn cmd_db_instance_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
-    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+    let active_vmm = if let Some(id) = instance.propolis_id {
         let fetch_result = vmm_dsl::vmm
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
@@ -4775,7 +4775,7 @@ async fn cmd_db_instance_info(
         nexus_state,
         generation,
         time_last_auto_restarted,
-    } = instance.runtime_state;
+    } = instance.runtime();
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
     let effective_state =
         InstanceStateComputer::new(&instance, active_vmm.as_ref())
@@ -5018,9 +5018,7 @@ async fn cmd_db_instance_info(
                 println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
                 println!("    {RAM:>WIDTH$}: {ram}");
                 println!("    {DISK:>WIDTH$}: {disk}");
-                if let Some(modified) = time_modified {
-                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
-                }
+                println!("    {LAST_UPDATED:>WIDTH$}: {time_modified}");
             }
         }
     }
@@ -5097,12 +5095,9 @@ async fn cmd_db_instance_info(
                     cpu_platform: _,
                     time_created,
                     time_deleted,
-                    runtime:
-                        db::model::VmmRuntimeState {
-                            time_state_updated: _,
-                            generation,
-                            state,
-                        },
+                    time_state_updated: _,
+                    generation,
+                    state,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow {
@@ -7735,8 +7730,9 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime:
-            db::model::VmmRuntimeState { state, generation, time_state_updated },
+        state,
+        generation,
+        time_state_updated,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7839,12 +7835,9 @@ async fn cmd_db_vmm_list(
                 propolis_ip: _,
                 propolis_port: _,
                 cpu_platform: _,
-                runtime:
-                    db::model::VmmRuntimeState {
-                        state,
-                        generation,
-                        time_state_updated: _,
-                    },
+                time_state_updated: _,
+                generation,
+                state,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7886,7 +7879,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip,
                 propolis_port,
-                ref runtime,
+                time_state_updated,
                 ..
             } = it.0;
             VerboseVmmRow {
@@ -7897,7 +7890,7 @@ async fn cmd_db_vmm_list(
                     propolis_port.into(),
                 ),
                 time_created,
-                time_updated: runtime.time_state_updated,
+                time_updated: time_state_updated,
             }
         }
     }

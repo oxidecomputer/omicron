@@ -65,7 +65,7 @@ pub mod audit {
 
 pub mod bfd {
     pub use crate::v2025_11_20_00::bfd::BfdState;
-    pub use crate::v2025_11_20_00::bfd::BfdStatus;
+    pub use crate::v2026_03_06_01::bfd::BfdStatus;
 }
 
 pub mod device {
@@ -220,14 +220,11 @@ pub mod metrics {
 }
 
 pub mod multicast {
-    pub use crate::v2025_11_20_00::multicast::MulticastGroupCreate;
     pub use crate::v2025_11_20_00::multicast::MulticastGroupIpLookupPath;
     pub use crate::v2025_11_20_00::multicast::MulticastGroupMemberRemove;
-    pub use crate::v2025_11_20_00::multicast::MulticastGroupUpdate;
 
     pub use crate::v2026_01_08_00::multicast::InstanceMulticastGroupJoin;
     pub use crate::v2026_01_08_00::multicast::InstanceMulticastGroupPath;
-    pub use crate::v2026_01_08_00::multicast::MulticastGroup;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupIdentifier;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupMember;
@@ -235,6 +232,10 @@ pub mod multicast {
     pub use crate::v2026_01_08_00::multicast::MulticastGroupMemberPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupSelector;
+
+    pub use crate::v2026_03_14_00::multicast::MulticastGroup;
+    pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
+    pub use crate::v2026_03_14_00::multicast::MulticastGroupUpdate;
 
     pub use crate::impls::multicast::validate_multicast_ip;
     pub use crate::impls::multicast::validate_source_ip;
@@ -247,8 +248,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::AddressLotCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
     pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
-    pub use crate::v2025_11_20_00::networking::BfdSessionDisable;
-    pub use crate::v2025_11_20_00::networking::BfdSessionEnable;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetCreate;
@@ -261,9 +260,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
-    pub use crate::v2025_11_20_00::networking::LldpPortPathSelector;
-    pub use crate::v2025_11_20_00::networking::LoopbackAddressCreate;
-    pub use crate::v2025_11_20_00::networking::LoopbackAddressPath;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
@@ -274,7 +270,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortGeometry;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
-    pub use crate::v2025_11_20_00::networking::SwitchPortSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsInfoSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsSelector;
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
@@ -291,6 +286,15 @@ pub mod networking {
     pub use crate::v2026_02_13_01::networking::BgpPeerStatus;
     pub use crate::v2026_02_13_01::networking::SwitchPortSettings;
     pub use crate::v2026_02_13_01::networking::SwitchPortSettingsCreate;
+
+    pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
+    pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
+    pub use crate::v2026_03_06_01::networking::LldpPortPathSelector;
+    pub use crate::v2026_03_06_01::networking::LoopbackAddress;
+    pub use crate::v2026_03_06_01::networking::LoopbackAddressCreate;
+    pub use crate::v2026_03_06_01::networking::LoopbackAddressPath;
+    pub use crate::v2026_03_06_01::networking::SwitchPort;
+    pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
 }
 
 pub mod oxql {
@@ -509,11 +513,8 @@ pub mod ssh_key {
 }
 
 pub mod user {
-    pub use crate::v2025_11_20_00::user::CurrentUser;
-    pub use crate::v2025_11_20_00::user::Group;
     pub use crate::v2025_11_20_00::user::OptionalGroupSelector;
     pub use crate::v2025_11_20_00::user::Password;
-    pub use crate::v2025_11_20_00::user::User;
     pub use crate::v2025_11_20_00::user::UserBuiltin;
     pub use crate::v2025_11_20_00::user::UserBuiltinCreate;
     pub use crate::v2025_11_20_00::user::UserBuiltinSelector;
@@ -521,6 +522,9 @@ pub mod user {
     pub use crate::v2025_11_20_00::user::UserParam;
     pub use crate::v2025_11_20_00::user::UserPassword;
     pub use crate::v2025_11_20_00::user::UsernamePasswordCredentials;
+    pub use crate::v2026_03_02_00::user::CurrentUser;
+    pub use crate::v2026_03_02_00::user::Group;
+    pub use crate::v2026_03_02_00::user::User;
 }
 
 pub mod path_params {

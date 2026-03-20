@@ -15,6 +15,7 @@ use nexus_db_model::VmmCpuPlatform;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
@@ -215,12 +216,10 @@ async fn sim_reserve_sled_resources(
                 "src_propolis_id" => %params.src_vmm.id,
                 "src_vmm_cpu_platform" => %params.src_vmm.cpu_platform);
         }
-        return Err(ActionError::action_failed(Error::invalid_request(
-            &format!(
-                "cannot migrate instance: {} nas no compatible sled families",
-                params.src_vmm.cpu_platform
-            ),
-        )));
+        return Err(saga_action_failed(Error::invalid_request(&format!(
+            "cannot migrate instance: {} nas no compatible sled families",
+            params.src_vmm.cpu_platform
+        ))));
     };
 
     // Add a constraint that requires the allocator to reserve on the
@@ -306,7 +305,7 @@ async fn sim_create_migration_record(
             ),
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn sim_fail_migration_record(
@@ -428,7 +427,7 @@ async fn sim_set_migration_ids(
             dst_propolis_id,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn sim_ensure_destination_propolis(
@@ -455,7 +454,7 @@ async fn sim_ensure_destination_propolis(
             .instance_id(db_instance.id())
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
     let dst_propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
@@ -489,7 +488,7 @@ async fn sim_ensure_destination_propolis(
 
                 // Don't set the instance to Failed in this case. Instead, allow
                 // the saga to unwind, marking the VMM as SagaUnwound.
-                ActionError::action_failed(Error::from(inner))
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(
@@ -499,7 +498,7 @@ async fn sim_ensure_destination_propolis(
                     "dst_propolis_id" => %dst_propolis_id,
                     "error" => ?inner,
                 );
-                ActionError::action_failed(inner)
+                saga_action_failed(inner)
             }
         })
 }
@@ -600,9 +599,9 @@ async fn sim_instance_migrate(
                       "instance_id" => %db_instance.id(),
                       "error" => ?inner);
 
-            Err(ActionError::action_failed(
-                omicron_common::api::external::Error::from(inner),
-            ))
+            Err(saga_action_failed(omicron_common::api::external::Error::from(
+                inner,
+            )))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
@@ -610,7 +609,7 @@ async fn sim_instance_migrate(
                       "instance_id" => %db_instance.id(),
                       "error" => ?inner);
 
-            Err(ActionError::action_failed(inner))
+            Err(saga_action_failed(inner))
         }
     }
 }
@@ -804,7 +803,7 @@ mod tests {
                     // unwinding saga, that VMM must be in the `SagaUnwound` state.
                     if let Some(target_vmm) = new_state.target_vmm {
                         assert_eq!(
-                            target_vmm.runtime.state,
+                            target_vmm.state,
                             db::model::VmmState::SagaUnwound
                         );
                     }

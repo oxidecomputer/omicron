@@ -11,6 +11,7 @@ use reqwest::Url;
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
 use sled_agent_types::rack_init::RackInitializeRequest;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -255,7 +256,11 @@ impl ClientParams {
                 )
                 .await
                 .map_err(|e| {
-                    eprintln!("{}: login failed: {:#}", Utc::now(), e);
+                    eprintln!(
+                        "{}: login failed: {}",
+                        Utc::now(),
+                        InlineErrorChain::new(&e)
+                    );
                     if let oxide_client::LoginError::RequestError(e) = &e {
                         if e.is_connect() {
                             return CondCheckError::NotYet;
