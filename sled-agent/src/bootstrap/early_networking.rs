@@ -607,7 +607,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
 
                     // Unnumbered peer - identified by interface
-                    RouterPeerType::Unnumbered => {
+                    RouterPeerType::Unnumbered { router_lifetime } => {
                         let bpc = MgUnnumberedBgpPeerConfig {
                             name: format!("unnumbered-{}", port.port),
                             interface: format!("tfport{}_0", port.port),
@@ -645,7 +645,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
-                            router_lifetime: peer.router_lifetime.as_u16(),
+                            router_lifetime: router_lifetime.as_u16(),
                         };
                         match bgp_unnumbered_peer_configs.get_mut(&port.port) {
                             Some(peers) => {

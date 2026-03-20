@@ -11,7 +11,6 @@ use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
@@ -440,15 +439,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         peer.insert("port", string_item(port));
 
         // addr = ""
-        peer.insert(
-            "addr",
-            string_item(match addr {
-                RouterPeerType::Unnumbered => {
-                    UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER.to_owned()
-                }
-                RouterPeerType::Numbered { ip } => ip.to_string(),
-            }),
-        );
+        peer.insert("addr", string_item(enum_to_toml_string(addr)));
 
         // hold_time
         if let Some(x) = hold_time {

@@ -14,8 +14,8 @@ use omicron_common::{
 };
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, RouterPeerType,
-    TxEqConfig, UplinkAddress,
+    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, TxEqConfig,
+    UplinkAddress,
 };
 use sled_hardware_types::Baseboard;
 
@@ -26,7 +26,7 @@ use crate::{
         CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,
         UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
         UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
-        UserSpecifiedUplinkAddressConfig,
+        UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
     },
 };
 
@@ -100,7 +100,7 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: RouterPeerType::Unnumbered,
+                addr: UserSpecifiedRouterPeerAddr::Unnumbered,
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -123,9 +123,9 @@ impl ExampleRackSetupData {
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
-                addr: RouterPeerType::Numbered {
-                    ip: "10.2.3.5".parse().unwrap(),
-                },
+                addr: UserSpecifiedRouterPeerAddr::Numbered(
+                    "10.2.3.5".parse().unwrap(),
+                ),
                 port: "port0".into(),
                 remote_asn: Some(200),
                 hold_time: Some(10),
@@ -151,7 +151,9 @@ impl ExampleRackSetupData {
 
         let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
             asn: 47,
-            addr: RouterPeerType::Numbered { ip: "10.2.3.4".parse().unwrap() },
+            addr: UserSpecifiedRouterPeerAddr::Numbered(
+                "10.2.3.4".parse().unwrap(),
+            ),
             port: "port0".into(),
             hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
             idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),

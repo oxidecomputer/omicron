@@ -24,6 +24,7 @@ use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
 use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
@@ -48,6 +49,7 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
@@ -780,8 +782,19 @@ fn build_port_config(
                     key
                 });
 
+                let addr = match p.addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => {
+                        RouterPeerType::Unnumbered {
+                            router_lifetime: p.router_lifetime,
+                        }
+                    }
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        RouterPeerType::Numbered { ip }
+                    }
+                };
+
                 BgpPeerConfig {
-                    addr: p.addr,
+                    addr,
                     asn: p.asn,
                     port: p.port.clone(),
                     hold_time: p.hold_time,
@@ -799,7 +812,6 @@ fn build_port_config(
                     allowed_export: p.allowed_export.clone().into(),
                     allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
-                    router_lifetime: p.router_lifetime,
                 }
             })
             .collect(),

@@ -1168,7 +1168,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         // TODO-cleanup Push `RouterPeerAddress` down to all the
                         // datastore methods below instead of an `Option`.
                         let peer_addr_for_lookup = match peer.addr {
-                            RouterPeerType::Unnumbered => None,
+                            RouterPeerType::Unnumbered { .. } => None,
                             RouterPeerType::Numbered { ip } => {
                                 Some(IpNetwork::from(IpAddr::from(ip)))
                             }

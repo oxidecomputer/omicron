@@ -916,10 +916,6 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
-                                router_lifetime:
-                                    NexusTypes::RouterLifetimeConfig(
-                                        b.router_lifetime.as_u16(),
-                                    ),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {

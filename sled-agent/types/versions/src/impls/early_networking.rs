@@ -203,18 +203,6 @@ impl RouterPeerType {
     /// we choose this sentinel value.
     pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
-    /// Squash this address down to an [`Option<IpAddr>`] by converting
-    /// [`RouterPeerType::Unnumbered`] to `None`.
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_unnumbered_to_none(&self) -> Option<IpAddr> {
-        match *self {
-            Self::Unnumbered => None,
-            Self::Numbered { ip } => Some(ip.into()),
-        }
-    }
-
     /// Squash this address down to an [`IpAddr`] by converting
     /// [`RouterPeerType::Unnumbered`] to
     /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
@@ -223,26 +211,8 @@ impl RouterPeerType {
     /// using stronger types.
     pub fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
         match *self {
-            Self::Unnumbered => Self::UNNUMBERED_SENTINEL,
+            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
             Self::Numbered { ip } => ip.into(),
-        }
-    }
-
-    /// Convert an arbitrary `Option<IpAddr>` into a [`RouterPeerType`] by
-    /// converting both `None` and `Some(UNSPECIFIED)`
-    /// [`RouterPeerType::Unnumbered`].
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn from_optional_ip_treating_unspecified_as_unnumbered(
-        ip: Option<IpAddr>,
-    ) -> Self {
-        let Some(ip) = ip else {
-            return Self::Unnumbered;
-        };
-        match SpecifiedIpAddr::try_from(ip) {
-            Ok(ip) => Self::Numbered { ip },
-            Err(UnspecifiedIpError) => Self::Unnumbered,
         }
     }
 }

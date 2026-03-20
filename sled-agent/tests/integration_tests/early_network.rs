@@ -10,8 +10,8 @@ use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
     EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, RouterPeerType, SwitchSlot, UplinkAddress,
-    UplinkAddressConfig,
+    RackNetworkConfig, RouterLifetimeConfig, RouterPeerType, SwitchSlot,
+    UplinkAddress, UplinkAddressConfig,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
@@ -176,7 +176,10 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: RouterPeerType::Unnumbered,
+                        addr: RouterPeerType::Unnumbered {
+                            router_lifetime: RouterLifetimeConfig::new(1234)
+                                .unwrap(),
+                        },
                         hold_time: Some(6),
                         idle_hold_time: Some(3),
                         delay_open: Some(3),
@@ -195,7 +198,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
                         vlan_id: Some(1),
-                        router_lifetime: Default::default(),
                     }],
                     autoneg: false,
                     tx_eq: None,
@@ -242,7 +244,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
                         vlan_id: None,
-                        router_lifetime: Default::default(),
                     }],
                     autoneg: false,
                     tx_eq: None,

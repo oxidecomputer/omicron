@@ -36,7 +36,6 @@ use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
@@ -47,6 +46,7 @@ use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
@@ -921,10 +921,10 @@ fn rss_config_text<'a>(
                 } = p;
 
                 let addr_string = match addr {
-                    RouterPeerType::Unnumbered => Cow::Borrowed(
-                        UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER,
+                    UserSpecifiedRouterPeerAddr::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedRouterPeerAddr::UNNUMBERED_PEER,
                     ),
-                    RouterPeerType::Numbered { ip } => {
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
                         Cow::Owned(ip.to_string())
                     }
                 };

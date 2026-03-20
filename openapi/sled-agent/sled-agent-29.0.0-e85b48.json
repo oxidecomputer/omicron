@@ -3338,7 +3338,7 @@
             "description": "Address of the peer.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RouterPeerAddress"
+                "$ref": "#/components/schemas/RouterPeerType"
               }
             ]
           },
@@ -3461,15 +3461,6 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
-          },
-          "router_lifetime": {
-            "description": "Router lifetime in seconds for unnumbered BGP peers.",
-            "default": 0,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RouterLifetimeConfig"
-              }
-            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -8856,11 +8847,19 @@
         "minimum": 0,
         "maximum": 9000
       },
-      "RouterPeerAddress": {
+      "RouterPeerType": {
         "oneOf": [
           {
             "type": "object",
             "properties": {
+              "router_lifetime": {
+                "description": "Router lifetime in seconds for unnumbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterLifetimeConfig"
+                  }
+                ]
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -8869,6 +8868,7 @@
               }
             },
             "required": [
+              "router_lifetime",
               "type"
             ]
           },
@@ -8876,7 +8876,12 @@
             "type": "object",
             "properties": {
               "ip": {
-                "$ref": "#/components/schemas/SpecifiedIpAddr"
+                "description": "IP address for numbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SpecifiedIpAddr"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -9877,7 +9882,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "link_local"
+                  "addr_conf"
                 ]
               }
             },
@@ -9894,7 +9899,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "address"
+                  "static"
                 ]
               }
             },

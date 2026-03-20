@@ -7559,7 +7559,11 @@
         "properties": {
           "addr": {
             "description": "Address of the peer.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterPeerAddr"
+              }
+            ]
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",
@@ -7821,6 +7825,9 @@
           "switch1"
         ],
         "additionalProperties": false
+      },
+      "UserSpecifiedRouterPeerAddr": {
+        "type": "string"
       },
       "UserSpecifiedUplinkAddressConfig": {
         "description": "User-specified version of [`sled_agent_types::early_networking::UplinkAddressConfig`].\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",

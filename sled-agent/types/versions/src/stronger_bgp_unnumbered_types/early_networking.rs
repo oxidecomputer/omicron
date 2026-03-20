@@ -19,6 +19,9 @@
 //!   possibly-unnumbered BGP peers. This is the new type of
 //!   [`BgpPeerConfig::addr`], which was previously an [`IpAddr`] where an
 //!   unspecified address was treated as unnumbered.
+//! * Move `router_lifetime` from the top-level of `BgpPeerConfig` to inside the
+//!   [`RouterPeerType::Unnumbered`] variant; it only applies to unnumbered
+//!   peers.
 //! * Update types that transitively contain the newly-updated
 //!   [`UplinkAddressConfig`] or [`BgpPeerConfig`]:
 //!     * [`EarlyNetworkConfigBody`]
@@ -72,8 +75,14 @@ pub enum UplinkAddress {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RouterPeerType {
-    Unnumbered,
-    Numbered { ip: SpecifiedIpAddr },
+    Unnumbered {
+        /// Router lifetime in seconds for unnumbered BGP peers.
+        router_lifetime: v20::RouterLifetimeConfig,
+    },
+    Numbered {
+        /// IP address for numbered BGP peers.
+        ip: SpecifiedIpAddr,
+    },
 }
 
 #[derive(
@@ -294,16 +303,15 @@ pub struct BgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
-    /// Router lifetime in seconds for unnumbered BGP peers.
-    #[serde(default)]
-    pub router_lifetime: v20::RouterLifetimeConfig,
 }
 
 impl From<v20::BgpPeerConfig> for BgpPeerConfig {
     fn from(value: v20::BgpPeerConfig) -> Self {
         let addr = match SpecifiedIpAddr::try_from(value.addr) {
             Ok(ip) => RouterPeerType::Numbered { ip },
-            Err(UnspecifiedIpError) => RouterPeerType::Unnumbered,
+            Err(UnspecifiedIpError) => RouterPeerType::Unnumbered {
+                router_lifetime: value.router_lifetime,
+            },
         };
         Self {
             asn: value.asn,
@@ -324,13 +332,22 @@ impl From<v20::BgpPeerConfig> for BgpPeerConfig {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-            router_lifetime: value.router_lifetime,
         }
     }
 }
 
 impl From<BgpPeerConfig> for v20::BgpPeerConfig {
     fn from(value: BgpPeerConfig) -> Self {
+        let router_lifetime = match value.addr {
+            RouterPeerType::Unnumbered { router_lifetime } => router_lifetime,
+            // v20::BgpPeerConfig always has a `router_lifetime` field, but its
+            // value is only used with unnumbered peers. For numbered peers,
+            // just fill in a default value.
+            RouterPeerType::Numbered { .. } => {
+                v20::RouterLifetimeConfig::default()
+            }
+        };
+
         Self {
             asn: value.asn,
             port: value.port,
@@ -350,7 +367,7 @@ impl From<BgpPeerConfig> for v20::BgpPeerConfig {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-            router_lifetime: value.router_lifetime,
+            router_lifetime,
         }
     }
 }
@@ -439,7 +456,6 @@ pub struct WriteNetworkConfigRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v20::early_networking::RouterLifetimeConfig;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
 
@@ -510,10 +526,12 @@ mod tests {
                 allowed_import: v1::ImportExportPolicy::NoFiltering,
                 allowed_export: v1::ImportExportPolicy::NoFiltering,
                 vlan_id: None,
-                router_lifetime: RouterLifetimeConfig::default(),
             }
         }
-        fn make_old_bgp_peer_config(addr: IpAddr) -> v20::BgpPeerConfig {
+        fn make_old_bgp_peer_config(
+            addr: IpAddr,
+            router_lifetime: v20::RouterLifetimeConfig,
+        ) -> v20::BgpPeerConfig {
             v20::BgpPeerConfig {
                 asn: 1,
                 port: "port".to_owned(),
@@ -533,7 +551,7 @@ mod tests {
                 allowed_import: v1::ImportExportPolicy::NoFiltering,
                 allowed_export: v1::ImportExportPolicy::NoFiltering,
                 vlan_id: None,
-                router_lifetime: RouterLifetimeConfig::default(),
+                router_lifetime,
             }
         }
 
@@ -542,14 +560,16 @@ mod tests {
         // `expected_old` in those cases. Specifically: `old` could contain an
         // address of `0.0.0.0` or `::`; either will come back as
         // `UNNUMBERED_SENTINEL` after the round trip.
-        for (old, new, expected_old) in [
+        for (old_ip, old_router_lifetime, new, expected_old_ip) in [
             (
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
+                v20::RouterLifetimeConfig::default(),
                 RouterPeerType::Numbered { ip: "10.0.0.1".parse().unwrap() },
                 None,
             ),
             (
                 "fe80:1234::3".parse().unwrap(),
+                v20::RouterLifetimeConfig::default(),
                 RouterPeerType::Numbered {
                     ip: "fe80:1234::3".parse().unwrap(),
                 },
@@ -557,20 +577,28 @@ mod tests {
             ),
             (
                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                RouterPeerType::Unnumbered,
+                v20::RouterLifetimeConfig::default(),
+                RouterPeerType::Unnumbered {
+                    router_lifetime: v20::RouterLifetimeConfig::default(),
+                },
                 Some(RouterPeerType::UNNUMBERED_SENTINEL),
             ),
             (
                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                RouterPeerType::Unnumbered,
+                v20::RouterLifetimeConfig::new(1234).unwrap(),
+                RouterPeerType::Unnumbered {
+                    router_lifetime: v20::RouterLifetimeConfig::new(1234)
+                        .unwrap(),
+                },
                 Some(RouterPeerType::UNNUMBERED_SENTINEL),
             ),
         ] {
-            let expected_old = expected_old.unwrap_or(old);
+            let expected_old_ip = expected_old_ip.unwrap_or(old_ip);
 
-            let old = make_old_bgp_peer_config(old);
+            let old = make_old_bgp_peer_config(old_ip, old_router_lifetime);
             let new = make_new_bgp_peer_config(new);
-            let expected_old = make_old_bgp_peer_config(expected_old);
+            let expected_old =
+                make_old_bgp_peer_config(expected_old_ip, old_router_lifetime);
 
             assert_eq!(BgpPeerConfig::from(old), new);
             assert_eq!(v20::BgpPeerConfig::from(new), expected_old);

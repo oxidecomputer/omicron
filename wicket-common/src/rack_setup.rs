@@ -24,7 +24,7 @@ use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SpecifiedIpAddr;
 use sled_agent_types::early_networking::SpecifiedIpNet;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
@@ -297,14 +297,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    // This type is used in both JSON (via OpenAPI) and TOML (for operator
-    // uploads to wicket). For the TOML case specifically, we want to use a more
-    // user-friendly representation, so we serialize/deserialize this field as a
-    // string. See the `bgp_peer_addr_serde` module below for the specific
-    // mapping.
-    #[serde(with = "bgp_peer_addr_serde")]
-    #[schemars(with = "String")]
-    pub addr: RouterPeerType,
+    pub addr: UserSpecifiedRouterPeerAddr,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
@@ -355,32 +348,53 @@ pub struct UserSpecifiedBgpPeerConfig {
     pub router_lifetime: RouterLifetimeConfig,
 }
 
-/// Special handling to serialize/deserialize [`RouterPeerAddress`] as a flat
-/// string for a nicer TOML representation.
-mod bgp_peer_addr_serde {
-    use super::{RouterPeerType, UserSpecifiedBgpPeerConfig};
-    use serde::{Deserialize, Deserializer, Serializer};
-    use sled_agent_types::early_networking::SpecifiedIpAddr;
-    use std::net::IpAddr;
+// Type that allows either the string "unnumbered" or an IP address. Has custom
+// implementations of `JsonSchema`, `Serialize`, and `Deserialize` to support
+// this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum UserSpecifiedRouterPeerAddr {
+    Unnumbered,
+    Numbered(SpecifiedIpAddr),
+}
 
-    pub fn serialize<S: Serializer>(
-        addr: &RouterPeerType,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        match addr {
-            RouterPeerType::Unnumbered => {
-                s.serialize_str(UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER)
-            }
-            RouterPeerType::Numbered { ip } => s.serialize_str(&ip.to_string()),
-        }
+impl UserSpecifiedRouterPeerAddr {
+    /// String representation for [`UserSpecifiedRouterPeerAddr::Unnumbered`] in
+    /// serialization.
+    pub const UNNUMBERED_PEER: &str = "unnumbered";
+}
+
+impl JsonSchema for UserSpecifiedRouterPeerAddr {
+    fn schema_name() -> String {
+        "UserSpecifiedRouterPeerAddr".to_string()
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<RouterPeerType, D::Error> {
-        let s = String::deserialize(d)?;
-        if s.eq_ignore_ascii_case(UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER) {
-            Ok(RouterPeerType::Unnumbered)
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        String::json_schema(generator)
+    }
+}
+
+impl Serialize for UserSpecifiedRouterPeerAddr {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Unnumbered => s.serialize_str(Self::UNNUMBERED_PEER),
+            Self::Numbered(ip) => s.serialize_str(&ip.to_string()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.eq_ignore_ascii_case(Self::UNNUMBERED_PEER) {
+            Ok(Self::Unnumbered)
         } else {
             let ip: IpAddr = s.parse().map_err(|_| {
                 serde::de::Error::custom(format!(
@@ -395,16 +409,12 @@ mod bgp_peer_addr_serde {
                      use `unnumbered` for unnumbered peers",
                 ))
             })?;
-            Ok(RouterPeerType::Numbered { ip })
+            Ok(Self::Numbered(ip))
         }
     }
 }
 
 impl UserSpecifiedBgpPeerConfig {
-    /// String representation for [`RouterPeerAddress::Unnumbered`] when
-    /// serializing/deserializing [`UserSpecifiedBgpPeerConfig`].
-    pub const UNNUMBERED_PEER: &str = "unnumbered";
-
     pub fn hold_time(&self) -> u64 {
         self.hold_time.unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME)
     }
@@ -765,13 +775,17 @@ mod tests {
     #[test]
     fn roundtrip_router_peer_address() {
         let inputs = [
-            (RouterPeerType::Unnumbered, "unnumbered"),
+            (UserSpecifiedRouterPeerAddr::Unnumbered, "unnumbered"),
             (
-                RouterPeerType::Numbered { ip: "1.1.1.1".parse().unwrap() },
+                UserSpecifiedRouterPeerAddr::Numbered(
+                    "1.1.1.1".parse().unwrap(),
+                ),
                 "1.1.1.1",
             ),
             (
-                RouterPeerType::Numbered { ip: "ff80::1".parse().unwrap() },
+                UserSpecifiedRouterPeerAddr::Numbered(
+                    "ff80::1".parse().unwrap(),
+                ),
                 "ff80::1",
             ),
         ];
@@ -822,10 +836,7 @@ mod tests {
 
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
     struct RouterPeerAddressWrapper {
-        // This attribute matches the one on `UserSpecifiedBgpPeerConfig::addr`
-        // above.
-        #[serde(with = "bgp_peer_addr_serde")]
-        pub addr: RouterPeerType,
+        pub addr: UserSpecifiedRouterPeerAddr,
     }
 
     #[test]
