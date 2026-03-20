@@ -115,9 +115,24 @@ pub struct ResolvedVpcFirewallRule {
     pub targets: Vec<NetworkInterface>,
     pub filter_hosts: Option<HashSet<HostIdentifier>>,
     pub filter_ports: Option<Vec<external::L4PortRange>>,
-    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,
     pub priority: external::VpcFirewallRulePriority,
+}
+
+/// The protocols that may be specified in a firewall rule's filter.
+///
+/// This is the version of the enum without `Icmp6`, for versions up through
+/// `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+pub enum VpcFirewallRuleProtocol {
+    Tcp,
+    Udp,
+    Icmp(Option<external::VpcFirewallIcmpFilter>),
+    // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
+    // Other(u16),
 }
 
 /// The body of a request to move a previously-ensured instance into a specific
