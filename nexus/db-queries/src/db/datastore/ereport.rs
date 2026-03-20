@@ -254,7 +254,8 @@ impl DataStore {
             .order_by(dsl::restart_id)
     }
 
-    /// List restarts of an ereporter at a given physical location.
+    /// List restarts of an ereporter at a given physical location, paginated by
+    /// restart generation.
     pub async fn ereporter_restart_list(
         &self,
         opctx: &OpContext,
@@ -292,8 +293,15 @@ impl DataStore {
         .select(EreporterRestart::as_select())
     }
 
-    /// Record a restart ID for a reporter location, if it has not already been
-    /// recorded.
+    /// Recognize a new restart ID for the reporter at a given location, if one
+    /// has not already been recorded.
+    ///
+    /// Reporter restarts are tracked for each unique tuple of `(reporter_type,
+    /// slot_type, slot)`. When a never-before-seen restart ID is inserted, it
+    /// is assigned the next generation number for that location. Inserting a
+    /// restart ID for a given location is idempotent; recording the same ID
+    /// multiple times will have no effect. However, attempting to insert an ID
+    /// that already exists at a _different_ location returns an error.
     pub async fn ereporter_restart_insert(
         &self,
         opctx: &OpContext,
@@ -323,38 +331,6 @@ impl DataStore {
         slot: SqlU16,
         restart_id: EreporterRestartUuid,
     ) -> TypedSqlQuery<sql_types::BigInt> {
-        // use nexus_db_schema::schema::ereporter_restart;
-        // // Subquery to determine the prior generation to increment.
-        // let (restart, restart2) = diesel::alias!(
-        //     ereporter_restart as restart,
-        //     ereporter_restart as restart2
-        // );
-
-        // sql_function! { fn coalesce(x: Nullable<Int8>, y: Int8) -> Int8; }
-
-        // let last_generation = restart
-        //     .filter(restart_dsl::reporter_type.eq(reporter_type))
-        //     .filter(restart_dsl::slot_type.eq(slot_type))
-        //     .filter(restart_dsl::slot.eq(slot))
-        //     .select(coalesce(restart.fields(restart_dsl::generation), 0))
-        //     .order_by(restart.fields(restart_dsl::generation))
-        //     .limit(1);
-
-        // diesel::insert_into(restart2)
-        //     .values((
-        //         restart_dsl::reporter_type.eq(reporter_type),
-        //         restart_dsl::slot_type.eq(slot_type),
-        //         restart_dsl::slot.eq(slot),
-        //         restart_dsl::restart_id.eq(restart_id),
-        //     ))
-        //     .on_conflict((restart_dsl::reporter_id, restart_dsl::restart_id))
-        //     .do_update()
-        //     .set(
-        //         ereporter_restart2
-        //             .generation
-        //             .eq(ereporter_restart2.generation + 1),
-        //     )
-        //
         let mut builder = QueryBuilder::new();
         builder
             .sql(
@@ -531,6 +507,7 @@ mod tests {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use diesel::pg::Pg;
     use dropshot::PaginationOrder;
+    use nexus_db_model::EreporterType;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::num::NonZeroU32;
@@ -928,8 +905,6 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sp_type = nexus_db_model::EreporterType::Sp;
-        let host_type = nexus_db_model::EreporterType::Host;
         let slot_type = SpType::Sled;
         let slot = SpMgsSlot::from(SqlU16::new(1));
 
@@ -938,8 +913,11 @@ mod tests {
         let restart_id_3 = EreporterRestartUuid::new_v4();
 
         // Helper to construct a `Generation` from a raw number for assertions.
-        let generation =
-            |n: i64| -> Generation { Generation::try_from(n).unwrap() };
+        let generation = |n: u32| -> Generation {
+            Generation::from(
+                omicron_common::api::external::Generation::from_u32(n),
+            )
+        };
 
         let pagparams: DataPageParams<'_, Generation> = DataPageParams {
             marker: None,
@@ -955,7 +933,7 @@ mod tests {
         datastore
             .ereporter_restart_insert(
                 opctx,
-                sp_type,
+                EreporterType::Sp,
                 slot_type,
                 slot,
                 restart_id_1,
@@ -964,9 +942,15 @@ mod tests {
             .expect("first insert should succeed");
 
         let restarts = datastore
-            .ereporter_restart_list(opctx, sp_type, slot_type, slot, &pagparams)
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
             .await
-            .expect("list should succeed");
+            .unwrap();
         assert_eq!(restarts.len(), 1);
         assert_eq!(restarts[0].id, restart_id_1.into());
         assert_eq!(restarts[0].generation, generation(0));
@@ -976,18 +960,24 @@ mod tests {
         datastore
             .ereporter_restart_insert(
                 opctx,
-                sp_type,
+                EreporterType::Sp,
                 slot_type,
                 slot,
                 restart_id_2,
             )
             .await
-            .expect("second insert should succeed");
+            .unwrap();
 
         let restarts = datastore
-            .ereporter_restart_list(opctx, sp_type, slot_type, slot, &pagparams)
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
             .await
-            .expect("list should succeed");
+            .unwrap();
         assert_eq!(restarts.len(), 2);
         // Results are ordered by generation descending.
         assert_eq!(restarts[0].generation, generation(1));
@@ -1001,7 +991,7 @@ mod tests {
         datastore
             .ereporter_restart_insert(
                 opctx,
-                sp_type,
+                EreporterType::Sp,
                 slot_type,
                 slot,
                 restart_id_1,
@@ -1013,9 +1003,15 @@ mod tests {
             );
 
         let restarts = datastore
-            .ereporter_restart_list(opctx, sp_type, slot_type, slot, &pagparams)
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
             .await
-            .expect("list should succeed");
+            .unwrap();
         // Should still be exactly 2 entries — no new row was created.
         assert_eq!(restarts.len(), 2);
         assert_eq!(restarts[0].generation, generation(1));
@@ -1030,7 +1026,7 @@ mod tests {
         datastore
             .ereporter_restart_insert(
                 opctx,
-                host_type,
+                EreporterType::Host,
                 slot_type,
                 slot,
                 restart_id_3,
@@ -1038,22 +1034,32 @@ mod tests {
             .await
             .expect("insert for a different reporter_type should succeed");
 
-        // The Host reporter should have its own generation starting at 0.
+        // The host OS reporter should have its own generation starting at 0.
         let host_restarts = datastore
             .ereporter_restart_list(
-                opctx, host_type, slot_type, slot, &pagparams,
+                opctx,
+                EreporterType::Host,
+                slot_type,
+                slot,
+                &pagparams,
             )
             .await
-            .expect("list should succeed");
+            .unwrap();
         assert_eq!(host_restarts.len(), 1);
         assert_eq!(host_restarts[0].id, restart_id_3.into());
         assert_eq!(host_restarts[0].generation, generation(0));
 
-        // The Sp reporter's entries should be completely unchanged.
+        // The SP reporter's entries should be completely unchanged.
         let sp_restarts = datastore
-            .ereporter_restart_list(opctx, sp_type, slot_type, slot, &pagparams)
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
             .await
-            .expect("list should succeed");
+            .unwrap();
         assert_eq!(sp_restarts.len(), 2);
         assert_eq!(sp_restarts[0].generation, generation(1));
         assert_eq!(sp_restarts[1].generation, generation(0));
@@ -1066,7 +1072,7 @@ mod tests {
         let result = datastore
             .ereporter_restart_insert(
                 opctx,
-                sp_type,
+                EreporterType::Sp,
                 slot_type,
                 different_slot,
                 restart_id_1,
