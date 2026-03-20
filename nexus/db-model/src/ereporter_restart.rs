@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::EreporterType;
+use crate::Generation;
 use crate::SpMgsSlot;
 use crate::SpType;
 use crate::typed_uuid::DbTypedUuid;
@@ -20,7 +21,7 @@ pub struct EreporterRestart {
     pub id: DbTypedUuid<EreporterRestartKind>,
     /// The generation of this start relative to `(reporter_type, slot_type,
     /// slot)`.
-    pub generation: i64,
+    pub generation: Generation,
     pub reporter_type: EreporterType,
     pub slot_type: SpType,
     pub slot: SpMgsSlot,
