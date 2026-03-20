@@ -205,7 +205,7 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             }))
             | None => RouterPeerType::Unnumbered { router_lifetime },
 
-            // We should never any other kind of invalid address as a peer -
+            // We should never see any other kind of invalid address as a peer -
             // those will fail if we try to send them to maghemite anyway. Bail
             // out as early as we can.
             Some(Err(
