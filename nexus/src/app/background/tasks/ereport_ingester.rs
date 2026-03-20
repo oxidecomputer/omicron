@@ -200,7 +200,11 @@ impl Ingester {
         slot: u16,
     ) -> Option<EreporterStatus> {
         // Fetch the latest ereport from this SP.
-        let reporter = nexus_types::fm::ereport::Reporter::Sp { sp_type, slot };
+        let reporter = nexus_types::fm::ereport::Reporter {
+            slot_type: sp_type,
+            slot,
+            kind: nexus_types::fm::ereport::ReporterKind::Sp,
+        };
         let latest =
             match self.datastore.latest_ereport_id(&opctx, reporter).await {
                 Ok(latest) => latest,

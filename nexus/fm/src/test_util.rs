@@ -6,7 +6,7 @@ use crate::builder::SitrepBuilderRng;
 use chrono::Utc;
 use nexus_reconfigurator_planning::example;
 use nexus_types::fm::ereport::{
-    Ena, Ereport, EreportData, EreportId, Reporter,
+    Ena, Ereport, EreportData, EreportId, Reporter, ReporterKind,
 };
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::EreporterRestartKind;
@@ -135,8 +135,8 @@ pub fn mk_ereport(
     time_collected: chrono::DateTime<Utc>,
     json: serde_json::Map<String, serde_json::Value>,
 ) -> Ereport {
-    let data = match reporter {
-        Reporter::Sp { .. } => {
+    let data = match reporter.kind {
+        ReporterKind::Sp => {
             let raw = ereport_types::Ereport { ena: id.ena, data: json };
             EreportData::from_sp_ereport(
                 log,
@@ -146,7 +146,7 @@ pub fn mk_ereport(
                 collector_id,
             )
         }
-        Reporter::HostOs { .. } => {
+        ReporterKind::HostOs { .. } => {
             todo!(
                 "eliza: when we get around to actually ingesting host ereport \
                  JSON, figure out what the field names for serial and part \
