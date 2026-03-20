@@ -1098,6 +1098,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 log,
                                 "failed to convert database peer configs to \
                                  API peer configs";
+                                "switch_slot" => ?switch_slot,
+                                "port" => &port.port_name.to_string(),
                                 InlineErrorChain::new(&err),
                             );
                             continue;
@@ -1122,6 +1124,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 log,
                                 "failed to convert database uplink addresses \
                                  to API uplink addresses";
+                                "switch_slot" => ?switch_slot,
+                                "port" => &port.port_name.to_string(),
                                 InlineErrorChain::new(&err),
                             );
                             continue;
@@ -1760,6 +1764,8 @@ fn uplinks(
                     log,
                     "failed to convert database uplink addresses to \
                      API uplink addresses";
+                    "switch_slot" => ?switch_slot,
+                    "port" => &port.port_name.to_string(),
                     InlineErrorChain::new(&err),
                 );
                 continue;
