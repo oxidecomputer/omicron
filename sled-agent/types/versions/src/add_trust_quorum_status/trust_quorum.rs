@@ -15,8 +15,10 @@ use serde::{Deserialize, Serialize};
 pub struct TrustQuorumNetworkConfig {
     pub generation: u64,
     /// A serialized blob of configuration data (base64 encoded).
+    // If and when this type changes next, delete the `schemars(with)` line
+    // and this comment.
     #[schemars(with = "String")]
-    #[serde(with = "serde_human_bytes::base64_vec")]
+    #[serde(with = "byte_wrapper::Base64Vec")]
     pub blob: Vec<u8>,
 }
 
