@@ -13,6 +13,7 @@ use sled_agent_types::early_networking::{
     RackNetworkConfig, RouterLifetimeConfig, RouterPeerType, SwitchSlot,
     UplinkAddress, UplinkAddressConfig,
 };
+use slog_error_chain::InlineErrorChain;
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
 
@@ -59,13 +60,15 @@ fn early_network_blobs_deserialize() {
         .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt envelope \
-                 \"{blob_desc}\" (line {blob_lineno}): {error}",
+                 \"{blob_desc}\" (line {blob_lineno}): {}",
+                InlineErrorChain::new(&error),
             );
         });
         let config = envelope.deserialize_body().unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt body \
-                 \"{blob_desc}\" (line {blob_lineno}): {error}",
+                 \"{blob_desc}\" (line {blob_lineno}): {}",
+                InlineErrorChain::new(&error),
             );
         });
 
@@ -89,8 +92,8 @@ fn early_network_blobs_deserialize() {
         .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt \
-                 \"{blob_desc}\" (line {blob_lineno}) as bootstore config: \
-                 {error}",
+                 \"{blob_desc}\" (line {blob_lineno}) as bootstore config: {}",
+                InlineErrorChain::new(&error),
             );
         });
 

@@ -1582,7 +1582,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "addr_conf"
+                  "addrconf"
                 ]
               }
             },

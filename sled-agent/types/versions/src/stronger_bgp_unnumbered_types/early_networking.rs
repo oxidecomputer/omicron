@@ -67,8 +67,15 @@ pub enum InvalidIpAddrError {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UplinkAddress {
+    // `#[serde(rename)]` this to `addrconf` so when this shows up in
+    // config-rss.toml development files, it's not phrased as `addr_conf`. This
+    // also makes it consistent with our custom TOML parsing in customer-facing
+    // TOML via wicket.
+    #[serde(rename = "addrconf")]
     AddrConf,
-    Static { ip_net: UplinkIpNet },
+    Static {
+        ip_net: UplinkIpNet,
+    },
 }
 
 #[derive(
