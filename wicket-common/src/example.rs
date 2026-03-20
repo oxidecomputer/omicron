@@ -119,7 +119,7 @@ impl ExampleRackSetupData {
                     "127.0.0.1/8".parse().unwrap(),
                 ]),
                 vlan_id: None,
-                router_lifetime: RouterLifetimeConfig::new(0).unwrap(),
+                router_lifetime: RouterLifetimeConfig::default(),
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
@@ -145,7 +145,7 @@ impl ExampleRackSetupData {
                 ]),
                 allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![]),
                 vlan_id: None,
-                router_lifetime: RouterLifetimeConfig::new(0).unwrap(),
+                router_lifetime: RouterLifetimeConfig::default(),
             },
         ];
 
@@ -172,7 +172,7 @@ impl ExampleRackSetupData {
             ]),
             allowed_export: UserSpecifiedImportExportPolicy::NoFiltering,
             vlan_id: None,
-            router_lifetime: RouterLifetimeConfig::new(0).unwrap(),
+            router_lifetime: RouterLifetimeConfig::default(),
         }];
 
         let switch0_port0_lldp = Some(LldpPortConfig {
