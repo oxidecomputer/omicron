@@ -863,7 +863,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -1056,7 +1055,6 @@ async fn test_instance_migrate_v2p_and_routes(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -1253,7 +1251,6 @@ async fn test_instance_migration_compatible_cpu_platforms(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -2376,7 +2373,6 @@ async fn test_instance_metrics_with_migration(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };

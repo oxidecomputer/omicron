@@ -28,6 +28,7 @@ use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use wicket_common::WICKETD_TIMEOUT;
@@ -234,8 +235,10 @@ impl WicketdApi for WicketdApiImpl {
                 use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
-                        let message =
-                            format!("Failed to send rack setup request: {err}");
+                        let message = format!(
+                            "Failed to send rack setup request: {}",
+                            InlineErrorChain::new(&err)
+                        );
                         HttpError {
                             status_code:
                                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
@@ -291,8 +294,10 @@ impl WicketdApi for WicketdApiImpl {
                 use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
-                        let message =
-                            format!("Failed to send rack setup request: {err}");
+                        let message = format!(
+                            "Failed to send rack setup request: {}",
+                            InlineErrorChain::new(&err)
+                        );
                         HttpError {
                             status_code:
                                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
@@ -336,8 +341,10 @@ impl WicketdApi for WicketdApiImpl {
                 use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
-                        let message =
-                            format!("Failed to send rack reset request: {err}");
+                        let message = format!(
+                            "Failed to send rack reset request: {}",
+                            InlineErrorChain::new(&err)
+                        );
                         HttpError {
                             status_code:
                                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,

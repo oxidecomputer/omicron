@@ -447,23 +447,23 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        ncpus -> Int8,
-        memory -> Int8,
-        hostname -> Text,
-        auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
-        auto_restart_cooldown -> Nullable<Interval>,
-        boot_disk_id -> Nullable<Uuid>,
-        cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        ncpus -> Int8,
+        memory -> Int8,
+        hostname -> Text,
+        updater_id -> Nullable<Uuid>,
+        updater_gen -> Int8,
         state -> crate::enums::InstanceStateEnum,
         time_last_auto_restarted -> Nullable<Timestamptz>,
+        auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
+        auto_restart_cooldown -> Nullable<Interval>,
+        boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
-        updater_id -> Nullable<Uuid>,
-        updater_gen-> Int8,
+        cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
     }
 }
 
@@ -2809,6 +2809,7 @@ table! {
         payload -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
+        case_id -> Nullable<Uuid>,
     }
 }
 
@@ -2904,7 +2905,6 @@ table! {
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
         multicast_ip -> Inet,
-        mvlan -> Nullable<Int2>,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
         state -> crate::enums::MulticastGroupStateEnum,
@@ -3171,6 +3171,17 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    fm_alert_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+        alert_class -> crate::enums::AlertClassEnum,
+        payload -> Jsonb,
+    }
+}
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

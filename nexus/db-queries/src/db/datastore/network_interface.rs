@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
 use crate::db::model::InstanceNetworkInterface;
@@ -535,6 +536,8 @@ impl DataStore {
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
+            // Treat "not found" as an error
+            .and_then(SoftDeleteResult::into_did_soft_delete_bool)
             .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
@@ -555,7 +558,10 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<bool, TransactionError<network_interface::DeleteError>> {
+    ) -> Result<
+        SoftDeleteResult,
+        TransactionError<network_interface::DeleteError>,
+    > {
         let query = network_interface::DeleteQuery::new(
             NetworkInterfaceKind::Service,
             service_id,
@@ -849,10 +855,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_runtime =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_runtime.propolis_id.is_some()
-                            || instance_runtime.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
@@ -936,10 +942,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_state =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_state.propolis_id.is_some()
-                            || instance_state.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }

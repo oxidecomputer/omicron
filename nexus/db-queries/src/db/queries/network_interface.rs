@@ -5,6 +5,7 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
@@ -1600,14 +1601,16 @@ fn push_instance_state_verification_subquery<'a>(
 /// be stopped, though we may relax this in the future.
 /// Second, while an instance may have zero or more interfaces, if it has one
 /// or more, exactly one of those must be the primary interface. That means
-/// we can only delete the primary interface if there are no secondary interfaces.
+/// we can only delete the primary interface if there are no secondary
+/// interfaces. The full query can be seen in the output of the
+/// `expectorate_query_contents()` unit test below.
 ///
 /// Notes
 /// -----
 ///
 /// As with some of the other queries in this module, this uses some casting
 /// trickery to learn why the query fails. This is why we store the
-/// `parent_id` as a string in this type.
+/// `parent_id` and `interface_id` as strings in this type.
 ///
 /// The `instance` CTE is only present if the interface is an instance-kind.
 ///
@@ -1615,6 +1618,7 @@ fn push_instance_state_verification_subquery<'a>(
 #[derive(Debug, Clone)]
 pub struct DeleteQuery {
     interface_id: Uuid,
+    interface_id_str: String,
     kind: NetworkInterfaceKind,
     parent_id: Uuid,
     parent_id_str: String,
@@ -1628,6 +1632,7 @@ impl DeleteQuery {
     ) -> Self {
         Self {
             interface_id,
+            interface_id_str: interface_id.to_string(),
             kind,
             parent_id,
             parent_id_str: parent_id.to_string(),
@@ -1636,14 +1641,18 @@ impl DeleteQuery {
 
     /// Issue the delete and parses the result.
     ///
-    /// The three outcomes are:
+    /// The four outcomes are:
     /// - Ok(Row exists and was deleted)
     /// - Ok(Row exists, but was not deleted)
-    /// - Error (row doesn't exist, or other diesel error)
+    /// - Ok(Row does not exist)
+    /// - Error (diesel error attempting the query)
+    ///
+    /// To treat "row does not exist" as an error, see
+    /// [`SoftDeleteResult::into_did_soft_delete_bool()`].
     pub async fn execute_and_check(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<bool, DieselError> {
+    ) -> Result<SoftDeleteResult, DieselError> {
         let (found_id, deleted_id) =
             self.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
         match (found_id, deleted_id) {
@@ -1652,16 +1661,16 @@ impl DeleteQuery {
                     found, deleted,
                     "internal query error: mismatched interface IDs"
                 );
-                Ok(true)
+                Ok(SoftDeleteResult::SoftDeleteApplied)
             }
-            (Some(_), None) => Ok(false),
+            (Some(_), None) => Ok(SoftDeleteResult::AlreadySoftDeleted),
             (None, Some(deleted)) => {
                 panic!(
                     "internal query error: \
                      deleted nonexisted interface {deleted}"
                 )
             }
-            (None, None) => Err(DieselError::NotFound),
+            (None, None) => Ok(SoftDeleteResult::NotFound),
         }
     }
 }
@@ -1712,7 +1721,7 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL) <= 1, ");
-        out.push_bind_param::<sql_types::Text, String>(&self.parent_id_str)?;
+        out.push_bind_param::<sql_types::Text, String>(&self.interface_id_str)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, &str>(
             &DeleteError::HAS_SECONDARIES_SENTINEL,
@@ -1722,7 +1731,9 @@ impl QueryFragment<Pg> for DeleteQuery {
         // LEFT JOINs them so the caller can distinguish three cases:
         // (found + deleted) = success, (found + NULL) = existed but
         // couldn't delete, (NULL + NULL) = not found.
-        out.push_sql(") AS UUID)), found_interface AS (SELECT ");
+        out.push_sql(") AS UUID) AS ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql("), found_interface AS (SELECT ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" FROM ");
         NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
@@ -1746,7 +1757,12 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(", updated.");
         out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" FROM found_interface LEFT JOIN updated");
+        out.push_sql(" FROM interface LEFT JOIN found_interface");
+        out.push_sql(" ON interface.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = found_interface.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" LEFT JOIN updated");
         out.push_sql(" ON found_interface.");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" = updated.");
@@ -1908,7 +1924,6 @@ fn decode_delete_network_interface_database_error(
 
 #[cfg(test)]
 mod tests {
-    use super::DeleteError;
     use super::DeleteQuery;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
@@ -1916,6 +1931,7 @@ mod tests {
     use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
+    use crate::db::datastore::SoftDeleteResult;
     use crate::db::identity::Resource;
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
@@ -1933,7 +1949,6 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
-    use nexus_db_errors::TransactionError;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpVersion;
     use nexus_types::external_api::instance::InstanceCreate;
@@ -1942,7 +1957,6 @@ mod tests {
     use nexus_types::external_api::instance::PrivateIpStackCreate;
     use nexus_types::external_api::instance::PrivateIpv4StackCreate;
     use nexus_types::external_api::project;
-    use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -2028,8 +2042,8 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            generation: instance.runtime_state.generation.next().into(),
-            ..instance.runtime_state.clone()
+            generation: instance.state_generation.next().into(),
+            ..instance.runtime()
         };
         let res = db_datastore
             .instance_update_runtime(
@@ -2038,7 +2052,7 @@ mod tests {
             )
             .await;
         assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
+        instance.set_runtime(new_runtime);
         instance
     }
 
@@ -2254,7 +2268,11 @@ mod tests {
             )
             .await
             .expect("failed first delete");
-        assert!(first_deleted, "first delete removed interface");
+        assert_eq!(
+            first_deleted,
+            SoftDeleteResult::SoftDeleteApplied,
+            "first delete removed interface"
+        );
 
         let second_deleted = context
             .datastore()
@@ -2265,26 +2283,27 @@ mod tests {
             )
             .await
             .expect("failed second delete");
-        assert!(!second_deleted, "second delete did nothing");
+        assert_eq!(
+            second_deleted,
+            SoftDeleteResult::AlreadySoftDeleted,
+            "second delete did nothing"
+        );
 
-        // Attempting to delete a nonexistent interface should fail.
+        // Attempting to delete a nonexistent record should report that fact.
         let bogus_id = Uuid::new_v4();
-        let err = context
+        let bogus_delete_result = context
             .datastore()
             .service_delete_network_interface_on_connection(
                 &conn, service_id, bogus_id,
             )
             .await
-            .expect_err(
-                "unexpectedly succeeded deleting nonexistent interface",
-            );
-        let expected_err = TransactionError::CustomError(
-            DeleteError::External(external::Error::ObjectNotFound {
-                type_name: external::ResourceType::ServiceNetworkInterface,
-                lookup_type: external::LookupType::ById(bogus_id),
-            }),
+            .expect("bogus delete did nothing");
+        assert_eq!(
+            bogus_delete_result,
+            SoftDeleteResult::NotFound,
+            "bogus delete should not have found a matching row"
         );
-        assert_eq!(err, expected_err);
+
         context.success().await;
     }
 

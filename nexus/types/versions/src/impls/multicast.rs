@@ -136,8 +136,6 @@ mod tests {
     use crate::latest::multicast::{
         MulticastGroupCreate, MulticastGroupUpdate,
     };
-    use omicron_common::api::external::Nullable;
-    use omicron_common::vlan::VlanID;
 
     #[test]
     fn test_validate_multicast_ip_v4() {
@@ -322,8 +320,7 @@ mod tests {
             "description": "Test multicast group",
             "multicast_ip": "224.1.2.3",
             "source_ips": ["10.0.0.1", "10.0.0.2"],
-            "pool": "default",
-            "mvlan": 10
+            "pool": "default"
         }"#;
 
         let result: Result<MulticastGroupCreate, _> =
@@ -346,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_multicast_group_create_deserialization_without_optional_fields() {
-        // This is the critical test - multicast_ip, source_ips, pool, and mvlan are all optional
+        // This is the critical test: multicast_ip, source_ips, and pool are all optional
         let json = r#"{
             "name": "test-group",
             "description": "Test multicast group"
@@ -364,7 +361,6 @@ mod tests {
         assert_eq!(params.multicast_ip, None);
         assert_eq!(params.source_ips, None);
         assert_eq!(params.pool, None);
-        assert_eq!(params.mvlan, None);
     }
 
     #[test]
@@ -454,15 +450,14 @@ mod tests {
 
     #[test]
     fn test_multicast_group_create_deserialization_explicit_null_fields() {
-        // Test with explicit null values for optional fields
-        // This is what the CLI sends when fields are not provided
+        // Test with explicit null values for optional fields.
+        // This is what the CLI sends when fields are not provided.
         let json = r#"{
             "name": "test-group",
             "description": "Test multicast group",
             "multicast_ip": null,
             "source_ips": null,
-            "pool": null,
-            "mvlan": null
+            "pool": null
         }"#;
 
         let result: Result<MulticastGroupCreate, _> =
@@ -476,7 +471,6 @@ mod tests {
         assert_eq!(params.multicast_ip, None);
         assert_eq!(params.source_ips, None);
         assert_eq!(params.pool, None);
-        assert_eq!(params.mvlan, None);
     }
 
     #[test]
@@ -487,8 +481,7 @@ mod tests {
             "description": "Test multicast group",
             "multicast_ip": "224.1.2.3",
             "source_ips": [],
-            "pool": null,
-            "mvlan": 30
+            "pool": null
         }"#;
 
         let result: Result<MulticastGroupCreate, _> =
@@ -501,7 +494,6 @@ mod tests {
         );
         assert_eq!(params.source_ips, Some(vec![]));
         assert_eq!(params.pool, None);
-        assert_eq!(params.mvlan, Some(VlanID::new(30).unwrap()));
     }
 
     #[test]
@@ -520,44 +512,6 @@ mod tests {
         );
         let params = result.unwrap();
         assert_eq!(params.source_ips, None);
-        assert_eq!(params.mvlan, None);
-    }
-
-    #[test]
-    fn test_multicast_group_update_deserialization_explicit_null_mvlan() {
-        // When mvlan is explicitly null, it should be Some(Nullable(None)) (clearing the field)
-        let json = r#"{
-            "name": "test-group",
-            "mvlan": null
-        }"#;
-
-        let result: Result<MulticastGroupUpdate, _> =
-            serde_json::from_str(json);
-        assert!(
-            result.is_ok(),
-            "Failed to deserialize update with null mvlan: {:?}",
-            result.err()
-        );
-        let params = result.unwrap();
-        assert_eq!(params.mvlan, Some(Nullable(None)));
-    }
-
-    #[test]
-    fn test_multicast_group_update_deserialization_set_mvlan() {
-        // When mvlan has a value, it should be Some(Nullable(Some(value)))
-        let json = r#"{
-            "name": "test-group",
-            "mvlan": 100
-        }"#;
-
-        let result: Result<MulticastGroupUpdate, _> =
-            serde_json::from_str(json);
-        assert!(result.is_ok());
-        let params = result.unwrap();
-        assert_eq!(
-            params.mvlan,
-            Some(Nullable(Some(VlanID::new(100).unwrap())))
-        );
     }
 
     #[test]
@@ -594,18 +548,5 @@ mod tests {
         assert!(result.is_ok());
         let params = result.unwrap();
         assert_eq!(params.source_ips, Some(vec![]));
-    }
-
-    #[test]
-    fn test_multicast_group_update_deserialization_invalid_mvlan() {
-        // VLAN ID 1 should be rejected (reserved)
-        let json = r#"{
-            "name": "test-group",
-            "mvlan": 1
-        }"#;
-
-        let result: Result<MulticastGroupUpdate, _> =
-            serde_json::from_str(json);
-        assert!(result.is_err(), "Should reject reserved VLAN ID 1");
     }
 }

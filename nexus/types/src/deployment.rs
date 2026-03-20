@@ -133,10 +133,12 @@ pub use planning_report::PlanningAddStepReport;
 pub use planning_report::PlanningCockroachdbSettingsStepReport;
 pub use planning_report::PlanningDecommissionStepReport;
 pub use planning_report::PlanningExpungeStepReport;
+pub use planning_report::PlanningMeasurementUpdatesStepReport;
 pub use planning_report::PlanningMgsUpdatesStepReport;
 pub use planning_report::PlanningMupdateOverrideStepReport;
 pub use planning_report::PlanningNexusGenerationBumpReport;
 pub use planning_report::PlanningNoopImageSourceSkipSledHostPhase2Reason;
+pub use planning_report::PlanningNoopImageSourceSkipSledMeasurementsReason;
 pub use planning_report::PlanningNoopImageSourceSkipSledZonesReason;
 pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
 pub use planning_report::PlanningNoopImageSourceStepReport;
@@ -2072,7 +2074,7 @@ pub enum BlueprintMeasurements {
     Artifacts { artifacts: BlueprintArtifactMeasurements },
 }
 
-/// This is a private inner type to ensure the measurment set is always non-empty
+/// This is a private inner type to ensure the measurement set is always non-empty
 #[derive(Clone, Debug, Serialize, JsonSchema, PartialEq, Diffable, Eq)]
 pub struct BlueprintArtifactMeasurements(BTreeSet<BlueprintSingleMeasurement>);
 
@@ -2111,6 +2113,15 @@ impl BlueprintArtifactMeasurements {
 
     pub fn into_iter(self) -> impl Iterator<Item = BlueprintSingleMeasurement> {
         self.0.into_iter()
+    }
+}
+
+impl Display for BlueprintArtifactMeasurements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for m in self.iter() {
+            writeln!(f, "{m}")?;
+        }
+        Ok(())
     }
 }
 
@@ -2206,9 +2217,7 @@ impl Display for BlueprintMeasurements {
                 writeln!(f, "(install dataset)")?;
             }
             Self::Artifacts { artifacts } => {
-                for m in artifacts.iter() {
-                    writeln!(f, "{m}")?;
-                }
+                writeln!(f, "{artifacts}")?;
             }
         }
         Ok(())

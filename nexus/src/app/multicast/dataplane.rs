@@ -43,7 +43,7 @@ use std::net::IpAddr;
 
 use futures::future::try_join_all;
 use oxnet::MulticastMac;
-use slog::{Logger, debug, error, info, warn};
+use slog::{Logger, debug, error, info};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
@@ -61,7 +61,6 @@ use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::Error;
-use omicron_common::vlan::VlanID;
 use sled_agent_types::early_networking::SwitchSlot;
 
 use crate::app::dpd_clients;
@@ -398,15 +397,6 @@ impl MulticastDataplaneClient {
             Error::internal_error("multicast group missing tag")
         })?;
 
-        // Convert MVLAN to u16 for DPD, validating through VlanID
-        let vlan_id = external_group
-            .mvlan
-            .map(|v| VlanID::new(v as u16))
-            .transpose()
-            .map_err(|e| {
-                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
-            })?
-            .map(u16::from);
         let underlay_ip_admin =
             underlay_group.multicast_ip.ip().into_underlay_multicast()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
@@ -468,9 +458,14 @@ impl MulticastDataplaneClient {
                         )
                         .await?;
 
+                    // TODO: `vlan_id` is `None` because egress VLAN tagging is not
+                    // yet supported. When egress support is added, this should
+                    // be populated from group configuration.
                     let external_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
-                        external_forwarding: ExternalForwarding { vlan_id },
+                        external_forwarding: ExternalForwarding {
+                            vlan_id: None,
+                        },
                         internal_forwarding: InternalForwarding {
                             nat_target: Some(nat_target),
                         },
@@ -556,16 +551,6 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
 
         // Pre-compute shared data once
-        // Convert MVLAN to u16 for DPD, validating through VlanID
-        let vlan_id = params
-            .external_group
-            .mvlan
-            .map(|v| VlanID::new(v as u16))
-            .transpose()
-            .map_err(|e| {
-                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
-            })?
-            .map(u16::from);
         let underlay_ip_admin = params
             .underlay_group
             .multicast_ip
@@ -698,8 +683,13 @@ impl MulticastDataplaneClient {
                             Error::internal_error("failed to update underlay")
                         })?;
 
-                    // Prepare external update/create entries with pre-computed data
-                    let external_forwarding = ExternalForwarding { vlan_id };
+                    // Prepare external update/create entries with pre-computed data.
+                    //
+                    // TODO: `vlan_id` is `None` because egress VLAN tagging is not
+                    // yet supported. When egress support is added, this should
+                    // be populated from group configuration.
+                    let external_forwarding =
+                        ExternalForwarding { vlan_id: None };
                     let internal_forwarding =
                         InternalForwarding { nat_target: Some(nat_target) };
 
@@ -927,116 +917,20 @@ impl MulticastDataplaneClient {
                         &underlay_ip_admin, &tag, &update_entry)
                     .await;
 
-                match update_res {
-                    Ok(_) => {}
-                    Err(DpdError::ErrorResponse(ref resp))
-                        if resp.status() == reqwest::StatusCode::NOT_FOUND
-                            || resp.status()
-                                == reqwest::StatusCode::INTERNAL_SERVER_ERROR =>
-                    {
-                        // 404: Group disappeared (race or external cleanup)
-                        // 500: ASIC state inconsistent with DPD DB
-                        //
-                        // In both cases, delete and recreate with the updated members.
-                        info!(
-                            log,
-                            "underlay update failed, attempting delete+recreate";
-                            "underlay_ip" => %underlay_ip,
-                            "switch" => ?switch_slot,
-                            "operation" => %operation_name,
-                            "status" => %resp.status(),
-                            "dpd_operation" => "modify_group_membership_recreate"
-                        );
-
-                        // TODO: this `reset_by_tag` fallback can be removed
-                        // once DPD's `modify_group_internal` calls
-                        // `process_membership_changes` in the
-                        // empty-transition arm, preventing the 500 that
-                        // triggers this recovery path.
-                        // See https://github.com/oxidecomputer/dendrite/pull/232
-                        //
-                        // Try to delete the stale underlay group. If this
-                        // fails because the underlay group is still
-                        // referenced by an external group via NAT target,
-                        // fall back to `reset_by_tag`, which deletes
-                        // external groups first so the ASIC state is clean
-                        // for the next reconciler pass.
-                        if let Err(del_err) = client
-                            .multicast_group_delete(&underlay_ip, &tag)
-                            .await
-                        {
-                            warn!(
-                                log,
-                                "underlay delete failed, resetting all \
-                                 groups by tag for clean ASIC state";
-                                "underlay_ip" => %underlay_ip,
-                                "switch" => ?switch_slot,
-                                "delete_error" => %del_err,
-                                "dpd_operation" => "modify_group_membership_recreate"
-                            );
-
-                            if let Err(reset_err) = client
-                                .multicast_reset_by_tag(&tag)
-                                .await
-                            {
-                                error!(
-                                    log,
-                                    "tag reset also failed during recovery";
-                                    "underlay_ip" => %underlay_ip,
-                                    "switch" => ?switch_slot,
-                                    "error" => %reset_err,
-                                    "dpd_operation" => "modify_group_membership_recreate"
-                                );
-                            }
-
-                            // Return error so the reconciler retries.
-                            // Drift correction will recreate the groups
-                            // with clean ASIC state on the next pass.
-                            return Err(Error::internal_error(&format!(
-                                "underlay group recovery on {switch_slot:?}: \
-                                 reset by tag after delete failed ({del_err})"
-                            )));
-                        }
-
-                        // Recreate with the updated members
-                        let create_entry = MulticastGroupCreateUnderlayEntry {
-                            group_ip: underlay_ip_admin.clone(),
-                            members: update_entry.members,
-                            tag: underlay_group.tag.clone(),
-                        };
-
-                        client
-                            .multicast_group_create_underlay(&create_entry)
-                            .await
-                            .map_err(|e| {
-                                error!(
-                                    log,
-                                    "underlay recreate with members failed";
-                                    "underlay_ip" => %underlay_ip,
-                                    "switch" => ?switch_slot,
-                                    "error" => %e,
-                                    "dpd_operation" => "modify_group_membership_recreate"
-                                );
-                                Error::internal_error(&format!(
-                                    "underlay recreate with members failed on {switch_slot:?}: {e}"
-                                ))
-                            })?;
-                    }
-                    Err(e) => {
-                        error!(
-                            log,
-                            "underlay member modify failed";
-                            "operation_name" => %operation_name,
-                            "underlay_ip" => %underlay_ip,
-                            "switch" => ?switch_slot,
-                            "error" => %e,
-                            "dpd_operation" => "modify_group_membership_update"
-                        );
-                        return Err(Error::internal_error(&format!(
-                            "underlay member modify failed on {switch_slot:?}: {e}"
-                        )));
-                    }
-                }
+                update_res.map_err(|e| {
+                    error!(
+                        log,
+                        "underlay member modify failed";
+                        "operation_name" => %operation_name,
+                        "underlay_ip" => %underlay_ip,
+                        "switch" => ?switch_slot,
+                        "error" => %e,
+                        "dpd_operation" => "modify_group_membership_update"
+                    );
+                    Error::internal_error(&format!(
+                        "underlay member modify failed on {switch_slot:?}: {e}"
+                    ))
+                })?;
 
                 info!(
                     log,

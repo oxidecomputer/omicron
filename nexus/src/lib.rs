@@ -54,6 +54,7 @@ use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
@@ -622,12 +623,11 @@ impl nexus_test_interface::NexusServer for Server {
 /// Run an instance of the Nexus server.
 pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     use slog::Drain;
-    let (drain, registration) =
-        slog_dtrace::with_drain(
-            config.pkg.log.to_logger("nexus").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
+    let (drain, registration) = slog_dtrace::with_drain(
+        config.pkg.log.to_logger("nexus").map_err(|message| {
+            format!("initializing logger: {}", InlineErrorChain::new(&message))
+        })?,
+    );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

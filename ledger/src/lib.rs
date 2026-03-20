@@ -14,16 +14,25 @@ use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Serialize, de::DeserializeOwned};
 use slog::{Logger, debug, error, info, warn};
+use slog_error_chain::SlogInlineError;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
-    #[error("Cannot serialize JSON to file {path}: {err}")]
-    JsonSerialize { path: Utf8PathBuf, err: serde_json::error::Error },
+    #[error("Cannot serialize JSON to file {path}")]
+    JsonSerialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: serde_json::error::Error,
+    },
 
-    #[error("Cannot deserialize JSON from file {path}: {err}")]
-    JsonDeserialize { path: Utf8PathBuf, err: serde_json::error::Error },
+    #[error("Cannot deserialize JSON from file {path}")]
+    JsonDeserialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: serde_json::error::Error,
+    },
 
-    #[error("Failed to perform I/O: {message}: {err}")]
+    #[error("Failed to perform I/O: {message}")]
     Io {
         message: String,
         #[source]
@@ -88,7 +97,7 @@ impl<T: Ledgerable> Ledger<T> {
             match T::read_from(log, &path).await {
                 Ok(ledger) => ledgers.push(ledger),
                 Err(err) => {
-                    debug!(log, "Failed to read ledger: {err}"; "path" => %path)
+                    debug!(log, "Failed to read ledger"; "path" => %path, err)
                 }
             }
         }
@@ -123,7 +132,7 @@ impl<T: Ledgerable> Ledger<T> {
         let mut one_successful_write = false;
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
-                warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
+                warn!(self.log, "Failed to write ledger"; "path" => ?path, &e);
                 failed_paths.push((path.to_path_buf(), e));
             } else {
                 one_successful_write = true;
@@ -215,6 +224,7 @@ mod test {
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     pub use dropshot::test_util::LogContext;
+    use slog_error_chain::InlineErrorChain;
 
     // Copied from `omicron-test-utils` to avoid adding a dependency on
     // that crate just for test logging setup.
@@ -413,7 +423,8 @@ mod test {
         let err = ledger.commit().await.unwrap_err();
         assert!(
             matches!(err, Error::FailedToWrite { .. }),
-            "Unexpected error: {err}"
+            "Unexpected error: {}",
+            InlineErrorChain::new(&err)
         );
 
         logctx.cleanup_successful();

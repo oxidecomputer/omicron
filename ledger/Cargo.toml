@@ -17,6 +17,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 omicron-workspace-hack.workspace = true
+slog-error-chain.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
