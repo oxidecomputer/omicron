@@ -784,9 +784,9 @@ mod tests {
             ),
             (
                 UserSpecifiedRouterPeerAddr::Numbered(
-                    "ff80::1".parse().unwrap(),
+                    "fd00::1".parse().unwrap(),
                 ),
-                "ff80::1",
+                "fd00::1",
             ),
         ];
 
@@ -848,8 +848,8 @@ mod tests {
                 "1.1.1.0/24",
             ),
             (
-                UplinkAddress::Static { ip_net: "ff80::/64".parse().unwrap() },
-                "ff80::/64",
+                UplinkAddress::Static { ip_net: "fd00::/64".parse().unwrap() },
+                "fd00::/64",
             ),
         ];
 
