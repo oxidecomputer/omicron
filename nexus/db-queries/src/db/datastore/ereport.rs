@@ -218,14 +218,24 @@ impl DataStore {
     pub async fn ereporter_restart_insert(
         &self,
         opctx: &OpContext,
-        reporter: fm::Reporter,
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SpMgsSlot,
         restart_id: EreporterRestartUuid,
     ) -> CreateResult<()> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let conn = &*self.pool_connection_authorized(opctx).await?;
-        // diesel::insert_into(restart_dsl::ereporter_restart)
-        todo!()
+        let query = Self::restart_insert_query(
+            reporter_type,
+            slot_type,
+            slot.into(),
+            restart_id,
+        );
+        query
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
     }
 
     fn restart_insert_query(
@@ -233,7 +243,7 @@ impl DataStore {
         slot_type: SpType,
         slot: SqlU16,
         restart_id: EreporterRestartUuid,
-    ) -> TypedSqlQuery<()> {
+    ) -> TypedSqlQuery<sql_types::BigInt> {
         // use nexus_db_schema::schema::ereporter_restart;
         // // Subquery to determine the prior generation to increment.
         // let (restart, restart2) = diesel::alias!(
@@ -307,8 +317,13 @@ impl DataStore {
             .sql(", ")
             .param()
             .bind::<sql_types::Int4, _>(slot)
-            .sql(", NOW())");
-        builder.query::<()>()
+            .sql(
+                "\
+                , NOW()) \
+                ON CONFLICT (generation, reporter_type, slot_type, slot) \
+                DO NOTHING",
+            );
+        builder.query()
     }
 
     pub async fn latest_ereport_id(
