@@ -67,6 +67,8 @@ pub mod v25;
 pub mod v26;
 #[path = "modify_services_in_inventory/mod.rs"]
 pub mod v28;
+#[path = "add_vsock_component/mod.rs"]
+pub mod v29;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
