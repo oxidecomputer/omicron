@@ -1477,6 +1477,25 @@ impl SledAgent {
             DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
         };
 
+        // If you have a parent dataset that has a reservation, and a child
+        // dataset has a bunch of data, you can run into an out-of-space issue
+        // when deleting the child dataset if the pool is nearly full: when you
+        // delete the child dataset, it moves into a "to be deleted" area in the
+        // background, but the space is still used by the child (this amount can
+        // be accessed by querying for the `freeing` property of the pool).
+        //
+        // This, combined with a parent dataset that has a reservation, causes
+        // the amount of free space in the pool to go down, so before deleting
+        // the volume, remove the reservation set for the parent dataset if one
+        // exists.
+
+        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        // Then proceed with deleting the child volume dataset, then the parent
+        // dataset
+
         Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
             name: &delegated_zvol.volume_name(),
             raw: true,
