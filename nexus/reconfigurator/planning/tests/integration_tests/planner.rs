@@ -3,12 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use assert_matches::assert_matches;
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::keeper::KeeperId;
 use expectorate::assert_contents;
 use iddqd::IdOrdMap;
+use ls_apis_shared::DEPLOYMENT_UNIT_DAG_PATH;
+use ls_apis_shared::DagEdgesFile;
+use ls_apis_shared::DeploymentUnitId;
+use ls_apis_shared::OMICRON_LS_APIS_PATH;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::CollectionId;
@@ -65,6 +70,7 @@ use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_common::update::ArtifactId;
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -83,10 +89,12 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::env;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -4962,4 +4970,337 @@ fn test_multiple_measurements() {
     }
 
     panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
+}
+
+/// Maps a `ZoneKind` to its deployment unit ID (matching the `id` fields in
+/// `api-manifest.toml`).  This is an exhaustive match so that adding a new
+/// zone kind forces an update here.
+fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitId {
+    let s = match kind {
+        ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+        ZoneKind::Clickhouse
+        | ZoneKind::ClickhouseKeeper
+        | ZoneKind::ClickhouseServer => "clickhouse",
+        ZoneKind::CockroachDb => "cockroach",
+        ZoneKind::Crucible => "crucible",
+        ZoneKind::CruciblePantry => "crucible_pantry",
+        ZoneKind::ExternalDns | ZoneKind::InternalDns => "dns_server",
+        ZoneKind::Nexus => "nexus",
+        ZoneKind::Oximeter => "oximeter",
+    };
+    DeploymentUnitId::from(s.to_owned())
+}
+
+/// Verify that the planner's zone update ordering is a topological sort of the
+/// deployment unit dependency DAG.
+#[test]
+fn test_zone_update_ordering_respects_dependency_dag() {
+    static TEST_NAME: &str = "zone_update_ordering_respects_dependency_dag";
+    let logctx = test_setup_log(TEST_NAME);
+
+    let workspace_root = Utf8PathBuf::from(
+        env::var("NEXTEST_WORKSPACE_ROOT")
+            .expect("nextest sets NEXTEST_WORKSPACE_ROOT"),
+    );
+    let dag_path = workspace_root
+        .join(OMICRON_LS_APIS_PATH)
+        .join(DEPLOYMENT_UNIT_DAG_PATH);
+    let dag_contents = std::fs::read_to_string(&dag_path)
+        .unwrap_or_else(|e| panic!("read {dag_path}: {e}"));
+    let dag: DagEdgesFile =
+        toml::from_str(&dag_contents).expect("parsed deployment_unit_dag.toml");
+
+    // Collect all deployment unit IDs referenced in the DAG.
+    let dag_unit_ids: BTreeSet<_> =
+        dag.edges.iter().flat_map(|e| [&e.consumer, &e.producer]).collect();
+
+    // Deployment units that don't correspond to zones and therefore can't
+    // be tracked in this test. These are expected to be absent from
+    // `progress`.
+    // TODO: track the host OS deployment unit by simulating MGS updates.
+    let non_zone_units: BTreeSet<DeploymentUnitId> =
+        ["host_os", "installinator"]
+            .into_iter()
+            .map(|s| DeploymentUnitId::from(s.to_owned()))
+            .collect();
+    for unit in &non_zone_units {
+        assert!(
+            dag_unit_ids.contains(unit),
+            "non_zone_units entry {unit:?} does not appear in the \
+             deployment unit DAG ({dag_path}) — is the ID still correct?"
+        );
+    }
+
+    // Set up the example system with all zone types represented,
+    // including multi-node clickhouse (servers + keepers).
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| {
+        // TODO: this configuration is copied from builder_all_zone_types.
+        // Should this live in a more central location?
+        builder
+            .nsleds(5)
+            .oximeter_count(OXIMETER_REDUNDANCY)
+            .cockroachdb_count(COCKROACHDB_REDUNDANCY)
+            .boundary_ntp_count(2)
+            .external_dns_count(1)?
+            .clickhouse_policy(ClickhousePolicy {
+                version: 0,
+                mode: ClickhouseMode::Both {
+                    target_servers: 2,
+                    target_keepers: 3,
+                },
+                time_created: Utc::now(),
+            })
+            .with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // Set a new target release with fake images for all zones.
+    //
+    // TODO: The SP/host artifacts intentionally match the initial state so the
+    // planner doesn't issue MGS updates — simulating MGS update completion
+    // requires some additional infrastructure.
+    let version = ArtifactVersion::new_static("2.0.0-freeform")
+        .expect("can't parse artifact version");
+    let fake_hash = ArtifactHash([0; 32]);
+    let target_image_source = BlueprintZoneImageSource::Artifact {
+        version: BlueprintArtifactVersion::Available {
+            version: version.clone(),
+        },
+        hash: fake_hash,
+    };
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: fake_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_zone_artifacts_at_version(&version),
+    });
+
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    // For each deployment unit, track the first iteration where the planner
+    // touched any zone (update or expunge), and the first iteration where all
+    // in-service zones reached the target image.
+    #[derive(Debug)]
+    struct UnitProgress {
+        first_activity: usize,
+        all_at_target: Option<usize>,
+    }
+
+    let mut progress = BTreeMap::new();
+
+    const MAX_PLANNING_ITERATIONS: usize = 100;
+
+    let mut parent = blueprint1;
+    for i in 1..=MAX_PLANNING_ITERATIONS {
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+
+        let BlueprintSource::Planner(report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+
+        // TODO: track the host OS deployment unit by simulating MGS updates.
+
+        // Record the first iteration with zone activity per deployment unit.
+        let zone_updates = &report.zone_updates;
+        let active_zones = zone_updates
+            .updated_zones
+            .values()
+            .chain(zone_updates.expunged_zones.values())
+            .flatten();
+        for z in active_zones {
+            let unit = zone_kind_to_deployment_unit(z.kind);
+            progress.entry(unit).or_insert(UnitProgress {
+                first_activity: i,
+                all_at_target: None,
+            });
+        }
+
+        // Check which deployment units have all in-service zones at the
+        // target image in this blueprint.
+        let mut zones_by_unit: BTreeMap<
+            DeploymentUnitId,
+            Vec<&BlueprintZoneConfig>,
+        > = BTreeMap::new();
+        for (_, zone) in blueprint.in_service_zones() {
+            let unit = zone_kind_to_deployment_unit(zone.zone_type.kind());
+            zones_by_unit.entry(unit).or_default().push(zone);
+        }
+        for (unit, zones) in &zones_by_unit {
+            if let Some(p) = progress.get_mut(unit) {
+                if p.all_at_target.is_none()
+                    && zones
+                        .iter()
+                        .all(|z| z.image_source == target_image_source)
+                {
+                    p.all_at_target = Some(i);
+                }
+            }
+        }
+
+        // Check for convergence. (This is in a scope so that the borrow can be
+        // dropped before moving blueprint into parent.)
+        {
+            let summary = blueprint.diff_since_blueprint(&parent);
+            // TODO: should this check live on BlueprintDiffSummary?
+            if summary.total_zones_added() == 0
+                && summary.total_zones_removed() == 0
+                && summary.total_zones_modified() == 0
+                && summary.before.nexus_generation
+                    == summary.after.nexus_generation
+                && summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
+            {
+                let not_at_target: Vec<_> = blueprint
+                    .in_service_zones()
+                    .filter(|(_, zone)| {
+                        zone.image_source != target_image_source
+                    })
+                    .map(|(sled, zone)| {
+                        format!(
+                            "  sled {sled}: zone {} ({:?}), \
+                             image_source: {}",
+                            zone.id,
+                            zone.zone_type.kind(),
+                            zone.image_source,
+                        )
+                    })
+                    .collect();
+                if !not_at_target.is_empty() {
+                    panic!(
+                        "diff summary claims convergence, \
+                         but {} zones are not at target:\n{}",
+                        not_at_target.len(),
+                        not_at_target.join("\n"),
+                    );
+                }
+                println!("planning converged after {i} iterations");
+                break;
+            }
+        }
+
+        parent = blueprint;
+        assert!(
+            i < MAX_PLANNING_ITERATIONS,
+            "did not converge after {MAX_PLANNING_ITERATIONS} iterations"
+        );
+    }
+
+    // Verify that every zone-based deployment unit was actually exercised. This
+    // catches cases where the example system doesn't include a zone type that
+    // the DAG covers.
+    let zone_based_units: BTreeSet<_> =
+        ZoneKind::iter().map(zone_kind_to_deployment_unit).collect();
+    for unit in &zone_based_units {
+        let p = progress.get(unit).unwrap_or_else(|| {
+            panic!(
+                "deployment unit {unit:?} is zone-based but was never \
+                 updated — is it missing from the example system?"
+            )
+        });
+        // Verify that every zone-based unit ID actually appears in the
+        // DAG. This catches typos in zone_kind_to_deployment_unit's
+        // string literals.
+        assert!(
+            dag_unit_ids.contains(unit),
+            "zone_kind_to_deployment_unit produced {unit:?}, which does \
+             not appear in the deployment unit DAG ({dag_path}) — is the \
+             ID correct?"
+        );
+        // Verify that every zone-based unit reached the target image.
+        // Without this, a unit that was touched but never fully converged
+        // could go undetected if it only appears as a consumer (never a
+        // producer) in checked DAG edges.
+        assert!(
+            p.all_at_target.is_some(),
+            "deployment unit {unit:?} was updated (first activity at \
+             iteration {}) but never had all zones reach the target image",
+            p.first_activity,
+        );
+    }
+
+    // TODO: simulate MGS updates and verify that host OS updates happen at the
+    // right time.
+
+    println!("\ndeployment unit update activity:");
+    for (unit, p) in &progress {
+        println!(
+            "  {unit}: first_activity = {}, all_at_target = {:?}",
+            p.first_activity, p.all_at_target,
+        );
+    }
+
+    let mut violations = Vec::new();
+    for edge in &dag.edges {
+        // Skip edges involving non-zone deployment units that this test can't
+        // track yet. Fail if a unit is missing for any other reason.
+        let consumer = match progress.get(&edge.consumer) {
+            Some(p) => p,
+            None => {
+                assert!(
+                    non_zone_units.contains(&edge.consumer),
+                    "DAG edge consumer {:?} is not in the progress map \
+                     and is not a known non-zone unit — is this a new \
+                     deployment unit that needs tracking?",
+                    edge.consumer,
+                );
+                continue;
+            }
+        };
+        let producer = match progress.get(&edge.producer) {
+            Some(p) => p,
+            None => {
+                assert!(
+                    non_zone_units.contains(&edge.producer),
+                    "DAG edge producer {:?} is not in the progress map \
+                     and is not a known non-zone unit — is this a new \
+                     deployment unit that needs tracking?",
+                    edge.producer,
+                );
+                continue;
+            }
+        };
+        let producer_done = match producer.all_at_target {
+            Some(v) => v,
+            None => panic!(
+                "producer {:?} has zones but never reached target",
+                edge.producer
+            ),
+        };
+
+        if consumer.first_activity < producer_done {
+            violations.push(format!(
+                "consumer {:?} started updating at iteration {}, \
+                 but producer {:?} was not fully updated until \
+                 iteration {producer_done}",
+                edge.consumer, consumer.first_activity, edge.producer,
+            ));
+        }
+    }
+
+    if !violations.is_empty() {
+        println!("\nDAG ordering violations:");
+        for v in &violations {
+            println!("  - {v}");
+        }
+        panic!(
+            "zone update ordering violated the dependency DAG \
+             ({} violations)",
+            violations.len()
+        );
+    }
+
+    println!("\nall DAG ordering constraints satisfied");
+    logctx.cleanup_successful();
 }

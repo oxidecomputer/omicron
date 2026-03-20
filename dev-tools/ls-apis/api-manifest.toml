@@ -67,6 +67,7 @@ ignored_non_clients = [
 # The host OS includes Sled Agent, Propolis, and all the components that get
 # bundled into the switch zone.
 [[deployment_units]]
+id = "host_os"
 label = "Host OS"
 packages = [
     "omicron-sled-agent",
@@ -83,20 +84,24 @@ packages = [
 
 # Installinator gets packaged into its own host OS image.
 [[deployment_units]]
+id = "installinator"
 label = "Installinator"
 packages = [ "installinator" ]
 
 # The rest of these get bundled by standard control plane zone images.
 
 [[deployment_units]]
+id = "crucible"
 label = "Crucible"
 packages = [ "crucible-agent", "crucible-downstairs" ]
 
 [[deployment_units]]
+id = "crucible_pantry"
 label = "Crucible Pantry"
 packages = [ "crucible-pantry" ]
 
 [[deployment_units]]
+id = "cockroach"
 label = "Cockroach"
 packages = [ "omicron-cockroach-admin" ]
 
@@ -104,22 +109,27 @@ packages = [ "omicron-cockroach-admin" ]
 # our purposes, and the tooling doesn't support multiple deployment units
 # that each expose a particular service.
 [[deployment_units]]
+id = "clickhouse"
 label = "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
 packages = [ "omicron-clickhouse-admin" ]
 
 [[deployment_units]]
+id = "dns_server"
 label = "DNS Server"
 packages = [ "dns-server" ]
 
 [[deployment_units]]
+id = "nexus"
 label = "Nexus"
 packages = [ "omicron-nexus" ]
 
 [[deployment_units]]
+id = "ntp"
 label = "NTP"
 packages = [ "omicron-ntp-admin" ]
 
 [[deployment_units]]
+id = "oximeter"
 label = "Oximeter"
 packages = [ "oximeter-collector" ]
 

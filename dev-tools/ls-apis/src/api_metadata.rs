@@ -14,6 +14,7 @@ use anyhow::{Result, bail};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use ls_apis_shared::DeploymentUnitId;
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -27,7 +28,7 @@ use std::collections::BTreeSet;
 #[serde(try_from = "RawApiMetadata")]
 pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
-    deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
+    deployment_units: IdOrdMap<DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
     intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
@@ -42,8 +43,16 @@ impl AllApiMetadata {
     /// Iterate over the deployment units defined in the metadata
     pub fn deployment_units(
         &self,
-    ) -> impl Iterator<Item = (&DeploymentUnitName, &DeploymentUnitInfo)> {
+    ) -> impl Iterator<Item = &DeploymentUnitInfo> {
         self.deployment_units.iter()
+    }
+
+    /// Look up a deployment unit's info by its ID
+    pub fn deployment_unit_info(
+        &self,
+        id: &DeploymentUnitId,
+    ) -> Option<&DeploymentUnitInfo> {
+        self.deployment_units.get(id)
     }
 
     /// Iterate over the package names for all the APIs' clients
@@ -55,7 +64,7 @@ impl AllApiMetadata {
     pub fn server_components(
         &self,
     ) -> impl Iterator<Item = &ServerComponentName> {
-        self.deployment_units.values().flat_map(|d| d.packages.iter())
+        self.deployment_units.iter().flat_map(|d| d.packages.iter())
     }
 
     /// Look up details about an API based on its client package name
@@ -166,14 +175,12 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             }
         }
 
-        let mut deployment_units = BTreeMap::new();
+        let mut deployment_units = IdOrdMap::new();
         for info in raw.deployment_units {
-            if let Some(previous) =
-                deployment_units.insert(info.label.clone(), info)
-            {
+            if let Err(e) = deployment_units.insert_unique(info) {
                 bail!(
-                    "duplicate deployment unit in API metadata: {}",
-                    &previous.label,
+                    "duplicate deployment unit id in API metadata: {}",
+                    e.new_item().id,
                 );
             }
         }
@@ -206,7 +213,7 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         // Validate that IDU-only edges reference only known server components
         // and APIs.
         let known_components: BTreeSet<_> =
-            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
+            deployment_units.iter().flat_map(|u| u.packages.iter()).collect();
         for edge in &raw.intra_deployment_unit_only_edges {
             if !known_components.contains(&edge.server) {
                 bail!(
@@ -411,10 +418,20 @@ pub enum ApiConsumerStatus {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentUnitInfo {
-    /// human-readable label, also used as primary key
+    /// short, machine-friendly identifier (e.g. "nexus", "dns_server")
+    pub id: DeploymentUnitId,
+    /// human-readable label for display
     pub label: DeploymentUnitName,
     /// list of Rust packages that are shipped in this unit
     pub packages: Vec<ServerComponentName>,
+}
+
+impl IdOrdItem for DeploymentUnitInfo {
+    type Key<'a> = &'a DeploymentUnitId;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+    id_upcast!();
 }
 
 #[derive(Deserialize)]

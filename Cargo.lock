@@ -6327,6 +6327,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "ls-apis-shared"
+version = "0.1.0"
+dependencies = [
+ "newtype_derive",
+ "omicron-workspace-hack",
+ "serde",
+]
+
+[[package]]
 name = "lzma-sys"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7401,6 +7410,7 @@ dependencies = [
  "internal-dns-types",
  "ipnet",
  "itertools 0.14.0",
+ "ls-apis-shared",
  "maplit",
  "nexus-config",
  "nexus-inventory",
@@ -7429,6 +7439,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "toml 0.8.23",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-lib",
@@ -8486,6 +8497,7 @@ dependencies = [
  "iddqd",
  "indent_write",
  "itertools 0.14.0",
+ "ls-apis-shared",
  "newtype_derive",
  "omicron-test-utils",
  "omicron-workspace-hack",
