@@ -215,7 +215,7 @@ impl UplinkAddress {
     pub fn ip_squashing_addrconf_to_unspecified(&self) -> IpAddr {
         match self {
             UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            UplinkAddress::Static { ip_net } => ip_net.addr().into(),
+            UplinkAddress::Static { ip_net } => ip_net.addr(),
         }
     }
 

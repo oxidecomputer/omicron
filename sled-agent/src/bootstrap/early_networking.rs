@@ -839,7 +839,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     // TODO We're discarding the `uplink_cidr.prefix()` here and
                     // only using the IP address; at some point we probably need
                     // to give the full CIDR to dendrite?
-                    addrs.push(ip_net.addr().into());
+                    addrs.push(ip_net.addr());
                 }
             }
         }
