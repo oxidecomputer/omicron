@@ -87,7 +87,7 @@ use sled_agent_types_versions::v1;
 use sled_agent_types_versions::v20;
 use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
-use sled_agent_types_versions::v29;
+use sled_agent_types_versions::v30;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -437,9 +437,9 @@ impl SledAgentApi for SledAgentSimImpl {
         }))
     }
 
-    async fn write_network_bootstore_config_v29(
+    async fn write_network_bootstore_config_v30(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v29::early_networking::WriteNetworkConfigRequest>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();

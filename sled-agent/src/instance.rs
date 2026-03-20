@@ -40,11 +40,9 @@ use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
 use oxnet::IpNet;
-use propolis_api_types::ErrorCode as PropolisErrorCode;
+use propolis_api_types::instance::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
-use propolis_client::instance_spec::{
-    ComponentV0, InstanceSpec, InstanceSpecV0, SpecKey,
-};
+use propolis_client::instance_spec::{Component, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
@@ -418,7 +416,7 @@ impl InstanceMonitorRunner {
 
             // Update the state generation for the next poll.
             if let InstanceMonitorUpdate::State(ref state) = update {
-                generation = state.r#gen + 1;
+                generation = state.gen_ + 1;
             }
 
             // Now that we have the response from Propolis' HTTP server, we
@@ -445,7 +443,7 @@ impl InstanceMonitorRunner {
             .client
             .instance_state_monitor()
             .body(propolis_client::types::InstanceStateMonitorRequest {
-                r#gen: generation,
+                gen_: generation,
             })
             .send()
             .await;
@@ -601,19 +599,6 @@ struct InstanceRunner {
 
     // Subnets attached to this instance.
     attached_subnets: IdOrdMap<AttachedSubnet>,
-}
-
-/// Translate a `propolis-client` `InstanceSpecV0` into the newer
-/// `InstanceSpec`.
-///
-/// This can be done losslessly, and probably should be an `impl From` or
-/// inherent method in `propolis-client`, but Propolis itself converts between
-/// these types a little less directly. It hadn't occurred to me that this is
-/// useful for clients as well.
-pub(crate) fn spec_v0_to_v1(orig_spec: InstanceSpecV0) -> InstanceSpec {
-    let InstanceSpecV0 { board, components } = orig_spec;
-
-    InstanceSpec { board, components, smbios: None }
 }
 
 impl InstanceRunner {
@@ -1240,9 +1225,7 @@ impl InstanceRunner {
         } else {
             propolis_client::types::InstanceEnsureRequest {
                 properties: self.properties.clone(),
-                init: InstanceInitializationMethod::Spec {
-                    spec: spec_v0_to_v1(spec.0),
-                },
+                init: InstanceInitializationMethod::Spec { spec: spec.0 },
             }
         };
 
@@ -1281,7 +1264,7 @@ impl InstanceRunner {
                 return Err(Error::NicNotInPropolisSpec(nic.id));
             };
 
-            let ComponentV0::VirtioNetworkBackend(be) = backend else {
+            let Component::VirtioNetworkBackend(be) = backend else {
                 return Err(Error::NicNotInPropolisSpec(nic.id));
             };
 
@@ -2625,11 +2608,7 @@ impl InstanceRunner {
             ),
         }
 
-        // We use a custom client builder here because the default progenitor
-        // one has a timeout of 15s but we want to be able to wait indefinitely.
-        // Use reqwest012 because the rev-pinned propolis-client is still on
-        // reqwest 0.12.
-        let reqwest_client = reqwest012::ClientBuilder::new().build().unwrap();
+        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", &self.propolis_addr),
             reqwest_client,
@@ -2945,6 +2924,7 @@ mod tests {
     };
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
+    use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
@@ -3135,8 +3115,8 @@ mod tests {
     fn fake_instance_initial_state(
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
-        use propolis_client::instance_spec::{Board, InstanceSpecV0};
-        let spec = VmmSpec(InstanceSpecV0 {
+        use propolis_client::instance_spec::{Board, InstanceSpec};
+        let spec = VmmSpec(InstanceSpec {
             board: Board {
                 cpus: 1,
                 memory_mb: 1024,
@@ -3145,6 +3125,7 @@ mod tests {
                 cpuid: None,
             },
             components: Default::default(),
+            smbios: None,
         });
 
         let external_ips = Some(
@@ -3886,7 +3867,7 @@ mod tests {
             .send(InstanceMonitorMessage {
                 update: InstanceMonitorUpdate::State(
                     InstanceStateMonitorResponse {
-                        r#gen: 5,
+                        gen_: 5,
                         migration: InstanceMigrateStatusResponse {
                             migration_in: None,
                             migration_out: None,

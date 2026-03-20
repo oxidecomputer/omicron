@@ -566,10 +566,10 @@ impl SledAgent {
             }
         }
 
-        // Start tracking CPU metrics.
-        match metrics_manager.request_queue().track_cpu() {
+        // Start tracking sled-level stats (CPU, zones).
+        match metrics_manager.request_queue().track_sled_stats() {
             Ok(_) => {
-                debug!(log, "started tracking CPU metrics")
+                debug!(log, "started tracking sled stats")
             }
             Err(e) => error!(
                 log,

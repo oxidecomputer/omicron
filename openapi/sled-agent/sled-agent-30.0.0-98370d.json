@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "29.0.0"
+    "version": "30.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -4027,7 +4027,7 @@
           "pending"
         ]
       },
-      "ComponentV0": {
+      "Component": {
         "oneOf": [
           {
             "type": "object",
@@ -4153,6 +4153,25 @@
                 "type": "string",
                 "enum": [
                   "boot_settings"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/VirtioSocket"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "virtio_socket"
                 ]
               }
             },
@@ -5933,7 +5952,7 @@
           "nics"
         ]
       },
-      "InstanceSpecV0": {
+      "InstanceSpec": {
         "type": "object",
         "properties": {
           "board": {
@@ -5942,15 +5961,22 @@
           "components": {
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/ComponentV0"
+              "$ref": "#/components/schemas/Component"
             }
+          },
+          "smbios": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SmbiosType1Input"
+              }
+            ]
           }
         },
         "required": [
           "board",
           "components"
-        ],
-        "additionalProperties": false
+        ]
       },
       "InstanceUuid": {
         "x-rust-type": {
@@ -9234,6 +9260,32 @@
           "vmm_state"
         ]
       },
+      "SmbiosType1Input": {
+        "type": "object",
+        "properties": {
+          "manufacturer": {
+            "type": "string"
+          },
+          "product_name": {
+            "type": "string"
+          },
+          "serial_number": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "manufacturer",
+          "product_name",
+          "serial_number",
+          "version"
+        ],
+        "additionalProperties": false
+      },
       "SoftNpuP9": {
         "description": "Describes a PCI device that shares host files with the guest using the P9 protocol.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
         "type": "object",
@@ -10008,6 +10060,31 @@
         ],
         "additionalProperties": false
       },
+      "VirtioSocket": {
+        "description": "A socket device that presents a virtio-socket interface to the guest.",
+        "type": "object",
+        "properties": {
+          "guest_cid": {
+            "description": "The guest's Context ID.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pci_path": {
+            "description": "The PCI path at which to attach this device.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          }
+        },
+        "required": [
+          "guest_cid",
+          "pci_path"
+        ],
+        "additionalProperties": false
+      },
       "VirtualNetworkInterfaceHost": {
         "description": "A mapping from a virtual NIC to a physical host",
         "type": "object",
@@ -10128,7 +10205,7 @@
         "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.",
         "allOf": [
           {
-            "$ref": "#/components/schemas/InstanceSpecV0"
+            "$ref": "#/components/schemas/InstanceSpec"
           }
         ]
       },

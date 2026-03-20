@@ -108,14 +108,47 @@ impl BundleDataSelection {
         Self { data: HashMap::new() }
     }
 
-    /// Inserts BundleData to be queried for a particular category within the
-    /// bundle.
-    ///
-    /// Each category of data can only be specified once (e.g., inserting
-    /// BundleData::HostInfo multiple times will only use the most-recently
-    /// inserted specification)
-    pub fn insert(&mut self, bundle_data: BundleData) {
+    /// Adds reconfigurator state collection.
+    pub fn with_reconfigurator(self) -> Self {
+        self.with(BundleData::Reconfigurator)
+    }
+
+    /// Adds sled cubby info collection.
+    pub fn with_sled_cubby_info(self) -> Self {
+        self.with(BundleData::SledCubbyInfo)
+    }
+
+    /// Adds SP dump collection.
+    pub fn with_sp_dumps(self) -> Self {
+        self.with(BundleData::SpDumps)
+    }
+
+    /// Adds host info collection from all sleds.
+    pub fn with_all_sleds(self) -> Self {
+        self.with(BundleData::HostInfo(SledSelection::All))
+    }
+
+    /// Adds host info collection from specific sleds.
+    pub fn with_specific_sleds(
+        self,
+        sleds: impl IntoIterator<Item = SledUuid>,
+    ) -> Self {
+        self.with(BundleData::HostInfo(SledSelection::Specific(
+            sleds.into_iter().collect(),
+        )))
+    }
+
+    /// Adds ereport collection with the given filters.
+    pub fn with_ereports(self, filters: EreportFilters) -> Self {
+        self.with(BundleData::Ereports(filters))
+    }
+
+    /// Builder-style method that inserts a [`BundleData`] value and returns
+    /// `self`. If multiple BundleData entries with the same type are inserted,
+    /// the last write wins.
+    pub fn with(mut self, bundle_data: BundleData) -> Self {
         self.data.insert(bundle_data.category(), bundle_data);
+        self
     }
 
     pub fn contains(&self, category: BundleDataCategory) -> bool {
@@ -124,6 +157,11 @@ impl BundleDataSelection {
 
     pub fn get(&self, category: BundleDataCategory) -> Option<&BundleData> {
         self.data.get(&category)
+    }
+
+    /// Iterates over the data entries in this selection.
+    pub fn iter(&self) -> impl Iterator<Item = &BundleData> {
+        self.data.values()
     }
 }
 
@@ -155,11 +193,7 @@ impl fmt::Display for DisplayBundleDataSelection<'_> {
 
 impl FromIterator<BundleData> for BundleDataSelection {
     fn from_iter<T: IntoIterator<Item = BundleData>>(iter: T) -> Self {
-        let mut selection = Self::new();
-        for bundle_data in iter {
-            selection.insert(bundle_data);
-        }
-        selection
+        iter.into_iter().fold(Self::new(), |sel, data| sel.with(data))
     }
 }
 
@@ -168,18 +202,16 @@ impl Default for BundleDataSelection {
     /// everything"). This is distinct from [`Self::new`], which returns an
     /// empty selection.
     fn default() -> Self {
-        [
-            BundleData::Reconfigurator,
-            BundleData::HostInfo(SledSelection::All),
-            BundleData::SledCubbyInfo,
-            BundleData::SpDumps,
-            BundleData::Ereports(EreportFilters {
-                start_time: Some(chrono::Utc::now() - chrono::Days::new(7)),
-                ..EreportFilters::default()
-            }),
-        ]
-        .into_iter()
-        .collect()
+        Self::new()
+            .with_reconfigurator()
+            .with_all_sleds()
+            .with_sled_cubby_info()
+            .with_sp_dumps()
+            .with_ereports(
+                EreportFilters::new()
+                    .with_start_time(chrono::Utc::now() - chrono::Days::new(7))
+                    .expect("no end time set, cannot fail"),
+            )
     }
 }
 

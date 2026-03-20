@@ -299,9 +299,7 @@ mod tests {
     use crate::fm::DiagnosisEngineKind;
     use crate::fm::ereport::EreportFilters;
     use crate::inventory::SpType;
-    use crate::support_bundle::{
-        BundleData, BundleDataSelection, SledSelection,
-    };
+    use crate::support_bundle::BundleDataSelection;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
         AlertUuid, CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
@@ -413,14 +411,11 @@ mod tests {
             })
             .unwrap();
 
-        let mut bundle1_data = BundleDataSelection::new();
-        bundle1_data.insert(BundleData::Reconfigurator);
-        bundle1_data.insert(BundleData::SpDumps);
-        bundle1_data.insert(BundleData::HostInfo(SledSelection::All));
-        bundle1_data.insert(BundleData::Ereports(EreportFilters {
-            only_classes: vec!["hw.pwr.*".to_string()],
-            ..Default::default()
-        }));
+        let bundle1_data = BundleDataSelection::new()
+            .with_reconfigurator()
+            .with_sp_dumps()
+            .with_all_sleds()
+            .with_ereports(EreportFilters::new().with_classes(["hw.pwr.*"]));
 
         let mut support_bundles_requested = IdOrdMap::new();
         support_bundles_requested

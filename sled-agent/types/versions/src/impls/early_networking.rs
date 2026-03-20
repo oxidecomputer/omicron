@@ -339,7 +339,7 @@ impl fmt::Display for PortFec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v29::early_networking::InvalidIpAddrError;
+    use crate::latest::early_networking::InvalidIpAddrError;
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use serde::{Deserialize, Serialize};

@@ -50,7 +50,7 @@
 use bootstore::schemes::v0 as bootstore;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use sled_agent_types_versions::{latest, v20, v26, v29};
+use sled_agent_types_versions::{latest, v20, v26, v30};
 use slog_error_chain::SlogInlineError;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -303,7 +303,7 @@ impl EarlyNetworkConfigEnvelope {
         let f = versioned_decode!(
             v20::early_networking::EarlyNetworkConfigBody,
             v26::early_networking::EarlyNetworkConfigBody,
-            v29::early_networking::EarlyNetworkConfigBody,
+            v30::early_networking::EarlyNetworkConfigBody,
         );
         f(self.schema_version, self.body.clone())
     }
@@ -350,4 +350,4 @@ macro_rules! from_body_for_envelope {
 }
 from_body_for_envelope!(v20::early_networking::EarlyNetworkConfigBody);
 from_body_for_envelope!(v26::early_networking::EarlyNetworkConfigBody);
-from_body_for_envelope!(v29::early_networking::EarlyNetworkConfigBody);
+from_body_for_envelope!(v30::early_networking::EarlyNetworkConfigBody);
