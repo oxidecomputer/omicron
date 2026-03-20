@@ -9,6 +9,8 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::model::Ereport;
+use crate::db::model::EreporterRestart;
+use crate::db::model::Generation;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
@@ -29,6 +31,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
+use nexus_db_schema::schema::ereporter_restart::dsl as restart_dsl;
 use nexus_types::fm::ereport as fm;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
@@ -211,6 +214,44 @@ impl DataStore {
                 count(dsl::ena).aggregate_distinct(),
             ))
             .order_by(dsl::restart_id)
+    }
+
+    /// List restarts of an ereporter at a given physical location.
+    pub async fn ereporter_restart_list(
+        &self,
+        opctx: &OpContext,
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SpMgsSlot,
+        pagparams: &DataPageParams<'_, Generation>,
+    ) -> ListResultVec<EreporterRestart> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::restart_list_query(
+            reporter_type,
+            slot_type,
+            slot.into(),
+            pagparams,
+        )
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn restart_list_query(
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SqlU16,
+        pagparams: &DataPageParams<'_, Generation>,
+    ) -> impl RunnableQuery<EreporterRestart> + use<> {
+        paginated(
+            restart_dsl::ereporter_restart,
+            restart_dsl::generation,
+            pagparams,
+        )
+        .filter(restart_dsl::reporter_type.eq(reporter_type))
+        .filter(restart_dsl::slot_type.eq(slot_type))
+        .filter(restart_dsl::slot.eq(slot))
+        .select(EreporterRestart::as_select())
     }
 
     /// Record a restart ID for a reporter location, if it has not already been
@@ -650,6 +691,41 @@ mod tests {
             .await
             .expect("Failed to explain query - is it valid SQL?");
         eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_ereporter_restart_list() {
+        let logctx = dev::test_setup_log("explain_ereporter_restart_list");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams: DataPageParams<'_, Generation> = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Descending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::restart_list_query(
+            nexus_db_model::EreporterType::Host,
+            SpType::Sled,
+            SqlU16::new(1),
+            &pagparams,
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
         assert!(
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",
