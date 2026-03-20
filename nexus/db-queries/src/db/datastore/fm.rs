@@ -385,6 +385,7 @@ impl DataStore {
                         comment,
                         ereports,
                         alerts_requested,
+                        support_bundles_requested: iddqd::IdOrdMap::new(),
                     }
                 }));
             }
@@ -1552,6 +1553,7 @@ mod tests {
                 de,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: _,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -1770,6 +1772,7 @@ mod tests {
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: iddqd::IdOrdMap::new(),
                 comment: "my cool case".to_string(),
             }
         };
@@ -1802,6 +1805,7 @@ mod tests {
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: iddqd::IdOrdMap::new(),
                 comment: "break in case of emergency".to_string(),
             }
         };

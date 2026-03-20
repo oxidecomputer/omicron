@@ -441,7 +441,6 @@ mod test {
     use super::*;
 
     use crate::app::background::tasks::support_bundle::perfetto;
-    use crate::app::background::tasks::support_bundle::request::BundleData;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
     use illumos_utils::zpool::ZpoolHealth;
@@ -456,6 +455,7 @@ mod test {
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::{BundleData, SledSelection};
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -831,7 +831,9 @@ mod test {
         // NOTE: The support bundle querying interface isn't supported on
         // the simulated sled agent (yet?) so we're using an empty sled selection.
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -908,7 +910,9 @@ mod test {
 
         // Collect the bundle
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1025,7 +1029,7 @@ mod test {
             transfer_chunk_size: NonZeroU64::new(16).unwrap(),
             data_selection: [
                 BundleData::Reconfigurator,
-                BundleData::HostInfo(HashSet::new()),
+                BundleData::HostInfo(SledSelection::Specific(HashSet::new())),
                 BundleData::SledCubbyInfo,
                 BundleData::SpDumps,
             ]
@@ -1127,7 +1131,9 @@ mod test {
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1292,7 +1298,9 @@ mod test {
             nexus.id(),
         );
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1447,7 +1455,9 @@ mod test {
             nexus.id(),
         );
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1532,7 +1542,9 @@ mod test {
             nexus.id(),
         );
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1618,7 +1630,9 @@ mod test {
 
         // Collect the bundle
         let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        request.data_selection.insert(BundleData::HostInfo(
+            SledSelection::Specific(HashSet::new()),
+        ));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
