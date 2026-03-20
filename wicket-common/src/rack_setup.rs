@@ -809,7 +809,15 @@ mod tests {
 
     #[test]
     fn invalid_router_peer_address() {
-        let invalid_inputs = ["0.0.0.0", "::", "foobar"];
+        let invalid_inputs = [
+            "0.0.0.0",
+            "::",
+            "foobar",
+            "127.0.0.1",
+            "255.255.255.255",
+            "ff02::1",
+            "fe80::1",
+        ];
 
         for input in invalid_inputs {
             let toml_input = format!("addr = \"{input}\"\n");
