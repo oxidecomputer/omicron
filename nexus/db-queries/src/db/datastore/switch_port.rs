@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::datastore::UpdatePrecondition;
@@ -33,7 +31,7 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
-use nexus_types::external_api::networking::{self};
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -49,6 +47,8 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// This is a wrapper around [`networking::BgpPeer`], with two additions:
