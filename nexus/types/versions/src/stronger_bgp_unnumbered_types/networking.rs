@@ -34,6 +34,7 @@ use sled_agent_types::early_networking::RouterLifetimeConfigError;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
+use std::net::IpAddr;
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
@@ -104,42 +105,57 @@ pub enum BgpPeerConversionError {
     RouterLifetimeConfig(#[from] RouterLifetimeConfigError),
 }
 
+/// Convert from our previous representations of BGP peer addresses: an optional
+/// IP address and an unvalidated `router_lifetime`.
+///
+/// Converts IPs of both `None` and `Some(UNSPECIFIED)` to
+/// [`RouterPeerType::Unnumbered`], and converts other `Some(ip)` values to
+/// [`RouterPeerType::Numbered`] (discarding `router_lifetime`, as it only
+/// applies to unnumbered peers). Fails if given an invalid IP (e.g., a loopback
+/// or multicast address) or if `router_lifetime` is an invalid
+/// [`RouterLifetimeConfig`].
+pub fn router_peer_type_try_from_old_representation(
+    ip: Option<IpAddr>,
+    router_lifetime: u16,
+) -> Result<RouterPeerType, BgpPeerConversionError> {
+    match ip.map(RouterPeerIpAddr::try_from) {
+        // The expected cases: We either have a valid peer IP or `None` (an
+        // unnumbered peer).
+        Some(Ok(ip)) => Ok(RouterPeerType::Numbered { ip }),
+        None => {
+            let router_lifetime = RouterLifetimeConfig::new(router_lifetime)?;
+            Ok(RouterPeerType::Unnumbered { router_lifetime })
+        }
+
+        // Unexpected cases: If `value.peer` is `Some(UNSPECIFIED)`, we'll
+        // treat that as `unnumbered`, because `UNSPECIFIED` was previously
+        // used as the sentinel value for unnumbered peers. For any other
+        // error case, we want to reject this conversion - the peer IP isn't
+        // valid.
+        Some(Err(err)) => match err.err {
+            InvalidIpAddrError::UnspecifiedAddress => {
+                let router_lifetime =
+                    RouterLifetimeConfig::new(router_lifetime)?;
+                Ok(RouterPeerType::Unnumbered { router_lifetime })
+            }
+            InvalidIpAddrError::LoopbackAddress
+            | InvalidIpAddrError::MulticastAddress
+            | InvalidIpAddrError::Ipv4Broadcast
+            | InvalidIpAddrError::Ipv6UnicastLinkLocal => Err(err.into()),
+        },
+    }
+}
+
 impl TryFrom<crate::v2026_02_13_01::networking::BgpPeer> for BgpPeer {
     type Error = BgpPeerConversionError;
 
     fn try_from(
         value: crate::v2026_02_13_01::networking::BgpPeer,
     ) -> Result<Self, Self::Error> {
-        let addr = match value.addr.map(RouterPeerIpAddr::try_from) {
-            // The expected cases: We either have a valid peer IP or `None` (an
-            // unnumbered peer).
-            Some(Ok(ip)) => RouterPeerType::Numbered { ip },
-            None => {
-                let router_lifetime =
-                    RouterLifetimeConfig::new(value.router_lifetime)?;
-                RouterPeerType::Unnumbered { router_lifetime }
-            }
-
-            // Unexpected cases: If `value.peer` is `Some(UNSPECIFIED)`, we'll
-            // treat that as `unnumbered`, because `UNSPECIFIED` was previously
-            // used as the sentinel value for unnumbered peers. For any other
-            // error case, we want to reject this conversion - the peer IP isn't
-            // valid.
-            Some(Err(err)) => match err.err {
-                InvalidIpAddrError::UnspecifiedAddress => {
-                    let router_lifetime =
-                        RouterLifetimeConfig::new(value.router_lifetime)?;
-                    RouterPeerType::Unnumbered { router_lifetime }
-                }
-                InvalidIpAddrError::LoopbackAddress
-                | InvalidIpAddrError::MulticastAddress
-                | InvalidIpAddrError::Ipv4Broadcast
-                | InvalidIpAddrError::Ipv6UnicastLinkLocal => {
-                    return Err(err.into());
-                }
-            },
-        };
-
+        let addr = router_peer_type_try_from_old_representation(
+            value.addr,
+            value.router_lifetime,
+        )?;
         Ok(Self {
             bgp_config: value.bgp_config,
             addr,
