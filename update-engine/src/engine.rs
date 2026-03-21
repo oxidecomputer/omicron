@@ -126,7 +126,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
                 "component" => "UpdateEngine",
                 "execution_id" => format!("{execution_id}"),
             )),
-            execution_id: ExecutionId(Uuid::new_v4()),
+            execution_id,
             sender,
             canceler: Some(canceler),
             cancel_receiver,
