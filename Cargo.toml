@@ -461,7 +461,7 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "af03e66c32cf941b2284a8b8081dabb1c9f55cfa" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
