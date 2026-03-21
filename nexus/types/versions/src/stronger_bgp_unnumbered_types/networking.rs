@@ -37,17 +37,15 @@ use sled_agent_types::early_networking::RouterPeerType;
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
-/// parameter is a reference to global BGP parameters. The `interface_name`
-/// indicates what interface the peer should be contacted on.
+/// parameter is a reference to global BGP parameters.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpPeer {
     /// The global BGP configuration used for establishing a session with this
     /// peer.
     pub bgp_config: NameOrId,
 
-    /// The address of the host to peer with, or specifying that an unnumbered
-    /// BGP session that will be established over the interface specified by
-    /// `interface_name`.
+    /// The address of the host to peer with, or specifying the configuration of
+    /// an unnumbered BGP session.
     pub addr: RouterPeerType,
 
     /// How long to hold peer connections between keepalives (seconds).

@@ -17362,11 +17362,11 @@
       },
       "BgpMessageHistory": {},
       "BgpPeer": {
-        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
+        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters.",
         "type": "object",
         "properties": {
           "addr": {
-            "description": "The address of the host to peer with, or specifying that an unnumbered BGP session that will be established over the interface specified by `interface_name`.",
+            "description": "The address of the host to peer with, or specifying the configuration of an unnumbered BGP session.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouterPeerType"
