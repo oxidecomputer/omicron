@@ -32,6 +32,7 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
+use nexus_types::external_api::networking::router_peer_type_try_from_old_representation;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -41,9 +42,6 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::InvalidIpAddrError;
-use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
@@ -112,35 +110,13 @@ impl BgpPeerFromDbBuilder<'_> {
             allowed_export,
         } = self;
 
-        // We shouldn't have any invalid, non-NULL addresses in the DB. If we
-        // do, we'll treat "UNSPECIFIED" as an unnumbered peer for now; ideally
-        // we'd have CHECK constraints that prevent UNSPECIFIED IPs from being
-        // stored at all. Any other invalid addrs must be rejected.
-        //
-        // Similarly, we should have a CHECK constraint that guarantees we don't
-        // have a too-large `router_lifetime`; if we somehow end up with a
-        // too-large value, bail out.
-        let addr = match p.addr.map(|a| RouterPeerIpAddr::try_from(a.ip())) {
-            Some(Ok(ip)) => RouterPeerType::Numbered { ip },
-            None => {
-                let router_lifetime =
-                    RouterLifetimeConfig::new(*p.router_lifetime)?;
-                RouterPeerType::Unnumbered { router_lifetime }
-            }
-            Some(Err(err)) => match err.err {
-                InvalidIpAddrError::UnspecifiedAddress => {
-                    let router_lifetime =
-                        RouterLifetimeConfig::new(*p.router_lifetime)?;
-                    RouterPeerType::Unnumbered { router_lifetime }
-                }
-                InvalidIpAddrError::LoopbackAddress
-                | InvalidIpAddrError::MulticastAddress
-                | InvalidIpAddrError::Ipv4Broadcast
-                | InvalidIpAddrError::Ipv6UnicastLinkLocal => {
-                    return Err(err.into());
-                }
-            },
-        };
+        // This will fail if we have a non-NULL but invalid address in the DB,
+        // or if we have a too-large `router_lifetime`. We should have CHECK
+        // constraints to prevent both of these, but don't today.
+        let addr = router_peer_type_try_from_old_representation(
+            p.addr.map(|a| a.ip()),
+            *p.router_lifetime,
+        )?;
         Ok(BgpPeerFromDb {
             port_settings_id: p.port_settings_id,
             bgp_config_id: p.bgp_config_id,

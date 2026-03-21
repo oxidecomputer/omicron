@@ -297,6 +297,7 @@ pub mod networking {
     pub use crate::v2026_03_18_00::networking::BgpPeerConversionError;
     pub use crate::v2026_03_18_00::networking::SwitchPortSettings;
     pub use crate::v2026_03_18_00::networking::SwitchPortSettingsCreate;
+    pub use crate::v2026_03_18_00::networking::router_peer_type_try_from_old_representation;
 }
 
 pub mod oxql {
