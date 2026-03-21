@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026031400.0.0"
+    "version": "2026031800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -17366,10 +17366,12 @@
         "type": "object",
         "properties": {
           "addr": {
-            "nullable": true,
-            "description": "The address of the host to peer with. If not provided, this is an unnumbered BGP session that will be established over the interface specified by `interface_name`.",
-            "type": "string",
-            "format": "ip"
+            "description": "The address of the host to peer with, or specifying that an unnumbered BGP session that will be established over the interface specified by `interface_name`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterPeerType"
+              }
+            ]
           },
           "allowed_export": {
             "description": "Define export policy for a peer.",
@@ -17432,14 +17434,6 @@
             "format": "uint32",
             "minimum": 0
           },
-          "interface_name": {
-            "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
           "keepalive": {
             "description": "How often to send keepalive requests (seconds).",
             "type": "integer",
@@ -17479,12 +17473,6 @@
             "format": "uint32",
             "minimum": 0
           },
-          "router_lifetime": {
-            "description": "Router lifetime in seconds for unnumbered BGP peers.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a peer.",
@@ -17494,6 +17482,7 @@
           }
         },
         "required": [
+          "addr",
           "allowed_export",
           "allowed_import",
           "bgp_config",
@@ -17503,9 +17492,7 @@
           "enforce_first_as",
           "hold_time",
           "idle_hold_time",
-          "interface_name",
-          "keepalive",
-          "router_lifetime"
+          "keepalive"
         ]
       },
       "BgpPeerConfig": {
@@ -26506,6 +26493,67 @@
               }
             },
             "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
+      },
+      "RouterPeerIpAddr": {
+        "type": "string",
+        "format": "ip"
+      },
+      "RouterPeerType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "router_lifetime": {
+                "description": "Router lifetime in seconds for unnumbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterLifetimeConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unnumbered"
+                ]
+              }
+            },
+            "required": [
+              "router_lifetime",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "IP address for numbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterPeerIpAddr"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "numbered"
+                ]
+              }
+            },
+            "required": [
+              "ip",
               "type"
             ]
           }
