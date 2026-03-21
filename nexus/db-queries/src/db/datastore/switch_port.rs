@@ -100,9 +100,7 @@ struct BgpPeerFromDbBuilder<'a> {
 }
 
 impl BgpPeerFromDbBuilder<'_> {
-    fn build(
-        self,
-    ) -> Result<BgpPeerFromDb, networking::BgpPeerConversionError> {
+    fn build(self) -> Result<BgpPeerFromDb, String> {
         let Self {
             peer_config: p,
             communities,
@@ -116,7 +114,16 @@ impl BgpPeerFromDbBuilder<'_> {
         let addr = router_peer_type_try_from_old_representation(
             p.addr.map(|a| a.ip()),
             *p.router_lifetime,
-        )?;
+        )
+        .map_err(|err| {
+            format!(
+                "invalid database contents for BGP peer {} ({:?}): {}",
+                p.bgp_config_id,
+                p.addr,
+                InlineErrorChain::new(&err),
+            )
+        })?;
+
         Ok(BgpPeerFromDb {
             port_settings_id: p.port_settings_id,
             bgp_config_id: p.bgp_config_id,
@@ -697,14 +704,11 @@ impl DataStore {
                     }.build();
                     let peer = match peer_result {
                         Ok(peer) => peer,
-                        Err(e) => {
+                        Err(message) => {
                             return Err(
                                 err.bail(
                                     SwitchPortSettingsGetError::InternalError(
-                                        format!(
-                                            "invalid database contents: {}",
-                                            InlineErrorChain::new(&e),
-                                        ),
+                                        message,
                                     )
                                 )
                             );
@@ -1588,12 +1592,9 @@ async fn do_switch_port_settings_create(
         .build();
         let peer = match peer_result {
             Ok(peer) => peer,
-            Err(e) => {
+            Err(message) => {
                 return Err(err.bail(
-                    SwitchPortSettingsCreateError::InternalError(format!(
-                        "invalid database contents: {}",
-                        InlineErrorChain::new(&e),
-                    )),
+                    SwitchPortSettingsCreateError::InternalError(message),
                 ));
             }
         };
