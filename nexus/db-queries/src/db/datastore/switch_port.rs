@@ -1597,9 +1597,10 @@ async fn do_switch_port_settings_create(
             .unwrap_or(RouterPeerType::UNNUMBERED_SENTINEL);
         let Some(peer) = peer_by_addr.get(&lookup_addr) else {
             return Err(err.bail(
-                SwitchPortSettingsCreateError::InternalError(
-                    format!("unexpectedly missing peer {}", p.bgp_config_id),
-                ),
+                SwitchPortSettingsCreateError::InternalError(format!(
+                    "unexpectedly missing peer {}",
+                    p.bgp_config_id
+                )),
             ));
         };
         let peer_result = BgpPeerFromDbBuilder {
