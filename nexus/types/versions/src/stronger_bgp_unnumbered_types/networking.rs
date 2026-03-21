@@ -371,3 +371,253 @@ impl From<SwitchPortSettings>
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    /// Helper to build a minimal old-format `BgpPeer` for conversion tests.
+    fn make_old_bgp_peer(
+        addr: Option<IpAddr>,
+        router_lifetime: u16,
+    ) -> crate::v2026_02_13_01::networking::BgpPeer {
+        crate::v2026_02_13_01::networking::BgpPeer {
+            bgp_config: NameOrId::Name("test-config".parse().unwrap()),
+            interface_name: "phy0".parse().unwrap(),
+            addr,
+            hold_time: 6,
+            idle_hold_time: 6,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: Vec::new(),
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            allowed_export: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+            router_lifetime,
+        }
+    }
+
+    #[test]
+    fn test_valid_router_peer_type_try_from_old_representation() {
+        let cases: Vec<(&str, Option<IpAddr>, u16, RouterPeerType)> = vec![
+            (
+                "numbered IPv4",
+                Some("192.168.1.1".parse().unwrap()),
+                0,
+                RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() },
+            ),
+            (
+                "numbered IPv6",
+                Some("fd00::1".parse().unwrap()),
+                0,
+                RouterPeerType::Numbered { ip: "fd00::1".parse().unwrap() },
+            ),
+            (
+                "unnumbered via None",
+                None,
+                300,
+                RouterPeerType::Unnumbered {
+                    router_lifetime: RouterLifetimeConfig::new(300).unwrap(),
+                },
+            ),
+            (
+                "unnumbered via IPv4 UNSPECIFIED sentinel",
+                Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                300,
+                RouterPeerType::Unnumbered {
+                    router_lifetime: RouterLifetimeConfig::new(300).unwrap(),
+                },
+            ),
+            (
+                "unnumbered via IPv6 UNSPECIFIED sentinel",
+                Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+                300,
+                RouterPeerType::Unnumbered {
+                    router_lifetime: RouterLifetimeConfig::new(300).unwrap(),
+                },
+            ),
+        ];
+
+        for (label, addr, router_lifetime, expected) in cases {
+            let result = router_peer_type_try_from_old_representation(
+                addr,
+                router_lifetime,
+            )
+            .unwrap_or_else(|e| panic!("{label}: unexpected error: {e:?}"));
+            assert_eq!(result, expected, "{label}");
+        }
+    }
+
+    #[test]
+    fn test_invalid_router_peer_type_try_from_old_representation() {
+        let ip_error_cases: Vec<(&str, IpAddr, InvalidIpAddrError)> = vec![
+            (
+                "IPv4 loopback",
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                InvalidIpAddrError::LoopbackAddress,
+            ),
+            (
+                "IPv6 loopback",
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+                InvalidIpAddrError::LoopbackAddress,
+            ),
+            (
+                "multicast",
+                "224.0.0.1".parse().unwrap(),
+                InvalidIpAddrError::MulticastAddress,
+            ),
+            (
+                "broadcast",
+                IpAddr::V4(Ipv4Addr::BROADCAST),
+                InvalidIpAddrError::Ipv4Broadcast,
+            ),
+            (
+                "IPv6 link-local",
+                "fe80::1".parse().unwrap(),
+                InvalidIpAddrError::Ipv6UnicastLinkLocal,
+            ),
+        ];
+
+        for (label, ip, expected_err) in ip_error_cases {
+            let err = router_peer_type_try_from_old_representation(Some(ip), 0)
+                .expect_err(&format!("{label}: should have failed"));
+            match err {
+                BgpPeerConversionError::RouterPeerIpAddr(
+                    RouterPeerIpAddrError { err, .. },
+                ) => assert_eq!(
+                    std::mem::discriminant(&err),
+                    std::mem::discriminant(&expected_err),
+                    "{label}: wrong error variant: {err:?}"
+                ),
+                other => panic!("{label}: wrong error type: {other:?}"),
+            }
+        }
+
+        // router_lifetime too large — via None and via UNSPECIFIED sentinel
+        for (label, addr) in [
+            ("None", None),
+            ("UNSPECIFIED", Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED))),
+        ] {
+            let err = router_peer_type_try_from_old_representation(addr, 9001)
+                .expect_err(&format!(
+                    "router_lifetime 9001 with {label} addr should fail"
+                ));
+            assert!(
+                matches!(err, BgpPeerConversionError::RouterLifetimeConfig(_)),
+                "{label}: wrong error type: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_bgp_peer_conversion_numbered_preserves_fields() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let old = make_old_bgp_peer(Some(ip), 0);
+        let new = BgpPeer::try_from(old.clone()).unwrap();
+
+        assert_eq!(
+            new.addr,
+            RouterPeerType::Numbered { ip: ip.try_into().unwrap() }
+        );
+        assert_eq!(new.bgp_config, old.bgp_config);
+        assert_eq!(new.hold_time, old.hold_time);
+        assert_eq!(new.idle_hold_time, old.idle_hold_time);
+        assert_eq!(new.delay_open, old.delay_open);
+        assert_eq!(new.connect_retry, old.connect_retry);
+        assert_eq!(new.keepalive, old.keepalive);
+        assert_eq!(new.remote_asn, old.remote_asn);
+        assert_eq!(new.enforce_first_as, old.enforce_first_as);
+        assert_eq!(new.allowed_import, old.allowed_import);
+        assert_eq!(new.allowed_export, old.allowed_export);
+    }
+
+    #[test]
+    fn test_bgp_peer_conversion_unnumbered_preserves_fields() {
+        let old = make_old_bgp_peer(None, 300);
+        let new = BgpPeer::try_from(old.clone()).unwrap();
+
+        assert_eq!(
+            new.addr,
+            RouterPeerType::Unnumbered {
+                router_lifetime: RouterLifetimeConfig::new(300).unwrap()
+            }
+        );
+        assert_eq!(new.bgp_config, old.bgp_config);
+        assert_eq!(new.hold_time, old.hold_time);
+    }
+
+    #[test]
+    fn test_bgp_peer_reverse_numbered() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let new = BgpPeer::try_from(make_old_bgp_peer(Some(ip), 123)).unwrap();
+        let back: crate::v2026_02_13_01::networking::BgpPeer = new.into();
+
+        assert_eq!(back.addr, Some(ip));
+
+        // router_lifetime is filled with the default for numbered peers
+        assert_eq!(
+            back.router_lifetime,
+            RouterLifetimeConfig::default().as_u16()
+        );
+
+        // interface_name gets the placeholder
+        assert_eq!(back.interface_name.as_str(), "interface-name-unavailable");
+    }
+
+    #[test]
+    fn test_bgp_peer_reverse_unnumbered() {
+        let new = BgpPeer::try_from(make_old_bgp_peer(None, 300)).unwrap();
+        let back: crate::v2026_02_13_01::networking::BgpPeer = new.into();
+
+        assert_eq!(back.addr, None);
+        assert_eq!(back.router_lifetime, 300);
+    }
+
+    #[test]
+    fn test_bgp_peer_round_trip_numbered() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let original = make_old_bgp_peer(Some(ip), 0);
+        let new = BgpPeer::try_from(original.clone()).unwrap();
+        let back: crate::v2026_02_13_01::networking::BgpPeer = new.into();
+
+        // addr and all non-removed fields should survive the round trip
+        assert_eq!(back.addr, original.addr);
+        assert_eq!(back.bgp_config, original.bgp_config);
+        assert_eq!(back.hold_time, original.hold_time);
+        assert_eq!(back.communities, original.communities);
+        assert_eq!(back.allowed_import, original.allowed_import);
+    }
+
+    #[test]
+    fn test_bgp_peer_round_trip_unnumbered() {
+        let original = make_old_bgp_peer(None, 300);
+        let new = BgpPeer::try_from(original.clone()).unwrap();
+        let back: crate::v2026_02_13_01::networking::BgpPeer = new.into();
+
+        assert_eq!(back.addr, original.addr);
+        assert_eq!(back.router_lifetime, original.router_lifetime);
+        assert_eq!(back.bgp_config, original.bgp_config);
+        assert_eq!(back.hold_time, original.hold_time);
+    }
+
+    #[test]
+    fn test_bgp_peer_round_trip_sentinel_becomes_none() {
+        // Old clients might send Some(0.0.0.0) for unnumbered. After round
+        // trip, this normalizes to None (the canonical representation).
+        let original =
+            make_old_bgp_peer(Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)), 300);
+        let new = BgpPeer::try_from(original).unwrap();
+        let back: crate::v2026_02_13_01::networking::BgpPeer = new.into();
+
+        assert_eq!(back.addr, None, "UNSPECIFIED should normalize to None");
+        assert_eq!(back.router_lifetime, 300);
+    }
+}
