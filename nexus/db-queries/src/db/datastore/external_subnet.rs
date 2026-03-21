@@ -40,6 +40,7 @@ use nexus_auth::authz::SUBNET_POOL_LIST;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
@@ -636,6 +637,150 @@ impl DataStore {
             ));
         }
         Ok(())
+    }
+
+    // === Subnet Pool Utilization ===
+
+    /// Return the number of addresses allocated from and the capacity of the
+    /// provided Subnet Pool.
+    pub async fn subnet_pool_utilization(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+    ) -> Result<(u128, u128), Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let pool_id = to_db_typed_uuid(authz_pool.id());
+        let (member_subnets, allocated_subnets) = self
+            .transaction_retry_wrapper("subnet_pool_utilization")
+            .transaction(&conn, |conn| async move {
+                let member_subnets = self
+                    .subnet_pool_list_member_subnets_on_connection(
+                        &conn, pool_id,
+                    )
+                    .await?;
+                let allocated_subnets = self
+                    .subnet_pool_list_allocated_subnets_on_connection(
+                        &conn, pool_id,
+                    )
+                    .await?;
+                Ok((member_subnets, allocated_subnets))
+            })
+            .await
+            .map_err(|e| match &e {
+                DieselError::NotFound => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                ),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+        let capacity = Self::accumulate_subnet_sizes(&member_subnets)?;
+        let allocated = Self::accumulate_subnet_sizes(&allocated_subnets)?;
+        Ok((allocated, capacity))
+    }
+
+    /// Return the total capacity (in addresses) of the provided Subnet Pool.
+    #[cfg(test)]
+    async fn subnet_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+    ) -> Result<u128, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let pool_id = to_db_typed_uuid(authz_pool.id());
+        let subnets = self
+            .subnet_pool_list_member_subnets_on_connection(&conn, pool_id)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })?;
+        Self::accumulate_subnet_sizes(&subnets)
+    }
+
+    /// Return the total number of allocated addresses in the provided Subnet
+    /// Pool.
+    #[cfg(test)]
+    async fn subnet_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+    ) -> Result<u128, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let pool_id = to_db_typed_uuid(authz_pool.id());
+        let subnets = self
+            .subnet_pool_list_allocated_subnets_on_connection(&conn, pool_id)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Self::accumulate_subnet_sizes(&subnets)
+    }
+
+    async fn subnet_pool_list_member_subnets_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        pool_id: nexus_db_model::DbTypedUuid<
+            omicron_uuid_kinds::SubnetPoolKind,
+        >,
+    ) -> Result<Vec<nexus_db_model::IpNet>, DieselError> {
+        use nexus_db_schema::schema::subnet_pool_member;
+        subnet_pool_member::table
+            .filter(subnet_pool_member::subnet_pool_id.eq(pool_id))
+            .filter(subnet_pool_member::time_deleted.is_null())
+            .select(subnet_pool_member::subnet)
+            .limit(10000)
+            .get_results_async::<nexus_db_model::IpNet>(conn)
+            .await
+    }
+
+    async fn subnet_pool_list_allocated_subnets_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        pool_id: nexus_db_model::DbTypedUuid<
+            omicron_uuid_kinds::SubnetPoolKind,
+        >,
+    ) -> Result<Vec<nexus_db_model::IpNet>, DieselError> {
+        use nexus_db_schema::schema::external_subnet;
+        external_subnet::table
+            .filter(external_subnet::subnet_pool_id.eq(pool_id))
+            .filter(external_subnet::time_deleted.is_null())
+            .select(external_subnet::subnet)
+            .limit(10000)
+            .get_results_async::<nexus_db_model::IpNet>(conn)
+            .await
+    }
+
+    fn accumulate_subnet_sizes(
+        subnets: &[nexus_db_model::IpNet],
+    ) -> Result<u128, Error> {
+        let mut count: u128 = 0;
+        for subnet in subnets {
+            let size = match subnet {
+                nexus_db_model::IpNet::V4(v4) => {
+                    u128::from(v4.size().ok_or_else(|| {
+                        Error::internal_error(
+                            "overflow computing IPv4 subnet size",
+                        )
+                    })?)
+                }
+                nexus_db_model::IpNet::V6(v6) => {
+                    v6.size().ok_or_else(|| {
+                        Error::internal_error(
+                            "overflow computing IPv6 subnet size",
+                        )
+                    })?
+                }
+            };
+            count = count.checked_add(size).ok_or_else(|| {
+                Error::internal_error("overflow accumulating subnet pool sizes")
+            })?;
+        }
+        Ok(count)
     }
 
     /// Create an External Subnet.
@@ -3937,6 +4082,277 @@ mod tests {
         let Error::Conflict { .. } = &err else {
             panic!("Expected Conflict, found {err:#?}");
         };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ipv4_subnet_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ipv4_subnet_pool_utilization");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        let (authz_project, _db_project) = datastore
+            .project_create(
+                opctx,
+                Project::new(
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "my-project".parse().unwrap(),
+                            description: String::new(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .expect("able to create a project");
+
+        // Create a subnet pool.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        // Capacity is 0 because there are no members.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 0);
+
+        // Link the pool to the silo so we can allocate external subnets.
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("able to link pool to silo");
+
+        // Add a /24 member (256 addresses).
+        let member_subnet: oxnet::IpNet = "10.0.0.0/24".parse().unwrap();
+        datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: member_subnet,
+                    min_prefix_length: Some(24),
+                    max_prefix_length: Some(28),
+                },
+            )
+            .await
+            .expect("able to add member");
+
+        // Capacity is now 256.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 256);
+
+        // No subnets allocated yet.
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 0);
+
+        // Allocate a /28 (16 addresses).
+        datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-subnet".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: "10.0.0.0/28".parse().unwrap(),
+                    },
+                },
+            )
+            .await
+            .expect("able to create external subnet");
+
+        // Allocated is now 16.
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 16);
+
+        // Capacity is unchanged.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 256);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_subnet_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ipv6_subnet_pool_utilization");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        let (authz_project, _db_project) = datastore
+            .project_create(
+                opctx,
+                Project::new(
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "my-project".parse().unwrap(),
+                            description: String::new(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .expect("able to create a project");
+
+        // Create an IPv6 subnet pool.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        // Link the pool to the silo.
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("able to link pool to silo");
+
+        // Capacity starts at 0.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 0);
+
+        // Add a /48 member (2^80 addresses).
+        let member_subnet: oxnet::IpNet = "2001:db8:1::/48".parse().unwrap();
+        datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: member_subnet,
+                    min_prefix_length: Some(48),
+                    max_prefix_length: Some(64),
+                },
+            )
+            .await
+            .expect("able to add member");
+
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 1u128 << 80);
+
+        // No subnets allocated yet.
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 0);
+
+        // Allocate a /64 (2^64 addresses).
+        datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-subnet".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: "2001:db8:1::/64".parse().unwrap(),
+                    },
+                },
+            )
+            .await
+            .expect("able to create external subnet");
+
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 1u128 << 64);
+
+        // Capacity is unchanged.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 1u128 << 80);
+
+        // Add a second, larger member.
+        let big_subnet: oxnet::IpNet = "2001:db9::/32".parse().unwrap();
+        datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: big_subnet,
+                    min_prefix_length: Some(32),
+                    max_prefix_length: Some(64),
+                },
+            )
+            .await
+            .expect("able to add second member");
+
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        // /48 has 2^80, /32 has 2^96
+        assert_eq!(capacity, (1u128 << 80) + (1u128 << 96));
 
         db.terminate().await;
         logctx.cleanup_successful();

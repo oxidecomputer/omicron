@@ -4,7 +4,6 @@
 
 //! Subnet Pools, collections of IP subnets for external subnet allocation
 
-use crate::app::Unimpl;
 use nexus_auth::authz;
 use nexus_db_lookup::lookup;
 use nexus_db_model::SubnetPool;
@@ -18,21 +17,10 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use oxnet::IpNet;
 use uuid::Uuid;
-
-// TODO(#9453): Remove this helper once real lookup logic is implemented.
-// When using LookupPath for database lookups, errors are handled internally
-// by the lookup machinery, making this helper unnecessary.
-fn not_found_error(pool: &NameOrId, resource_type: ResourceType) -> Error {
-    match pool {
-        NameOrId::Name(name) => Error::not_found_by_name(resource_type, &name),
-        NameOrId::Id(id) => Error::not_found_by_id(resource_type, &id),
-    }
-}
 
 impl super::Nexus {
     // === Subnet Pool CRUD ===
@@ -327,15 +315,31 @@ impl super::Nexus {
 
     // === Utilization ===
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore aggregation
     pub(crate) async fn subnet_pool_utilization_view(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
     ) -> LookupResult<subnet_pool_types::SubnetPoolUtilization> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let pool_lookup = self.datastore().lookup_subnet_pool(opctx, pool);
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Read).await?;
+
+        let (allocated, capacity) = self
+            .db_datastore
+            .subnet_pool_utilization(opctx, &authz_pool)
+            .await?;
+
+        let Some(remaining) = capacity.checked_sub(allocated) else {
+            return Err(Error::internal_error(
+                format!(
+                    "Computed an impossible negative count of remaining \
+                    addresses. Capacity = {capacity}, allocated = {allocated}"
+                )
+                .as_str(),
+            ));
+        };
+        let remaining = remaining as f64;
+        let capacity = capacity as f64;
+        Ok(subnet_pool_types::SubnetPoolUtilization { remaining, capacity })
     }
 }
