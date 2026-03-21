@@ -338,7 +338,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 addr: RouterPeerType::Unnumbered {
-                    router_lifetime: RouterLifetimeConfig::default(),
+                    router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
                 },
                 hold_time: 6,
                 idle_hold_time: 6,
@@ -398,7 +398,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(
         unnumbered_peer.addr,
         RouterPeerType::Unnumbered {
-            router_lifetime: RouterLifetimeConfig::default()
+            router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
         }
     );
     assert_eq!(
