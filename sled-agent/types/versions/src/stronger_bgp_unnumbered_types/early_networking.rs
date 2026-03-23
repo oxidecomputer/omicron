@@ -50,6 +50,8 @@ pub enum InvalidIpAddrError {
     Ipv4Broadcast,
     #[error("IPv6 unicast link-local addresses are not allowed")]
     Ipv6UnicastLinkLocal,
+    #[error("IPv4-mapped IPv6 addresses are not allowed")]
+    Ipv4MappedIpv6,
 }
 
 #[derive(
@@ -250,6 +252,9 @@ impl TryFrom<IpAddr> for RouterPeerIpAddr {
                     InvalidIpAddrError::UnspecifiedAddress
                 } else if ipv6.is_unicast_link_local() {
                     InvalidIpAddrError::Ipv6UnicastLinkLocal
+                } else if ipv6.to_ipv4_mapped().is_some() {
+                    // switch to ipv6.is_ipv4_mapped() once it's stabilized
+                    InvalidIpAddrError::Ipv4MappedIpv6
                 } else {
                     return Ok(Self(ip));
                 }
@@ -293,7 +298,8 @@ impl TryFrom<v20::UplinkAddressConfig> for UplinkAddressConfig {
                 InvalidIpAddrError::LoopbackAddress
                 | InvalidIpAddrError::MulticastAddress
                 | InvalidIpAddrError::Ipv4Broadcast
-                | InvalidIpAddrError::Ipv6UnicastLinkLocal => return Err(err),
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                | InvalidIpAddrError::Ipv4MappedIpv6 => return Err(err),
             },
         };
         Ok(Self { address, vlan_id: value.vlan_id })
@@ -465,7 +471,8 @@ impl TryFrom<v20::BgpPeerConfig> for BgpPeerConfig {
                 InvalidIpAddrError::LoopbackAddress
                 | InvalidIpAddrError::MulticastAddress
                 | InvalidIpAddrError::Ipv4Broadcast
-                | InvalidIpAddrError::Ipv6UnicastLinkLocal => return Err(err),
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                | InvalidIpAddrError::Ipv4MappedIpv6 => return Err(err),
             },
         };
         Ok(Self {

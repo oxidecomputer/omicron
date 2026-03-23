@@ -214,7 +214,8 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
                         InvalidIpAddrError::LoopbackAddress
                         | InvalidIpAddrError::MulticastAddress
                         | InvalidIpAddrError::Ipv4Broadcast
-                        | InvalidIpAddrError::Ipv6UnicastLinkLocal,
+                        | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                        | InvalidIpAddrError::Ipv4MappedIpv6,
                     ..
                 },
             )) => return Err(BgpPeerConfigDataError::Address(err)),

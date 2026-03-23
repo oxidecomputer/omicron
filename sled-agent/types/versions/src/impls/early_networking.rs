@@ -248,7 +248,8 @@ impl UplinkAddress {
                 InvalidIpAddrError::LoopbackAddress
                 | InvalidIpAddrError::MulticastAddress
                 | InvalidIpAddrError::Ipv4Broadcast
-                | InvalidIpAddrError::Ipv6UnicastLinkLocal => Err(err.err),
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                | InvalidIpAddrError::Ipv4MappedIpv6 => Err(err.err),
             },
         }
     }
@@ -444,9 +445,13 @@ mod tests {
                     Some(InvalidIpAddrError::Ipv6UnicastLinkLocal),
                 )
             }),
+            // ipv4-mapped ipv6
+            any::<Ipv4Addr>()
+                .prop_map(|ip| ip.to_ipv6_mapped())
+                .prop_map(IpAddr::V6)
+                .prop_map(|ip| (ip, Some(InvalidIpAddrError::Ipv4MappedIpv6))),
             // any other ipv4 (filtered)
-            any::<[u8; 4]>()
-                .prop_map(|b| Ipv4Addr::from(b))
+            any::<Ipv4Addr>()
                 .prop_filter(
                     "not unspecified, loopback, multicast, or broadcast",
                     |ip| {
@@ -468,6 +473,7 @@ mod tests {
                             && !ip.is_loopback()
                             && !ip.is_multicast()
                             && !ip.is_unicast_link_local()
+                            && ip.to_ipv4_mapped().is_none()
                     }
                 )
                 .prop_map(IpAddr::V6)
