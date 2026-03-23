@@ -72,7 +72,11 @@ filter = 'binary_id(omicron-nexus::test_all) and test(::schema::)'
 threads-required = 4
 
 [[profile.ci.overrides]]
-filter = 'binary_id(omicron-nexus::test_all)'
+# `omicron-test-utils` is included in this block that uses a longer-than-normal
+# timeout because under some conditions it waits for CockroachDB to shut down
+# gracefully. Note that `omicron-test-utils` depends on `omicron-nexus`, so this
+# is redundant, but we do this for future-proofing.
+filter = 'binary_id(omicron-nexus::test_all) + rdeps(omicron-test-utils)'
 # As of 2023-01-08, the slowest test in test_all takes 196s on a Ryzen 7950X.
 # 900s is a good upper limit that adds a comfortable buffer.
 slow-timeout = { period = '60s', terminate-after = 15 }
