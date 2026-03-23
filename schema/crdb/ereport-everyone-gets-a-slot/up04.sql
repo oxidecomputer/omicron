@@ -5,7 +5,6 @@ UPDATE omicron.public.ereport
     SET slot = CASE ereport.reporter
         -- For SP reporters, the slot is simply the existing `sp_slot` value.
         WHEN 'sp' THEN ereport.sp_slot
-
         -- For host OS reporters, attempt to determine the slot number by
         -- looking up the sled in the most recent inventory collection that
         -- contains it, then joining through the baseboard to find the
@@ -19,10 +18,17 @@ UPDATE omicron.public.ereport
                 ON sled_agent.inv_collection_id = inv.id
             JOIN omicron.public.inv_service_processor AS sp
                 ON sp.hw_baseboard_id = sled_agent.hw_baseboard_id
-                AND sled_agent.inv_collection_id = sled_agent.inv_collection_id
+                AND sp.inv_collection_id = sled_agent.inv_collection_id
             WHERE sled_agent.sled_id = ereport.sled_id
                 AND sled_agent.hw_baseboard_id IS NOT NULL
-            ORDER BY inv.time_done DESC
+                AND inv.time_done = (
+                    SELECT MAX(inv_collection.time_done)
+                    FROM omicron.public.inv_sled_agent
+                    JOIN omicron.public.inv_collection
+                        ON inv_sled_agent.inv_collection_id = inv_collection.id
+                    WHERE inv_sled_agent.sled_id = ereport.sled_id
+                        AND inv_sled_agent.hw_baseboard_id IS NOT NULL
+                )
             LIMIT 1
         )
     END;
