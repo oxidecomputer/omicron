@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::IpAddr;
-
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -29,6 +27,7 @@ use omicron_common::api::external::{
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::UplinkAddress;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -328,7 +327,7 @@ pub(crate) type ReserveBlockTxnError = TransactionError<ReserveBlockError>;
 
 pub(crate) async fn try_reserve_block(
     lot_id: Uuid,
-    inet: IpNetwork,
+    addr: UplinkAddress,
     anycast: bool,
     conn: &Connection<DTraceConnection<PgConnection>>,
 ) -> Result<(AddressLotBlock, AddressLotReservedBlock), ReserveBlockTxnError> {
@@ -336,6 +335,17 @@ pub(crate) async fn try_reserve_block(
     use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;
     use nexus_db_schema::schema::address_lot_rsvd_block;
     use nexus_db_schema::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+
+    // TODO-correctness What should we do with addrconf addresses? They don't
+    // have an IP to check against an address lot's range. Should address lots
+    // have a setting controlling whether to allow them?
+    //
+    // For now, treat addrconf addresses as though they have the address `::`.
+    // This requires us to have an address lot that includes the address `::`,
+    // which seems a little silly.
+    //
+    // https://github.com/oxidecomputer/omicron/issues/10103
+    let inet = IpNetwork::from(addr.ip_squashing_addrconf_to_unspecified());
 
     // Ensure a lot block exists with the requested address.
 
@@ -353,13 +363,12 @@ pub(crate) async fn try_reserve_block(
             )
         })?;
 
-    // Ensure the address is not already taken.
-
-    let no_reserve = match inet.ip() {
-        IpAddr::V4(a) => a.is_unspecified(),
-        IpAddr::V6(a) => a.is_unspecified() || a.is_unicast_link_local(),
+    let no_reserve = match addr {
+        UplinkAddress::AddrConf => true,
+        UplinkAddress::Static { .. } => false,
     };
 
+    // Ensure the address is not already taken.
     if !no_reserve {
         let results: Vec<Uuid> = if anycast {
             // Ensure that a non-anycast reservation has not already been made

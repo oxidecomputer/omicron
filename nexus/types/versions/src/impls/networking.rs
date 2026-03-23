@@ -5,6 +5,10 @@
 use crate::latest;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use oxnet::IpNet;
+use sled_agent_types_versions::latest::early_networking::UplinkAddress;
+use sled_agent_types_versions::latest::early_networking::UplinkIpNet;
+use sled_agent_types_versions::latest::early_networking::UplinkIpNetError;
+use std::fmt;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
     fn from(ipnet: IpNet) -> Self {
@@ -67,5 +71,43 @@ impl latest::networking::SwitchPortSettingsCreate {
             bgp_peers: Vec::new(),
             addresses: Vec::new(),
         }
+    }
+}
+
+impl fmt::Display for latest::networking::LoopbackAddressIpNet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<UplinkIpNet> for latest::networking::LoopbackAddressIpNet {
+    fn from(value: UplinkIpNet) -> Self {
+        Self(value)
+    }
+}
+
+impl TryFrom<IpNet> for latest::networking::LoopbackAddressIpNet {
+    type Error = UplinkIpNetError;
+
+    fn try_from(value: IpNet) -> Result<Self, Self::Error> {
+        Ok(Self(value.try_into()?))
+    }
+}
+
+impl From<latest::networking::LoopbackAddressIpNet> for UplinkIpNet {
+    fn from(value: latest::networking::LoopbackAddressIpNet) -> Self {
+        value.0
+    }
+}
+
+impl From<latest::networking::LoopbackAddressIpNet> for UplinkAddress {
+    fn from(value: latest::networking::LoopbackAddressIpNet) -> Self {
+        Self::Static { ip_net: value.into() }
+    }
+}
+
+impl From<latest::networking::LoopbackAddressIpNet> for IpNet {
+    fn from(value: latest::networking::LoopbackAddressIpNet) -> Self {
+        value.0.into()
     }
 }

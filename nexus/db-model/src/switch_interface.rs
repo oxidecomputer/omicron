@@ -9,12 +9,15 @@ use db_macros::Asset;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
 use nexus_types::external_api::networking as networking_types;
+use nexus_types::external_api::networking::LoopbackAddressIpNet;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
 use omicron_uuid_kinds::LoopbackAddressKind;
 use omicron_uuid_kinds::TypedUuid;
+use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkIpNetError;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -128,7 +131,7 @@ impl LoopbackAddress {
         rsvd_address_lot_block_id: Uuid,
         rack_id: Uuid,
         switch_slot: SwitchSlot,
-        address: IpNetwork,
+        address: LoopbackAddressIpNet,
         anycast: bool,
     ) -> Self {
         Self {
@@ -139,20 +142,25 @@ impl LoopbackAddress {
             rsvd_address_lot_block_id,
             rack_id,
             switch_slot: switch_slot.into(),
-            address,
+            address: IpNet::from(address).into(),
             anycast,
         }
     }
 }
 
-impl Into<networking_types::LoopbackAddress> for LoopbackAddress {
-    fn into(self) -> networking_types::LoopbackAddress {
-        networking_types::LoopbackAddress {
-            id: self.identity().id,
-            address_lot_block_id: self.address_lot_block_id,
-            rack_id: self.rack_id,
-            switch_slot: self.switch_slot.into(),
-            address: self.address.into(),
-        }
+impl TryFrom<LoopbackAddress> for networking_types::LoopbackAddress {
+    type Error = UplinkIpNetError;
+
+    fn try_from(value: LoopbackAddress) -> Result<Self, Self::Error> {
+        let address =
+            LoopbackAddressIpNet::try_from(IpNet::from(value.address))?;
+
+        Ok(Self {
+            id: value.identity().id,
+            address_lot_block_id: value.address_lot_block_id,
+            rack_id: value.rack_id,
+            switch_slot: value.switch_slot.into(),
+            address,
+        })
     }
 }

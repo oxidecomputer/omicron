@@ -3138,25 +3138,6 @@ pub struct SwitchPortRouteConfig {
 
 /// An IP address configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressConfig {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortAddressView {
     /// The port settings object this address configuration belongs to.
     pub port_settings_id: Uuid,

@@ -1641,7 +1641,7 @@ async fn do_switch_port_settings_create(
             let (block, rsvd_block) =
                 crate::db::datastore::address_lot::try_reserve_block(
                     address_lot_id,
-                    address.address.addr().into(),
+                    address.address,
                     // TODO: Should we allow anycast addresses for switch_ports?
                     // anycast
                     false,
@@ -1655,11 +1655,30 @@ async fn do_switch_port_settings_create(
                     ReserveBlockTxnError::Database(e) => e,
                 })?;
 
+            // We called try_reserve_block with a single address, so it should
+            // give us back a reserved block containing only that address.
+            let rsvd_address =
+                if rsvd_block.first_address == rsvd_block.last_address {
+                    rsvd_block.first_address
+                } else {
+                    return Err(err.bail(
+                        SwitchPortSettingsCreateError::InternalError(format!(
+                            "try_reserve_block() called with one address \
+                             ({:?}) returned a reserved block ({}) covering \
+                             multiple addresses: {}..={}",
+                            address.address,
+                            rsvd_block.id,
+                            rsvd_block.first_address,
+                            rsvd_block.first_address,
+                        )),
+                    ));
+                };
+
             address_config.push(SwitchPortAddressConfig::new(
                 psid,
                 block.id,
                 rsvd_block.id,
-                address.address.into(),
+                rsvd_address,
                 a.link_name.clone().into(),
                 address.vlan_id,
             ));
