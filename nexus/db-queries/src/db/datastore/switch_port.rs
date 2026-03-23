@@ -1679,7 +1679,7 @@ async fn do_switch_port_settings_create(
                             address.address,
                             rsvd_block.id,
                             rsvd_block.first_address,
-                            rsvd_block.first_address,
+                            rsvd_block.last_address,
                         )),
                     ));
                 };

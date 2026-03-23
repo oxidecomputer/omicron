@@ -4,15 +4,17 @@
 
 //! Networking types for the `STRONGER_UPLINK_ADDRESS_TYPES` version.
 //!
-//! * Change [`Address::address`] from [`IpNet`] to [`UplinkAddress`], which
-//!   rejects various invalid addresses (localhost, multicast addresses, etc.).
+//! * Change the type of the [`Address::address`] and
+//!   [`LoopbackAddress::address`] fields from [`IpNet`] to [`UplinkAddress`],
+//!   which rejects various invalid addresses (multicast addresses, unspecified
+//!   addresses, etc.).
+//! * In [`LoopbackAddressCreate`], replace the pair of fields `address`
+//!   (`IpAddr`) and `mask` (`u8`) with a single `address` field of type
+//!   [`LoopbackAddressIpNet`]. This enforces valid prefix lengths and rejects
+//!   invalid IPs.
 //! * Define new versions of types that transitively include [`Address`]:
 //!   * [`AddressConfig`]
 //!   * [`SwitchPortSettingsCreate`]
-//! * In [`LoopbackAddress`] and [`LoopbackAddressCreate`], replace the pair of
-//!   fields `address` (`IpAddr`) and `prefix` (`u8`) with a single `address`
-//!   field of type [`LoopbackAddressIpNet`]. This enforces valid prefix lengths
-//!   and rejects invalid IPs.
 
 use crate::v2025_11_20_00;
 use crate::v2025_11_20_00::networking::LinkConfigCreate;
@@ -42,7 +44,8 @@ pub struct Address {
     /// The address lot this address is drawn from.
     pub address_lot: NameOrId,
 
-    /// The address and prefix length of this address.
+    /// The address and prefix length of this address or a specification that
+    /// this address should be an `addrconf` address.
     pub address: UplinkAddress,
 
     /// Optional VLAN ID for this address
@@ -169,7 +172,7 @@ impl TryFrom<v2026_04_16_00::networking::SwitchPortSettingsCreate>
 
 /// IP address and subnet mask used for loopback addresses.
 // This is a newtype wrapper around `UplinkIpNet`. We apply the same
-// restrictions on valid IPs, but unlink `UplinkAddress`, we don't allow
+// restrictions on valid IPs, but unlike `UplinkAddress`, we don't allow
 // addrconf addresses.
 #[derive(
     Clone,
