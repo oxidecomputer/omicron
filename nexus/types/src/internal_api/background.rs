@@ -24,6 +24,7 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::early_networking::SwitchLocation;
+use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -852,9 +853,27 @@ impl slog::KV for BlueprintPrunerDetails {
     fn serialize(
         &self,
         _record: &slog::Record,
-        _serializer: &mut dyn slog::Serializer,
+        serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        todo!(); // XXX-dap
+        let Self {
+            nkept_by_policy,
+            deleted,
+            ntargets_removable,
+            ntargets_deleted,
+            warnings,
+        } = self;
+
+        serializer
+            .emit_usize(Key::from("nkept_by_policy"), *nkept_by_policy)?;
+        serializer
+            .emit_usize(Key::from("ntargets_removable"), *ntargets_removable)?;
+        serializer
+            .emit_usize(Key::from("ntargets_deleted"), *ntargets_deleted)?;
+        // slog does not support nested values out-of-the-box so we settle for
+        // just the counts for now.
+        serializer.emit_usize(Key::from("ndeleted"), deleted.len())?;
+        serializer.emit_usize(Key::from("nwarnings"), warnings.len())?;
+        Ok(())
     }
 }
 
