@@ -65,6 +65,7 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
+use oxnet::IpNet;
 use semver::Version;
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -932,8 +933,10 @@ pub static DEMO_LOOPBACK_CREATE: LazyLock<networking::LoopbackAddressCreate> =
         address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
         rack_id: uuid::Uuid::new_v4(),
         switch_slot: SwitchSlot::Switch0,
-        address: "203.0.113.99".parse().unwrap(),
-        mask: 24,
+        address: networking::LoopbackAddressIpNet::try_from(
+            "203.0.113.99/24".parse::<IpNet>().unwrap(),
+        )
+        .expect("valid loopback address IpNet"),
         anycast: false,
     });
 

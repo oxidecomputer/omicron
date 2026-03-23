@@ -22,7 +22,9 @@ use omicron_common::api::external::{
     NameOrId,
 };
 use oxnet::IpNet;
-use sled_agent_types::early_networking::{ImportExportPolicy, RouterPeerType};
+use sled_agent_types::early_networking::{
+    ImportExportPolicy, RouterPeerType, UplinkAddress,
+};
 use sled_agent_types::early_networking::{RouterLifetimeConfig, SwitchSlot};
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -191,7 +193,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     settings.addresses.push(AddressConfig {
         link_name: link0_name.clone(),
         addresses: vec![Address {
-            address: "203.0.113.10/24".parse().unwrap(),
+            address: UplinkAddress::Static {
+                ip_net: "203.0.113.10/24".parse().unwrap(),
+            },
             vlan_id: None,
             address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
         }],
@@ -591,7 +595,9 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     settings.addresses.push(AddressConfig {
         link_name: link_name.clone(),
         addresses: vec![Address {
-            address: "1701::d/64".parse().unwrap(),
+            address: UplinkAddress::Static {
+                ip_net: "1701::d/64".parse().unwrap(),
+            },
             vlan_id: None,
             address_lot: NameOrId::Name(lot_name.clone()),
         }],

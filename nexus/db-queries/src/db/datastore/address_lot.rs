@@ -345,7 +345,12 @@ pub(crate) async fn try_reserve_block(
     // which seems a little silly.
     //
     // https://github.com/oxidecomputer/omicron/issues/10103
-    let inet = IpNetwork::from(addr.ip_squashing_addrconf_to_unspecified());
+    //
+    // NOTE: We specifically call `.addr()` on the returned `IpNet` to remove
+    // any subnet prefix from the underlying `IpNet` value. We only store bare
+    // IP address values in `address_lot_rsvd_block`.
+    let inet =
+        IpNetwork::from(addr.ip_net_squashing_addrconf_to_unspecified().addr());
 
     // Ensure a lot block exists with the requested address.
 

@@ -232,14 +232,16 @@ impl RouterPeerType {
 
 impl UplinkAddress {
     /// Squash this address down to a flat IP address by converting
-    /// [`UplinkAddress::AddrConf`] to `::`.
+    /// [`UplinkAddress::AddrConf`] to `::/128`.
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
-    pub fn ip_squashing_addrconf_to_unspecified(&self) -> IpAddr {
-        match self {
-            UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            UplinkAddress::Static { ip_net } => ip_net.addr(),
+    pub fn ip_net_squashing_addrconf_to_unspecified(&self) -> IpNet {
+        match *self {
+            UplinkAddress::AddrConf => {
+                IpNet::host_net(IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+            }
+            UplinkAddress::Static { ip_net } => ip_net.into(),
         }
     }
 
@@ -351,7 +353,7 @@ impl fmt::Display for PortFec {
 mod tests {
     use super::*;
     use crate::latest::early_networking::InvalidIpAddrError;
-    use oxnet::Ipv4Net;
+    use oxnet::{Ipv4Net, Ipv6Net};
     use proptest::prelude::*;
     use serde::{Deserialize, Serialize};
     use test_strategy::proptest;
