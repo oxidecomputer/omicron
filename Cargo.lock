@@ -9546,9 +9546,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "slog",
- "slog-async",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain)",
- "slog-term",
  "thiserror 2.0.18",
  "tokio",
 ]
