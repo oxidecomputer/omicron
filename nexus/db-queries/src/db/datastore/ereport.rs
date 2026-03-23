@@ -197,8 +197,8 @@ impl DataStore {
             .group_by((
                 dsl::restart_id,
                 dsl::reporter,
-                dsl::sp_slot,
-                dsl::sp_type,
+                dsl::slot_type,
+                dsl::slot,
                 dsl::sled_id,
             ))
             .select((
@@ -236,7 +236,7 @@ impl DataStore {
                     .get_result_async(conn)
                     .await
             }
-            fm::Reporter::HostOs { sled } => {
+            fm::Reporter::HostOs { sled, .. } => {
                 Self::host_latest_ereport_id_query(sled)
                     .get_result_async(conn)
                     .await
@@ -258,9 +258,9 @@ impl DataStore {
     ) -> impl RunnableQuery<EreportIdTuple> {
         dsl::ereport
             .filter(
-                dsl::sp_type
+                dsl::slot_type
                     .eq(sp_type)
-                    .and(dsl::sp_slot.eq(slot))
+                    .and(dsl::slot.eq(slot))
                     .and(dsl::time_deleted.is_null()),
             )
             .order_by((dsl::time_collected.desc(), dsl::ena.desc()))

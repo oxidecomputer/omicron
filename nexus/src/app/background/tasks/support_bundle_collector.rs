@@ -587,10 +587,11 @@ mod test {
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
+        const SLED_SLOT: u16 = 8;
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
@@ -648,7 +649,10 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                Reporter::HostOs {
+                    sled: SledUuid::new_v4(),
+                    slot: Some(SLED_SLOT),
+                },
                 vec![
                     EreportData {
                         id: EreportId {
@@ -681,7 +685,7 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
                         id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
