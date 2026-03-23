@@ -15,14 +15,15 @@ use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::UnparsedDisk;
-use sled_hardware::is_gimlet;
+use sled_hardware::is_oxide_sled;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SledMode {
     Auto,
-    Gimlet,
+    #[serde(alias = "gimlet")]
+    Sled,
     Scrimlet,
 }
 
@@ -123,21 +124,21 @@ pub struct Config {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("Failed to read config from {path}: {err}")]
+    #[error("Failed to read config from {path}")]
     Io {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("Failed to parse config from {path}: {err}")]
+    #[error("Failed to parse config from {path}")]
     Parse {
         path: Utf8PathBuf,
         #[source]
         err: anyhow::Error,
     },
-    #[error("Loading certificate: {0}")]
+    #[error("Loading certificate")]
     Certificate(#[source] anyhow::Error),
-    #[error("Could not determine if host is a Gimlet: {0}")]
+    #[error("Could not determine if host is an Oxide sled")]
     SystemDetection(#[source] anyhow::Error),
     #[error("Could not enumerate physical links")]
     FindLinks(#[from] FindPhysicalLinkError),
@@ -158,7 +159,7 @@ impl Config {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
-            if is_gimlet().map_err(ConfigError::SystemDetection)? {
+            if is_oxide_sled().map_err(ConfigError::SystemDetection)? {
                 Dladm::list_physical()
                     .await
                     .map_err(ConfigError::FindLinks)?

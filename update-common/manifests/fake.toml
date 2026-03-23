@@ -5,12 +5,12 @@
 system_version = "1.0.0"
 
 [[artifact.gimlet_sp]]
-name = "SimGimletSp"
+name = "fake-gimlet-sp"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.gimlet_rot]]
-name = "fake-gimlet-rot"
+name = "fake-rot"
 version = "1.0.0"
 [artifact.gimlet_rot.source]
 kind = "composite-rot"
@@ -22,7 +22,8 @@ name = "fake-host"
 version = "1.0.0"
 [artifact.host.source]
 kind = "composite-host"
-phase_1 = { kind = "fake", size = "512KiB" }
+gimlet_phase_1 = { kind = "fake", size = "512KiB" }
+cosmo_phase_1 = { kind = "fake", size = "512KiB" }
 phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.trampoline]]
@@ -30,7 +31,8 @@ name = "fake-trampoline"
 version = "1.0.0"
 [artifact.trampoline.source]
 kind = "composite-host"
-phase_1 = { kind = "fake", size = "512KiB" }
+gimlet_phase_1 = { kind = "fake", size = "512KiB" }
+cosmo_phase_1 = { kind = "fake", size = "512KiB" }
 phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.control_plane]]
@@ -79,7 +81,7 @@ archive_a = { kind = "fake", size = "512KiB" }
 archive_b = { kind = "fake", size = "512KiB" }
 
 [[artifact.gimlet_rot_bootloader]]
-name = "fake-gimlet-rot-bootloader"
+name = "fake-rot-bootloader"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
@@ -93,4 +95,7 @@ name = "fake-switch-rot-bootloader"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
-
+[[artifact.measurement_corpus]]
+name = "fake-corpus"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }

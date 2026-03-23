@@ -11,6 +11,9 @@ use crate::LoadArgs;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
 use crate::api_metadata::AllApiMetadata;
+use crate::api_metadata::ApiConsumerStatus;
+use crate::api_metadata::ApiExpectedConsumer;
+use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
 use crate::api_metadata::VersionedHow;
@@ -21,11 +24,17 @@ use anyhow::Result;
 use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
+use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 
 /// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 /// the Oxide system
@@ -46,10 +55,10 @@ pub struct SystemApis {
     /// maps an API name (using the client package name as primary key) to the
     /// list of server components that use it
     /// (reverse of `apis_consumed`)
-    api_consumers: BTreeMap<
-        ClientPackageName,
-        BTreeMap<ServerComponentName, Vec<DepPath>>,
-    >,
+    api_consumers: BTreeMap<ClientPackageName, IdOrdMap<ApiConsumer>>,
+    /// API consumers that were expected but not found
+    missing_expected_consumers:
+        BTreeMap<ClientPackageName, ApiMissingConsumers>,
 
     /// maps an API name to the server component(s) that expose that API
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
@@ -61,6 +70,54 @@ pub struct SystemApis {
 }
 
 type ApiProducerMap = BTreeMap<ServerComponentName, Vec<DepPath>>;
+
+#[derive(Debug)]
+struct ApiConsumer {
+    server_pkgname: ServerComponentName,
+    dep_paths: Vec<DepPath>,
+    status: ApiConsumerStatus,
+}
+
+impl ApiConsumer {
+    fn new(name: ServerComponentName, status: ApiConsumerStatus) -> Self {
+        Self { server_pkgname: name, dep_paths: Vec::new(), status }
+    }
+
+    fn add_path(&mut self, path: DepPath) {
+        self.dep_paths.push(path);
+    }
+}
+
+impl IdOrdItem for ApiConsumer {
+    type Key<'a> = &'a ServerComponentName;
+    fn key(&self) -> Self::Key<'_> {
+        &self.server_pkgname
+    }
+    id_upcast!();
+}
+
+/// An API consumer returned by [`SystemApis::api_consumers`].
+#[derive(Debug)]
+pub struct FilteredApiConsumer<'a> {
+    /// The name of the consumer.
+    pub server_pkgname: &'a ServerComponentName,
+    /// The list of paths through which this consumer depends on the client,
+    /// after filters have been applied.
+    pub dep_paths: Vec<&'a DepPath>,
+    /// The status of the consumer, such as whether it is expected to be present.
+    pub status: &'a ApiConsumerStatus,
+}
+
+impl<'a> IdOrdItem for FilteredApiConsumer<'a> {
+    type Key<'b>
+        = &'a ServerComponentName
+    where
+        Self: 'b;
+    fn key(&self) -> Self::Key<'_> {
+        self.server_pkgname
+    }
+    id_upcast!();
+}
 
 impl SystemApis {
     /// Load information about APIs in the system based on both developer-
@@ -130,6 +187,28 @@ impl SystemApis {
             tracker.api_producers,
         );
 
+        // Ensure that if restricted_to_consumers is defined, all consumers
+        // listed are specified by at least one deployment unit.
+        for api in api_metadata.apis() {
+            match &api.restricted_to_consumers {
+                ApiExpectedConsumers::Unrestricted => {}
+                ApiExpectedConsumers::Restricted(consumers) => {
+                    for consumer in consumers {
+                        if !server_component_units.contains_key(&consumer.name)
+                        {
+                            bail!(
+                                "api {} specifies unknown consumer: {} \
+                                 (with expected reason: {})",
+                                api.client_package_name,
+                                consumer.name,
+                                consumer.reason,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Now that we've figured out what servers are where, walk dependencies
         // of each server component and assemble structures to find which APIs
         // are produced and consumed by which components.
@@ -159,6 +238,7 @@ impl SystemApis {
 
         let (apis_consumed, api_consumers) =
             (deps_tracker.apis_consumed, deps_tracker.api_consumers);
+        let mut missing_expected_consumers = BTreeMap::new();
 
         // Make sure that each API is produced by at least one producer.
         for api in api_metadata.apis() {
@@ -182,6 +262,75 @@ impl SystemApis {
                     found
                 );
             }
+
+            // Do any of the expected consumers of this API not actually use it?
+            match &api.restricted_to_consumers {
+                ApiExpectedConsumers::Unrestricted => {}
+                ApiExpectedConsumers::Restricted(expected_consumers) => {
+                    let actual_consumers =
+                        api_consumers.get(&api.client_package_name);
+                    let missing: IdOrdMap<_> = expected_consumers
+                        .iter()
+                        .filter(|c| {
+                            actual_consumers.map_or(false, |actual| {
+                                !actual.contains_key(&c.name)
+                            })
+                        })
+                        .cloned()
+                        .collect();
+                    if !missing.is_empty() {
+                        missing_expected_consumers.insert(
+                            api.client_package_name.clone(),
+                            ApiMissingConsumers { missing },
+                        );
+                    }
+                }
+            }
+        }
+
+        // Validate that the IDU-only edges' components belong to the same
+        // deployment unit.
+        for edge in api_metadata.intra_deployment_unit_only_edges() {
+            let server = &edge.server;
+            let Some(server_unit) = server_component_units.get(server) else {
+                // This was validated earlier, but there's not an easy way to
+                // express this in the type system, so we just handle it
+                // gracefully.
+                bail!(
+                    "internal error: intra_deployment_unit_only specifies \
+                    server {:?} that does not exist in server components",
+                    server,
+                );
+            };
+
+            let client = &edge.client;
+            let Some(producers) = api_producers.get(client) else {
+                // This was validated earlier, but there's not an easy way to
+                // express this in the type system, so we just handle it
+                // gracefully.
+                bail!(
+                    "internal error: intra_deployment_unit_only specifies \
+                     client {:?} that does not correspond to a known API",
+                    client,
+                );
+            };
+
+            if !producers.iter().any(|(p, _)| {
+                server_component_units
+                    .get(p)
+                    .map(|producer_unit| producer_unit == server_unit)
+                    .unwrap_or(false)
+            }) {
+                bail!(
+                    "error: intra_deployment_unit_only specifies server \
+                     {:?} in deployment unit {:?}, but none of the producers \
+                     of client {:?} are in that deployment_unit: {}",
+                    server,
+                    server_unit,
+                    client,
+                    producers.keys().map(|p| p.as_str()).join(", "),
+                );
+            }
         }
 
         Ok(SystemApis {
@@ -189,6 +338,7 @@ impl SystemApis {
             unit_server_components,
             apis_consumed,
             api_consumers,
+            missing_expected_consumers,
             api_producers,
             api_metadata,
             workspaces,
@@ -202,11 +352,19 @@ impl SystemApis {
         self.unit_server_components.keys()
     }
 
+    /// Get the deployment unit associated with a server component
+    pub fn server_component_unit(
+        &self,
+        server_component: &ServerComponentName,
+    ) -> Option<&DeploymentUnitName> {
+        self.server_component_units.get(server_component)
+    }
+
     /// For one deployment unit, iterate over the servers contained in it
     pub fn deployment_unit_servers(
         &self,
         unit: &DeploymentUnitName,
-    ) -> Result<impl Iterator<Item = &ServerComponentName>> {
+    ) -> Result<impl Iterator<Item = &ServerComponentName> + use<'_>> {
         Ok(self
             .unit_server_components
             .get(unit)
@@ -219,12 +377,27 @@ impl SystemApis {
         &self.api_metadata
     }
 
+    /// Returns the note for a intra-deployment-unit-only edge, if one matches.
+    pub fn idu_only_edge_note(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> Option<&str> {
+        self.api_metadata
+            .intra_deployment_unit_only_edges()
+            .iter()
+            .find(|edge| edge.matches(server, client))
+            .map(|edge| edge.note.as_str())
+    }
+
     /// Given a server component, return the APIs consumed by this component
     pub fn component_apis_consumed(
         &self,
         server_component: &ServerComponentName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ClientPackageName, &DepPath)> + '_> {
+    ) -> Result<
+        impl Iterator<Item = (&ClientPackageName, &DepPath)> + '_ + use<'_>,
+    > {
         let mut rv = Vec::new();
         let Some(apis_consumed) = self.apis_consumed.get(server_component)
         else {
@@ -257,7 +430,8 @@ impl SystemApis {
     pub fn api_producers<'apis>(
         &'apis self,
         client: &ClientPackageName,
-    ) -> impl Iterator<Item = &'apis ServerComponentName> + 'apis {
+    ) -> impl Iterator<Item = &'apis ServerComponentName> + 'apis + use<'apis>
+    {
         self.api_producers
             .get(client)
             .into_iter()
@@ -271,17 +445,16 @@ impl SystemApis {
         &self,
         client: &ClientPackageName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_>
-    {
-        let mut rv = Vec::new();
+    ) -> Result<IdOrdMap<FilteredApiConsumer<'_>>> {
+        let mut rv = IdOrdMap::new();
 
         let Some(api_consumers) = self.api_consumers.get(client) else {
-            return Ok(rv.into_iter());
+            return Ok(rv);
         };
 
-        for (server_pkgname, dep_paths) in api_consumers {
+        for api_consumer in api_consumers {
             let mut include = Vec::new();
-            for p in dep_paths {
+            for p in &api_consumer.dep_paths {
                 if filter.should_include(
                     &self.api_metadata,
                     &self.workspaces,
@@ -293,11 +466,27 @@ impl SystemApis {
             }
 
             if !include.is_empty() {
-                rv.push((server_pkgname, include))
+                rv.insert_unique(FilteredApiConsumer {
+                    server_pkgname: &api_consumer.server_pkgname,
+                    dep_paths: include,
+                    status: &api_consumer.status,
+                })
+                .expect("api_consumers is uniquely indexed by server_pkgname");
             }
         }
 
-        Ok(rv.into_iter())
+        Ok(rv)
+    }
+
+    /// Get the consumers for an API that were expected but not found.
+    ///
+    /// Returns `None` if there are no missing expected consumers, or if the set
+    /// of expected consumers is unrestricted.
+    pub fn missing_expected_consumers(
+        &self,
+        client: &ClientPackageName,
+    ) -> Option<&ApiMissingConsumers> {
+        self.missing_expected_consumers.get(client)
     }
 
     /// Given the client package name for an API and the name of a server
@@ -345,7 +534,23 @@ impl SystemApis {
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
-        let mut graph = petgraph::graph::Graph::new();
+        let (graph, _) =
+            self.make_deployment_unit_graph(filter, EdgeFilter::All)?;
+        Ok(Dot::new(&graph).to_string())
+    }
+
+    // The complex type below is only used in this one place: the return value
+    // of this internal helper function.  A type alias doesn't seem better.
+    #[allow(clippy::type_complexity)]
+    fn make_deployment_unit_graph(
+        &self,
+        dependency_filter: ApiDependencyFilter,
+        edge_filter: EdgeFilter<'_>,
+    ) -> Result<(
+        Graph<&DeploymentUnitName, &ClientPackageName>,
+        BTreeMap<&DeploymentUnitName, NodeIndex>,
+    )> {
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .deployment_units()
             .map(|name| (name, graph.add_node(name)))
@@ -360,8 +565,34 @@ impl SystemApis {
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
                 for (client_pkg, _) in
-                    self.component_apis_consumed(server_pkg, filter)?
+                    self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
+                    if let EdgeFilter::DagOnly(idu_edges) = edge_filter {
+                        let api = self
+                            .api_metadata
+                            .client_pkgname_lookup(client_pkg)
+                            .unwrap();
+                        // Filtering DAG-only edges means ignoring everything
+                        // that's not server-side-versioned.
+                        if api.versioned_how != VersionedHow::Server {
+                            continue;
+                        }
+
+                        // When filtering DAG-only edges, also skip edges that
+                        // represent intra-deployment-unit-only communication
+                        // (communication within one instance of one deployment
+                        // unit).  That's because intra-deployment-unit edges
+                        // would look like a cycle in the dependency graph, but
+                        // aren't one that we care about since they're always
+                        // referring to the same *instance* of the same
+                        // deployment unit.
+                        if idu_edges
+                            .contains(&(server_pkg.clone(), client_pkg.clone()))
+                        {
+                            continue;
+                        }
+                    }
+
                     // Multiple server components may produce an API. However,
                     // if an API is produced by multiple server components
                     // within the same deployment unit, we would like to only
@@ -377,17 +608,13 @@ impl SystemApis {
                         .collect();
                     for other_unit in other_units {
                         let other_node = nodes.get(other_unit).unwrap();
-                        graph.update_edge(
-                            *my_node,
-                            *other_node,
-                            client_pkg.clone(),
-                        );
+                        graph.update_edge(*my_node, *other_node, client_pkg);
                     }
                 }
             }
         }
 
-        Ok(Dot::new(&graph).to_string())
+        Ok((graph, nodes))
     }
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
@@ -401,17 +628,17 @@ impl SystemApis {
     }
 
     // The complex type below is only used in this one place: the return value
-    // of an internal helper function.  A type alias doesn't seem better.
+    // of this internal helper function.  A type alias doesn't seem better.
     #[allow(clippy::type_complexity)]
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
         versioned_on_server_only: bool,
     ) -> Result<(
-        petgraph::graph::Graph<&ServerComponentName, &ClientPackageName>,
+        Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
     )> {
-        let mut graph = petgraph::graph::Graph::new();
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
             .keys()
@@ -446,6 +673,123 @@ impl SystemApis {
         }
 
         Ok((graph, nodes))
+    }
+
+    /// Computes the set of (server, client) edges for server-side-only-
+    /// versioned APIs where the server and client are in the same deployment
+    /// unit.
+    ///
+    /// See the caller for more on this.
+    fn compute_required_idu_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        let filter = ApiDependencyFilter::Default;
+        let mut required = BTreeSet::new();
+
+        for (server, server_unit) in &self.server_component_units {
+            for (client, _) in self.component_apis_consumed(server, filter)? {
+                // Only consider server-side-versioned APIs.
+                let api = self
+                    .api_metadata
+                    .client_pkgname_lookup(client)
+                    .expect("consumed API must have metadata");
+                if api.versioned_how != VersionedHow::Server {
+                    continue;
+                }
+
+                // Check if any producer is in the same deployment unit.
+                for producer in self.api_producers(client) {
+                    let producer_unit = self
+                        .server_component_units
+                        .get(producer)
+                        .expect("API producer must be in some deployment unit");
+
+                    if server_unit == producer_unit {
+                        // This edge would create an intra-unit dependency for
+                        // a server-versioned API, so it must be in the
+                        // intra-deployment-unit-only list.
+                        required.insert((server.clone(), client.clone()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(required)
+    }
+
+    /// Validates that these two sets of (server, client) edges match:
+    ///
+    /// - API dependencies found by this tool *within* a deployment unit for a
+    ///   server-side-versioned API
+    /// - API dependencies annotated in the metadata as being
+    ///   intra-deployment-unit
+    ///
+    /// Why?  Recall that a server-side-only-versioned API means that the server
+    /// is always updated before its clients.  Further, the update system does
+    /// not (and cannot) guarantee anything about the ordering of updates for a
+    /// particular kind of deployment unit.  (Example: for host OS, the update
+    /// system does not say that any particular sleds are updated before any
+    /// others.)  Thus, if you have a server-side-only-versioned API with a
+    /// client in the same deployment unit, that's only allowable if the client
+    /// is always talking to an instance of the server in the same *instance* of
+    /// the same deployment unit.  A dependency from Sled Agent to Propolis in
+    /// the *same* host OS is okay.  A dependency from Sled Agent to a Propolis
+    /// on a different sled is not.
+    ///
+    /// If we found a same-deployment-unit edge that's not labeled in the
+    /// manifest as intra-deployment-unit, that means we've identified either a
+    /// manifest bug or an update bug waiting to happen.
+    ///
+    /// Returns the validated set of edges for use by
+    /// make_deployment_unit_graph.
+    fn validate_idu_only_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        let required = self.compute_required_idu_edges()?;
+
+        // Build the configured set from the manifest.
+        let mut configured = BTreeSet::new();
+        for edge in self.api_metadata.intra_deployment_unit_only_edges() {
+            configured.insert((edge.server.clone(), edge.client.clone()));
+        }
+
+        // Compare the two sets.
+        let missing: BTreeSet<_> = required.difference(&configured).collect();
+        let extra: BTreeSet<_> = configured.difference(&required).collect();
+
+        if !missing.is_empty() || !extra.is_empty() {
+            let mut msg = String::new();
+            for (server, client) in missing {
+                msg.push_str(&format!(
+                    "The following API dependendency exists between two \
+                     components in the same deployment unit, but is not \
+                     present in `intra_deployment_unit_only_edges`: \
+                     server {:?} client {:?}\n\
+                     If this client only ever uses this API with a server \
+                     in the same *instance* of the same deployment unit, \
+                     then add it to `intra_deployment_unit_only_edges`. \
+                     Otherwise, this relationship is incompatible with \
+                     automated upgrade.\n",
+                    server, client,
+                ));
+            }
+
+            for (server, client) in extra {
+                msg.push_str(&format!(
+                    "`intra_deployment_unit_only_edges` contains an edge \
+                     between server {:?} and client {:?}, but either \
+                     this API dependency was not found, or the API is not \
+                     server-side-only-versioned, or this client and server \
+                     are not in the same deployment unit.\n",
+                    server, client,
+                ));
+            }
+
+            bail!("{}", msg);
+        }
+
+        Ok(required)
     }
 
     /// Verifies various important properties about the assignment of which APIs
@@ -502,6 +846,10 @@ impl SystemApis {
         // can't be part of a cycle.
         let filter = ApiDependencyFilter::Default;
 
+        // Validate that all configured intra_deployment_unit_only_edges are
+        // correct and match the required set exactly.
+        let idu_only_edges = self.validate_idu_only_edges()?;
+
         // Construct a graph where:
         //
         // - nodes are all the API producer and consumer components
@@ -514,8 +862,23 @@ impl SystemApis {
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
             bail!(
-                "graph of server-managed components has a cycle (includes \
-                 node: {:?})",
+                "graph of server-managed API dependencies between components \
+                 has a cycle (includes node: {:?})",
+                reverse_nodes.get(&error.node_id()).unwrap()
+            );
+        }
+
+        // Do the same with a graph of deployment units.
+        let (graph, nodes) = self.make_deployment_unit_graph(
+            filter,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
+        let reverse_nodes: BTreeMap<_, _> =
+            nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
+        if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            bail!(
+                "graph of server-managed API dependencies between deployment \
+                 units has a cycle (includes node: {:?})",
                 reverse_nodes.get(&error.node_id()).unwrap()
             );
         }
@@ -551,16 +914,41 @@ impl SystemApis {
                 }
                 continue;
             }
+
+            for consumer in
+                self.api_consumers(&api.client_package_name, filter)?
+            {
+                // Are there any unexpected consumers?
+                match consumer.status {
+                    ApiConsumerStatus::NoAssertion
+                    | ApiConsumerStatus::Expected { .. } => {}
+                    ApiConsumerStatus::Unexpected => {
+                        dag_check.report_unexpected_consumer(
+                            &api.client_package_name,
+                            consumer.server_pkgname,
+                        );
+                    }
+                }
+            }
+
+            // Are there any missing consumers?
+            if let Some(missing) =
+                self.missing_expected_consumers(&api.client_package_name)
+            {
+                dag_check.report_missing_expected_consumers(
+                    &api.client_package_name,
+                    missing,
+                );
+            }
+
             for producer in self.api_producers(&api.client_package_name) {
                 let apis_consumed: BTreeSet<_> = self
                     .component_apis_consumed(producer, filter)?
                     .map(|(client_pkgname, _dep_path)| client_pkgname)
                     .collect();
-                let dependents: BTreeSet<_> = self
+                let consumers = self
                     .api_consumers(&api.client_package_name, filter)
-                    .unwrap()
-                    .map(|(dependent, _dep_path)| dependent)
-                    .collect();
+                    .unwrap();
 
                 if api.versioned_how == VersionedHow::Unknown {
                     // If we haven't determined how to manage versioning on this
@@ -586,7 +974,7 @@ impl SystemApis {
                             &api.client_package_name,
                             String::from("depends on itself"),
                         );
-                    } else if dependents.is_empty() {
+                    } else if consumers.is_empty() {
                         // If something has no consumers in deployed components, it
                         // can be server-managed.  (These are generally debug APIs.)
                         dag_check.propose_server(
@@ -612,9 +1000,9 @@ impl SystemApis {
                 // produced by component C1, which uses API A2 produced by C2, which
                 // also uses A1).  In such cases, either A1 or A2 must be
                 // client-managed (or both).
-                for other_pkgname in dependents {
+                for c in consumers {
                     if let Some(dependency_clientpkg) =
-                        dependencies.get(other_pkgname)
+                        dependencies.get(c.server_pkgname)
                     {
                         let dependency_api = self
                             .api_metadata
@@ -660,6 +1048,11 @@ impl SystemApis {
     }
 }
 
+enum EdgeFilter<'a> {
+    All,
+    DagOnly(&'a BTreeSet<(ServerComponentName, ClientPackageName)>),
+}
+
 /// Describes proposals for assigning how APIs should be versioned, based on
 /// heuristics applied while checking the DAG
 pub struct DagCheck<'a> {
@@ -678,6 +1071,8 @@ pub struct DagCheck<'a> {
     /// most once in this structure.
     proposed_upick:
         BTreeMap<&'a ClientPackageName, BTreeSet<&'a ClientPackageName>>,
+    /// clients that failed assertions about consumers
+    failed_consumers: IdOrdMap<FailedConsumerCheck<'a>>,
 }
 
 impl<'a> DagCheck<'a> {
@@ -686,6 +1081,7 @@ impl<'a> DagCheck<'a> {
             proposed_server_managed: BTreeMap::new(),
             proposed_client_managed: BTreeMap::new(),
             proposed_upick: BTreeMap::new(),
+            failed_consumers: IdOrdMap::new(),
         }
     }
 
@@ -743,6 +1139,29 @@ impl<'a> DagCheck<'a> {
             .insert(client_pkgname2);
     }
 
+    fn report_unexpected_consumer(
+        &mut self,
+        client_pkgname: &'a ClientPackageName,
+        consumer_name: &'a ServerComponentName,
+    ) {
+        self.failed_consumers
+            .entry(client_pkgname)
+            .or_insert_with(|| FailedConsumerCheck::new(client_pkgname))
+            .unexpected
+            .insert(consumer_name);
+    }
+
+    fn report_missing_expected_consumers(
+        &mut self,
+        client_pkgname: &'a ClientPackageName,
+        missing: &'a ApiMissingConsumers,
+    ) {
+        self.failed_consumers
+            .entry(client_pkgname)
+            .or_insert_with(|| FailedConsumerCheck::new(client_pkgname))
+            .missing = Some(missing);
+    }
+
     /// Returns a list of APIs (identified by client package name) that look
     /// like they could use server-side versioning, along with reasons
     pub fn proposed_server_managed(
@@ -771,6 +1190,103 @@ impl<'a> DagCheck<'a> {
         self.proposed_upick
             .iter()
             .flat_map(|(c, others)| others.iter().map(|o| (*c, *o)))
+    }
+
+    /// Returns the map of all client package names and consumers that failed
+    /// consumers checks.
+    pub fn failed_consumers(&self) -> &IdOrdMap<FailedConsumerCheck<'a>> {
+        &self.failed_consumers
+    }
+}
+
+/// A map of missing consumers for an API.
+#[derive(Debug)]
+pub struct ApiMissingConsumers {
+    missing: IdOrdMap<ApiExpectedConsumer>,
+}
+
+impl ApiMissingConsumers {
+    pub fn error_count(&self) -> usize {
+        self.missing.len()
+    }
+
+    pub fn display<'a>(
+        &'a self,
+        apis: &'a SystemApis,
+    ) -> ApiMissingConsumersDisplay<'a> {
+        ApiMissingConsumersDisplay { missing: &self.missing, apis }
+    }
+}
+
+pub struct ApiMissingConsumersDisplay<'a> {
+    missing: &'a IdOrdMap<ApiExpectedConsumer>,
+    apis: &'a SystemApis,
+}
+
+impl fmt::Display for ApiMissingConsumersDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for consumer in self.missing {
+            let deployment_unit = self
+                .apis
+                .server_component_unit(&consumer.name)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "consumer {} doesn't have an associated \
+                         deployment unit (this is checked at load time, so \
+                         if you're seeing this message, there's a bug in that \
+                         check)",
+                        consumer.name
+                    );
+                });
+            writeln!(
+                f,
+                "error: missing expected dependency on {} \
+                 (part of {})",
+                consumer.name, deployment_unit
+            )?;
+            writeln!(
+                f,
+                "    reason this consumer is expected: {}",
+                consumer.reason
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Information about an API that failed consumers checks.
+#[derive(Clone, Debug)]
+pub struct FailedConsumerCheck<'a> {
+    /// The API's client package name.
+    pub client_pkgname: &'a ClientPackageName,
+    /// Components that actually consume this API but that were not present in
+    /// the list of expected consumers.
+    pub unexpected: BTreeSet<&'a ServerComponentName>,
+    /// Components that were expected to consume this API but that were not
+    /// present in the list of actual consumers, along with the reason they
+    /// should be present.
+    pub missing: Option<&'a ApiMissingConsumers>,
+}
+
+impl<'a> IdOrdItem for FailedConsumerCheck<'a> {
+    type Key<'b>
+        = &'a ClientPackageName
+    where
+        Self: 'b;
+    fn key(&self) -> Self::Key<'_> {
+        self.client_pkgname
+    }
+    id_upcast!();
+}
+
+impl<'a> FailedConsumerCheck<'a> {
+    pub fn new(client_pkgname: &'a ClientPackageName) -> Self {
+        Self { client_pkgname, unexpected: BTreeSet::new(), missing: None }
+    }
+
+    pub fn error_count(&self) -> usize {
+        self.unexpected.len() + self.missing.map_or(0, |m| m.error_count())
     }
 }
 
@@ -920,10 +1436,7 @@ struct ClientDependenciesTracker<'a> {
         ServerComponentName,
         BTreeMap<ClientPackageName, Vec<DepPath>>,
     >,
-    api_consumers: BTreeMap<
-        ClientPackageName,
-        BTreeMap<ServerComponentName, Vec<DepPath>>,
-    >,
+    api_consumers: BTreeMap<ClientPackageName, IdOrdMap<ApiConsumer>>,
 }
 
 impl<'a> ClientDependenciesTracker<'a> {
@@ -947,18 +1460,19 @@ impl<'a> ClientDependenciesTracker<'a> {
         pkgname: &str,
         dep_path: &DepPath,
     ) {
-        if self.api_metadata.client_pkgname_lookup(pkgname).is_none() {
+        let Some(api) = self.api_metadata.client_pkgname_lookup(pkgname) else {
             return;
-        }
+        };
 
         // This is the name of a known client package.  Record it.
+        let status = api.restricted_to_consumers.status(server_pkgname);
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
         self.api_consumers
             .entry(client_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
-            .entry(server_pkgname.clone())
-            .or_insert_with(Vec::new)
-            .push(dep_path.clone());
+            .or_insert_with(IdOrdMap::new)
+            .entry(&server_pkgname)
+            .or_insert_with(|| ApiConsumer::new(server_pkgname.clone(), status))
+            .add_path(dep_path.clone());
         self.apis_consumed
             .entry(server_pkgname.clone())
             .or_insert_with(BTreeMap::new)

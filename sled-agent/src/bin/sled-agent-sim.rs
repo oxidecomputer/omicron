@@ -12,6 +12,7 @@ use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
@@ -21,7 +22,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server,
 };
 use omicron_uuid_kinds::SledUuid;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
@@ -52,6 +53,9 @@ struct Args {
 
     #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
+
+    #[clap(action)]
+    nexus_lockstep_port: u16,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -103,16 +107,23 @@ async fn do_run() -> Result<(), CmdError> {
         },
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
-            zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
+            zpools: vec![
+                ConfigZpool {
+                    size: 1 << 40,
+                    health: ZpoolHealth::Online
+                };
+                10
+            ],
             ip: (*args.sled_agent_addr.ip()).into(),
         },
         hardware: ConfigHardware {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
             reservoir_ram: 32 * (1 << 30),
+            cpu_family: SledCpuFamily::AmdMilan,
             baseboard: Baseboard::Gimlet {
                 identifier: format!("sim-{}", args.uuid),
-                model: String::from("sim-gimlet"),
+                model: String::from(sp_sim::FAKE_GIMLET_MODEL),
                 revision: 3,
             },
         },
@@ -122,6 +133,7 @@ async fn do_run() -> Result<(), CmdError> {
             Some(args.nexus_addr),
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
+            SledCpuFamily::AmdMilan,
         )
     };
 
@@ -152,7 +164,12 @@ async fn do_run() -> Result<(), CmdError> {
 
     let config_logging =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info };
-    run_standalone_server(&config, &config_logging, &rss_args)
-        .await
-        .map_err(CmdError::Failure)
+    run_standalone_server(
+        &config,
+        args.nexus_lockstep_port,
+        &config_logging,
+        &rss_args,
+    )
+    .await
+    .map_err(CmdError::Failure)
 }

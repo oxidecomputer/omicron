@@ -9,7 +9,7 @@ use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::stream::StreamExt;
 use libc::SIGINT;
-use omicron_test_utils::dev;
+use omicron_test_utils::dev::{self, db::CockroachStarterBuilder};
 use signal_hook_tokio::Signals;
 
 fn main() -> anyhow::Result<()> {
@@ -64,6 +64,13 @@ struct DbRunArgs {
     /// Do not populate the database with any schema
     #[clap(long = "no-populate", action(clap::ArgAction::SetFalse))]
     populate: bool,
+
+    /// Maximum SQL memory in MiB
+    ///
+    /// This should generally not be set unless you're testing
+    /// memory-constrained operations.
+    #[clap(long, default_value_t = CockroachStarterBuilder::DEFAULT_MAX_SQL_MEMORY_MIB)]
+    max_sql_memory_mib: u16,
 }
 
 impl DbRunArgs {
@@ -79,7 +86,8 @@ impl DbRunArgs {
         // builder, then create starter, then start it) because we want to be able
         // to print what's happening before we do it.
         let mut db_arg_builder = dev::db::CockroachStarterBuilder::new()
-            .listen_port(self.listen_port);
+            .listen_port(self.listen_port)
+            .max_sql_memory_mib(self.max_sql_memory_mib);
 
         // NOTE: The stdout strings here are not intended to be stable, but they are
         // used by the test suite.

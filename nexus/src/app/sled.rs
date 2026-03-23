@@ -4,7 +4,6 @@
 
 //! Sleds, and the hardware and services within them.
 
-use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
@@ -13,12 +12,11 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -29,8 +27,12 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
+use sled_agent_types::inventory::SledRole;
+use sled_hardware_types::BaseboardId;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -40,7 +42,7 @@ impl super::Nexus {
     pub fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        sled_id: &Uuid,
+        sled_id: &SledUuid,
     ) -> LookupResult<lookup::Sled<'a>> {
         nexus_networking::sled_lookup(&self.db_datastore, opctx, *sled_id)
     }
@@ -53,7 +55,7 @@ impl super::Nexus {
     pub(crate) async fn upsert_sled(
         &self,
         _opctx: &OpContext,
-        id: Uuid,
+        id: SledUuid,
         info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
@@ -77,6 +79,7 @@ impl super::Nexus {
                 usable_hardware_threads: info.usable_hardware_threads,
                 usable_physical_ram: info.usable_physical_ram.into(),
                 reservoir_size: info.reservoir_size.into(),
+                cpu_family: info.cpu_family.into(),
             },
             self.rack_id,
             info.generation.into(),
@@ -104,11 +107,48 @@ impl super::Nexus {
     pub(crate) async fn sled_expunge(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<SledPolicy, Error> {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
-        let (authz_sled,) =
-            sled_lookup.lookup_for(authz::Action::Modify).await?;
+        let (authz_sled, sled) =
+            sled_lookup.fetch_for(authz::Action::Modify).await?;
+
+        let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+
+        // If the sled still exists in the latest committed trust quorum
+        // configuration, it cannot be expunged.
+        //
+        // This is just a sanity check. There is an inherent TOCTUO here, since
+        // we aren't combining the check with with the policy change inside
+        // a transaction. However, it is unlikely that an operator would be
+        // creating a different trust quorum configuration while trying to
+        // expunge this sled, since both have to be done from omdb by an oxide
+        // employee right now.
+        //
+        // When we add an external API, we'll probably want to come back and add
+        // some extra safeguards including checking that there are no ongoing
+        // configurations currently, as the last committed configuration can be
+        // different from the current configuration. However, if we checked that
+        // here we'd have to do yet more DB lookups to check that the state of
+        // the last configuration wasn't aborted. This is probably good enough
+        // for now given that the user already has to confirm a bunch of prompts
+        // before kicking off the operation.
+        let (tq_latest_committed_config, _) = self
+            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .await?;
+        let baseboard_id = BaseboardId {
+            part_number: sled.part_number().to_string(),
+            serial_number: sled.serial_number().to_string(),
+        };
+        if tq_latest_committed_config.members.contains_key(&baseboard_id) {
+            return Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}, as its baseboard \
+                {baseboard_id} is still a member of the latest committed \
+                trust quorum configuration at epoch {} for rack {rack_id}",
+                tq_latest_committed_config.epoch
+            )));
+        }
+
         let prev_policy = self
             .db_datastore
             .sled_set_policy_to_expunged(opctx, &authz_sled)
@@ -124,23 +164,13 @@ impl super::Nexus {
         Ok(prev_policy)
     }
 
-    pub(crate) async fn sled_request_firewall_rules(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> Result<(), Error> {
-        info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
-        self.plumb_service_firewall_rules(opctx, &[id]).await?;
-        Ok(())
-    }
-
     pub(crate) async fn sled_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         self.db_datastore
-            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .sled_list(&opctx, &pagparams, SledFilter::InService)
             .await
     }
 
@@ -168,7 +198,7 @@ impl super::Nexus {
         let client = nexus_networking::sled_client_ext(
             &self.db_datastore,
             &self.opctx_alloc,
-            id.into_untyped_uuid(),
+            *id,
             &self.log,
             client,
         )
@@ -222,7 +252,7 @@ impl super::Nexus {
     pub fn physical_disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        disk_selector: &params::PhysicalDiskPath,
+        disk_selector: &path_params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
         // XXX how to do typed UUID as part of dropshot path?
         Ok(LookupPath::new(&opctx, &self.db_datastore).physical_disk(
@@ -230,10 +260,11 @@ impl super::Nexus {
         ))
     }
 
+    /// Return a page of physical disks for a given sled id
     pub(crate) async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
         self.db_datastore
@@ -309,7 +340,7 @@ impl super::Nexus {
     pub(crate) async fn physical_disk_expunge(
         &self,
         opctx: &OpContext,
-        disk: params::PhysicalDiskPath,
+        disk: path_params::PhysicalDiskPath,
     ) -> Result<(), Error> {
         let physical_disk_lookup = self.physical_disk_lookup(opctx, &disk)?;
         let (authz_disk,) =
@@ -357,7 +388,7 @@ impl super::Nexus {
     pub(crate) async fn upsert_crucible_dataset(
         &self,
         id: DatasetUuid,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(
@@ -369,21 +400,5 @@ impl super::Nexus {
         let dataset = db::model::CrucibleDataset::new(id, zpool_id, address);
         self.db_datastore.crucible_dataset_upsert(dataset).await?;
         Ok(())
-    }
-
-    /// Ensure firewall rules for internal services get reflected on all the relevant sleds.
-    pub(crate) async fn plumb_service_firewall_rules(
-        &self,
-        opctx: &OpContext,
-        sleds_filter: &[Uuid],
-    ) -> Result<(), Error> {
-        nexus_networking::plumb_service_firewall_rules(
-            &self.db_datastore,
-            opctx,
-            sleds_filter,
-            &self.opctx_alloc,
-            &self.log,
-        )
-        .await
     }
 }

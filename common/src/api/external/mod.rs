@@ -9,8 +9,8 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
-pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -23,18 +23,18 @@ pub use error::*;
 use futures::stream::BoxStream;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
-use rand::thread_rng;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -42,6 +42,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::ParseIntError;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
@@ -281,8 +282,6 @@ impl TryFrom<String> for Name {
 }
 
 impl FromStr for Name {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -319,7 +318,7 @@ impl JsonSchema for Name {
         "Name".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some(
@@ -373,8 +372,6 @@ impl TryFrom<String> for NameOrId {
 }
 
 impl FromStr for NameOrId {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -400,13 +397,13 @@ impl JsonSchema for NameOrId {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
-                    label_schema("id", gen.subschema_for::<Uuid>()),
-                    label_schema("name", gen.subschema_for::<Name>()),
+                    label_schema("id", generator.subschema_for::<Uuid>()),
+                    label_schema("name", generator.subschema_for::<Name>()),
                 ]),
                 ..Default::default()
             })),
@@ -452,7 +449,7 @@ impl JsonSchema for UserId {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some("A username for a local-only user".to_string()),
@@ -577,13 +574,16 @@ impl ByteCount {
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TiB && self.to_bytes() % TiB == 0 {
+        if self.to_bytes() >= TiB && self.to_bytes().is_multiple_of(TiB) {
             write!(f, "{} TiB", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GiB && self.to_bytes() % GiB == 0 {
+        } else if self.to_bytes() >= GiB && self.to_bytes().is_multiple_of(GiB)
+        {
             write!(f, "{} GiB", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MiB && self.to_bytes() % MiB == 0 {
+        } else if self.to_bytes() >= MiB && self.to_bytes().is_multiple_of(MiB)
+        {
             write!(f, "{} MiB", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KiB && self.to_bytes() % KiB == 0 {
+        } else if self.to_bytes() >= KiB && self.to_bytes().is_multiple_of(KiB)
+        {
             write!(f, "{} KiB", self.to_whole_kibibytes())
         } else {
             write!(f, "{} B", self.to_bytes())
@@ -592,7 +592,16 @@ impl Display for ByteCount {
 }
 
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
-#[derive(Debug, Eq, thiserror::Error, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Debug,
+    Eq,
+    thiserror::Error,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 pub enum ByteCountRangeError {
     #[error("value is too small for a byte count")]
     TooSmall,
@@ -655,7 +664,12 @@ impl From<ByteCount> for i64 {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct Generation(u64);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Generation(
+    // Generations are restricted to 2**63 - 1 as documented above.
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=i64::MAX as u64))]
+    u64,
+);
 
 impl Generation {
     // `as` is a little distasteful because it allows lossy conversion, but we
@@ -871,7 +885,7 @@ impl JsonSchema for Hostname {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -901,6 +915,7 @@ impl JsonSchema for Hostname {
 // General types used to implement API resources
 
 /// Identifies a type of API resource
+// NOTE: Please keep this enum in alphabetical order.
 #[derive(
     Clone,
     Copy,
@@ -920,75 +935,84 @@ pub enum ResourceType {
     AddressLotBlock,
     AffinityGroup,
     AffinityGroupMember,
-    AntiAffinityGroup,
-    AntiAffinityGroupMember,
     Alert,
     AlertReceiver,
     AllowList,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
+    AuditLogEntry,
     BackgroundTask,
-    BgpConfig,
     BgpAnnounceSet,
+    BgpConfig,
     Blueprint,
-    Fleet,
-    Silo,
-    SiloUser,
-    SiloGroup,
-    SiloQuotas,
-    IdentityProvider,
-    SamlIdentityProvider,
-    SshKey,
     Certificate,
     ConsoleSession,
-    DeviceAuthRequest,
-    DeviceAccessToken,
-    Project,
     Dataset,
+    DeviceAccessToken,
+    DeviceAuthRequest,
     Disk,
+    ExternalSubnet,
+    Fleet,
+    FloatingIp,
+    IdentityProvider,
     Image,
-    SiloImage,
-    ProjectImage,
     Instance,
-    LoopbackAddress,
-    SiloAuthSettings,
-    SwitchPortSettings,
-    SupportBundle,
-    IpPool,
-    IpPoolResource,
     InstanceNetworkInterface,
     InternetGateway,
-    InternetGatewayIpPool,
     InternetGatewayIpAddress,
+    InternetGatewayIpPool,
+    IpPool,
+    IpPoolResource,
+    LldpLinkConfig,
+    LoopbackAddress,
+    MetricProducer,
+    MulticastGroup,
+    MulticastGroupMember,
+    NatEntry,
+    Oximeter,
     PhysicalDisk,
+    Probe,
+    ProbeNetworkInterface,
+    Project,
+    ProjectImage,
     Rack,
+    RoleBuiltin,
+    RouterRoute,
+    SagaDbg,
+    SamlIdentityProvider,
+    ScimClientBearerToken,
     Service,
     ServiceNetworkInterface,
+    Silo,
+    SiloAuthSettings,
+    SiloGroup,
+    SiloImage,
+    SiloQuotas,
+    SiloUser,
     Sled,
     SledInstance,
     SledLedger,
-    Switch,
-    SagaDbg,
     Snapshot,
+    SshKey,
+    SupportBundle,
+    SubnetPool,
+    SubnetPoolMember,
+    SubnetPoolSiloLink,
+    Switch,
+    SwitchPort,
+    SwitchPortSettings,
+    TufArtifact,
+    TufRepo,
+    TufTrustRoot,
+    UserBuiltin,
+    Vmm,
     Volume,
     Vpc,
     VpcFirewallRule,
-    VpcSubnet,
     VpcRouter,
-    RouterRoute,
-    Oximeter,
-    MetricProducer,
-    RoleBuiltin,
-    TufRepo,
-    TufArtifact,
-    SwitchPort,
-    UserBuiltin,
-    Zpool,
-    Vmm,
-    Ipv4NatEntry,
-    FloatingIp,
-    Probe,
-    ProbeNetworkInterface,
-    LldpLinkConfig,
+    VpcSubnet,
     WebhookSecret,
+    Zpool,
 }
 
 // IDENTITY METADATA
@@ -996,15 +1020,15 @@ pub enum ResourceType {
 /// Identity-related metadata that's included in nearly all public API objects
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct IdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
+    /// Unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /// unique, mutable, user-controlled identifier for each resource
+    /// Unique, mutable, user-controlled identifier for each resource
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// timestamp when this resource was created
+    /// Timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
+    /// Timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }
 
@@ -1175,17 +1199,17 @@ pub struct Instance {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this Instance
+    /// ID for the project containing this instance
     pub project_id: Uuid,
 
-    /// number of CPUs allocated for this Instance
+    /// Number of CPUs allocated for this instance
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
+    /// Memory allocated for this instance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the instance
     pub hostname: String,
 
-    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
     pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
@@ -1193,6 +1217,10 @@ pub struct Instance {
 
     #[serde(flatten)]
     pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The CPU platform for this instance. If this is `null`, the instance
+    /// requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 /// Status of control-plane driven automatic failure recovery for this instance.
@@ -1257,6 +1285,51 @@ pub enum InstanceAutoRestartPolicy {
     BestEffort,
 }
 
+/// A required CPU platform for an instance.
+///
+/// When an instance specifies a required CPU platform:
+///
+/// - The system may expose (to the VM) new CPU features that are only present
+///   on that platform (or on newer platforms of the same lineage that also
+///   support those features).
+/// - The instance must run on hosts that have CPUs that support all the
+///   features of the supplied platform.
+///
+/// That is, the instance is restricted to hosts that have the CPUs which
+/// support all features of the required platform, but in exchange the CPU
+/// features exposed by the platform are available for the guest to use. Note
+/// that this may prevent an instance from starting (if the hosts that could run
+/// it are full but there is capacity on other incompatible hosts).
+///
+/// If an instance does not specify a required CPU platform, then when
+/// it starts, the control plane selects a host for the instance and then
+/// supplies the guest with the "minimum" CPU platform supported by that host.
+/// This maximizes the number of hosts that can run the VM if it later needs to
+/// migrate to another host.
+///
+/// In all cases, the CPU features presented by a given CPU platform are a
+/// subset of what the corresponding hardware may actually support; features
+/// which cannot be used from a virtual environment or do not have full
+/// hypervisor support may be masked off. See RFD 314 for specific CPU features
+/// in a CPU platform.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceCpuPlatform {
+    /// An AMD Milan-like CPU platform.
+    AmdMilan,
+
+    /// An AMD Turin-like CPU platform.
+    // Note that there is only Turin, not Turin Dense - feature-wise there are
+    // collapsed together as the guest-visible platform is the same.
+    // If the two must be distinguished for instance placement, we'll want to
+    // track whatever the motivating constraint is more explicitly. CPU
+    // families, and especially the vendor code names, don't necessarily promise
+    // details about specific processor packaging choices.
+    AmdTurin,
+}
+
 // AFFINITY GROUPS
 
 /// Affinity policy used to describe "what to do when a request cannot be satisfied"
@@ -1298,7 +1371,12 @@ pub enum AffinityGroupMember {
     ///
     /// Instances can belong to up to 16 affinity groups.
     // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
@@ -1329,7 +1407,12 @@ pub enum AntiAffinityGroupMember {
     ///
     /// Instances can belong to up to 16 anti-affinity groups.
     // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
@@ -1350,6 +1433,13 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
 // DISKS
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskType {
+    Distributed,
+    Local,
+}
+
 /// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
@@ -1364,6 +1454,9 @@ pub struct Disk {
     pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
+    pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
 }
 
 /// State of a Disk
@@ -1890,10 +1983,16 @@ impl From<u8> for IcmpParamRange {
     }
 }
 
-impl From<RangeInclusive<u8>> for IcmpParamRange {
-    fn from(value: RangeInclusive<u8>) -> Self {
-        let (first, last) = value.into_inner();
-        Self { first, last }
+impl TryFrom<RangeInclusive<u8>> for IcmpParamRange {
+    type Error = IcmpParamRangeError;
+
+    fn try_from(value: RangeInclusive<u8>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(IcmpParamRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
     }
 }
 
@@ -2063,6 +2162,8 @@ pub enum L4PortRangeError {
     MissingStart,
     #[error("range has no end value")]
     MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
     #[error("{0:?} unparsable for type: {1}")]
     Value(String, ParseIntError),
 }
@@ -2097,7 +2198,7 @@ impl JsonSchema for L4PortRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2131,10 +2232,16 @@ impl From<L4Port> for L4PortRange {
     }
 }
 
-impl From<RangeInclusive<L4Port>> for L4PortRange {
-    fn from(value: RangeInclusive<L4Port>) -> Self {
-        let (first, last) = value.into_inner();
-        Self { first, last }
+impl TryFrom<RangeInclusive<L4Port>> for L4PortRange {
+    type Error = L4PortRangeError;
+
+    fn try_from(value: RangeInclusive<L4Port>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(L4PortRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
     }
 }
 
@@ -2168,6 +2275,7 @@ impl FromStr for IcmpParamRange {
                 let last = right
                     .parse::<u8>()
                     .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
+
                 Ok(IcmpParamRange { first, last })
             }
         }
@@ -2180,6 +2288,8 @@ pub enum IcmpParamRangeError {
     MissingStart,
     #[error("range has no end value")]
     MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
     #[error("{0:?} unparsable for type: {1}")]
     Value(String, ParseIntError),
 }
@@ -2208,7 +2318,7 @@ impl JsonSchema for IcmpParamRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2283,15 +2393,15 @@ impl MacAddr {
 
     /// Generate a random MAC address for a guest network interface
     pub fn random_guest() -> Self {
-        let value =
-            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        let value = rand::rng()
+            .random_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
         Self::from_i64(value)
     }
 
     /// Generate a random MAC address in the system address range
     pub fn random_system() -> Self {
-        let value = thread_rng()
-            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        let value = rand::rng()
+            .random_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
     }
 
@@ -2380,7 +2490,7 @@ impl JsonSchema for MacAddr {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2430,17 +2540,28 @@ impl Vni {
     /// The VNI for the builtin services VPC.
     pub const SERVICES_VNI: Self = Self(100);
 
+    /// VNI default if no VPC is provided for a multicast group.
+    ///
+    /// This is a low-numbered VNI to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved range yet.
+    pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
+
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
 
     /// Create a new random VNI.
     pub fn random() -> Self {
-        Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+        Self(rand::rng().random_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
 
     /// Create a new random VNI in the Oxide-reserved space.
     pub fn random_system() -> Self {
-        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
+        Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
+    }
+
+    /// Returns the VNI as a raw u32.
+    pub const fn as_u32(&self) -> u32 {
+        self.0
     }
 }
 
@@ -2494,18 +2615,118 @@ pub struct InstanceNetworkInterface {
     /// The MAC address assigned to this interface.
     pub mac: MacAddr,
 
-    /// The IP address assigned to this interface.
-    // TODO-correctness: We need to split this into an optional V4 and optional
-    // V6 address, at least one of which must be specified.
-    pub ip: IpAddr,
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
 
-    /// A set of additional networks that this interface may send and
+    /// The VPC-private IP stack for this interface.
+    pub ip_stack: PrivateIpStack,
+}
+
+/// The VPC-private IP stack for a network interface.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpStack {
+    /// The interface has only an IPv4 stack.
+    V4(PrivateIpv4Stack),
+    /// The interface has only an IPv6 stack.
+    V6(PrivateIpv6Stack),
+    /// The interface is dual-stack IPv4 and IPv6.
+    DualStack { v4: PrivateIpv4Stack, v6: PrivateIpv6Stack },
+}
+
+impl PrivateIpStack {
+    /// Return the IPv4 stack, if it exists.
+    pub fn ipv4_stack(&self) -> Option<&PrivateIpv4Stack> {
+        match self {
+            PrivateIpStack::V4(v4) | PrivateIpStack::DualStack { v4, .. } => {
+                Some(v4)
+            }
+            PrivateIpStack::V6(_) => None,
+        }
+    }
+
+    /// Return the VPC-private IPv4 address, if it exists.
+    pub fn ipv4_addr(&self) -> Option<&Ipv4Addr> {
+        self.ipv4_stack().map(|s| &s.ip)
+    }
+
+    /// Return the IPv6 stack, if it exists.
+    pub fn ipv6_stack(&self) -> Option<&PrivateIpv6Stack> {
+        match self {
+            PrivateIpStack::V6(v6) | PrivateIpStack::DualStack { v6, .. } => {
+                Some(v6)
+            }
+            PrivateIpStack::V4(_) => None,
+        }
+    }
+
+    /// Return the VPC-private IPv6 address, if it exists.
+    pub fn ipv6_addr(&self) -> Option<&Ipv6Addr> {
+        self.ipv6_stack().map(|s| &s.ip)
+    }
+
+    /// Return true if this is an IPv4-only stack, and false otherwise.
+    pub fn is_ipv4_only(&self) -> bool {
+        matches!(self, PrivateIpStack::V4(_))
+    }
+
+    /// Return true if this is an IPv6-only stack, and false otherwise.
+    pub fn is_ipv6_only(&self) -> bool {
+        matches!(self, PrivateIpStack::V6(_))
+    }
+
+    /// Return true if this is dual-stack, and false otherwise.
+    pub fn is_dual_stack(&self) -> bool {
+        matches!(self, PrivateIpStack::DualStack { .. })
+    }
+
+    /// Return the IPv4 transit IPs, if they exist.
+    pub fn ipv4_transit_ips(&self) -> Option<&[Ipv4Net]> {
+        self.ipv4_stack().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return the IPv6 transit IPs, if they exist.
+    pub fn ipv6_transit_ips(&self) -> Option<&[Ipv6Net]> {
+        self.ipv6_stack().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return all transit IPs, of any IP version.
+    pub fn all_transit_ips(&self) -> impl Iterator<Item = IpNet> + '_ {
+        let v4 = self
+            .ipv4_transit_ips()
+            .into_iter()
+            .flatten()
+            .copied()
+            .map(Into::into);
+        let v6 = self
+            .ipv6_transit_ips()
+            .into_iter()
+            .flatten()
+            .copied()
+            .map(Into::into);
+        v4.chain(v6)
+    }
+}
+
+/// The VPC-private IPv4 stack for a network interface
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct PrivateIpv4Stack {
+    /// The VPC-private IPv4 address for the interface.
+    pub ip: Ipv4Addr,
+    /// A set of additional IPv4 networks that this interface may send and
     /// receive traffic on.
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
+    pub transit_ips: Vec<Ipv4Net>,
+}
+
+/// The VPC-private IPv6 stack for a network interface
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct PrivateIpv6Stack {
+    /// The VPC-private IPv6 address for the interface.
+    pub ip: Ipv6Addr,
+    /// A set of additional IPv6 networks that this interface may send and
+    /// receive traffic on.
+    pub transit_ips: Vec<Ipv6Net>,
 }
 
 #[derive(
@@ -2569,6 +2790,16 @@ pub struct AddressLotCreateResponse {
     pub blocks: Vec<AddressLotBlock>,
 }
 
+/// An address lot and associated blocks resulting from viewing an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotViewResponse {
+    /// The address lot.
+    pub lot: AddressLot,
+
+    /// The address lot blocks.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
 /// Represents an address lot object, containing the id of the lot that can be
 /// used in other API calls.
 // TODO Add kind attribute to AddressLot
@@ -2610,46 +2841,6 @@ pub struct AddressLotBlock {
     pub last_address: IpAddr,
 }
 
-/// A loopback address is an address that is assigned to a rack switch but is
-/// not associated with any particular port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LoopbackAddress {
-    /// The id of the loopback address.
-    pub id: Uuid,
-
-    /// The address lot block this address came from.
-    pub address_lot_block_id: Uuid,
-
-    /// The id of the rack where this loopback address is assigned.
-    pub rack_id: Uuid,
-
-    /// Switch location where this loopback address is assigned.
-    pub switch_location: String,
-
-    /// The loopback IP address and prefix length.
-    pub address: oxnet::IpNet,
-}
-
-/// A switch port represents a physical external port on a rack switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPort {
-    /// The id of the switch port.
-    pub id: Uuid,
-
-    /// The rack this switch port belongs to.
-    pub rack_id: Uuid,
-
-    /// The switch location of this switch port.
-    pub switch_location: String,
-
-    /// The name of this switch port.
-    pub port_name: Name,
-
-    /// The primary settings group of this switch port. Will be `None` until
-    /// this switch port is configured.
-    pub port_settings_id: Option<Uuid>,
-}
-
 /// A switch port settings identity whose id may be used to view additional
 /// details.
 #[derive(
@@ -2658,39 +2849,6 @@ pub struct SwitchPort {
 pub struct SwitchPortSettingsIdentity {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-}
-
-/// This structure contains all port settings information in one place. It's a
-/// convenience data structure for getting a complete view of a particular
-/// port's settings.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettings {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<SwitchPortSettingsGroups>,
-
-    /// Layer 1 physical port settings.
-    pub port: SwitchPortConfig,
-
-    /// Layer 2 link settings.
-    pub links: Vec<SwitchPortLinkConfig>,
-
-    /// Layer 3 interface settings.
-    pub interfaces: Vec<SwitchInterfaceConfig>,
-
-    /// Vlan interface settings.
-    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
-
-    /// IP route settings.
-    pub routes: Vec<SwitchPortRouteConfig>,
-
-    /// BGP peer settings.
-    pub bgp_peers: Vec<BgpPeer>,
-
-    /// Layer 3 IP address settings.
-    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 /// This structure maps a port settings object to a port settings groups. Port
@@ -2775,38 +2933,6 @@ pub enum LinkFec {
     None,
     /// Reed-Solomon forward error correction.
     Rs,
-}
-
-impl From<crate::api::internal::shared::PortFec> for LinkFec {
-    fn from(x: crate::api::internal::shared::PortFec) -> LinkFec {
-        match x {
-            crate::api::internal::shared::PortFec::Firecode => Self::Firecode,
-            crate::api::internal::shared::PortFec::None => Self::None,
-            crate::api::internal::shared::PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-impl From<crate::api::internal::shared::PortSpeed> for LinkSpeed {
-    fn from(x: crate::api::internal::shared::PortSpeed) -> Self {
-        match x {
-            crate::api::internal::shared::PortSpeed::Speed0G => Self::Speed0G,
-            crate::api::internal::shared::PortSpeed::Speed1G => Self::Speed1G,
-            crate::api::internal::shared::PortSpeed::Speed10G => Self::Speed10G,
-            crate::api::internal::shared::PortSpeed::Speed25G => Self::Speed25G,
-            crate::api::internal::shared::PortSpeed::Speed40G => Self::Speed40G,
-            crate::api::internal::shared::PortSpeed::Speed50G => Self::Speed50G,
-            crate::api::internal::shared::PortSpeed::Speed100G => {
-                Self::Speed100G
-            }
-            crate::api::internal::shared::PortSpeed::Speed200G => {
-                Self::Speed200G
-            }
-            crate::api::internal::shared::PortSpeed::Speed400G => {
-                Self::Speed400G
-            }
-        }
-    }
 }
 
 /// A link configuration for a port settings object.
@@ -2997,112 +3123,9 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// RIB Priority indicating priority within and across protocols.
+    /// Route RIB priority. Higher priority indicates precedence within and across
+    /// protocols.
     pub rib_priority: Option<u8>,
-}
-
-/// A BGP peer configuration for an interface. Includes the set of announcements
-/// that will be advertised to the peer identified by `addr`. The `bgp_config`
-/// parameter is a reference to global BGP parameters. The `interface_name`
-/// indicates what interface the peer should be contacted on.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpPeer {
-    /// The global BGP configuration used for establishing a session with this
-    /// peer.
-    pub bgp_config: NameOrId,
-
-    /// The name of interface to peer on. This is relative to the port
-    /// configuration this BGP peer configuration is a part of. For example this
-    /// value could be phy0 to refer to a primary physical interface. Or it
-    /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: Name,
-
-    /// The address of the host to peer with.
-    pub addr: IpAddr,
-
-    /// How long to hold peer connections between keepalives (seconds).
-    pub hold_time: u32,
-
-    /// How long to hold a peer in idle before attempting a new session
-    /// (seconds).
-    pub idle_hold_time: u32,
-
-    /// How long to delay sending an open request after establishing a TCP
-    /// session (seconds).
-    pub delay_open: u32,
-
-    /// How long to to wait between TCP connection retries (seconds).
-    pub connect_retry: u32,
-
-    /// How often to send keepalive requests (seconds).
-    pub keepalive: u32,
-
-    /// Require that a peer has a specified ASN.
-    pub remote_asn: Option<u32>,
-
-    /// Require messages from a peer have a minimum IP time to live field.
-    pub min_ttl: Option<u8>,
-
-    /// Use the given key for TCP-MD5 authentication with the peer.
-    pub md5_auth_key: Option<String>,
-
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
-    pub multi_exit_discriminator: Option<u32>,
-
-    /// Include the provided communities in updates sent to the peer.
-    pub communities: Vec<u32>,
-
-    /// Apply a local preference to routes received from this peer.
-    pub local_pref: Option<u32>,
-
-    /// Enforce that the first AS in paths received from this peer is the peer's AS.
-    pub enforce_first_as: bool,
-
-    /// Define import policy for a peer.
-    pub allowed_import: ImportExportPolicy,
-
-    /// Define export policy for a peer.
-    pub allowed_export: ImportExportPolicy,
-
-    /// Associate a VLAN ID with a peer.
-    pub vlan_id: Option<u16>,
-}
-
-/// A base BGP configuration.
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct BgpConfig {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// The autonomous system number of this BGP configuration.
-    pub asn: u32,
-
-    /// Optional virtual routing and forwarding identifier for this BGP
-    /// configuration.
-    pub vrf: Option<String>,
-}
-
-/// Represents a BGP announce set by id. The id can be used with other API calls
-/// to view and manage the announce set.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpAnnounceSet {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-}
-
-/// A BGP announcement tied to an address lot block.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpAnnouncement {
-    /// The id of the set this announcement is a part of.
-    pub announce_set_id: Uuid,
-
-    /// The address block the IP network being announced is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP network being announced.
-    pub network: oxnet::IpNet,
 }
 
 /// An IP address configuration for a port settings object.
@@ -3149,165 +3172,6 @@ pub struct SwitchPortAddressView {
     pub interface_name: Name,
 }
 
-/// The current state of a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum BgpPeerState {
-    /// Initial state. Refuse all incoming BGP connections. No resources
-    /// allocated to peer.
-    Idle,
-
-    /// Waiting for the TCP connection to be completed.
-    Connect,
-
-    /// Trying to acquire peer by listening for and accepting a TCP connection.
-    Active,
-
-    /// Waiting for open message from peer.
-    OpenSent,
-
-    /// Waiting for keepaliave or notification from peer.
-    OpenConfirm,
-
-    /// Synchronizing with peer.
-    SessionSetup,
-
-    /// Session established. Able to exchange update, notification and keepalive
-    /// messages with peers.
-    Established,
-}
-
-impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
-    fn from(s: mg_admin_client::types::FsmStateKind) -> BgpPeerState {
-        use mg_admin_client::types::FsmStateKind;
-        match s {
-            FsmStateKind::Idle => BgpPeerState::Idle,
-            FsmStateKind::Connect => BgpPeerState::Connect,
-            FsmStateKind::Active => BgpPeerState::Active,
-            FsmStateKind::OpenSent => BgpPeerState::OpenSent,
-            FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
-            FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
-            FsmStateKind::Established => BgpPeerState::Established,
-        }
-    }
-}
-
-/// The current status of a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpPeerStatus {
-    /// IP address of the peer.
-    pub addr: IpAddr,
-
-    /// Local autonomous system number.
-    pub local_asn: u32,
-
-    /// Remote autonomous system number.
-    pub remote_asn: u32,
-
-    /// State of the peer.
-    pub state: BgpPeerState,
-
-    /// Time of last state change.
-    pub state_duration_millis: u64,
-
-    /// Switch with the peer session.
-    pub switch: SwitchLocation,
-}
-
-/// The current status of a BGP peer.
-#[derive(
-    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
-)]
-pub struct BgpExported {
-    /// Exported routes indexed by peer address.
-    pub exports: HashMap<String, Vec<Ipv4Net>>,
-}
-
-/// Opaque object representing BGP message history for a given BGP peer. The
-/// contents of this object are not yet stable.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
-
-impl BgpMessageHistory {
-    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
-        Self(arg)
-    }
-}
-
-impl JsonSchema for BgpMessageHistory {
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        let obj = schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject::default(),
-        );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
-        obj
-    }
-
-    fn schema_name() -> String {
-        "BgpMessageHistory".to_owned()
-    }
-}
-
-/// BGP message history for a particular switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SwitchBgpHistory {
-    /// Switch this message history is associated with.
-    pub switch: SwitchLocation,
-
-    /// Message history indexed by peer address.
-    pub history: HashMap<String, BgpMessageHistory>,
-}
-
-/// BGP message history for rack switches.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct AggregateBgpMessageHistory {
-    /// BGP history organized by switch.
-    switch_histories: Vec<SwitchBgpHistory>,
-}
-
-impl AggregateBgpMessageHistory {
-    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
-        Self { switch_histories }
-    }
-}
-
-/// A route imported from a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpImportedRouteIpv4 {
-    /// The destination network prefix.
-    pub prefix: oxnet::Ipv4Net,
-
-    /// The nexthop the prefix is reachable through.
-    pub nexthop: Ipv4Addr,
-
-    /// BGP identifier of the originating router.
-    pub id: u32,
-
-    /// Switch the route is imported into.
-    pub switch: SwitchLocation,
-}
-
-/// BFD connection mode.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
-}
-
 /// Configuration of inbound ICMP allowed by API services.
 #[derive(
     Clone,
@@ -3329,6 +3193,10 @@ pub struct ServiceIcmpConfig {
     /// inbound ICMP traffic will be dropped.
     pub enabled: bool,
 }
+
+// TODO: move these TUF repo structs out of this file. They're not external
+// anymore after refactors that use views::TufRepo in the external API. They are
+// still used extensively in internal services.
 
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -3389,40 +3257,19 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
-}
 
-/// Data about a successful TUF repo import into Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoInsertResponse {
-    /// The repository as present in the database.
-    pub recorded: TufRepoDescription,
+    /// Contents of the `BORD` field of a Hubris archive caboose. Only
+    /// applicable to artifacts that are Hubris archives.
+    ///
+    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
+    /// opposite is not true (SP images will have a `board` but not a `sign`).
+    pub board: Option<String>,
 
-    /// Whether this repository already existed or is new.
-    pub status: TufRepoInsertStatus,
-}
-
-/// Status of a TUF repo import.
-///
-/// Part of `TufRepoInsertResponse`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TufRepoInsertStatus {
-    /// The repository already existed in the database.
-    AlreadyExists,
-
-    /// The repository did not exist, and was inserted into the database.
-    Inserted,
-}
-
-/// Data about a successful TUF repo get from Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoGetResponse {
-    /// The description of the repository.
-    pub description: TufRepoDescription,
+    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
+    /// an identifier for the set of valid signing keys. Currently only
+    /// applicable to RoT image and bootloader artifacts, where it will
+    /// be an LPC55 Root Key Table Hash (RKTH).
+    pub sign: Option<Vec<u8>>,
 }
 
 #[derive(
@@ -3431,28 +3278,9 @@ pub struct TufRepoGetResponse {
 pub struct Probe {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub sled: Uuid,
-}
 
-/// Define policy relating to the import and export of prefixes from a BGP
-/// peer.
-#[derive(
-    Default,
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    JsonSchema,
-    Eq,
-    PartialEq,
-    Hash,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum ImportExportPolicy {
-    /// Do not perform any filtering.
-    #[default]
-    NoFiltering,
-    Allow(Vec<oxnet::IpNet>),
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Use instead of Option in API request body structs to get a field that can
@@ -3460,7 +3288,7 @@ pub enum ImportExportPolicy {
 /// will fail to parse if the key is not present. The JSON Schema in the
 /// OpenAPI definition will also reflect that the field is required. See
 /// <https://github.com/serde-rs/serde/issues/2753>.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Nullable<T>(pub Option<T>);
 
 impl<T> From<Option<T>> for Nullable<T> {
@@ -4124,7 +3952,7 @@ mod test {
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
-                code: Some((0..=10).into())
+                code: Some((0..=10).try_into().unwrap())
             })),
             "icmp:60,0-10".parse().unwrap()
         );

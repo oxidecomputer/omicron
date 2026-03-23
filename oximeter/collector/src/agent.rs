@@ -4,7 +4,7 @@
 
 //! The oximeter agent handles collection tasks for each producer.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use crate::DbConfig;
 use crate::Error;
@@ -12,6 +12,7 @@ use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
+use crate::probes;
 use crate::results_sink;
 use crate::self_stats;
 use anyhow::anyhow;
@@ -22,9 +23,9 @@ use nexus_client::Client as NexusClient;
 use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
-use oximeter_api::ProducerDetails;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
+use oximeter_types::producer::ProducerDetails;
 use qorb::claim::Handle;
 use qorb::policy::Policy;
 use qorb::pool::Pool;
@@ -42,10 +43,9 @@ use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
 use std::ops::Bound;
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::time::Duration;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -65,9 +65,9 @@ pub struct OximeterAgent {
     // The interval on which we refresh our list of producers from Nexus.
     refresh_interval: Duration,
     // Handle to the task used to periodically refresh the list of producers.
-    refresh_task: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
+    refresh_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// The last time we've refreshed our list of producers from Nexus.
-    pub last_refresh_time: Arc<StdMutex<Option<DateTime<Utc>>>>,
+    pub last_refresh_time: Arc<Mutex<Option<DateTime<Utc>>>>,
 }
 
 impl OximeterAgent {
@@ -196,8 +196,8 @@ impl OximeterAgent {
             result_sender: collection_task_wrapper.wrapper_tx,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
-            refresh_task: Arc::new(StdMutex::new(None)),
-            last_refresh_time: Arc::new(StdMutex::new(None)),
+            refresh_task: Arc::new(Mutex::new(None)),
+            last_refresh_time: Arc::new(Mutex::new(None)),
         };
 
         Ok(self_)
@@ -291,7 +291,7 @@ impl OximeterAgent {
         // We don't spawn the task to periodically refresh producers when run
         // in standalone mode. We can just pretend we registered once, and
         // that's it.
-        let last_refresh_time = Arc::new(StdMutex::new(Some(Utc::now())));
+        let last_refresh_time = Arc::new(Mutex::new(Some(Utc::now())));
 
         Ok(Self {
             id,
@@ -300,36 +300,29 @@ impl OximeterAgent {
             result_sender: collection_task_wrapper.wrapper_tx,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
-            refresh_task: Arc::new(StdMutex::new(None)),
+            refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time,
         })
     }
 
     /// Fetch details about a producer, if it exists.
-    pub async fn producer_details(
-        &self,
-        id: Uuid,
-    ) -> Result<ProducerDetails, Error> {
-        let tasks = self.collection_tasks.lock().await;
+    pub fn producer_details(&self, id: Uuid) -> Result<ProducerDetails, Error> {
+        let tasks = self.collection_tasks.lock().unwrap();
         let Some(task) = tasks.get(&id) else {
             return Err(Error::NoSuchProducer { id });
         };
-        task.details().await
+        Ok(task.details())
     }
 
     /// Register a new producer with this oximeter instance.
-    pub async fn register_producer(
-        &self,
-        info: ProducerEndpoint,
-    ) -> Result<(), Error> {
-        let mut tasks = self.collection_tasks.lock().await;
-        self.register_producer_locked(&mut tasks, info).await;
-        Ok(())
+    pub fn register_producer(&self, info: ProducerEndpoint) {
+        let mut tasks = self.collection_tasks.lock().unwrap();
+        self.register_producer_locked(&mut tasks, info);
     }
 
     // Internal implementation that registers a producer, assuming the lock on
     // the map is held.
-    async fn register_producer_locked(
+    fn register_producer_locked(
         &self,
         tasks: &mut MutexGuard<'_, BTreeMap<Uuid, CollectionTaskHandle>>,
         info: ProducerEndpoint,
@@ -348,15 +341,14 @@ impl OximeterAgent {
                     self.collection_target,
                     info,
                     self.result_sender.clone(),
-                )
-                .await;
+                );
                 value.insert(handle);
             }
             Entry::Occupied(mut value) => {
                 // Only update the endpoint information if it's actually
                 // different, to avoid indefinitely delaying the collection
                 // timer from expiring.
-                if value.get().producer == info {
+                if value.get().producer_info() == info {
                     trace!(
                         self.log,
                         "ignoring request to update existing metric \
@@ -373,10 +365,18 @@ impl OximeterAgent {
                         "interval" => ?info.interval,
                         "address" => info.address,
                     );
-                    value.get_mut().update(info).await;
+                    value.get_mut().update(info);
                 }
             }
         }
+        probes::producer__registered!(|| {
+            (
+                self.id.to_string(),
+                id.to_string(),
+                info.address.to_string(),
+                u64::try_from(info.interval.as_millis()).unwrap_or(u64::MAX),
+            )
+        });
     }
 
     /// Enqueue requests to forces collection from all producers.
@@ -386,11 +386,9 @@ impl OximeterAgent {
     /// cases where there are many concurrent calls. This method _does not_ wait
     /// for the requested collections to be performed; it is "fire and forget".
     /// avoid this, since it rarely makes sense to do that.
-    pub async fn try_force_collection(
-        &self,
-    ) -> Result<(), ForcedCollectionError> {
+    pub fn try_force_collection(&self) -> Result<(), ForcedCollectionError> {
         let mut res = Ok(());
-        let collection_tasks = self.collection_tasks.lock().await;
+        let collection_tasks = self.collection_tasks.lock().unwrap();
         for (_id, task) in collection_tasks.iter() {
             // Try to trigger a collection on each task; if any fails, we'll
             // take that error as our overall return value. (If multiple fail,
@@ -403,7 +401,7 @@ impl OximeterAgent {
     }
 
     /// List existing producers.
-    pub async fn list_producers(
+    pub fn list_producers(
         &self,
         start_id: Option<Uuid>,
         limit: usize,
@@ -415,37 +413,38 @@ impl OximeterAgent {
         };
         self.collection_tasks
             .lock()
-            .await
+            .unwrap()
             .range((start, Bound::Unbounded))
             .take(limit)
-            .map(|(_id, task)| task.producer)
+            .map(|(_id, task)| task.producer_info())
             .collect()
     }
 
     /// Delete a producer by ID, stopping its collection task.
-    pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
-        let mut tasks = self.collection_tasks.lock().await;
-        self.delete_producer_locked(&mut tasks, id).await
+    pub fn delete_producer(&self, id: Uuid) {
+        let mut tasks = self.collection_tasks.lock().unwrap();
+        self.delete_producer_locked(&mut tasks, id);
     }
 
     // Internal implementation that deletes a producer, assuming the lock on
     // the map is held.
-    async fn delete_producer_locked(
+    fn delete_producer_locked(
         &self,
         tasks: &mut MutexGuard<'_, BTreeMap<Uuid, CollectionTaskHandle>>,
         id: Uuid,
-    ) -> Result<(), Error> {
+    ) {
         let Some(task) = tasks.remove(&id) else {
-            // We have no such producer, so good news, we've removed it!
-            return Ok(());
+            return;
         };
         debug!(
             self.log,
             "removed collection task from set";
             "producer_id" => %id,
         );
-        task.shutdown().await;
-        Ok(())
+        probes::producer__deleted!(|| {
+            (self.id.to_string(), task.details().id.to_string())
+        });
+        task.shutdown();
     }
 
     // Ensure that exactly the set of producers is registered with `self`.
@@ -454,11 +453,11 @@ impl OximeterAgent {
     // is made, even if an error is encountered part-way through.
     //
     // This returns the number of pruned tasks.
-    async fn ensure_producers(
+    fn ensure_producers(
         &self,
         expected_producers: BTreeMap<Uuid, ProducerEndpoint>,
     ) -> usize {
-        let mut tasks = self.collection_tasks.lock().await;
+        let mut tasks = self.collection_tasks.lock().unwrap();
 
         // First prune unwanted collection tasks.
         //
@@ -471,11 +470,7 @@ impl OximeterAgent {
             .collect();
         let n_pruned = ids_to_prune.len();
         for id in ids_to_prune.into_iter() {
-            // This method only returns an error if the provided ID does not
-            // exist in the current tasks. That is impossible, because we hold
-            // the lock, and we've just computed this as the set that _is_ in
-            // the map, and not in the new set from Nexus.
-            self.delete_producer_locked(&mut tasks, id).await.unwrap();
+            self.delete_producer_locked(&mut tasks, id);
         }
 
         // And then ensure everything in the list.
@@ -483,7 +478,7 @@ impl OximeterAgent {
         // This will insert new tasks, and update any that we already know
         // about.
         for info in expected_producers.into_values() {
-            self.register_producer_locked(&mut tasks, info).await;
+            self.register_producer_locked(&mut tasks, info);
         }
         n_pruned
     }
@@ -632,7 +627,7 @@ async fn refresh_producer_list_once(
         }
     }
     let n_current_tasks = expected_producers.len();
-    let n_pruned_tasks = agent.ensure_producers(expected_producers).await;
+    let n_pruned_tasks = agent.ensure_producers(expected_producers);
     *agent.last_refresh_time.lock().unwrap() = Some(Utc::now());
     info!(
         agent.log,
@@ -684,6 +679,7 @@ mod tests {
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::types::ProducerResults;
+    use oximeter_types::producer::ProducerDetails;
     use reqwest::StatusCode;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -707,11 +703,69 @@ mod tests {
     // collections which fail in the "unreachability" test below.
     const N_COLLECTIONS: u64 = 5;
 
-    // Period these tests wait using `tokio::time::advance()` before checking
-    // their test conditions.
-    const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
-        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
-    );
+    /// Maximum simulated time to wait for a collection to complete.
+    const COLLECTION_TIMEOUT: Duration = Duration::from_secs(60);
+
+    /// Return a watch receiver for the given producer's collection details.
+    fn details_watcher(
+        collector: &OximeterAgent,
+        id: Uuid,
+    ) -> tokio::sync::watch::Receiver<ProducerDetails> {
+        collector
+            .collection_tasks
+            .lock()
+            .unwrap()
+            .get(&id)
+            .unwrap()
+            .details_watcher()
+    }
+
+    /// Pause time and advance it one collection at a time, waiting for each
+    /// collection to complete before advancing to the next. Time is
+    /// intentionally left paused when this function returns, since some callers
+    /// (e.g. `verify_producer_details`) continue to advance time manually
+    /// afterward.
+    ///
+    /// This avoids the flake described in #8636, where blindly advancing time
+    /// could cause the collection timer to fire while a previous collection was
+    /// still in-flight, overflowing the bounded channel and recording spurious
+    /// `FailedCollection` entries.
+    ///
+    /// The approach: advance time in small increments until the details watch
+    /// channel signals that a collection completed, then repeat. By waiting for
+    /// each collection to finish before continuing, we ensure the channel is
+    /// drained before the next timer tick fires.
+    async fn advance_n_collections(
+        collector: &OximeterAgent,
+        id: Uuid,
+        n: u64,
+    ) {
+        const TIMEOUT: Duration = COLLECTION_TIMEOUT;
+        let mut details_rx = details_watcher(collector, id);
+        // Mark current state as seen so has_changed() only reflects
+        // new updates from this point forward.
+        details_rx.borrow_and_update();
+        tokio::time::pause();
+        for i in 0..n {
+            let start = Instant::now();
+            // Advance time until this collection completes.
+            loop {
+                assert!(
+                    start.elapsed() < TIMEOUT,
+                    "timed out waiting for collection {i} after \
+                    {:?} of simulated time",
+                    start.elapsed(),
+                );
+                tokio::time::advance(TICK_INTERVAL).await;
+                if details_rx.has_changed().expect(
+                    "producer details watch channel closed unexpectedly",
+                ) {
+                    details_rx.borrow_and_update();
+                    break;
+                }
+            }
+        }
+    }
 
     #[derive(
         Clone,
@@ -773,6 +827,7 @@ mod tests {
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
     async fn test_self_stat_collection_count() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_self_stat_collection_count");
         let log = &logctx.log;
 
@@ -805,32 +860,23 @@ mod tests {
             address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
-        collector
-            .register_producer(endpoint)
-            .await
-            .expect("failed to register dummy producer");
+        let id = endpoint.id;
+        collector.register_producer(endpoint);
 
-        // Step time for a few collections.
-        //
-        // Due to scheduling variations, we don't verify the number of
-        // collections we expect based on time, but we instead check that every
-        // collection that _has_ occurred bumps the counter.
-        tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Advance time one collection at a time, waiting for each to
+        // complete before proceeding. This avoids overflowing the
+        // collection task's bounded channel on slow/loaded machines.
+        advance_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
-        let stats = collector
+        let rx = collector
             .collection_tasks
             .lock()
-            .await
-            .values()
-            .next()
             .unwrap()
-            .statistics()
-            .await;
+            .get(&id)
+            .unwrap()
+            .statistics();
+        let stats = rx.await.unwrap();
         let count = stats.collections.datum.value() as usize;
 
         assert!(count != 0);
@@ -847,6 +893,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_stat_unreachable_counter() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_self_stat_unreachable_counter");
         let log = &logctx.log;
 
@@ -874,28 +921,22 @@ mod tests {
             )),
             interval: COLLECTION_INTERVAL,
         };
-        collector
-            .register_producer(endpoint)
-            .await
-            .expect("failed to register bogus producer");
+        let id = endpoint.id;
+        collector.register_producer(endpoint);
 
-        // Step time until there has been exactly `N_COLLECTIONS` collections.
-        tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Advance time one collection at a time, waiting for each to
+        // complete before proceeding.
+        advance_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
-        let stats = collector
+        let rx = collector
             .collection_tasks
             .lock()
-            .await
-            .values()
-            .next()
             .unwrap()
-            .statistics()
-            .await;
+            .get(&id)
+            .unwrap()
+            .statistics();
+        let stats = rx.await.unwrap();
         assert_eq!(stats.collections.datum.value(), 0);
         assert_eq!(
             stats
@@ -912,6 +953,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_stat_error_counter() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_self_stat_error_counter");
         let log = &logctx.log;
 
@@ -944,104 +986,47 @@ mod tests {
             address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
-        collector
-            .register_producer(endpoint)
-            .await
-            .expect("failed to register flaky producer");
+        let id = endpoint.id;
+        collector.register_producer(endpoint);
 
-        // Step time for a few collections.
-        //
-        // Due to scheduling variations, we don't verify the number of
-        // collections we expect based on time, but we instead check that every
-        // collection that _has_ occurred bumps the counter.
-        tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Advance time one collection at a time, waiting for each to
+        // complete before proceeding.
+        advance_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
-        let stats = collector
+        let rx = collector
             .collection_tasks
             .lock()
-            .await
-            .values()
-            .next()
             .unwrap()
-            .statistics()
-            .await;
+            .get(&id)
+            .unwrap()
+            .statistics();
+        let stats = rx.await.unwrap();
 
-        // The collections _should_ always fail due to a 500, but it's possible
-        // that we also get collections failing because there's already one in
-        // progress. See
-        // https://github.com/oxidecomputer/omicron/issues/7255#issuecomment-2711537164
-        // for example.
-        //
-        // Sum over all the expected reasons to get the correct count. We should
-        // never get anything but a 500, or possibly an in-progress error.
-        dbg!(&stats.failed_collections);
-        let count: usize = stats
-            .failed_collections
-            .iter()
-            .map(|(reason, value)| {
-                let value = match reason {
-                    FailureReason::CollectionsInProgress => value,
-                    FailureReason::Other(sc)
-                        if sc == &StatusCode::INTERNAL_SERVER_ERROR =>
-                    {
-                        value
-                    }
-                    _ => panic!("Unexpected failure reason: {reason:?}"),
-                };
-                value.datum.value() as usize
-            })
-            .sum();
-        assert!(count != 0);
-
-        // In any case, we should never have a _successful_ collection.
+        // Every collection should have failed with a 500.
         assert_eq!(stats.collections.datum.value(), 0);
+        assert_eq!(stats.failed_collections.len(), 1);
+        let error_count = stats
+            .failed_collections
+            .get(&FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR))
+            .unwrap()
+            .datum
+            .value();
+        assert_eq!(error_count, N_COLLECTIONS);
 
-        // The server may have handled a request that we've not yet recorded on
-        // our collection task side, so we allow the server count to be greater
-        // than our own. But since the collection task is single-threaded, it
-        // cannot ever be more than _one_ greater than our count, since we
-        // should increment that counter before making another request to the
-        // server.
         let server_count = collection_count.load(Ordering::SeqCst);
-        assert!(
-            count == server_count || count + 1 == server_count,
+        assert_eq!(
+            error_count as usize, server_count,
             "number of collections reported by the collection \
-            task ({count}) differs from the number reported by the always-ded \
-            producer server itself ({server_count})"
-        );
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_delete_nonexistent_producer_succeeds() {
-        let logctx =
-            test_setup_log("test_delete_nonexistent_producer_succeeds");
-        let log = &logctx.log;
-
-        // Spawn an oximeter collector ...
-        let collector = OximeterAgent::new_standalone(
-            Uuid::new_v4(),
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
-            crate::default_refresh_interval(),
-            None,
-            log,
-        )
-        .await
-        .unwrap();
-        assert!(
-            collector.delete_producer(Uuid::new_v4()).await.is_ok(),
-            "Deleting a non-existent producer should be OK"
+            task ({error_count}) differs from the number reported by the \
+            always-ded producer server itself ({server_count})"
         );
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn verify_producer_details() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("verify_producer_details");
         let log = &logctx.log;
 
@@ -1076,10 +1061,7 @@ mod tests {
         };
         let id = endpoint.id;
         let before = Utc::now();
-        collector
-            .register_producer(endpoint)
-            .await
-            .expect("failed to register dummy producer");
+        collector.register_producer(endpoint);
 
         // We don't manipulate time manually here, since this is pretty short
         // and we want to assert things about the actual timing in the test
@@ -1094,7 +1076,6 @@ mod tests {
             }
             collector
                 .producer_details(id)
-                .await
                 .expect("Should be able to get producer details")
                 .n_collections
                 > 0
@@ -1107,7 +1088,6 @@ mod tests {
         let count = collection_count.load(Ordering::SeqCst) as u64;
         let details = collector
             .producer_details(id)
-            .await
             .expect("Should be able to get producer details");
         println!("{details:#?}");
         assert_eq!(details.id, id);
@@ -1130,6 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_updated_producer_is_still_collected_from() {
+        usdt::register_probes().unwrap();
         let logctx =
             test_setup_log("test_updated_producer_is_still_collected_from");
         let log = &logctx.log;
@@ -1164,19 +1145,13 @@ mod tests {
             address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
-        collector
-            .register_producer(endpoint)
-            .await
-            .expect("failed to register dummy producer");
+        collector.register_producer(endpoint);
 
-        let details = collector.producer_details(id).await.unwrap();
+        let details = collector.producer_details(id).unwrap();
         println!("{details:#?}");
 
-        // Ensure we get some collections from it.
-        tokio::time::pause();
-        while collection_count.load(Ordering::SeqCst) < 1 {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Ensure we get at least one collection from it.
+        advance_n_collections(&collector, id, 1).await;
 
         // Now, drop and recreate the server, and register with the same ID at a
         // different address.
@@ -1193,25 +1168,37 @@ mod tests {
         // Register the dummy producer.
         let endpoint =
             ProducerEndpoint { address: server.local_addr(), ..endpoint };
-        collector
-            .register_producer(endpoint)
-            .await
-            .expect("failed to register dummy producer a second time");
+        collector.register_producer(endpoint);
 
         // We should just have one producer.
         assert_eq!(
-            collector.collection_tasks.lock().await.len(),
+            collector.collection_tasks.lock().unwrap().len(),
             1,
             "Should only have one producer, it was updated and has the \
             same UUID",
         );
 
-        // We should eventually collect from it again.
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
+        let mut details_rx = details_watcher(&collector, id);
+        let start = Instant::now();
+        loop {
+            assert!(
+                start.elapsed() < COLLECTION_TIMEOUT,
+                "timed out waiting for collection from re-registered producer",
+            );
             tokio::time::advance(TICK_INTERVAL).await;
+            if details_rx
+                .has_changed()
+                .expect("producer details watch channel closed unexpectedly")
+            {
+                details_rx.borrow_and_update();
+                // Only break once a new collection has actually completed
+                // (not just a producer info update).
+                if collection_count.load(Ordering::SeqCst) >= 1 {
+                    break;
+                }
+            }
         }
-        let details = collector.producer_details(id).await.unwrap();
+        let details = collector.producer_details(id).unwrap();
         println!("{details:#?}");
         assert_eq!(details.id, id);
         assert_eq!(details.address, server.local_addr());

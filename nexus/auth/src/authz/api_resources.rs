@@ -12,7 +12,7 @@
 //! accept these `authz` types.
 //!
 //! The `authz` types can be passed to
-//! [`crate::context::OpContext::authorize()`] to do an authorization check --
+//! [`OpContext::authorize()`] to do an authorization check --
 //! is the caller allowed to perform some action on the resource?  This is the
 //! primary way of doing authz checks in Nexus.
 //!
@@ -40,7 +40,7 @@ use authz_macros::authz_resource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
-use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
+use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
@@ -153,7 +153,7 @@ where
 /// Fleets.
 ///
 /// This object is used for authorization checks on a Fleet by passing it as the
-/// `resource` argument to [`crate::context::OpContext::authorize()`].  You
+/// `resource` argument to [`OpContext::authorize()`].  You
 /// don't construct a `Fleet` yourself -- use the global [`FLEET`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Fleet;
@@ -237,6 +237,50 @@ impl ApiResourceWithRoles for Fleet {
 
 impl ApiResourceWithRolesType for Fleet {
     type AllowedRoles = FleetRole;
+}
+
+/// Represents the "quiesce" state of Nexus
+///
+/// It is essential that authorizing actions on this resource *not* access the
+/// database because we cannot do that while quiesced and we *do* want to be
+/// able to read and modify the quiesce state while quiesced.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PolarClass)]
+pub struct QuiesceState;
+/// Singleton representing the [`QuiesceState`] itself for authz purposes
+pub const QUIESCE_STATE: QuiesceState = QuiesceState;
+
+impl Eq for QuiesceState {}
+impl PartialEq for QuiesceState {
+    fn eq(&self, _: &Self) -> bool {
+        // There is only one QuiesceState
+        true
+    }
+}
+
+impl AuthorizedResource for QuiesceState {
+    fn load_roles<'fut>(
+        &'fut self,
+        _: &'fut OpContext,
+        _: &'fut authn::Context,
+        _: &'fut mut RoleSet,
+    ) -> BoxFuture<'fut, Result<(), Error>> {
+        // We don't use (database) roles to grant access to the quiesce state.
+        futures::future::ready(Ok(())).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
 }
 
 // TODO: refactor synthetic resources below
@@ -407,8 +451,130 @@ impl AuthorizedResource for IpPoolList {
         roleset: &'fut mut RoleSet,
     ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on the IpPoolList, only permissions. But we still
+        // need to load the Fleet-related roles to verify that the actor's role
+        // on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic, fleet-scoped resource representing the `/v1/multicast-groups`
+/// collection.
+///
+/// **Authorization Model:**
+/// - Multicast groups are fleet-scoped resources.
+/// - Groups are created when the first instance joins and deleted when the last
+///   member leaves (implicit lifecycle).
+/// - **List**: Any authenticated user in the fleet (for discovery).
+///
+/// The fleet-level collection endpoint (`/v1/multicast-groups`) allows:
+/// - Fleet-wide listing for all authenticated users (discovery).
+/// - Instances from different projects and silos can join the same groups.
+///
+/// See `omicron.polar` for the detailed policy rules.
+#[derive(Clone, Copy, Debug)]
+pub struct MulticastGroupList;
+
+/// Singleton representing the [`MulticastGroupList`] itself for authz purposes.
+pub const MULTICAST_GROUP_LIST: MulticastGroupList = MulticastGroupList;
+
+impl Eq for MulticastGroupList {}
+
+impl PartialEq for MulticastGroupList {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for MulticastGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &MulticastGroupList| FLEET)
+    }
+}
+
+impl AuthorizedResource for MulticastGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the MulticastGroupList, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor's
+        // role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+// Similar to IpPoolList, the audit log is a collection that doesn't exist in
+// the database as an entity distinct from its children (IP pools, or in this
+// case, audit log entries). We need a dummy resource here because we need
+// something to hang permissions off of. We need to be able to create audit log
+// children (entries) for login attempts, when there is no authenticated user,
+// as well as for normal requests with an authenticated user. For retrieval, we
+// want (to start out) to allow only fleet viewers to list children.
+
+#[derive(Clone, Copy, Debug)]
+pub struct AuditLog;
+
+/// Singleton representing the [`AuditLog`] for authz purposes
+pub const AUDIT_LOG: AuditLog = AuditLog;
+
+impl Eq for AuditLog {}
+
+impl PartialEq for AuditLog {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for AuditLog {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &AuditLog| FLEET)
+    }
+}
+
+impl AuthorizedResource for AuditLog {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the AuditLog, only permissions. But we still
         // need to load the Fleet-related roles to verify that the actor has the
-        // "admin" role on the Fleet (possibly conferred from a Silo role).
+        // viewer role on the Fleet (possibly conferred from a Silo role).
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
@@ -668,6 +834,267 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
+/// Synthetic resource describing the list of Groups in a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloGroupList(Silo);
+
+impl SiloGroupList {
+    pub fn new(silo: Silo) -> Self {
+        SiloGroupList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloGroupList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+// Note the session list and the token list have exactly the same behavior
+
+/// Synthetic resource for managing a user's sessions
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloUserSessionList(SiloUser);
+
+impl SiloUserSessionList {
+    pub fn new(silo_user: SiloUser) -> Self {
+        Self(silo_user)
+    }
+
+    pub fn silo_user(&self) -> &SiloUser {
+        &self.0
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0.parent
+    }
+}
+
+impl oso::PolarClass for SiloUserSessionList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().with_equality_check().add_attribute_getter(
+            "silo_user",
+            |user_sessions: &SiloUserSessionList| {
+                user_sessions.silo_user().clone()
+            },
+        )
+    }
+}
+
+impl AuthorizedResource for SiloUserSessionList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // To check for silo admin, we need to load roles from the parent silo.
+        self.silo_user().parent.load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource for managing a user's tokens
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloUserTokenList(SiloUser);
+
+impl SiloUserTokenList {
+    pub fn new(silo_user: SiloUser) -> Self {
+        Self(silo_user)
+    }
+
+    pub fn silo_user(&self) -> &SiloUser {
+        &self.0
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0.parent
+    }
+}
+
+impl oso::PolarClass for SiloUserTokenList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().with_equality_check().add_attribute_getter(
+            "silo_user",
+            |user_sessions: &SiloUserTokenList| {
+                user_sessions.silo_user().clone()
+            },
+        )
+    }
+}
+
+impl AuthorizedResource for SiloUserTokenList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // To check for silo admin, we need to load roles from the parent silo.
+        self.silo_user().parent.load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource describing the list of VPCs in a Project
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VpcList(Project);
+
+impl VpcList {
+    pub fn new(project: Project) -> VpcList {
+        VpcList(project)
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for VpcList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("project", |list: &VpcList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for VpcList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Project-related roles.
+        self.project().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct UpdateTrustRootList;
+
+/// Singleton representing the [`UpdateTrustRootList`] itself for authz purposes
+pub const UPDATE_TRUST_ROOT_LIST: UpdateTrustRootList = UpdateTrustRootList;
+
+impl Eq for UpdateTrustRootList {}
+
+impl PartialEq for UpdateTrustRootList {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for UpdateTrustRootList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &UpdateTrustRootList| FLEET)
+    }
+}
+
+impl AuthorizedResource for UpdateTrustRootList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the UpdateTrustRootList, only permissions.
+        // But we still need to load the Fleet-related roles to verify that the
+        // actor has the "admin" role on the Fleet (possibly conferred from a
+        // Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// System software target version configuration
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TargetReleaseConfig;
@@ -750,6 +1177,101 @@ impl AuthorizedResource for AlertClassList {
     }
 }
 
+/// Synthetic resource describing the list of SCIM client bearer tokens
+/// associated with a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScimClientBearerTokenList(Silo);
+
+impl ScimClientBearerTokenList {
+    pub fn new(silo: Silo) -> ScimClientBearerTokenList {
+        ScimClientBearerTokenList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for ScimClientBearerTokenList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &ScimClientBearerTokenList| {
+                list.0.clone()
+            })
+    }
+}
+
+impl AuthorizedResource for ScimClientBearerTokenList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource for authorization to list Subnet Pools.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubnetPoolList;
+
+/// Singleton representing the [`SubnetPoolList`] itself for authz
+/// purposes.
+pub const SUBNET_POOL_LIST: SubnetPoolList = SubnetPoolList;
+
+impl oso::PolarClass for SubnetPoolList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &SubnetPoolList| FLEET)
+    }
+}
+
+impl AuthorizedResource for SubnetPoolList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the SubnetPoolList, only permissions.
+        // But we still need to load the Fleet-related roles to verify that
+        // the actor's role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
 // Main resource hierarchy: Projects and their resources
 
 authz_resource! {
@@ -764,12 +1286,23 @@ impl ApiResourceWithRolesType for Project {
     type AllowedRoles = ProjectRole;
 }
 
+// ============================================================================
+// Project Resources - Non-Networking (InProjectLimited)
+//
+// These resources can be created and modified by users with the
+// "limited-collaborator" role and above. These are "regular" project resources
+// that users can work with without needing permission to reconfigure network
+// infrastructure.
+//
+// Examples: Instances, Disks, Snapshots, Images, Floating IPs
+// ============================================================================
+
 authz_resource! {
     name = "Disk",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -777,7 +1310,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -785,7 +1318,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -793,7 +1326,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -801,7 +1334,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -809,7 +1342,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -817,15 +1350,31 @@ authz_resource! {
     parent = "Instance",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
+
+// ============================================================================
+// Project Resources - Networking Infrastructure (InProjectFull)
+//
+// These resources require the full "collaborator" role to create or modify.
+// Users with only the "limited-collaborator" role can *read* these resources
+// (via viewer inheritance) but cannot create or modify them.
+//
+// This distinction allows organizations to restrict who can reconfigure the
+// network topology while still allowing those users to work with compute
+// resources (instances, disks, etc.) within the existing network.
+//
+// Resources in this category: VPCs, Subnets, Routers, Router Routes,
+// Internet Gateways, and their child resources (IP pools, IP addresses),
+// Floating IPs, and External Subnets.
+// ============================================================================
 
 authz_resource! {
     name = "Vpc",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -833,7 +1382,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -841,7 +1390,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -849,7 +1398,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -857,7 +1406,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -865,7 +1414,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -873,7 +1422,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -881,7 +1430,34 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
+}
+
+authz_resource! {
+    name = "ExternalSubnet",
+    parent = "Project",
+    primary_key = { uuid_kind = ExternalSubnetKind },
+    roles_allowed = false,
+    polar_snippet = InProjectLimited,
+}
+
+// MulticastGroup Authorization
+//
+// MulticastGroups are **fleet-scoped resources** with an implicit lifecycle:
+// created when the first instance joins and deleted when the last member leaves.
+//
+// Authorization rules:
+// - List/Read: Any authenticated user in their fleet
+// - Attach/detach: Instance::Modify permission on the instance being attached
+//
+// See omicron.polar for the custom authorization rules.
+
+authz_resource! {
+    name = "MulticastGroup",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
 }
 
 // Customer network integration resources nested below "Fleet"
@@ -926,6 +1502,14 @@ authz_resource! {
     polar_snippet = FleetChild,
 }
 
+authz_resource! {
+    name = "SubnetPool",
+    parent = "Fleet",
+    primary_key = { uuid_kind = SubnetPoolKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
 // Miscellaneous resources nested directly below "Fleet"
 
 authz_resource! {
@@ -963,7 +1547,7 @@ authz_resource! {
 authz_resource! {
     name = "UserBuiltin",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = BuiltInUserKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -991,7 +1575,7 @@ impl ApiResourceWithRolesType for Silo {
 authz_resource! {
     name = "SiloUser",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SiloUserKind },
     roles_allowed = false,
     polar_snippet = Custom,
 }
@@ -999,7 +1583,7 @@ authz_resource! {
 authz_resource! {
     name = "SiloGroup",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SiloGroupKind },
     roles_allowed = false,
     polar_snippet = Custom,
 }
@@ -1048,7 +1632,7 @@ authz_resource! {
 authz_resource! {
     name = "Sled",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SledKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1056,7 +1640,7 @@ authz_resource! {
 authz_resource! {
     name = "Zpool",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = ZpoolKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1118,6 +1702,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "TufTrustRoot",
+    parent = "Fleet",
+    primary_key = { uuid_kind = TufTrustRootKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "Certificate",
     parent = "Silo",
     primary_key = Uuid,
@@ -1153,6 +1745,14 @@ authz_resource! {
     name = "WebhookSecret",
     parent = "AlertReceiver",
     primary_key = { uuid_kind = WebhookSecretKind },
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "ScimClientBearerToken",
+    parent = "Silo",
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = Custom,
 }

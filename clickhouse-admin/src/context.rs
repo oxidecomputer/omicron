@@ -6,11 +6,12 @@ use crate::{ClickhouseCli, Clickward};
 
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
+use clickhouse_admin_types::config::GenerateConfigResult;
+use clickhouse_admin_types::keeper::KeeperConfigurableSettings;
+use clickhouse_admin_types::server::ServerConfigurableSettings;
 use clickhouse_admin_types::{
     CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
     CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
-    GenerateConfigResult, KeeperConfigurableSettings,
-    ServerConfigurableSettings,
 };
 use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
@@ -50,8 +51,8 @@ impl KeeperServerContext {
 
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
-        let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, generation_rx) = watch::channel(gen);
+        let generation = read_generation_from_file(config_path)?;
+        let (generation_tx, generation_rx) = watch::channel(generation);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
@@ -137,8 +138,8 @@ impl ServerContext {
 
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
-        let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, generation_rx) = watch::channel(gen);
+        let generation = read_generation_from_file(config_path)?;
+        let (generation_tx, generation_rx) = watch::channel(generation);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
@@ -499,9 +500,9 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
         )
     })?;
 
-    let gen = Generation::try_from(gen_u64)?;
+    let generation = Generation::try_from(gen_u64)?;
 
-    Ok(Some(gen))
+    Ok(Some(generation))
 }
 
 #[cfg(test)]

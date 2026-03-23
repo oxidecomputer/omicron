@@ -23,6 +23,7 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetName;
@@ -35,15 +36,18 @@ use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -1136,6 +1140,7 @@ pub(crate) struct PhysicalDisk {
 /// Describes data being simulated within a dataset.
 pub(crate) enum DatasetContents {
     Crucible(CrucibleServer),
+    LocalStorageUnencrypted(LocalStorageDatasetEnsureRequest),
 }
 
 pub(crate) struct Zpool {
@@ -1143,6 +1148,7 @@ pub(crate) struct Zpool {
     physical_disk_id: PhysicalDiskUuid,
     total_size: u64,
     datasets: HashMap<DatasetUuid, DatasetContents>,
+    health: ZpoolHealth,
 }
 
 impl Zpool {
@@ -1150,8 +1156,15 @@ impl Zpool {
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         total_size: u64,
+        health: ZpoolHealth,
     ) -> Self {
-        Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
+        Zpool {
+            id,
+            physical_disk_id,
+            total_size,
+            datasets: HashMap::new(),
+            health,
+        }
     }
 
     fn insert_crucible_dataset(
@@ -1162,20 +1175,25 @@ impl Zpool {
         start_port: u16,
         end_port: u16,
     ) -> &CrucibleServer {
-        self.datasets.insert(
-            id,
-            DatasetContents::Crucible(CrucibleServer::new(
+        let DatasetContents::Crucible(crucible) = self
+            .datasets
+            .entry(id)
+            .insert_entry(DatasetContents::Crucible(CrucibleServer::new(
                 log,
                 crucible_ip,
                 start_port,
                 end_port,
-            )),
-        );
-        let DatasetContents::Crucible(crucible) = self
-            .datasets
-            .get(&id)
-            .expect("Failed to get the dataset we just inserted");
+            )))
+            .into_mut()
+        else {
+            unreachable!("just inserted this variant!");
+        };
+
         crucible
+    }
+
+    pub fn health(&self) -> ZpoolHealth {
+        self.health
     }
 
     pub fn total_size(&self) -> u64 {
@@ -1187,7 +1205,9 @@ impl Zpool {
         region_id: Uuid,
     ) -> Option<Arc<CrucibleData>> {
         for dataset in self.datasets.values() {
-            let DatasetContents::Crucible(dataset) = dataset;
+            let DatasetContents::Crucible(dataset) = dataset else {
+                continue;
+            };
             for region in &dataset.data().list() {
                 let id = Uuid::from_str(&region.id.0).unwrap();
                 if id == region_id {
@@ -1203,7 +1223,9 @@ impl Zpool {
         let mut regions = vec![];
 
         for dataset in self.datasets.values() {
-            let DatasetContents::Crucible(dataset) = dataset;
+            let DatasetContents::Crucible(dataset) = dataset else {
+                continue;
+            };
             for region in &dataset.data().list() {
                 if region.state == State::Destroyed {
                     continue;
@@ -1224,11 +1246,27 @@ impl Zpool {
     pub fn drop_dataset(&mut self, id: DatasetUuid) {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
     }
+
+    fn insert_local_storage_unencrypted_dataset(
+        &mut self,
+        id: DatasetUuid,
+        request: LocalStorageDatasetEnsureRequest,
+    ) {
+        self.datasets
+            .insert(id, DatasetContents::LocalStorageUnencrypted(request));
+    }
 }
 
 /// Represents a nested dataset
 pub struct NestedDatasetStorage {
     config: NestedDatasetConfig,
+    // In-memory flag for whether this dataset pretends to be mounted; defaults
+    // to true.
+    //
+    // Nothing in the simulated storage implementation acts on this value; it is
+    // merely a sticky bool that remembers the most recent value passed to
+    // `nested_dataset_set_mounted()`.
+    mounted: bool,
     // We intentionally store the children before the mountpoint,
     // so they are deleted first.
     children: BTreeMap<String, NestedDatasetStorage>,
@@ -1262,6 +1300,7 @@ impl NestedDatasetStorage {
 
         Self {
             config: NestedDatasetConfig { name, inner: shared_config },
+            mounted: true,
             children: BTreeMap::new(),
             mountpoint,
         }
@@ -1291,7 +1330,7 @@ impl Storage {
         }
     }
 
-    pub fn lock(&self) -> std::sync::MutexGuard<StorageInner> {
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, StorageInner> {
         self.inner.lock().unwrap()
     }
 
@@ -1380,12 +1419,20 @@ impl StorageInner {
                 return Ok(DatasetProperties {
                     id: Some(*id),
                     name: dataset_name.to_string(),
-                    mounted: true,
+                    // We should have an entry in `self.nested_datasets` for
+                    // every entry in `config.datasets` (`datasets_ensure()`
+                    // keeps these in sync), but we only keeping track of a
+                    // `mounted` property on nested datasets. Look that up here.
+                    mounted: self
+                        .nested_datasets
+                        .get(&dataset.name)
+                        .map_or(true, |d| d.mounted),
                     avail: ByteCount::from_kibibytes_u32(1024),
                     used: ByteCount::from_kibibytes_u32(1024),
                     quota: dataset.inner.quota,
                     reservation: dataset.inner.reservation,
                     compression: dataset.inner.compression.to_string(),
+                    epoch: None,
                 });
             }
         }
@@ -1399,12 +1446,13 @@ impl StorageInner {
                 return Ok(DatasetProperties {
                     id: None,
                     name: dataset_name.to_string(),
-                    mounted: true,
+                    mounted: nested_dataset_storage.mounted,
                     avail: ByteCount::from_kibibytes_u32(1024),
                     used: ByteCount::from_kibibytes_u32(1024),
                     quota: config.quota,
                     reservation: config.reservation,
                     compression: config.compression.to_string(),
+                    epoch: None,
                 });
             }
         }
@@ -1517,6 +1565,64 @@ impl StorageInner {
         }
     }
 
+    #[cfg(test)]
+    pub fn nested_dataset_is_mounted(
+        &self,
+        dataset: &NestedDatasetLocation,
+    ) -> Result<bool, HttpError> {
+        let Some(mut nested_dataset) = self.nested_datasets.get(&dataset.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+        for component in dataset.path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            nested_dataset =
+                nested_dataset.children.get(component).ok_or_else(|| {
+                    HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    )
+                })?;
+        }
+        Ok(nested_dataset.mounted)
+    }
+
+    pub fn nested_dataset_set_mounted(
+        &mut self,
+        dataset: &NestedDatasetLocation,
+        mounted: bool,
+    ) -> Result<(), HttpError> {
+        let Some(mut nested_dataset) =
+            self.nested_datasets.get_mut(&dataset.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+        for component in dataset.path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            nested_dataset = nested_dataset
+                .children
+                .get_mut(component)
+                .ok_or_else(|| {
+                    HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    )
+                })?;
+        }
+        nested_dataset.mounted = mounted;
+        Ok(())
+    }
+
     pub fn nested_dataset_ensure(
         &mut self,
         config: NestedDatasetConfig,
@@ -1596,8 +1702,8 @@ impl StorageInner {
             if path_components.peek().is_none() {
                 if nested_dataset.children.remove(path_component).is_none() {
                     return Err(HttpError::for_not_found(
-                        None,
-                        "Nested Dataset not found".to_string(),
+                        Some(NESTED_DATASET_NOT_FOUND.to_string()),
+                        NESTED_DATASET_NOT_FOUND.to_string(),
                     ));
                 };
                 return Ok(());
@@ -1684,9 +1790,11 @@ impl StorageInner {
         zpool_id: ZpoolUuid,
         disk_id: PhysicalDiskUuid,
         size: u64,
+        health: ZpoolHealth,
     ) {
         // Update our local data
-        self.zpools.insert(zpool_id, Zpool::new(zpool_id, disk_id, size));
+        self.zpools
+            .insert(zpool_id, Zpool::new(zpool_id, disk_id, size, health));
     }
 
     /// Returns an immutable reference to all zpools
@@ -1732,20 +1840,20 @@ impl StorageInner {
 
     pub fn get_all_physical_disks(
         &self,
-    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+    ) -> Vec<nexus_lockstep_client::types::PhysicalDiskPutRequest> {
         self.physical_disks
             .iter()
             .map(|(id, disk)| {
                 let variant = match disk.variant {
                     DiskVariant::U2 => {
-                        nexus_client::types::PhysicalDiskKind::U2
+                        nexus_lockstep_client::types::PhysicalDiskKind::U2
                     }
                     DiskVariant::M2 => {
-                        nexus_client::types::PhysicalDiskKind::M2
+                        nexus_lockstep_client::types::PhysicalDiskKind::M2
                     }
                 };
 
-                nexus_client::types::PhysicalDiskPutRequest {
+                nexus_lockstep_client::types::PhysicalDiskPutRequest {
                     id: *id,
                     vendor: disk.identity.vendor.clone(),
                     serial: disk.identity.serial.clone(),
@@ -1757,10 +1865,12 @@ impl StorageInner {
             .collect()
     }
 
-    pub fn get_all_zpools(&self) -> Vec<nexus_client::types::ZpoolPutRequest> {
+    pub fn get_all_zpools(
+        &self,
+    ) -> Vec<nexus_lockstep_client::types::ZpoolPutRequest> {
         self.zpools
             .values()
-            .map(|pool| nexus_client::types::ZpoolPutRequest {
+            .map(|pool| nexus_lockstep_client::types::ZpoolPutRequest {
                 id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
                 physical_disk_id: pool.physical_disk_id,
@@ -1777,8 +1887,11 @@ impl StorageInner {
         zpool
             .datasets
             .iter()
-            .map(|(id, dataset)| match dataset {
-                DatasetContents::Crucible(server) => (*id, server.address()),
+            .filter_map(|(id, dataset)| match dataset {
+                DatasetContents::Crucible(server) => {
+                    Some((*id, server.address()))
+                }
+                DatasetContents::LocalStorageUnencrypted(_) => None,
             })
             .collect()
     }
@@ -1807,6 +1920,9 @@ impl StorageInner {
     ) -> Arc<CrucibleData> {
         match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(crucible) => crucible.data.clone(),
+            DatasetContents::LocalStorageUnencrypted(_) => {
+                panic!("asked for Crucible, got LocalStorageUnencrypted!")
+            }
         }
     }
 
@@ -1846,6 +1962,36 @@ impl StorageInner {
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
             .drop_dataset(dataset_id)
+    }
+
+    pub fn ensure_local_storage_unencrypted_dataset(
+        &mut self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+        request: LocalStorageDatasetEnsureRequest,
+    ) {
+        let zpool_id =
+            ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid());
+        self.zpools
+            .get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .insert_local_storage_unencrypted_dataset(dataset_id, request);
+    }
+
+    pub fn get_local_storage_unencrypted_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> LocalStorageDatasetEnsureRequest {
+        match self.get_dataset(zpool_id, dataset_id) {
+            DatasetContents::Crucible(_) => {
+                panic!("asked for LocalStorageUnencrypted, got Crucible!")
+            }
+
+            DatasetContents::LocalStorageUnencrypted(request) => {
+                request.clone()
+            }
+        }
     }
 }
 
@@ -2104,14 +2250,14 @@ impl Pantry {
             }
         };
 
-        if (offset % region_block_size) != 0 {
+        if !offset.is_multiple_of(region_block_size) {
             return Err(HttpError::for_bad_request(
                 None,
                 "offset not multiple of block size!".to_string(),
             ));
         }
 
-        if (data.len() as u64 % region_block_size) != 0 {
+        if !(data.len() as u64).is_multiple_of(region_block_size) {
             return Err(HttpError::for_bad_request(
                 None,
                 "data length not multiple of block size!".to_string(),

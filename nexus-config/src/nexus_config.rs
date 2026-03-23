@@ -6,26 +6,28 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::Ipv6Subnet;
+pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
+pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
-use serde_with::SerializeDisplay;
 use serde_with::serde_as;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -173,6 +175,9 @@ pub struct DeploymentConfig {
     /// Dropshot configuration for internal API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
+    /// Dropshot configuration for lockstep API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
+    pub dropshot_lockstep: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
     pub internal_dns: InternalDns,
@@ -236,12 +241,6 @@ pub struct ConsoleConfig {
     pub session_idle_timeout_minutes: u32,
     /// how long a session can exist before expiring
     pub session_absolute_timeout_minutes: u32,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct UpdatesConfig {
-    /// Trusted root.json role for the TUF updates repository.
-    pub trusted_root: Utf8PathBuf,
 }
 
 /// Options to tweak database schema changes.
@@ -318,14 +317,6 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
     }
 }
 
-/// Minimum prefix size supported in IPv4 VPC Subnets.
-///
-/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
-pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
-
-/// The number of reserved addresses at the beginning of a subnet range.
-pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
-
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
         let absolute_max: u8 = 32_u8
@@ -351,14 +342,6 @@ impl Tunables {
         }
     }
 }
-
-/// The maximum prefix size by default.
-///
-/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
-/// like, and the broadcast address at the end of the subnet. This size provides
-/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
-/// for the smallest subnet that's still useful in many contexts.
-pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {
@@ -432,6 +415,8 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for TUF repo pruner task
+    pub tuf_repo_pruner: TufRepoPrunerConfig,
     /// configuration for read-only region replacement start task
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
@@ -441,6 +426,66 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
+    /// configuration for fault management background tasks
+    pub fm: FmTasksConfig,
+    /// configuration for networking probe distributor
+    pub probe_distributor: ProbeDistributorConfig,
+    /// configuration for multicast reconciler (group+members) task
+    pub multicast_reconciler: MulticastGroupReconcilerConfig,
+    /// configuration for trust quorum manager task
+    pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
+    /// configuration for console session cleanup task
+    pub session_cleanup: SessionCleanupConfig,
+    /// configuration for audit log incomplete timeout task
+    pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
+    /// configuration for audit log cleanup (retention) task
+    pub audit_log_cleanup: AuditLogCleanupConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionCleanupConfig {
+    /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogTimeoutIncompleteConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// how old an incomplete entry must be before it is timed out
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout_secs: Duration,
+
+    /// max rows per SQL statement
+    pub max_timed_out_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogCleanupConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// retention period in days; must be at least 1
+    ///
+    /// This should be much longer than the `audit_log_timeout_incomplete`
+    /// timeout so orphaned entries are completed before they become eligible
+    /// for cleanup.
+    pub retention_days: NonZeroU32,
+
+    /// maximum rows hard-deleted per activation
+    pub max_deleted_per_activation: u32,
 }
 
 #[serde_as]
@@ -562,13 +607,25 @@ pub struct SwitchPortSettingsManagerConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InventoryConfig {
-    /// period (in seconds) for periodic activations of this background task
+    /// period (in seconds) for periodic activations of the background task to
+    /// load the latest inventory collection
+    ///
+    /// Each activation runs a fast query to check whether there is a new
+    /// collection, and only follows up with the set of queries required to load
+    /// its contents if there's been a change. This period should be pretty
+    /// aggressive to ensure consumers are usually acting on the latest
+    /// collection.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load: Duration,
+
+    /// period (in seconds) for periodic activations of the background task to
+    /// collect inventory
     ///
     /// Each activation fetches information about all hardware and software in
     /// the system and inserts it into the database.  This generates a moderate
     /// amount of data.
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
+    pub period_secs_collect: Duration,
 
     /// maximum number of past collections to keep in the database
     ///
@@ -580,7 +637,7 @@ pub struct InventoryConfig {
     ///
     /// This is an emergency lever for support / operations.  It should never be
     /// necessary.
-    pub disable: bool,
+    pub disable_collect: bool,
 }
 
 #[serde_as]
@@ -621,9 +678,9 @@ pub struct BlueprintTasksConfig {
     pub period_secs_collect_crdb_node_ids: Duration,
 
     /// period (in seconds) for periodic activations of the background task that
-    /// reads chicken switches from the database
+    /// reads the reconfigurator config from the database
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs_load_chicken_switches: Duration,
+    pub period_secs_load_reconfigurator_config: Duration,
 }
 
 #[serde_as]
@@ -769,6 +826,26 @@ pub struct TufArtifactReplicationConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TufRepoPrunerConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// number of extra recent target releases to keep
+    ///
+    /// The system always keeps two: the current release and the previous one.
+    /// This number is in addition to that.
+    pub nkeep_extra_target_releases: u8,
+
+    /// number of extra recently uploaded repos to keep
+    ///
+    /// The system always keeps one, assuming that the operator may be about to
+    /// update to it.  This number is in addition to that.
+    pub nkeep_extra_newly_uploaded: u8,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReadOnlyRegionReplacementStartConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -821,12 +898,140 @@ pub struct SpEreportIngesterConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable ereport collection altogether
+    ///
+    /// This is an emergency lever for support / operations.  It should never be
+    /// necessary.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 impl Default for SpEreportIngesterConfig {
     fn default() -> Self {
-        Self { period_secs: Duration::from_secs(30) }
+        Self { period_secs: Duration::from_secs(30), disable: false }
     }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastGroupReconcilerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reconciles multicast group state with dendrite switch configuration
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// TTL (in seconds) for the sled-to-switch-port mapping cache.
+    ///
+    /// This cache maps sled IDs to their physical switch ports. It changes when
+    /// sleds are added/removed or inventory is updated.
+    ///
+    /// Default: 3600 seconds (1 hour)
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs"
+    )]
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sled_cache_ttl_secs: Duration,
+
+    /// TTL (in seconds) for the backplane hardware topology cache.
+    ///
+    /// This cache stores the hardware platform's port mapping. It effectively
+    /// never changes during normal operation.
+    ///
+    /// Default: 86400 seconds (24 hours) with smart invalidation
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs"
+    )]
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub backplane_cache_ttl_secs: Duration,
+}
+
+impl MulticastGroupReconcilerConfig {
+    const fn default_sled_cache_ttl_secs() -> Duration {
+        Duration::from_secs(3600) // 1 hour
+    }
+
+    const fn default_backplane_cache_ttl_secs() -> Duration {
+        Duration::from_secs(86400) // 24 hours
+    }
+}
+
+impl Default for MulticastGroupReconcilerConfig {
+    fn default() -> Self {
+        Self {
+            period_secs: Duration::from_secs(60),
+            sled_cache_ttl_secs: Self::default_sled_cache_ttl_secs(),
+            backplane_cache_ttl_secs: Self::default_backplane_cache_ttl_secs(),
+        }
+    }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FmTasksConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest fault management sitrep from the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_load_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// garbage collects unneeded fault management sitreps in the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_gc_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// updates externally-visible database tables to match the current situation
+    /// report.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub rendezvous_period_secs: Duration,
+}
+
+impl Default for FmTasksConfig {
+    fn default() -> Self {
+        Self {
+            sitrep_load_period_secs: Duration::from_secs(15),
+            // This need not be activated very frequently, as it's triggered any
+            // time the current sitrep changes, and activating it more
+            // frequently won't make things more responsive.
+            sitrep_gc_period_secs: Duration::from_secs(600),
+            // This, too, is activated whenever a new sitrep is loaded, so we
+            // need not set the periodic activation interval too high.
+            rendezvous_period_secs: Duration::from_secs(300),
+        }
+    }
+}
+
+/// Configuration for multicast options.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastConfig {
+    /// Whether multicast functionality is enabled or not.
+    ///
+    /// When false, multicast API calls remain accessible but no actual
+    /// multicast operations occur (no switch programming, reconciler disabled).
+    /// Instance sagas will skip multicast operations. This allows gradual
+    /// rollout and testing of multicast configuration.
+    ///
+    /// Default: false (experimental feature, disabled by default)
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProbeDistributorConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// distributes networking probe zones to sled-agents.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TrustQuorumConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// completes trust quorum reconfigurations.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -839,12 +1044,13 @@ pub struct PackageConfig {
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
+    /// Nexus-side support for `omdb`-based debugging.
+    ///
+    /// This is only meaningful on real, multi-sled systems where `omdb` is in
+    /// use from the switch zone.
+    pub omdb: OmdbConfig,
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
-    /// Updates-related configuration. Updates APIs return 400 Bad Request when
-    /// this is unconfigured.
-    #[serde(default)]
-    pub updates: Option<UpdatesConfig>,
     /// Describes how to handle and perform schema changes.
     #[serde(default)]
     pub schema: Option<SchemaConfig>,
@@ -853,52 +1059,35 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    pub dendrite: HashMap<SwitchSlot, DpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
-    pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    pub mgd: HashMap<SwitchSlot, MgdConfig>,
+    /// Initial reconfigurator config
+    ///
+    /// We use this hook to disable reconfigurator automation in the test suite
+    #[serde(default)]
+    pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Multicast feature configuration
+    #[serde(default)]
+    pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
-/// List of supported external authn schemes
-///
-/// Note that the authn subsystem doesn't know about this type.  It allows
-/// schemes to be called whatever they want.  This is just to provide a set of
-/// allowed values for configuration.
-#[derive(
-    Clone, Copy, Debug, DeserializeFromStr, Eq, PartialEq, SerializeDisplay,
-)]
-pub enum SchemeName {
-    Spoof,
-    SessionCookie,
-    AccessToken,
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
-impl std::str::FromStr for SchemeName {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "spoof" => Ok(SchemeName::Spoof),
-            "session_cookie" => Ok(SchemeName::SessionCookie),
-            "access_token" => Ok(SchemeName::AccessToken),
-            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for SchemeName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            SchemeName::Spoof => "spoof",
-            SchemeName::SessionCookie => "session_cookie",
-            SchemeName::AccessToken => "access_token",
-        })
-    }
-}
+// Re-export SchemeName from nexus-types for use in config parsing.
+pub use nexus_types::authn::SchemeName;
 
 impl WebhookDeliveratorConfig {
     const fn default_lease_timeout_secs() -> u64 {
@@ -918,10 +1107,10 @@ impl WebhookDeliveratorConfig {
 mod test {
     use super::*;
 
+    use nexus_types::deployment::PlannerConfig;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
@@ -990,10 +1179,7 @@ mod test {
             //     "unexpected eof encountered at line 1 column 6"
             // );
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1007,10 +1193,7 @@ mod test {
             assert_eq!(error.span(), Some(0..0));
             assert_eq!(error.message(), "missing field `deployment`");
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1036,8 +1219,6 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:9000"
-            [updates]
-            trusted_root = "/path/to/root.json"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
             [deployment]
@@ -1052,6 +1233,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1061,6 +1245,10 @@ mod test {
             address = "[::1]:12224"
             [mgd.switch0]
             address = "[::1]:4676"
+            [initial_reconfigurator_config]
+            planner_enabled = true
+            planner_config.add_zones_with_mupdate_override = true
+            tuf_repo_pruner_enabled = false
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1074,9 +1262,10 @@ mod test {
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
             bfd_manager.period_secs = 30
-            inventory.period_secs = 10
-            inventory.nkeep = 11
-            inventory.disable = false
+            inventory.period_secs_load = 10
+            inventory.period_secs_collect = 11
+            inventory.nkeep = 12
+            inventory.disable_collect = false
             support_bundle_collector.period_secs = 30
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
@@ -1086,7 +1275,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
-            blueprints.period_secs_load_chicken_switches= 5
+            blueprints.period_secs_load_reconfigurator_config = 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1106,6 +1295,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
@@ -1113,9 +1305,26 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
+            fm.sitrep_load_period_secs = 48
+            fm.sitrep_gc_period_secs = 49
+            probe_distributor.period_secs = 50
+            multicast_reconciler.period_secs = 60
+            fm.rendezvous_period_secs = 51
+            trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .unwrap();
@@ -1141,6 +1350,12 @@ mod test {
                     },
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                    dropshot_lockstep: ConfigDropshot {
+                        bind_address: "10.1.2.3:4569"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
@@ -1179,28 +1394,35 @@ mod test {
                             0,
                         ))),
                     },
-                    updates: Some(UpdatesConfig {
-                        trusted_root: Utf8PathBuf::from("/path/to/root.json"),
-                    }),
+                    omdb: OmdbConfig {
+                        bin_path: "/nonexistent/path/to/omdb".into(),
+                    },
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
                         load_timeout: None
                     },
                     dendrite: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
                                 .unwrap(),
                         }
                     )]),
                     mgd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         MgdConfig {
                             address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),
                         }
                     )]),
+                    initial_reconfigurator_config: Some(ReconfiguratorConfig {
+                        planner_enabled: true,
+                        planner_config: PlannerConfig {
+                            add_zones_with_mupdate_override: true,
+                        },
+                        tuf_repo_pruner_enabled: false,
+                    }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),
@@ -1227,9 +1449,10 @@ mod test {
                             period_secs: Duration::from_secs(30),
                         },
                         inventory: InventoryConfig {
-                            period_secs: Duration::from_secs(10),
-                            nkeep: 11,
-                            disable: false,
+                            period_secs_load: Duration::from_secs(10),
+                            period_secs_collect: Duration::from_secs(11),
+                            nkeep: 12,
+                            disable_collect: false,
                         },
                         support_bundle_collector:
                             SupportBundleCollectorConfig {
@@ -1255,7 +1478,7 @@ mod test {
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
-                            period_secs_load_chicken_switches:
+                            period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
@@ -1320,6 +1543,11 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        tuf_repo_pruner: TufRepoPrunerConfig {
+                            period_secs: Duration::from_secs(299),
+                            nkeep_extra_target_releases: 51,
+                            nkeep_extra_newly_uploaded: 52,
+                        },
                         read_only_region_replacement_start:
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
@@ -1335,8 +1563,44 @@ mod test {
                         },
                         sp_ereport_ingester: SpEreportIngesterConfig {
                             period_secs: Duration::from_secs(47),
+                            disable: false,
+                        },
+                        fm: FmTasksConfig {
+                            sitrep_load_period_secs: Duration::from_secs(48),
+                            sitrep_gc_period_secs: Duration::from_secs(49),
+                            rendezvous_period_secs: Duration::from_secs(51),
+                        },
+                        probe_distributor: ProbeDistributorConfig {
+                            period_secs: Duration::from_secs(50),
+                        },
+                        multicast_reconciler: MulticastGroupReconcilerConfig {
+                            period_secs: Duration::from_secs(60),
+                            sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
+                            backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
+                        },
+                        trust_quorum: TrustQuorumConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        session_cleanup: SessionCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
+                        },
+                        audit_log_timeout_incomplete:
+                            AuditLogTimeoutIncompleteConfig {
+                                period_secs: Duration::from_secs(600),
+                                timeout_secs: Duration::from_secs(14400),
+                                max_timed_out_per_activation: 1000,
+                            },
+                        audit_log_cleanup: AuditLogCleanupConfig {
+                            period_secs: Duration::from_secs(600),
+                            retention_days: NonZeroU32::new(90).unwrap(),
+                            max_deleted_per_activation: 10_000,
                         },
                     },
+                    multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
                             seed: Some(0)
@@ -1372,6 +1636,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1392,9 +1659,10 @@ mod test {
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
             bfd_manager.period_secs = 30
-            inventory.period_secs = 10
+            inventory.period_secs_load = 10
+            inventory.period_secs_collect = 10
             inventory.nkeep = 3
-            inventory.disable = false
+            inventory.disable_collect = false
             support_bundle_collector.period_secs = 30
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
@@ -1404,7 +1672,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
-            blueprints.period_secs_load_chicken_switches= 5
+            blueprints.period_secs_load_reconfigurator_config = 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1423,13 +1691,34 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+            fm.sitrep_load_period_secs = 45
+            fm.sitrep_gc_period_secs = 46
+            probe_distributor.period_secs = 47
+            fm.rendezvous_period_secs = 48
+            multicast_reconciler.period_secs = 60
+            trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"
+
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .unwrap();
@@ -1469,11 +1758,16 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .expect_err("expected failure");
@@ -1486,10 +1780,7 @@ mod test {
                 error
             );
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1511,9 +1802,6 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:9000"
-            [updates]
-            trusted_root = "/path/to/root.json"
-            default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 100
             [deployment]
@@ -1526,11 +1814,16 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4568"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .expect_err("Expected failure");
@@ -1539,11 +1832,21 @@ mod test {
                 r#"invalid "max_vpc_ipv4_subnet_prefix": "IPv4 subnet prefix must"#,
             ));
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
+    }
+
+    #[test]
+    fn test_invalid_audit_log_cleanup_retention_days() {
+        let error = toml::from_str::<AuditLogCleanupConfig>(
+            r##"
+            period_secs = 600
+            retention_days = 0
+            max_deleted_per_activation = 10000
+            "##,
+        )
+        .expect_err("retention_days = 0 should be rejected");
+        assert!(error.message().contains("nonzero"), "error = {}", error);
     }
 
     #[test]
@@ -1639,4 +1942,21 @@ pub enum RegionAllocationStrategy {
 
     /// Like Random, but ensures that each region is allocated on its own sled.
     RandomWithDistinctSleds { seed: Option<u64> },
+}
+
+/// Configuration details relevant to supporting `omdb`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OmdbConfig {
+    /// Path to the `omdb` binary that is packaged alongside Nexus.
+    ///
+    /// `omdb` is not typically used from within a Nexus zone, but we ship it
+    /// alongside Nexus to ensure we always have a version of `omdb` on the
+    /// system that matches the active version of Nexus. (During an upgrade, the
+    /// `omdb` shipped in the switch zone will be updated much earlier in the
+    /// process than the running Nexus zones, which means there's a period where
+    /// the switch zone `omdb` is expecting the systems it pokes to be running
+    /// already-updated software; this is particularly problematic for `omdb db
+    /// ...` when the schema migration to the new version hasn't been applied
+    /// yet.)
+    pub bin_path: Utf8PathBuf,
 }

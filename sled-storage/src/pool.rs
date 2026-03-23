@@ -4,8 +4,7 @@
 
 //! ZFS storage pool
 
-use crate::error::Error;
-use illumos_utils::zpool::{Zpool, ZpoolInfo, ZpoolName};
+use illumos_utils::zpool::{GetInfoError, Zpool, ZpoolInfo, ZpoolName};
 use omicron_common::disk::DiskIdentity;
 
 /// A ZFS storage pool wrapper that tracks information returned from
@@ -24,7 +23,7 @@ impl Pool {
     pub async fn new(
         name: ZpoolName,
         parent: DiskIdentity,
-    ) -> Result<Pool, Error> {
+    ) -> Result<Pool, GetInfoError> {
         let info = Zpool::get_info(&name.to_string()).await?;
         Ok(Pool { name, info, parent })
     }

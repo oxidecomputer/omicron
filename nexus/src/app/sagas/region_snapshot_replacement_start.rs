@@ -66,6 +66,7 @@ use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_queries::db::datastore::NewRegionVolumeId;
 use nexus_db_queries::db::datastore::OldSnapshotVolumeId;
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -250,7 +251,7 @@ async fn rsrss_set_saga_id(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -308,9 +309,9 @@ async fn rsrss_get_snapshot_and_region_id(
                 .datastore()
                 .get_region_optional(region_id)
                 .await
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
             else {
-                return Err(ActionError::action_failed(Error::internal_error(
+                return Err(saga_action_failed(Error::internal_error(
                     &format!("region {region_id} deleted"),
                 )));
             };
@@ -319,19 +320,19 @@ async fn rsrss_get_snapshot_and_region_id(
                 .datastore()
                 .find_snapshot_by_volume_id(&opctx, region.volume_id())
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             match maybe_snapshot {
                 Some(snapshot) => (snapshot.id(), region.id()),
 
                 None => {
-                    return Err(ActionError::action_failed(
-                        Error::internal_error(&format!(
+                    return Err(saga_action_failed(Error::internal_error(
+                        &format!(
                             "region {} volume {} deleted",
                             region.id(),
                             region.volume_id(),
-                        )),
-                    ));
+                        ),
+                    )));
                 }
             }
         }
@@ -398,7 +399,7 @@ async fn rsrss_get_clone_source(
         .datastore()
         .find_non_expunged_region_snapshots(&opctx, snapshot_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Filter out the request's region snapshot, if appropriate - if there are
     // no other candidates, this could be chosen later in this function, but it
@@ -452,19 +453,20 @@ async fn rsrss_get_clone_source(
         .datastore()
         .snapshot_get(&opctx, snapshot_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let Some(db_snapshot) = maybe_db_snapshot else {
-        return Err(ActionError::action_failed(Error::internal_error(
-            &format!("snapshot {} was hard deleted!", snapshot_id),
-        )));
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "snapshot {} was hard deleted!",
+            snapshot_id
+        ))));
     };
 
     let mut non_expunged_read_only_regions = osagactx
         .datastore()
         .find_non_expunged_regions(&opctx, db_snapshot.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Filter out the request's region, if appropriate.
 
@@ -506,7 +508,7 @@ async fn rsrss_get_clone_source(
                 .datastore()
                 .crucible_dataset_physical_disk_in_service(dataset_id.into())
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             if request_dataset_on_in_service_physical_disk {
                 // If the request region snapshot's dataset has not been
@@ -529,9 +531,9 @@ async fn rsrss_get_clone_source(
                 .datastore()
                 .get_region_optional(region_id)
                 .await
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
             else {
-                return Err(ActionError::action_failed(Error::internal_error(
+                return Err(saga_action_failed(Error::internal_error(
                     &format!("region {region_id} deleted"),
                 )));
             };
@@ -540,7 +542,7 @@ async fn rsrss_get_clone_source(
                 .datastore()
                 .crucible_dataset_physical_disk_in_service(region.dataset_id())
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             if request_dataset_on_in_service_physical_disk {
                 // If the request read-only region's dataset has not been
@@ -559,10 +561,10 @@ async fn rsrss_get_clone_source(
     // If all targets of a Volume::Region are on expunged datasets, then the
     // user's data is gone, and this code will fail to select a clone source.
 
-    return Err(ActionError::action_failed(format!(
+    return Err(saga_action_failed(Error::internal_error(&format!(
         "no clone source candidate for {}!",
         snapshot_id,
-    )));
+    ))));
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -596,12 +598,13 @@ async fn rsrss_get_alloc_region_params(
         .datastore()
         .snapshot_get(&opctx, snapshot_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let Some(db_snapshot) = maybe_db_snapshot else {
-        return Err(ActionError::action_failed(Error::internal_error(
-            &format!("snapshot {} was hard deleted!", snapshot_id),
-        )));
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "snapshot {} was hard deleted!",
+            snapshot_id
+        ))));
     };
 
     // Find the region to replace
@@ -609,13 +612,13 @@ async fn rsrss_get_alloc_region_params(
         .datastore()
         .get_region(region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let current_allocated_regions = osagactx
         .datastore()
         .get_allocated_regions(db_snapshot.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(AllocRegionParams {
         block_size: db_region.block_size().to_bytes(),
@@ -661,7 +664,7 @@ async fn rsrss_alloc_new_region(
             alloc_region_params.current_allocated_regions.len() + 1,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(datasets_and_regions)
 }
@@ -719,12 +722,10 @@ async fn rsrss_find_new_region(
     );
 
     let Some(dataset_and_region) = maybe_dataset_and_region else {
-        return Err(ActionError::action_failed(Error::internal_error(
-            &format!(
-                "expected dataset and region, saw {:?}!",
-                maybe_dataset_and_region,
-            ),
-        )));
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "expected dataset and region, saw {:?}!",
+            maybe_dataset_and_region,
+        ))));
     };
 
     Ok(dataset_and_region)
@@ -758,12 +759,14 @@ async fn rsrss_new_region_ensure(
                 .datastore()
                 .region_snapshot_get(dataset_id, region_id, snapshot_id)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             let Some(region_snapshot) = region_snapshot else {
-                return Err(ActionError::action_failed(format!(
-                    "region snapshot {} {} {} deleted!",
-                    dataset_id, region_id, snapshot_id,
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "region snapshot {} {} {} deleted!",
+                        dataset_id, region_id, snapshot_id,
+                    ),
                 )));
             };
 
@@ -771,8 +774,10 @@ async fn rsrss_new_region_ensure(
                 Ok(addr) => addr,
 
                 Err(e) => {
-                    return Err(ActionError::action_failed(format!(
-                        "error parsing region_snapshot.snapshot_addr: {e}"
+                    return Err(saga_action_failed(Error::internal_error(
+                        &format!(
+                            "error parsing region_snapshot.snapshot_addr: {e}"
+                        ),
                     )));
                 }
             }
@@ -783,14 +788,16 @@ async fn rsrss_new_region_ensure(
                 .datastore()
                 .region_addr(region_id)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             match maybe_addr {
                 Some(addr) => addr,
 
                 None => {
-                    return Err(ActionError::action_failed(format!(
-                        "region clone source {region_id} has no port!"
+                    return Err(saga_action_failed(Error::internal_error(
+                        &format!(
+                            "region clone source {region_id} has no port!"
+                        ),
                     )));
                 }
             }
@@ -816,7 +823,7 @@ async fn rsrss_new_region_ensure(
             Some(source_repair_addr.to_string()),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok((new_dataset, ensured_region))
 }
@@ -876,7 +883,7 @@ async fn rsrss_new_region_volume_create(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            generation: 0,
             opts: CrucibleOpts {
                 id: new_region_volume_id.into_untyped_uuid(),
                 target: vec![new_region_address],
@@ -897,7 +904,7 @@ async fn rsrss_new_region_volume_create(
         .datastore()
         .volume_create(new_region_volume_id, volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -938,12 +945,13 @@ async fn rsrss_get_old_snapshot_volume_id(
         .datastore()
         .snapshot_get(&opctx, snapshot_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let Some(db_snapshot) = maybe_db_snapshot else {
-        return Err(ActionError::action_failed(Error::internal_error(
-            &format!("snapshot {} was hard deleted!", snapshot_id),
-        )));
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "snapshot {} was hard deleted!",
+            snapshot_id
+        ))));
     };
 
     Ok(db_snapshot.volume_id())
@@ -967,7 +975,7 @@ async fn rsrss_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            generation: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 // Do not put the new region ID here: it will be deleted during
@@ -995,7 +1003,7 @@ async fn rsrss_create_fake_volume(
         .datastore()
         .volume_create(new_volume_id, volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1033,14 +1041,14 @@ async fn get_replace_params(
         .datastore()
         .read_only_target_addr(&params.request)
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     else {
         // This is ok - the next background task invocation will move the
         // request state forward appropriately.
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "request {} target deleted!",
             params.request.id,
-        )));
+        ))));
     };
 
     let (new_dataset, ensured_region) =
@@ -1097,7 +1105,7 @@ async fn rsrss_replace_snapshot_in_volume(
             VolumeToDelete(replacement_params.new_volume_id),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     match volume_replace_snapshot_result {
         VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
@@ -1210,7 +1218,7 @@ async fn rsrss_update_request_record(
             OldSnapshotVolumeId(old_region_volume_id),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1219,7 +1227,7 @@ async fn rsrss_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::saga::create_saga_dag,
+        app::db::datastore::Disk, app::saga::create_saga_dag,
         app::sagas::region_snapshot_replacement_start::*,
         app::sagas::test_helpers::test_opctx,
     };
@@ -1236,9 +1244,9 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::create_snapshot;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::views;
+    use nexus_types::external_api::snapshot;
     use nexus_types::identity::Asset;
-    use omicron_uuid_kinds::GenericUuid;
+
     use sled_agent_client::VolumeConstructionRequest;
 
     type ControlPlaneTestContext =
@@ -1275,11 +1283,12 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 3);
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(db_disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         // Create a snapshot
         let snapshot =
@@ -1301,8 +1310,8 @@ pub(crate) mod test {
     }
 
     struct PrepareResult<'a> {
-        db_disk: nexus_db_model::Disk,
-        snapshot: views::Snapshot,
+        db_disk: db::datastore::CrucibleDisk,
+        snapshot: snapshot::Snapshot,
         db_snapshot: nexus_db_model::Snapshot,
         disk_test: DiskTest<'a, crate::Server>,
     }
@@ -1534,17 +1543,21 @@ pub(crate) mod test {
         request: &RegionSnapshotReplacement,
     ) {
         let opctx = test_opctx(cptestctx);
+
         let db_request = datastore
             .get_region_snapshot_replacement_request_by_id(&opctx, request.id)
             .await
             .unwrap();
 
         assert_eq!(db_request.new_region_id, None);
-        assert_eq!(
-            db_request.replacement_state,
-            RegionSnapshotReplacementState::Requested
-        );
         assert_eq!(db_request.operating_saga_id, None);
+
+        match db_request.replacement_state {
+            RegionSnapshotReplacementState::Requested => {}
+            x => {
+                panic!("replacement state {:?} != Requested", x);
+            }
+        }
     }
 
     async fn assert_volume_untouched(
@@ -1855,11 +1868,11 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk.identity.id)
-            .fetch()
-            .await
-            .unwrap();
+        let Disk::Crucible(db_disk) =
+            datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
@@ -1883,11 +1896,11 @@ pub(crate) mod test {
 
             let zpool = disk_test
                 .zpools()
-                .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+                .find(|x| x.id == dataset.pool_id())
                 .expect("Expected at least one zpool");
 
             let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-                .zpool_id(zpool.id.into_untyped_uuid())
+                .zpool_id(zpool.id)
                 .fetch()
                 .await
                 .unwrap();
@@ -1895,7 +1908,7 @@ pub(crate) mod test {
             datastore
                 .physical_disk_update_policy(
                     &opctx,
-                    db_zpool.physical_disk_id.into(),
+                    db_zpool.physical_disk_id(),
                     PhysicalDiskPolicy::Expunged,
                 )
                 .await
@@ -2013,11 +2026,11 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk.identity.id)
-            .fetch()
-            .await
-            .unwrap();
+        let Disk::Crucible(db_disk) =
+            datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
@@ -2041,11 +2054,11 @@ pub(crate) mod test {
 
             let zpool = disk_test
                 .zpools()
-                .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+                .find(|x| x.id == dataset.pool_id())
                 .expect("Expected at least one zpool");
 
             let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-                .zpool_id(zpool.id.into_untyped_uuid())
+                .zpool_id(zpool.id)
                 .fetch()
                 .await
                 .unwrap();
@@ -2053,7 +2066,7 @@ pub(crate) mod test {
             datastore
                 .physical_disk_update_policy(
                     &opctx,
-                    db_zpool.physical_disk_id.into(),
+                    db_zpool.physical_disk_id(),
                     PhysicalDiskPolicy::Expunged,
                 )
                 .await

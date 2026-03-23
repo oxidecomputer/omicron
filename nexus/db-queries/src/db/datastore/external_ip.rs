@@ -7,17 +7,18 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
-use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::ExternalIp;
 use crate::db::model::FloatingIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
+use crate::db::model::IpPoolType;
 use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -30,6 +31,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -39,7 +41,8 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
-use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_db_model::IpVersion;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -56,9 +59,72 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
+use sled_agent_types::inventory::ZoneKind;
+use slog::debug;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+/// Ephemeral IPs for an instance, with one slot per IP version.
+///
+/// Only used to have something nice to return from the ephemeral IPs lookup
+/// function. The canonical data structure for representing these to the user is
+/// the list of all external IPs on an instance.
+#[derive(Debug, Clone, Default)]
+pub struct InstanceEphemeralIps {
+    pub v4: Option<ExternalIp>,
+    pub v6: Option<ExternalIp>,
+}
+
+impl InstanceEphemeralIps {
+    pub fn get(self, version: IpVersion) -> Option<ExternalIp> {
+        match version {
+            IpVersion::V4 => self.v4,
+            IpVersion::V6 => self.v6,
+        }
+    }
+}
+
+/// Floating IP allocation method.
+///
+/// Separate from `params::AddressAllocator` because pool resolution requires
+/// async authz lookup. The app layer converts API params to this type.
+#[derive(Debug, Clone)]
+pub enum FloatingIpAllocation {
+    /// Use a specific IP address. Pool is inferred from the address since
+    /// IP pool ranges cannot overlap.
+    Explicit { ip: IpAddr },
+    /// Auto-allocate from a pool.
+    Auto {
+        /// Explicit pool to allocate from. If None, uses the silo's default.
+        pool: Option<authz::IpPool>,
+        /// IP version for default pool selection.
+        /// Required if both IPv4 and IPv6 default pools exist and no explicit
+        /// pool is specified.
+        ip_version: Option<IpVersion>,
+    },
+}
+
+impl std::fmt::Display for FloatingIpAllocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Explicit { .. } => write!(f, "inferred"),
+            Self::Auto { pool: Some(_), .. } => write!(f, "explicit"),
+            Self::Auto { pool: None, .. } => write!(f, "default"),
+        }
+    }
+}
+
+// NOTE: This number includes the automatically-created SNAT IP for every
+// instance. We need to change that allocation so that it's only when necessary,
+// tracked by https://github.com/oxidecomputer/omicron/issues/9003.
+//
+// With the addition of dual-stack NICs, we actually get one or _two_ automatic
+// SNAT addresses, one per IP stack. The code today makes it challenging to
+// enforce a limit that respects this -- if you create a dual-stack NIC, you can
+// create 31 external IPs, if you create a single-stack, you can have 32.
+// Bumping this by 1 just moves the problem, the fundamental issue is that our
+// code for attaching resources has only a single limit on the number (they're
+// all homogenous) and that we still haven't fixed #9003.
 const MAX_EXTERNAL_IPS_PLUS_SNAT: u32 = MAX_EXTERNAL_IPS_PER_INSTANCE + 1;
 
 impl DataStore {
@@ -85,8 +151,16 @@ impl DataStore {
         ip_id: Uuid,
         probe_id: Uuid,
         pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
     ) -> CreateResult<ExternalIp> {
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let (authz_pool, _pool_version) = self
+            .resolve_pool_for_allocation(
+                opctx,
+                pool,
+                IpPoolType::Unicast,
+                ip_version,
+            )
+            .await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
             probe_id,
@@ -113,6 +187,7 @@ impl DataStore {
         ip_id: Uuid,
         instance_id: InstanceUuid,
         pool: Option<authz::IpPool>,
+        ip_version: Option<IpVersion>,
         creating_instance: bool,
     ) -> CreateResult<(ExternalIp, bool)> {
         // This is slightly hacky: we need to create an unbound ephemeral IP, and
@@ -122,27 +197,42 @@ impl DataStore {
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
 
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let (authz_pool, pool_version) = self
+            .resolve_pool_for_allocation(
+                opctx,
+                pool,
+                IpPoolType::Unicast,
+                ip_version,
+            )
+            .await?;
+
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
         // idempotent or double attach this failure is allowed.
         let temp_ip = self.allocate_external_ip(opctx, data).await;
         if let Err(e) = temp_ip {
-            let eip = self
-                .instance_lookup_ephemeral_ip(opctx, instance_id)
-                .await?
-                .ok_or(e)?;
-
+            // Use the pool's version for lookup when the request didn't
+            // specify one. This handles the case where an explicit pool was
+            // used and the instance already has both v4 and v6 ephemeral IPs.
+            let lookup_version = ip_version.unwrap_or(pool_version);
+            let eph_ips =
+                self.instance_lookup_ephemeral_ips(opctx, instance_id).await?;
+            let eip = eph_ips.get(lookup_version).ok_or(e)?;
             return Ok((eip, false));
         }
         let temp_ip = temp_ip?;
+        let allocated_version = match temp_ip.ip {
+            ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+            ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+        };
 
         match self
             .begin_attach_ip(
                 opctx,
                 temp_ip.id,
                 instance_id,
+                allocated_version,
                 IpKind::Ephemeral,
                 creating_instance,
             )
@@ -155,12 +245,14 @@ impl DataStore {
             // Idempotent case: attach failed due to a caught UniqueViolation.
             Ok(None) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
-                let eip = self
-                    .instance_lookup_ephemeral_ip(opctx, instance_id)
-                    .await?
-                    .ok_or_else(|| Error::internal_error(
-                        "failed to lookup current ephemeral IP for idempotent attach"
-                    ))?;
+                let eph_ips = self
+                    .instance_lookup_ephemeral_ips(opctx, instance_id)
+                    .await?;
+                let eip = eph_ips.get(allocated_version).ok_or_else(|| {
+                    Error::internal_error(
+                        "failed to lookup current ephemeral IP for idempotent attach",
+                    )
+                })?;
                 let do_saga = eip.state != IpAttachState::Attached;
                 Ok((eip, do_saga))
             }
@@ -173,7 +265,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
-    ) -> LookupResult<Vec<ExternalIp>> {
+    ) -> Result<Vec<ExternalIp>, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(true))
@@ -182,34 +274,7 @@ impl DataStore {
             .select(ExternalIp::as_select())
             .get_results_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// If a pool is specified, make sure it's linked to this silo. If a pool is
-    /// not specified, fetch the default pool for this silo. Once the pool is
-    /// resolved (by either method) do an auth check. Then return the pool.
-    async fn resolve_pool_for_allocation(
-        &self,
-        opctx: &OpContext,
-        pool: Option<authz::IpPool>,
-    ) -> LookupResult<authz::IpPool> {
-        let authz_pool = match pool {
-            Some(authz_pool) => {
-                self.ip_pool_fetch_link(opctx, authz_pool.id())
-                    .await
-                    .map_err(|_| authz_pool.not_found())?;
-
-                authz_pool
-            }
-            // If no pool specified, use the default logic
-            None => {
-                let (authz_pool, ..) =
-                    self.ip_pools_fetch_default(opctx).await?;
-                authz_pool
-            }
-        };
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        Ok(authz_pool)
+            .map_err(|err| err.into())
     }
 
     /// Allocates a floating IP address for instance usage.
@@ -218,14 +283,51 @@ impl DataStore {
         opctx: &OpContext,
         project_id: Uuid,
         identity: IdentityMetadataCreateParams,
-        ip: Option<IpAddr>,
-        pool: Option<authz::IpPool>,
+        allocation: FloatingIpAllocation,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let (authz_pool, explicit_ip) = match &allocation {
+            FloatingIpAllocation::Explicit { ip } => {
+                let pool = self
+                    .ip_pool_fetch_containing_address(
+                        opctx,
+                        *ip,
+                        IpPoolType::Unicast,
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        Error::ObjectNotFound { .. } => {
+                            Error::invalid_request(format!(
+                                "IP address {ip} is not in any configured pool"
+                            ))
+                        }
+                        other => other,
+                    })?;
+                (pool, Some(*ip))
+            }
+            FloatingIpAllocation::Auto { pool, ip_version } => {
+                let (pool, _pool_version) = self
+                    .resolve_pool_for_allocation(
+                        opctx,
+                        pool.clone(),
+                        IpPoolType::Unicast,
+                        *ip_version,
+                    )
+                    .await?;
+                (pool, None)
+            }
+        };
 
-        let data = if let Some(ip) = ip {
+        debug!(
+            opctx.log,
+            "floating IP allocation";
+            "pool_selection" => %allocation,
+            "pool_id" => %authz_pool.id(),
+            "project_id" => %project_id,
+        );
+
+        let data = if let Some(ip) = explicit_ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
                 &Name(identity.name),
@@ -253,7 +355,9 @@ impl DataStore {
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let ip = Self::allocate_external_ip_on_connection(&conn, data).await?;
+        let ip = Self::allocate_external_ip_on_connection(&conn, data)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(ip)
     }
 
@@ -263,40 +367,68 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
     ) -> Result<ExternalIp, TransactionError<Error>> {
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
         // Name needs to be cloned out here (if present) to give users a
         // sensible error message on name collision.
         let name = data.name().clone();
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use diesel::result::DatabaseErrorKind::NotNullViolation;
+            use diesel::result::DatabaseErrorKind::UniqueViolation;
             use diesel::result::Error::DatabaseError;
             use diesel::result::Error::NotFound;
+            let emit_err_msg = |explicit_ip: bool,
+                                msg: &str|
+             -> TransactionError<Error> {
+                if explicit_ip {
+                    TransactionError::CustomError(Error::invalid_request(
+                        "Requested external IP address not available",
+                    ))
+                } else {
+                    TransactionError::CustomError(Error::insufficient_capacity(
+                        "No external IP addresses available",
+                        msg,
+                    ))
+                }
+            };
             match e {
-                NotFound => {
-                    if explicit_ip {
+                DatabaseError(NotNullViolation, ref info)
+                    if info.message().contains("in column \"ip\"") =>
+                {
+                    emit_err_msg(
+                        explicit_ip,
+                        "NextExternalIp::new tried to insert NULL ip",
+                    )
+                }
+                NotFound => emit_err_msg(
+                    explicit_ip,
+                    "NextExternalIp::new returned NotFound",
+                ),
+                DatabaseError(UniqueViolation, ref info) => {
+                    // Attempt to re-use same IP address.
+                    if info.constraint_name() == Some("external_ip_unique") {
                         TransactionError::CustomError(Error::invalid_request(
                             "Requested external IP address not available",
                         ))
+                    // Floating IP: name conflict
+                    } else if info
+                        .constraint_name()
+                        .map(|name| name.starts_with("lookup_floating_"))
+                        .unwrap_or(false)
+                    {
+                        TransactionError::CustomError(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::FloatingIp,
+                                name.as_ref()
+                                    .map(|m| m.as_str())
+                                    .unwrap_or_default(),
+                            ),
+                        ))
                     } else {
                         TransactionError::CustomError(
-                            Error::insufficient_capacity(
-                                "No external IP addresses available",
-                                "NextExternalIp::new returned NotFound",
-                            ),
+                            crate::db::queries::external_ip::from_diesel(e),
                         )
                     }
-                }
-                // Floating IP: name conflict
-                DatabaseError(UniqueViolation, ..) if name.is_some() => {
-                    TransactionError::CustomError(public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::FloatingIp,
-                            name.as_ref()
-                                .map(|m| m.as_str())
-                                .unwrap_or_default(),
-                        ),
-                    ))
                 }
                 _ => {
                     if retryable(&e) {
@@ -318,7 +450,9 @@ impl DataStore {
         zone_kind: ZoneKind,
         external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
-        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
+        let version = IpVersion::from(external_ip.ip_version());
+        let (authz_pool, pool) =
+            self.ip_pools_service_lookup(opctx, version).await?;
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         let data = IncompleteExternalIp::for_omicron_zone(
             pool.id(),
@@ -356,7 +490,12 @@ impl DataStore {
     ) -> ListResultVec<ExternalIp> {
         use nexus_db_schema::schema::external_ip::dsl;
 
-        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        // Note the IP version used here isn't important. It's just for the
+        // authz check to list children, and not used for the actual database
+        // query below, which filters on is_service to get external IPs from
+        // either pool.
+        let (authz_pool, _pool) =
+            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
 
         paginated(dsl::external_ip, dsl::id, pagparams)
@@ -410,6 +549,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: InstanceUuid,
+        ip_version: IpVersion,
         kind: IpKind,
         creating_instance: bool,
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
@@ -419,6 +559,8 @@ impl DataStore {
         use nexus_db_schema::schema::external_ip::table;
         use nexus_db_schema::schema::instance::dsl as inst_dsl;
         use nexus_db_schema::schema::instance::table as inst_table;
+        use nexus_db_schema::schema::network_interface::dsl as nic_dsl;
+        use nexus_db_schema::schema::network_interface::table as nic_table;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
@@ -426,7 +568,18 @@ impl DataStore {
             &SAFE_TO_ATTACH_INSTANCE_STATES[..]
         };
 
-        let query = Instance::attach_resource(
+        let base_nic_query = nic_table
+            .into_boxed()
+            .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
+            .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::is_primary.eq(true))
+            .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
+        let has_matching_ip_stack = match ip_version {
+            IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
+            IpVersion::V6 => base_nic_query.select(nic_dsl::ipv6.is_not_null()),
+        };
+
+        let query = Instance::attach_resource_with_update_condition(
             instance_id.into_untyped_uuid(),
             ip_id,
             inst_table
@@ -444,6 +597,7 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
                 dsl::state.eq(IpAttachState::Attaching),
             )),
+            has_matching_ip_stack,
         );
 
         let mut do_saga = true;
@@ -467,7 +621,7 @@ impl DataStore {
                     )
                 })
             },
-            AttachError::NoUpdate { attached_count, resource, collection } => {
+            AttachError::NoUpdate { attached_count, update_condition_satisfied, resource, collection } => {
                 match resource.state {
                     // Idempotent errors: is in progress or complete for same resource pair -- this is fine.
                     IpAttachState::Attaching if resource.parent_id == Some(instance_id.into_untyped_uuid()) =>
@@ -494,28 +648,48 @@ impl DataStore {
                     IpAttachState::Detached => {},
                 }
 
-                if collection.runtime_state.migration_id.is_some() {
+                // Attempt to attach during a migration.
+                if collection.migration_id.is_some() {
                     return Err(Error::unavail(&format!(
                         "tried to attach {kind} IP while instance was migrating: \
                          detach will be safe to retry once migrate completes"
                     )))
                 }
 
-                Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
-                            Error::invalid_request(&format!(
-                                "an instance may not have more than \
-                                {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
-                            ))
-                        } else {
-                            Error::internal_error(&format!("failed to attach {kind} IP"))
-                        }
-                    },
-                    state => Error::invalid_request(&format!(
+                // Attach while instance is in an unsafe state.
+                let state = &collection.nexus_state;
+                if !safe_states.contains(state) {
+                    return Err(Error::invalid_request(&format!(
                         "cannot attach {kind} IP to instance in {state} state"
-                    )),
-                })
+                    )));
+                }
+
+                // Too many attached external IP addresses.
+                if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
+                    return Err(Error::invalid_request(&format!(
+                        "an instance may not have more than \
+                        {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
+                    )));
+                }
+
+                // Primary NIC Missing an IP stack for this external IP.
+                if !update_condition_satisfied {
+                    return Err(Error::invalid_request(&format!(
+                        "The {} external IP is an IP{} address, but \
+                        the instance with ID {} does not have a \
+                        primary network interface with a VPC-private IP{} \
+                        address. Add a VPC-private IP{} address to the \
+                        interface, or attach a different IP address",
+                        kind,
+                        ip_version,
+                        instance_id,
+                        ip_version,
+                        ip_version,
+                    )));
+                }
+
+                // Anything else, just report a generic error.
+                Err(Error::internal_error(&format!("failed to attach {kind} IP")))
             },
             // This case occurs for both currently attaching and attached ephemeral IPs:
             AttachError::DatabaseError(DatabaseError(UniqueViolation, ..))
@@ -618,14 +792,14 @@ impl DataStore {
                     IpAttachState::Attached => {},
                 }
 
-                if collection.runtime_state.migration_id.is_some() {
+                if collection.migration_id.is_some() {
                     return Err(Error::unavail(&format!(
                         "tried to detach {kind} IP while instance was migrating: \
                          detach will be safe to retry once migrate completes"
                     )))
                 }
 
-                match collection.runtime_state.nexus_state {
+                match collection.nexus_state {
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error(&format!("failed to detach {kind} IP"))
                     },
@@ -660,30 +834,44 @@ impl DataStore {
         ip_id: Uuid,
     ) -> Result<bool, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.deallocate_external_ip_on_connection(&conn, ip_id).await
+        let soft_delete_result = self
+            .deallocate_external_ip_on_connection(&conn, ip_id)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
+
+        // Squash `SoftDeleteResult::NotFound` into an error
+        soft_delete_result
+            .into_did_soft_delete_bool()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Variant of [Self::deallocate_external_ip] which may be called from a
-    /// transaction context.
+    /// transaction context and does not treat "row not found" as an error.
     pub(crate) async fn deallocate_external_ip_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         ip_id: Uuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<SoftDeleteResult, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
-        diesel::update(dsl::external_ip)
+        match diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(ip_id))
             .set(dsl::time_deleted.eq(now))
             .check_if_exists::<ExternalIp>(ip_id)
             .execute_and_check(conn)
             .await
-            .map(|r| match r.status {
-                UpdateStatus::Updated => true,
-                UpdateStatus::NotUpdatedButExists => false,
-            })
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|r| r.status)
+        {
+            Ok(UpdateStatus::Updated) => {
+                Ok(SoftDeleteResult::SoftDeleteApplied)
+            }
+            Ok(UpdateStatus::NotUpdatedButExists) => {
+                Ok(SoftDeleteResult::AlreadySoftDeleted)
+            }
+            Err(DieselError::NotFound) => Ok(SoftDeleteResult::NotFound),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Moves an instance's ephemeral IP from 'Attached' to 'Detaching'.
@@ -713,8 +901,8 @@ impl DataStore {
         .map(|res| res.map(|(ip, _do_saga)| ip))
     }
 
-    /// Delete all non-floating IP addresses associated with the provided instance
-    /// ID.
+    /// Delete all non-floating IP addresses associated with the provided
+    /// instance ID.
     ///
     /// This method returns the number of records deleted, rather than the usual
     /// `DeleteResult`. That's mostly useful for tests, but could be important
@@ -812,21 +1000,25 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch the ephmeral IP address assigned to the provided instance, if this
-    /// has been configured.
-    pub async fn instance_lookup_ephemeral_ip(
+    /// Fetch the ephemeral IPs assigned to the provided instance.
+    pub async fn instance_lookup_ephemeral_ips(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-    ) -> LookupResult<Option<ExternalIp>> {
-        Ok(self
-            .instance_lookup_external_ips(opctx, instance_id)
-            .await?
-            .into_iter()
-            .find(|v| v.kind == IpKind::Ephemeral))
+    ) -> LookupResult<InstanceEphemeralIps> {
+        let mut result = InstanceEphemeralIps { v4: None, v6: None };
+        for ip in self.instance_lookup_external_ips(opctx, instance_id).await? {
+            if ip.kind == IpKind::Ephemeral {
+                match ip.ip {
+                    ipnetwork::IpNetwork::V4(_) => result.v4 = Some(ip),
+                    ipnetwork::IpNetwork::V6(_) => result.v6 = Some(ip),
+                }
+            }
+        }
+        Ok(result)
     }
 
-    /// Fetch all external IP addresses of any kind for the provided probe
+    /// Fetch all external IP addresses of any kind for the provided probe.
     pub async fn probe_lookup_external_ips(
         &self,
         opctx: &OpContext,
@@ -954,6 +1146,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
+        ip_version: IpVersion,
         instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
@@ -969,6 +1162,7 @@ impl DataStore {
             opctx,
             authz_fip.id(),
             instance_id,
+            ip_version,
             IpKind::Floating,
             creating_instance,
         )
@@ -1141,11 +1335,29 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::{
+        create_project, create_stopped_instance_record,
+    };
+    use nexus_db_model::IpPoolResourceType;
+    use nexus_db_model::IpVersion;
+    use nexus_db_model::{Generation, IpPoolReservationType, Ipv4Net, Ipv6Net};
+    use nexus_db_model::{
+        IncompleteIpPoolResource, IncompleteNetworkInterface, IncompleteVpc,
+        VpcSubnet,
+    };
+    use nexus_db_model::{IpPool, VpcSubnetIdentity};
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
-    use nexus_types::external_api::shared::IpRange;
-    use nexus_types::inventory::SourceNatConfig;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
+    use nexus_types::external_api::vpc;
+    use nexus_types::identity::Resource;
+    use nexus_types::inventory::SourceNatConfigGeneric;
+    use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+    use omicron_common::api::external::{
+        self, IdentityMetadataCreateParams, LookupType,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use std::collections::BTreeSet;
@@ -1183,12 +1395,12 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(opctx)
+        let (service_ip_pool, db_pool) = datastore
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
             .await
             .expect("add range to service ip pool");
 
@@ -1199,7 +1411,7 @@ mod tests {
             let external_ip = if allocate_snat {
                 OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                     id: ExternalIpUuid::new_v4(),
-                    snat_cfg: SourceNatConfig::new(
+                    snat_cfg: SourceNatConfigGeneric::new(
                         ip,
                         0,
                         NUM_SOURCE_NAT_PORTS - 1,
@@ -1251,6 +1463,527 @@ mod tests {
         // Ensure we see them all remaining IPs.
         let ips = read_all_service_ips(&datastore, opctx).await;
         assert_eq!(ips, external_ips);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_deallocate_external_ip_is_idempotent() {
+        let logctx =
+            dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Set up an service IP pool range with one IP in it.
+        let ip = Ipv4Addr::new(10, 0, 0, 1);
+        let ip_range = IpRange::try_from((ip, ip)).unwrap();
+        let (service_ip_pool, db_pool) = datastore
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
+            .await
+            .expect("lookup service ip pool");
+        datastore
+            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
+            .await
+            .expect("add range to service ip pool");
+
+        // Allocate that IP to a fake Nexus.
+        let external_ip =
+            OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: ip.into(),
+            });
+        let external_ip = datastore
+            .external_ip_allocate_omicron_zone(
+                opctx,
+                OmicronZoneUuid::new_v4(),
+                ZoneKind::Nexus,
+                external_ip,
+            )
+            .await
+            .expect("failed to allocate service IP");
+
+        // Ensure we see them it.
+        let read_ips = read_all_service_ips(&datastore, opctx).await;
+        assert_eq!(read_ips, vec![external_ip.clone()]);
+
+        // We should be able to delete twice, and be told that the first delete
+        // modified the row and the second did not.
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .expect("got connection for tests");
+        let first_deleted = datastore
+            .deallocate_external_ip_on_connection(&conn, external_ip.id)
+            .await
+            .expect("deleted IP");
+        assert_eq!(
+            first_deleted,
+            SoftDeleteResult::SoftDeleteApplied,
+            "first delete removed IP"
+        );
+
+        // It should be gone after the first delete.
+        let read_ips = read_all_service_ips(&datastore, opctx).await;
+        assert_eq!(read_ips, Vec::new());
+
+        let second_deleted = datastore
+            .deallocate_external_ip_on_connection(&conn, external_ip.id)
+            .await
+            .expect("deleted IP");
+        assert_eq!(
+            second_deleted,
+            SoftDeleteResult::AlreadySoftDeleted,
+            "second delete did nothing"
+        );
+
+        // Attempting to delete a nonexist record should report that fact.
+        let bogus_id = Uuid::new_v4();
+        let bogus_delete_result = datastore
+            .deallocate_external_ip_on_connection(&conn, bogus_id)
+            .await
+            .expect("bogus delete did nothing");
+        assert_eq!(
+            bogus_delete_result,
+            SoftDeleteResult::NotFound,
+            "bogus delete should not have found a matching row"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that ephemeral IP allocation uses unicast default pool, not
+    /// multicast. When only a multicast default pool exists, allocation
+    /// should fail. When a unicast default pool exists, allocation should
+    /// succeed and use that pool.
+    #[tokio::test]
+    async fn test_ephemeral_ip_uses_unicast_default_not_multicast() {
+        let logctx = dev::test_setup_log(
+            "test_ephemeral_ip_uses_unicast_default_not_multicast",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a project and instance
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "test-project").await;
+        let instance_id = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "test-instance",
+        )
+        .await;
+
+        // Create a multicast default pool first
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-default".parse().unwrap(),
+                        description: "Multicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast pool");
+
+        // Add a range to multicast pool
+        let multicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 1, 1),
+                Ipv4Addr::new(224, 10, 1, 254),
+            )
+            .unwrap(),
+        );
+        let authz_multicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            multicast_pool.id(),
+            LookupType::ById(multicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_multicast_pool,
+                &multicast_pool,
+                &multicast_range,
+            )
+            .await
+            .expect("Should add multicast range");
+
+        // Link multicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast pool");
+
+        // Try to allocate ephemeral IP (using instance_id created above)
+        let ip_id = Uuid::new_v4();
+        let res = datastore
+            .allocate_instance_ephemeral_ip(
+                &opctx,
+                ip_id,
+                instance_id,
+                None, // No specific pool - use default
+                None, // No specific IP version
+                true, // creating instance
+            )
+            .await;
+
+        // Should fail because no unicast default pool exists
+        assert!(
+            res.is_err(),
+            "Ephemeral IP allocation should fail without unicast default pool"
+        );
+
+        // Now create a unicast default pool
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-default".parse().unwrap(),
+                        description: "Unicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast pool");
+
+        // Add a range to unicast pool
+        let unicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 254),
+            )
+            .unwrap(),
+        );
+        let authz_unicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            unicast_pool.id(),
+            LookupType::ById(unicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_unicast_pool,
+                &unicast_pool,
+                &unicast_range,
+            )
+            .await
+            .expect("Should add unicast range");
+
+        // Link unicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast pool");
+
+        // NOTE: When we create a stopped instance, as above, we do that with
+        // `project_create_instance()`, rather than the normal saga that creates
+        // instances. That means we get no NIC for the instance. As part of
+        // #9508, we added verification that an instane's primary NIC can handle
+        // traffic when attaching an external IP, e.g., that it has a VPC
+        // private IPv4 address when attaching an external IPv4 address.
+        //
+        // That check will fail if we do not create the NIC for this instance
+        // first, so do that now. There's a _lot_ of boilerplate, since nothing
+        // exists yet.
+        let (_silo, project, authz_instance, _db_instance) =
+            LookupPath::new(opctx, datastore)
+                .instance_id(instance_id.into_untyped_uuid())
+                .fetch_for(authz::Action::CreateChild)
+                .await
+                .unwrap();
+        let (authz_vpc, _vpc) = datastore
+            .project_create_vpc(
+                opctx,
+                &project,
+                IncompleteVpc::new(
+                    Uuid::new_v4(),
+                    project.id(),
+                    Uuid::new_v4(),
+                    vpc::VpcCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "default".parse().unwrap(),
+                            description: String::new(),
+                        },
+                        ipv6_prefix: Some("fd00::/48".parse().unwrap()),
+                        dns_name: "foo".parse().unwrap(),
+                    },
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (authz_subnet, db_subnet) = datastore
+            .vpc_create_subnet(
+                opctx,
+                &authz_vpc,
+                VpcSubnet {
+                    identity: VpcSubnetIdentity {
+                        id: Uuid::new_v4(),
+                        name: Name("default".parse().unwrap()),
+                        description: String::new(),
+                        time_created: Utc::now(),
+                        time_modified: Utc::now(),
+                        time_deleted: None,
+                    },
+                    vpc_id: authz_vpc.id(),
+                    rcgen: Generation(external::Generation::new()),
+                    ipv4_block: Ipv4Net("192.168.1.0/24".parse().unwrap()),
+                    ipv6_block: Ipv6Net("fd00::/64".parse().unwrap()),
+                    custom_router_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let _nic = datastore
+            .instance_create_network_interface(
+                opctx,
+                &authz_subnet,
+                &authz_instance,
+                IncompleteNetworkInterface::new_instance(
+                    Uuid::new_v4(),
+                    instance_id,
+                    db_subnet,
+                    IdentityMetadataCreateParams {
+                        name: "net0".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    PrivateIpStackCreate::auto_dual_stack(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("Failed to create NIC for instance");
+
+        // Now ephemeral IP allocation should succeed
+        let ip_id = Uuid::new_v4();
+        let (ephemeral_ip, _) = datastore
+            .allocate_instance_ephemeral_ip(
+                &opctx,
+                ip_id,
+                instance_id,
+                None, // No specific pool - use default
+                None, // No specific IP version, but just 1 default pool
+                true, // creating instance
+            )
+            .await
+            .expect("Ephemeral IP allocation should succeed with unicast default pool");
+
+        // Verify the IP came from the unicast pool (10.0.0.x range)
+        let ip_addr = ephemeral_ip.ip.ip();
+        assert!(
+            matches!(ip_addr, std::net::IpAddr::V4(v4) if v4.octets()[0] == 10),
+            "Ephemeral IP {ip_addr} should be from unicast pool (10.0.0.x), not multicast"
+        );
+
+        // Verify the IP is associated with the unicast pool
+        assert_eq!(
+            ephemeral_ip.ip_pool_id,
+            unicast_pool.id(),
+            "Ephemeral IP should be from unicast pool"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that floating IP allocation uses unicast default pool, not
+    /// multicast. When only a multicast default pool exists, allocation
+    /// should fail. When a unicast default pool exists, allocation should
+    /// succeed and use that pool.
+    #[tokio::test]
+    async fn test_floating_ip_uses_unicast_default_not_multicast() {
+        let logctx = dev::test_setup_log(
+            "test_floating_ip_uses_unicast_default_not_multicast",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a project for our floating IP
+        let (_authz_project, project) =
+            create_project(&opctx, &datastore, "test-project").await;
+
+        // Create a multicast default pool first
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-default".parse().unwrap(),
+                        description: "Multicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast pool");
+
+        // Add a range to multicast pool
+        let multicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 1, 1),
+                Ipv4Addr::new(224, 10, 1, 254),
+            )
+            .unwrap(),
+        );
+        let authz_multicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            multicast_pool.id(),
+            LookupType::ById(multicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_multicast_pool,
+                &multicast_pool,
+                &multicast_range,
+            )
+            .await
+            .expect("Should add multicast range");
+
+        // Link multicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast pool");
+
+        // Try to allocate floating IP from default pool (no pool, no IP version)
+        let res = datastore
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                IdentityMetadataCreateParams {
+                    name: "my-floating-ip".parse().unwrap(),
+                    description: "A floating IP".to_string(),
+                },
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
+            )
+            .await;
+
+        // This should fail because no unicast default pool exists
+        assert!(
+            res.is_err(),
+            "Floating IP allocation should fail without unicast default pool"
+        );
+
+        // Now create a unicast default pool
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-default".parse().unwrap(),
+                        description: "Unicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast pool");
+
+        // Add a range to unicast pool
+        let unicast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 254),
+            )
+            .unwrap(),
+        );
+        let authz_unicast_pool = authz::IpPool::new(
+            authz::FLEET,
+            unicast_pool.id(),
+            LookupType::ById(unicast_pool.id()),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_unicast_pool,
+                &unicast_pool,
+                &unicast_range,
+            )
+            .await
+            .expect("Should add unicast range");
+
+        // Link unicast pool to silo as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast pool");
+
+        // Now floating IP allocation from default pool should succeed
+        let floating_ip = datastore
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                IdentityMetadataCreateParams {
+                    name: "my-floating-ip".parse().unwrap(),
+                    description: "A floating IP".to_string(),
+                },
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
+            )
+            .await
+            .expect("Floating IP allocation should succeed with unicast default pool");
+
+        // Verify the IP came from the unicast pool (10.0.0.x range)
+        let ip_addr = floating_ip.ip.ip();
+        assert!(
+            matches!(ip_addr, std::net::IpAddr::V4(v4) if v4.octets()[0] == 10),
+            "Floating IP {ip_addr} should be from unicast pool (10.0.0.x), not multicast"
+        );
+
+        // Verify the IP is associated with the unicast pool
+        assert_eq!(
+            floating_ip.ip_pool_id,
+            unicast_pool.id(),
+            "Floating IP should be from unicast pool"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

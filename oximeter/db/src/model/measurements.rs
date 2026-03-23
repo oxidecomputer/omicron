@@ -246,7 +246,7 @@ fn insert_datum_columns(datum: &Datum, columns: &mut IndexMap<String, Column>) {
 /// Build the measurement columns for a missing datum.
 fn build_missing_measurement_columns(
     missing: &MissingDatum,
-) -> impl Iterator<Item = (String, Column)> {
+) -> impl Iterator<Item = (String, Column)> + use<> {
     let mut columns = IndexMap::new();
     match missing.datum_type() {
         DatumType::Bool => {
@@ -420,7 +420,7 @@ impl_convert_bin_type! {f64, DataType::Float64}
 /// counts array, which is always a `u64`.
 fn build_histogram_measurement_columns<T>(
     hist: &Histogram<T>,
-) -> impl Iterator<Item = (String, Column)>
+) -> impl Iterator<Item = (String, Column)> + use<T>
 where
     T: ConvertBinType,
 {

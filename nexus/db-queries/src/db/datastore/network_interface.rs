@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
 use crate::db::model::InstanceNetworkInterface;
@@ -19,6 +20,7 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::SqlU8;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -29,8 +31,13 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::retryable;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::IpVersion;
+use nexus_db_model::Ipv4Addr;
+use nexus_db_model::Ipv6Addr;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
@@ -42,35 +49,98 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
 /// interface and VPC subnet tables.
-#[derive(Debug, diesel::Queryable)]
+#[derive(Debug, diesel::Queryable, diesel::Selectable)]
 struct NicInfo {
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::id)]
     id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::parent_id)]
     parent_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::kind)]
     kind: NetworkInterfaceKind,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::name)]
     name: db::model::Name,
-    ip: ipnetwork::IpNetwork,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::ip)]
+    ipv4: Option<Ipv4Addr>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::ipv6)]
+    ipv6: Option<Ipv6Addr>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::mac)]
     mac: db::model::MacAddr,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv4_block)]
     ipv4_block: db::model::Ipv4Net,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv6_block)]
     ipv6_block: db::model::Ipv6Net,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc::vni)]
     vni: db::model::Vni,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::is_primary)]
     primary: bool,
-    slot: i16,
-    transit_ips: Vec<ipnetwork::IpNetwork>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::slot)]
+    slot: SqlU8,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips)]
+    transit_ips_v4: Vec<crate::db::model::Ipv4Net>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips_v6)]
+    transit_ips_v6: Vec<crate::db::model::Ipv6Net>,
 }
 
-impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
-    fn from(
+impl TryFrom<NicInfo>
+    for omicron_common::api::internal::shared::NetworkInterface
+{
+    type Error = Error;
+
+    fn try_from(
         nic: NicInfo,
-    ) -> omicron_common::api::internal::shared::NetworkInterface {
-        let ip_subnet = if nic.ip.is_ipv4() {
-            oxnet::IpNet::V4(nic.ipv4_block.0)
-        } else {
-            oxnet::IpNet::V6(nic.ipv6_block.0)
+    ) -> Result<
+        omicron_common::api::internal::shared::NetworkInterface,
+        Self::Error,
+    > {
+        let maybe_ipv4_config = match nic.ipv4 {
+            None => None,
+            Some(ipv4) => {
+                let transit_ips = nic
+                    .transit_ips_v4
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect();
+                Some(PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    transit_ips,
+                )?)
+            }
+        };
+        let maybe_ipv6_config = match nic.ipv6 {
+            None => None,
+            Some(ipv6) => {
+                let transit_ips = nic
+                    .transit_ips_v6
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect();
+                Some(PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    transit_ips,
+                )?)
+            }
+        };
+        let ip = match (maybe_ipv4_config, maybe_ipv6_config) {
+            (None, None) => {
+                return Err(Error::internal_error(
+                    "Found NIC with no VPC-private IP addresses at all",
+                ));
+            }
+            (Some(v4), None) => PrivateIpConfig::V4(v4),
+            (None, Some(v6)) => PrivateIpConfig::V6(v6),
+            (Some(v4), Some(v6)) => PrivateIpConfig::DualStack { v4, v6 },
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
@@ -83,18 +153,16 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
                 omicron_common::api::internal::shared::NetworkInterfaceKind::Probe{ id: nic.parent_id }
             }
         };
-        omicron_common::api::internal::shared::NetworkInterface {
+        Ok(omicron_common::api::internal::shared::NetworkInterface {
             id: nic.id,
             kind,
             name: nic.name.into(),
-            ip: nic.ip.ip(),
+            ip_config: ip,
             mac: nic.mac.0,
-            subnet: ip_subnet,
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
-            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
-        }
+        })
     }
 }
 
@@ -111,8 +179,13 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
             .map_err(network_interface::InsertError::External)?;
+        // Creating a NIC doesn't create a child resource of the subnet itself;
+        // it creates a child of the Instance. We only need Read permission on
+        // the subnet to reference it. This allows limited-collaborators to
+        // create instances while still blocking them from modifying networking
+        // infrastructure.
         opctx
-            .authorize(authz::Action::CreateChild, authz_subnet)
+            .authorize(authz::Action::Read, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
@@ -166,7 +239,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
-    ) -> ListResultVec<ServiceNetworkInterface> {
+    ) -> Result<Vec<ServiceNetworkInterface>, TransactionError<Error>> {
         use nexus_db_schema::schema::service_network_interface::dsl;
         dsl::service_network_interface
             .filter(dsl::time_deleted.is_null())
@@ -174,7 +247,7 @@ impl DataStore {
             .select(ServiceNetworkInterface::as_select())
             .get_results_async::<ServiceNetworkInterface>(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| e.into())
     }
 
     /// List one page of all network interfaces associated with internal services
@@ -190,7 +263,11 @@ impl DataStore {
         // instance network interfaces, which require ListChildren on the
         // instance to list). As a logical proxy, we check for listing children
         // of the service IP pool.
-        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        //
+        // Note that the IP version doesn't matter here, both pools have the
+        // same permissions.
+        let (authz_pool, _pool) =
+            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
 
         paginated(dsl::service_network_interface, dsl::id, pagparams)
@@ -250,8 +327,11 @@ impl DataStore {
         // pool) and a network interface (in the relevant VpcSubnet). Putting
         // this check here ensures that the caller can't proceed if they also
         // couldn't proceed with creating the corresponding external IP.
+        //
+        // Note that the IP version here doesn't matter, both IPv4 and IPv6
+        // service pools have the same permissions.
         let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx)
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
             .await
             .map_err(network_interface::InsertError::External)?;
         opctx
@@ -289,14 +369,24 @@ impl DataStore {
             .pool_connection_authorized(opctx)
             .await
             .map_err(network_interface::InsertError::External)?;
-        self.create_network_interface_raw_conn(&conn, interface).await
+        self.create_network_interface_raw_conn(&conn, interface.clone())
+            .await
+            .map_err(|err| match err {
+                TransactionError::CustomError(err) => err,
+                TransactionError::Database(err) => {
+                    network_interface::InsertError::from_diesel(err, &interface)
+                }
+            })
     }
 
     pub(crate) async fn create_network_interface_raw_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, network_interface::InsertError> {
+    ) -> Result<
+        NetworkInterface,
+        TransactionError<network_interface::InsertError>,
+    > {
         use nexus_db_schema::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
@@ -308,15 +398,52 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
-                network_interface::InsertError::External(
-                    Error::ObjectNotFound {
-                        type_name: ResourceType::VpcSubnet,
-                        lookup_type: LookupType::ById(subnet_id),
-                    },
+                TransactionError::CustomError(
+                    network_interface::InsertError::External(
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::VpcSubnet,
+                            lookup_type: LookupType::ById(subnet_id),
+                        },
+                    ),
                 )
             }
             AsyncInsertError::DatabaseError(e) => {
-                network_interface::InsertError::from_diesel(e, &interface)
+                if retryable(&e) {
+                    TransactionError::Database(e)
+                } else {
+                    TransactionError::CustomError(
+                        network_interface::InsertError::from_diesel(
+                            e, &interface,
+                        ),
+                    )
+                }
+            }
+        })
+        .and_then(|nic| {
+            // Verify that the created NIC has the requested IP address
+            // types. Note that our sql constraint ensures that at least
+            // one of ip and ipv6 is populated, so we should never reach
+            // this point if both address types failed to create.
+            // However, if the user requested a dual-stack NIC and only
+            // received a single address type, our sql constraint is
+            // satisfied, and we need the additional check here.
+            let wants_v4 = interface.ip_config.as_ipv4_create().is_some();
+            let wants_v6 = interface.ip_config.as_ipv6_create().is_some();
+            let missing_v4 = wants_v4 && nic.ipv4.is_none();
+            let missing_v6 = wants_v6 && nic.ipv6.is_none();
+            if missing_v4 || missing_v6 {
+                Err(TransactionError::CustomError(
+                    network_interface::InsertError::NoAvailableIpAddresses {
+                        name: interface.subnet.identity.name.to_string(),
+                        id: subnet_id,
+                        ip_versions:
+                            network_interface::MissingIpVersions::from_missing(
+                                missing_v4, missing_v6,
+                            ),
+                    },
+                ))
+            } else {
+                Ok(nic)
             }
         })
     }
@@ -409,67 +536,46 @@ impl DataStore {
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
+            // Treat "not found" as an error
+            .and_then(SoftDeleteResult::into_did_soft_delete_bool)
             .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Delete a `ServiceNetworkInterface` attached to a provided service.
     ///
-    /// To support idempotency, such as in saga operations, this method returns
-    /// an extra boolean. The meaning of return values are:
+    /// To support idempotency,  this method returns an extra boolean. The
+    /// meaning of return values are:
+    ///
     /// - `Ok(true)`: The record was deleted during this call
     /// - `Ok(false)`: The record was already deleted, such as by a previous
     /// call
     /// - `Err(_)`: Any other condition, including a non-existent record.
-    pub async fn service_delete_network_interface(
-        &self,
-        opctx: &OpContext,
-        service_id: Uuid,
-        network_interface_id: Uuid,
-    ) -> Result<bool, network_interface::DeleteError> {
-        // See the comment in `service_create_network_interface`. There's no
-        // obvious parent for a service network interface (as opposed to
-        // instance network interfaces, which require permissions on the
-        // instance). As a logical proxy, we check for listing children of the
-        // service IP pool.
-        let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        opctx
-            .authorize(authz::Action::Delete, &authz_service_ip_pool)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-
-        let conn = self
-            .pool_connection_authorized(opctx)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        self.service_delete_network_interface_on_connection(
-            &conn,
-            service_id,
-            network_interface_id,
-        )
-        .await
-    }
-
-    /// Variant of [Self::service_delete_network_interface] which may be called
-    /// from a transaction context.
-    pub async fn service_delete_network_interface_on_connection(
+    ///
+    /// Should only be called from a transaction context which has already
+    /// performed any necessary auth checks.
+    pub(crate) async fn service_delete_network_interface_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<bool, network_interface::DeleteError> {
+    ) -> Result<
+        SoftDeleteResult,
+        TransactionError<network_interface::DeleteError>,
+    > {
         let query = network_interface::DeleteQuery::new(
             NetworkInterfaceKind::Service,
             service_id,
             network_interface_id,
         );
-        query
-            .clone()
-            .execute_and_check(conn)
-            .await
-            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
+        query.clone().execute_and_check(conn).await.map_err(|e| {
+            if retryable(&e) {
+                TransactionError::Database(e)
+            } else {
+                TransactionError::CustomError(
+                    network_interface::DeleteError::from_diesel(e, &query),
+                )
+            }
+        })
     }
 
     /// Return information about network interfaces required for the sled
@@ -496,32 +602,14 @@ impl DataStore {
             )
             .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
             .order_by(network_interface::slot)
-            // TODO-cleanup: Having to specify each column again is less than
-            // ideal, but we can't derive `Selectable` since this is the result
-            // of a JOIN and not from a single table. DRY this out if possible.
-            .select((
-                network_interface::id,
-                network_interface::parent_id,
-                network_interface::kind,
-                network_interface::name,
-                network_interface::ip,
-                network_interface::mac,
-                vpc_subnet::ipv4_block,
-                vpc_subnet::ipv6_block,
-                vpc::vni,
-                network_interface::is_primary,
-                network_interface::slot,
-                network_interface::transit_ips,
-            ))
-            .get_results_async::<NicInfo>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .select(NicInfo::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows
+        rows
             .into_iter()
-            .map(omicron_common::api::internal::shared::NetworkInterface::from)
-            .collect())
+            .map(omicron_common::api::internal::shared::NetworkInterface::try_from)
+            .collect::<Result<_, _>>()
     }
 
     /// Return the information about an instance's network interfaces required
@@ -754,6 +842,7 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
+            CandidatePrimaryMissingIpStack(u8),
             FailedToUnsetPrimary(DieselError),
         }
 
@@ -766,10 +855,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_runtime =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_runtime.propolis_id.is_some()
-                            || instance_runtime.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
@@ -794,6 +883,48 @@ impl DataStore {
                                     |e| NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)
                                 ));
                             }
+
+                            // Ensure that the new secondary has VPC-private IP
+                            // addresses of the same family as any external IP
+                            // addresses.
+                            //
+                            // Fetch the IP versions for all external addresses
+                            // attached to this instance, and whether the
+                            // secondary we're trying to make into primary has
+                            // the private IP stacks to support those.
+                            let ip_versions = {
+                                use nexus_db_schema::schema::external_ip::dsl;
+                                dsl::external_ip
+                                    .filter(dsl::parent_id.eq(instance_id))
+                                    .filter(dsl::time_deleted.is_null())
+                                    // NOTE: We would like to use the `family()` function, but this
+                                    // confuses Diesel. It expects that to return an `i32`, but CRDB
+                                    // returns an `INT` which is an alias for an `i64`.
+                                    // Deserialization fails.
+                                    .select(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                        "family(ip)",
+                                    ))
+                                    .distinct()
+                                    .get_results_async(&conn)
+                                    .await?
+                            };
+                            let (secondary_has_ipv4, secondary_has_ipv6): (bool, bool) = {
+                                use nexus_db_schema::schema::instance_network_interface::dsl;
+                                dsl::instance_network_interface
+                                    .find(interface_id)
+                                    .filter(dsl::time_deleted.is_null())
+                                    .select((dsl::ipv4.is_not_null(), dsl::ipv6.is_not_null()))
+                                    .get_result_async(&conn)
+                                    .await?
+                            };
+                            if ip_versions.contains(&4) && !secondary_has_ipv4 {
+                                return
+                                    Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(4)));
+                            }
+                            if ip_versions.contains(&6) && !secondary_has_ipv6 {
+                                return
+                                    Err(err.bail(NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(6)));
+                            }
                         }
 
                         // In any case, update the actual target
@@ -811,10 +942,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_state =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_state.propolis_id.is_some()
-                            || instance_state.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
@@ -833,6 +964,15 @@ impl DataStore {
                             "Instance must be stopped to update its network interfaces",
                         );
                     },
+                    NetworkInterfaceUpdateError::CandidatePrimaryMissingIpStack(version) => {
+                        return Error::invalid_request(format!(
+                            "Interface cannot be made the primary for this instance, since \
+                            it does not have a private IPv{} address to handle traffic for \
+                            the instance's external IPv{} addresses",
+                            version,
+                            version,
+                        ));
+                    }
                     NetworkInterfaceUpdateError::FailedToUnsetPrimary(err) => {
                         return public_error_from_diesel(err, ErrorHandler::Server);
                     },
@@ -890,7 +1030,16 @@ impl DataStore {
         // instance network interfaces, which require ListChildren on the
         // instance to list). As a logical proxy, we check for listing children
         // of the service IP pool.
-        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        //
+        // TODO-cleanup: https://github.com/oxidecomputer/omicron/issues/8873.
+        // This authz check looks at the builtin services IP Pool, but we're
+        // listing _instance_ NICs. That seems to be authorizing against the
+        // wrong resource.
+        //
+        // But assuming this check is correct, both service pools have the same
+        // permissions, so the actual IP version here doesn't matter.
+        let (authz_pool, _pool) =
+            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
 
         paginated(dsl::instance_network_interface, dsl::id, pagparams)
@@ -908,6 +1057,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -959,7 +1109,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                ip.into(),
+                PrivateIpStackCreate::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )
@@ -977,13 +1127,14 @@ mod tests {
         assert_eq!(nics, service_nics);
 
         // Delete a few, and ensure we don't see them anymore.
+        let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
         let mut removed_nic_ids = BTreeSet::new();
         for (i, nic) in service_nics.iter().enumerate() {
             if i % 3 == 0 {
                 let id = nic.id();
                 datastore
-                    .service_delete_network_interface(
-                        &opctx,
+                    .service_delete_network_interface_on_connection(
+                        &conn,
                         nic.service_id,
                         id,
                     )

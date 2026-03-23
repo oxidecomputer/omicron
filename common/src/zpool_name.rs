@@ -59,7 +59,7 @@ impl JsonSchema for ZpoolName {
         "ZpoolName".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -120,7 +120,15 @@ impl ZpoolName {
 
     /// Returns a path to a dataset's mountpoint within the zpool.
     ///
+    /// `dataset` is relative to the root of the pool.  For example, if your
+    /// pool is `oxp_123`, then your full dataset name would be something like
+    /// `oxp_123/foo/bar`.  You'd pass `foo/bar` to this function and it would
+    /// return something like `/pool/ext/123/foo/bar`.
+    ///
     /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
+    ///
+    /// In this example, the value of UUID here is implied by `self`.  `dataset`
+    /// is the argument to this function.
     pub fn dataset_mountpoint(
         &self,
         root: &Utf8Path,

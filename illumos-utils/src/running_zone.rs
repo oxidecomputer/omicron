@@ -8,21 +8,26 @@ use crate::addrobj::{
     AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
     IPV6_STATIC_ADDROBJ_NAME,
 };
+#[cfg(target_os = "illumos")]
+use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
 use crate::zone::Zones;
+use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::backoff;
+use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use slog_error_chain::SlogInlineError;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -41,7 +46,7 @@ pub enum ServiceError {
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
-#[error("Error running command in zone '{zone}': {err}")]
+#[error("Error running command in zone '{zone}'")]
 pub struct RunCommandError {
     zone: String,
     #[source]
@@ -51,7 +56,7 @@ pub struct RunCommandError {
 /// Errors returned from [`RunningZone::boot`].
 #[derive(thiserror::Error, Debug)]
 pub enum BootError {
-    #[error("Error booting zone: {0}")]
+    #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
@@ -60,19 +65,20 @@ pub enum BootError {
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
 
-    #[error("Zone booted, but running a command experienced an error: {0}")]
+    #[error("Zone booted, but running a command experienced an error")]
     RunCommandError(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum EnsureAddressError {
     #[error(
-        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}"
+        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name"
     )]
     AddrObject {
         request: AddressRequest,
         zone: String,
+        #[source]
         err: crate::addrobj::ParseError,
     },
 
@@ -82,8 +88,12 @@ pub enum EnsureAddressError {
     #[error(transparent)]
     GetAddressesError(#[from] crate::zone::GetAddressesError),
 
-    #[error("Failed ensuring link-local address in {zone}: {err}")]
-    LinkLocal { zone: String, err: crate::ExecutionError },
+    #[error("Failed ensuring link-local address in {zone}")]
+    LinkLocal {
+        zone: String,
+        #[source]
+        err: crate::ExecutionError,
+    },
 
     #[error("Failed to find non-link-local address in {zone}")]
     NoDhcpV6Addr { zone: String },
@@ -111,7 +121,7 @@ pub fn ensure_contract_reaper(log: &Logger) {
     info!(log, "Ensuring contract reaper thread");
     REAPER_THREAD.get_or_init(|| {
         let log = log.new(o!("component" => "ContractReaper"));
-        std::thread::spawn(move || zenter::contract_reaper(log))
+        std::thread::spawn(move || contract::process_contract_reaper(log))
     });
 }
 
@@ -124,214 +134,12 @@ pub fn ensure_contract_reaper(log: &Logger) {
 // inside a non-global zone.
 #[cfg(target_os = "illumos")]
 mod zenter {
-    use libc::ctid_t;
     use libc::zoneid_t;
-    use slog::{Logger, debug, error};
     use std::ffi::c_int;
-    use std::ffi::c_uint;
-    use std::ffi::c_void;
-    use std::ffi::{CStr, CString};
-    use std::process;
-    use std::thread;
-    use std::time::Duration;
-
-    #[allow(non_camel_case_types)]
-    type ct_evthdl_t = *mut c_void;
-
-    #[link(name = "contract")]
-    extern "C" {
-        fn ct_tmpl_set_critical(fd: c_int, events: c_uint) -> c_int;
-        fn ct_tmpl_set_informative(fd: c_int, events: c_uint) -> c_int;
-        fn ct_pr_tmpl_set_fatal(fd: c_int, events: c_uint) -> c_int;
-        fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
-        fn ct_tmpl_activate(fd: c_int) -> c_int;
-        fn ct_tmpl_clear(fd: c_int) -> c_int;
-        fn ct_ctl_abandon(fd: c_int) -> c_int;
-        fn ct_event_read_critical(fd: c_int, ev: *mut ct_evthdl_t) -> c_int;
-        fn ct_event_get_type(ev: ct_evthdl_t) -> u64;
-        fn ct_event_get_ctid(ev: ct_evthdl_t) -> ctid_t;
-        fn ct_event_free(ev: ct_evthdl_t);
-    }
 
     #[link(name = "c")]
-    extern "C" {
+    unsafe extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
-    }
-
-    // This thread watches for critical events coming from all process
-    // contracts held by sled-agent, and reaps (abandons) contracts which
-    // become empty. Process contracts are used in conjunction with
-    // zone_enter() in order to run commands within non-global zones, and
-    // the contracts used for this come from templates that define becoming
-    // empty as a critical event.
-    pub fn contract_reaper(log: Logger) {
-        const EVENT_PATH: &'static [u8] = b"/system/contract/process/pbundle";
-        const CT_PR_EV_EMPTY: u64 = 1;
-
-        let cpath = CString::new(EVENT_PATH).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) };
-
-        if fd < 0 {
-            panic!(
-                "Could not open {:?}: {}",
-                cpath,
-                std::io::Error::last_os_error()
-            );
-        }
-
-        loop {
-            let mut ev: ct_evthdl_t = std::ptr::null_mut();
-            let evp: *mut ct_evthdl_t = &mut ev;
-            // The event endpoint was not opened as non-blocking, so
-            // ct_event_read_critical(3CONTRACT) will block until a new
-            // critical event is available on the channel.
-            match unsafe { ct_event_read_critical(fd, evp) } {
-                0 => {
-                    let typ = unsafe { ct_event_get_type(ev) };
-                    if typ == CT_PR_EV_EMPTY {
-                        let ctid = unsafe { ct_event_get_ctid(ev) };
-                        match abandon_contract(ctid) {
-                            Err(e) => error!(
-                                &log,
-                                "Failed to abandon contract {}: {}", ctid, e
-                            ),
-                            Ok(_) => {
-                                debug!(&log, "Abandoned contract {}", ctid)
-                            }
-                        }
-                    }
-                    unsafe { ct_event_free(ev) };
-                }
-                err => {
-                    // ct_event_read_critical(3CONTRACT) does not state any
-                    // error values for this function if the file descriptor
-                    // was not opened non-blocking, but inspection of the
-                    // library code shows that various errnos could be returned
-                    // in situations such as failure to allocate memory. In
-                    // those cases, log a message and pause to avoid entering a
-                    // tight loop if the problem persists.
-                    error!(
-                        &log,
-                        "Unexpected response from contract event channel: {}",
-                        std::io::Error::from_raw_os_error(err)
-                    );
-                    thread::sleep(Duration::from_secs(1));
-                }
-            }
-        }
-    }
-
-    #[derive(thiserror::Error, Debug)]
-    pub enum AbandonContractError {
-        #[error("Error opening file {file}: {error}")]
-        Open { file: String, error: std::io::Error },
-
-        #[error("Error abandoning contract {ctid}: {error}")]
-        Abandon { ctid: ctid_t, error: std::io::Error },
-
-        #[error("Error closing file {file}: {error}")]
-        Close { file: String, error: std::io::Error },
-    }
-
-    pub fn abandon_contract(ctid: ctid_t) -> Result<(), AbandonContractError> {
-        let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
-
-        let cpath = CString::new(path.clone()).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
-        if fd < 0 {
-            return Err(AbandonContractError::Open {
-                file: path,
-                error: std::io::Error::last_os_error(),
-            });
-        }
-        let ret = unsafe { ct_ctl_abandon(fd) };
-        if ret != 0 {
-            unsafe { libc::close(fd) };
-            return Err(AbandonContractError::Abandon {
-                ctid,
-                error: std::io::Error::from_raw_os_error(ret),
-            });
-        }
-        if unsafe { libc::close(fd) } != 0 {
-            return Err(AbandonContractError::Close {
-                file: path,
-                error: std::io::Error::last_os_error(),
-            });
-        }
-
-        Ok(())
-    }
-
-    // A Rust wrapper around the process contract template.
-    #[derive(Debug)]
-    pub struct Template {
-        fd: c_int,
-    }
-
-    impl Drop for Template {
-        fn drop(&mut self) {
-            self.clear();
-            // Ignore any error, since printing may interfere with `slog`'s
-            // structured output.
-            unsafe { libc::close(self.fd) };
-        }
-    }
-
-    impl Template {
-        const TEMPLATE_PATH: &'static [u8] =
-            b"/system/contract/process/template\0";
-
-        // Constants related to how the contract below is managed. See
-        // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
-        // for details.
-
-        // Contract has become empty.
-        const CT_PR_EV_EMPTY: c_uint = 0x1;
-        // Process experienced an uncorrectable error.
-        const CT_PR_EV_HWERR: c_uint = 0x20;
-        // Only kill process group on fatal errors.
-        const CT_PR_PGRPONLY: c_uint = 0x04;
-        // Automatically detach inherited contracts.
-        const CT_PR_REGENT: c_uint = 0x08;
-
-        pub fn new() -> Result<Self, crate::ExecutionError> {
-            let path = CStr::from_bytes_with_nul(Self::TEMPLATE_PATH).unwrap();
-            let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
-            if fd < 0 {
-                let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ContractFailure { err });
-            }
-
-            // Initialize the contract template.
-            //
-            // Nothing is inherited, we do not allow the contract to be
-            // orphaned, and the only event which is delivered is EV_EMPTY,
-            // indicating that the contract has become empty. These events are
-            // consumed by contract_reaper() above.
-            //
-            // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
-            // implementation of `init_template()` for details.
-            if unsafe { ct_tmpl_set_critical(fd, Self::CT_PR_EV_EMPTY) } != 0
-                || unsafe { ct_tmpl_set_informative(fd, 0) } != 0
-                || unsafe { ct_pr_tmpl_set_fatal(fd, Self::CT_PR_EV_HWERR) }
-                    != 0
-                || unsafe {
-                    ct_pr_tmpl_set_param(
-                        fd,
-                        Self::CT_PR_PGRPONLY | Self::CT_PR_REGENT,
-                    )
-                } != 0
-                || unsafe { ct_tmpl_activate(fd) } != 0
-            {
-                let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ContractFailure { err });
-            }
-            Ok(Self { fd })
-        }
-
-        pub fn clear(&self) {
-            unsafe { ct_tmpl_clear(self.fd) };
-        }
     }
 }
 
@@ -420,10 +228,11 @@ impl RunningZone {
                 err: crate::ExecutionError::NotRunning,
             });
         };
-        let template =
-            std::sync::Arc::new(zenter::Template::new().map_err(|err| {
-                RunCommandError { zone: self.name().to_string(), err }
-            })?);
+        let template = std::sync::Arc::new(
+            contract::Template::new(contract::ContractType::Process).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?,
+        );
         let tmpl = std::sync::Arc::clone(&template);
         let mut command = std::process::Command::new(crate::PFEXEC);
         let logger = self.inner.log.clone();
@@ -555,23 +364,26 @@ impl RunningZone {
         &self,
         name: &str,
         port_idx: usize,
-    ) -> Result<IpNetwork, EnsureAddressError> {
+    ) -> Result<(), EnsureAddressError> {
         info!(self.inner.log, "Ensuring address for OPTE port");
+
         let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
             EnsureAddressError::MissingOptePort {
                 zone: self.inner.name.clone(),
                 port_idx,
             }
         })?;
-        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
-            EnsureAddressError::AddrObject {
-                request: AddressRequest::Dhcp,
-                zone: self.inner.name.clone(),
-                err,
-            }
-        })?;
         let zone = Some(self.inner.name.as_ref());
-        if let IpAddr::V4(gateway) = port.gateway().ip() {
+        if let Some(gateway) = port.gateway().ipv4_addr() {
+            let v4_name = format!("{}4", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v4_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             let addr =
                 Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
                     .await?;
@@ -582,7 +394,7 @@ impl RunningZone {
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[
-                "/usr/sbin/route",
+                ROUTE,
                 "add",
                 "-host",
                 &gateway_ip,
@@ -591,15 +403,18 @@ impl RunningZone {
                 "-ifp",
                 port.name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
-            Ok(addr)
-        } else {
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
+        }
+        if port.gateway().ipv6_addr().is_some() {
+            let v6_name = format!("{}6", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v6_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
             Zones::ensure_has_link_local_v6_address(zone, &addrobj)
@@ -625,15 +440,13 @@ impl RunningZone {
                             )
                         })?;
 
-                    // Ipv6Addr::is_unicast_link_local is sadly not stable
-                    let is_ll =
-                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
-
                     // Look for a non link-local addr
                     addrs
                         .into_iter()
                         .find(|addr| match addr {
-                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
+                            IpNetwork::V6(ip) => {
+                                !ip.ip().is_unicast_link_local()
+                            }
                             _ => false,
                         })
                         .ok_or_else(|| {
@@ -649,58 +462,31 @@ impl RunningZone {
                         self.inner.log,
                         "No non link-local address yet (retrying in {:?})",
                         delay;
-                        "error" => ?error
+                        error
                     );
                 },
             )
-            .await
+            .await?;
         }
+        Ok(())
     }
 
-    pub fn add_default_route(
+    pub fn add_underlay_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
-            "default",
+            &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_default_route4(
-        &self,
-        gateway: Ipv4Addr,
-    ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_bootstrap_route(
-        &self,
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), RunCommandError> {
-        let args = [
-            "/usr/sbin/route",
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
             "-ifp",
-            zone_vnic_name,
-        ];
-        self.run_cmd(args)?;
+            self.inner.control_vnic.name(),
+        ])?;
         Ok(())
     }
 
@@ -896,7 +682,7 @@ pub enum InstallZoneError {
         file_source.file_name,
         file_source.search_paths,
     )]
-    ImageNotFound { file_source: ZoneImageFileSource },
+    ImageNotFound { file_source: ResolvableFileSource },
     #[error("Attempted to call install() on underspecified ZoneBuilder")]
     IncompleteBuilder,
 }
@@ -1062,7 +848,7 @@ pub struct ZoneBuilder<'a> {
     /// Filesystem path at which the installed zone will reside.
     zone_root_path: Option<PathInPool>,
     /// The file source.
-    file_source: Option<&'a ZoneImageFileSource>,
+    file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -1122,7 +908,7 @@ impl<'a> ZoneBuilder<'a> {
     /// The file name and image source.
     pub fn with_file_source(
         mut self,
-        file_source: &'a ZoneImageFileSource,
+        file_source: &'a ResolvableFileSource,
     ) -> Self {
         self.file_source = Some(file_source);
         self
@@ -1336,19 +1122,6 @@ impl<'a> ZoneBuilder<'a> {
             zones_api: DebugIgnore(zones_api),
         })
     }
-}
-
-/// Places to look for a zone's image.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ZoneImageFileSource {
-    /// The file name to look for.
-    pub file_name: String,
-
-    /// The paths to look for the zone image in.
-    ///
-    /// This represents a high-confidence belief, but not a guarantee, that the
-    /// zone image will be found in one of these locations.
-    pub search_paths: Vec<Utf8PathBuf>,
 }
 
 /// Return true if the service with the given FMRI appears to be an

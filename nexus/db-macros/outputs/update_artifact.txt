@@ -40,7 +40,7 @@ impl<'a> UpdateArtifact<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             UpdateArtifact::Error(_, error) => Err(error.clone()),
             UpdateArtifact::PrimaryKey(_, v0, v1, v2) => {
                 Self::fetch_by_id_for(opctx, datastore, v0, v1, v2, action).await
@@ -98,7 +98,7 @@ impl<'a> UpdateArtifact<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             UpdateArtifact::Error(_, error) => Err(error.clone()),
             UpdateArtifact::PrimaryKey(_, v0, v1, v2) => {
                 let (authz_update_artifact, _) = Self::lookup_by_id_no_authz(

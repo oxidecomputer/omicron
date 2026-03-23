@@ -1,0 +1,624 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Defining Error Types and Logging Errors
+
+== Background
+
+We rely on the Rust standard library
+https://doc.rust-lang.org/std/error/trait.Error.html[`std::error::Error`] trait
+throughout Omicron. Several parts of it have been deprecated; the parts that are
+relevant to us are:
+
+* Errors implement `fmt::Display`
+* Errors implement `source()`, a method that returns an optional inner error
+
+The documentation notes this about `source()`:
+
+> `Error::source()` is generally used when errors cross "abstraction
+> boundaries". If one module must report an error that is caused by an error
+> from a lower-level module, it can allow accessing that error via
+> `Error::source()`.
+
+Wrapping inner errors is critical for attaching additional context. For example,
+a function that attempts to open and read a file in a couple of parts could
+return `std::io::Error` directly:
+
+[source,rust]
+----
+fn read_file(path: &Utf8Path) -> Result<(), io::Error> {
+    let mut f = File::open(path)?;
+
+    let mut header = [0; 64];
+    f.read_exact(&mut header)?;
+    // ... do something with `header` ...
+
+    let mut body = [0; 256];
+    f.read_exact(&mut body)?;
+    // ... do something with `body` ...
+
+    Ok(())
+}
+----
+
+But the potential errors the caller sees are missing any context. They might
+see:
+
+[source]
+----
+No such file or directory (os error 2)
+Permission denied (os error 13)
+failed to fill whole buffer
+----
+
+or a variety of other I/O errors. In most cases adding context around the error
+is useful; it would better if they could see something like:
+
+[source]
+----
+failed to open open `/some/file`: No such file or directory (os error 2)
+failed to open open `/some/file`: Permission denied (os error 13)
+failed reading header of `/some/file`: failed to fill whole buffer
+failed reading body of `/some/file`: failed to fill whole buffer
+----
+
+This typically generalizes: functions (or crates) that call fallible functions
+usually have meaningful context they can attach to the lower-level errors that
+clarify the operation that failed. However, there are several ways to do this
+incorrectly (particularly: in ways that can lose information), which is what
+this document attempts to cover.
+
+== Defining Error enums with `thiserror`
+
+In Omicron we primarily use
+https://docs.rs/thiserror/latest/thiserror/[`thiserror`] to define types that
+implement `std::error::Error`. (We also use `anyhow` some; that's covered
+below.)
+
+Continuing the example above, we can attach the context we'd like to see in a
+new enum that has different variants that all wrap potential I/O errors:
+
+[source,rust]
+----
+#[derive(Debug, thiserror::Error)]
+enum ReadFileError {
+    #[error("failed to open `{path}`")]
+    FailedOpen {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("failed reading header of `{path}`")]
+    FailedReadingHeader {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("failed reading body of `{path}`")]
+    FailedReadingBody {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    // ... more error variants ...
+}
+
+fn read_file_with_context(path: &Utf8Path) -> Result<(), ReadFileError> {
+    let mut f = File::open(path).map_err(|err| ReadFileError::FailedOpen {
+        path: path.to_owned(),
+        err,
+    })?;
+
+    let mut header = [0; 64];
+    f.read_exact(&mut header)
+        .map_err(|err| ReadFileError::FailedReadingHeader {
+            path: path.to_owned(),
+            err,
+        })?;
+    // ... do something with `header` ...
+
+    let mut body = [0; 256];
+    f.read_exact(&mut body)
+        .map_err(|err| ReadFileError::FailedReadingBody {
+            path: path.to_owned(),
+            err,
+        })?;
+    // ... do something with `body` ...
+
+    Ok(())
+}
+----
+
+Using this error type _and a method of logging errors that includes the chain of
+error sources_, we will get the error messages we wanted:
+
+[source]
+----
+failed to open open `/some/file`: No such file or directory (os error 2)
+failed to open open `/some/file`: Permission denied (os error 13)
+failed reading header of `/some/file`: failed to fill whole buffer
+failed reading body of `/some/file`: failed to fill whole buffer
+----
+
+There are a few common problematic patterns (all of which are still present in
+Omicron in various places; we should try to fix them as we can!). I think it's
+too easy to do the wrong thing in these cases, but I don't know that there's a
+good way to address that other than documenting them as we do here.
+
+=== Pitfall 1: Not Logging the Full Error Chain
+
+Continuing with the example above, if the caller of `read_file_with_context()`
+tries to print the error as a string or log it using its `Display`
+implementation, without using an adapter that knows how to read the entire chain
+of errors, they'll only see the outermost error string:
+
+[source,rust]
+----
+// This prints the outer errors without the inner I/O error; e.g.,
+//
+// ```
+// failed to open open `/some/file`
+// failed reading header of `/some/file`
+// failed reading body of `/some/file`
+// ```
+if let Err(err) = read_file_with_context(path) {
+    println!("{err}");
+}
+
+// Likewise, this will emit logs that only include the outer error without the
+// inner I/O error; e.g.,
+//
+// ```
+// WARN failed to read file, error: failed to open `/some/file`
+// WARN failed to read file, error: failed reading header of `/some/file`
+// WARN failed to read file, error: failed reading body of `/some/file`
+// ```
+if let Err(err) = read_file_with_context(path) {
+    slog::warn!(log, "failed to read file"; "error" => %err);
+}
+----
+
+The easy but incorrect way to fix this is to change the outer error to include
+the source error; e.g.,
+
+[source,rust]
+----
+// This is incorrect!
+#[derive(Debug, thiserror::Error)]
+enum ReadFileError {
+    #[error("failed to open `{path}`: {err}")] // Wrong! See below.
+    FailedOpen {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    // ... similar treatment to other variants
+}
+----
+
+See "Pitfall 2" below for why this is incorrect.
+
+Instead, use an adapter that knows how to walk the full chain of errors. Many
+crates (including `anyhow`, discussed below) provide this functionality. Because
+we make heavy use of `slog`, we have
+https://github.com/oxidecomputer/slog-error-chain[`slog-error-chain`], which
+provides the `InlineErrorChain` adapter that:
+
+* includes the full error chain, separated by colons in its `Display` impl
+* implements `slog::KV` and `slog::Value` for easy inclusion in `slog` logs
+
+Example usage:
+
+[source,rust]
+----
+// Prints the full error chain; e.g.,
+//
+// ```
+// failed to open open `/some/file`: No such file or directory (os error 2)
+// failed to open open `/some/file`: Permission denied (os error 13)
+// failed reading header of `/some/file`: failed to fill whole buffer
+// failed reading body of `/some/file`: failed to fill whole buffer
+// ```
+if let Err(err) = read_file_with_context(path) {
+    println!("{}", InlineErrorChain::new(&err));
+}
+
+// Includes the full error chain in the log. Uses the default key "error".
+//
+// ```
+// WARN failed to read file, error: failed to open open `/some/file`: No such file or directory (os error 2)
+// WARN failed to read file, error: failed to open open `/some/file`: Permission denied (os error 13)
+// WARN failed to read file, error: failed reading header of `/some/file`: failed to fill whole buffer
+// WARN failed to read file, error: failed reading body of `/some/file`: failed to fill whole buffer
+// ```
+if let Err(err) = read_file_with_context(path) {
+    slog::warn!(log, "failed to read file"; InlineErrorChain::new(&err));
+}
+----
+
+=== Pitfall 2: Including Inner Error in Outer Error's `Display` Implementation
+
+A ``std::error::Error``'s `Display` implementation should _not_ recurse into its
+source's `Display` implementation. As noted in "Pitfall 1", this is a very easy
+mistake to make, because it appears to fix a real problem. Continuing with the
+example, if we change the error definition to include the source's `Display`
+impl like so:
+
+[source,rust]
+----
+// This is incorrect!
+#[derive(Debug, thiserror::Error)]
+enum ReadFileError {
+    #[error("failed to open `{path}`: {err}")] // Wrong! See below.
+    FailedOpen {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    // ... similar treatment to other variants
+}
+----
+
+then naive printing of the error appears to include all the relevant
+information:
+
+[source,rust]
+----
+// Appears to print the full error chain; e.g.,
+//
+// ```
+// failed to open open `/some/file`: No such file or directory (os error 2)
+// failed to open open `/some/file`: Permission denied (os error 13)
+// failed reading header of `/some/file`: failed to fill whole buffer
+// failed reading body of `/some/file`: failed to fill whole buffer
+// ```
+if let Err(err) = read_file_with_context(path) {
+    println!("{err}");
+}
+----
+
+This has two problems, one obvious and one subtle. The obvious problem is that
+if the caller does use an adapter like `InlineErrorChain` that walks the full
+chain of error sources, the resulting output includes errors after the outermost
+one multiple times:
+
+[source,rust]
+----
+// Prints the outer error, which prints the inner error, then also walks the
+// chain and prints the inner error again; e.g.,
+//
+// ```
+// failed to open open `/some/file`: No such file or directory (os error 2): No such file or directory (os error 2)
+// ```
+if let Err(err) = read_file_with_context(path) {
+    println!("{}", InlineErrorChain::new(&err));
+}
+----
+
+This doublespeak gets considerably worse if there are more than two errors in
+the chain.
+
+The more subtle error is that if there are at least three errors in the chain
+and any of the intermediate errors are correctly defined (i.e., their `Display`
+implementation does not recurse to their source), then printing the error
+without an `InlineErrorChain`-like adapter will _lose_ information; any errors
+in the chain later than the correctly-defined one will be omitted.
+
+For example, consider a three deep error chain where the middle error does not
+recurse to its source's `Display` impl but the outermost error does:
+
+[source,rust]
+----
+#[derive(Debug, thiserror::Error)]
+enum Inner{
+    #[error("lowest-level error")]
+    LowLevel,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum MiddleError {
+    #[error("inner operation failed")]
+    InnerFailure(#[source] Inner),
+}
+
+// Note: Incorrect display implementation!
+#[derive(Debug, thiserror::Error)]
+enum OuterError {
+    #[error("middle operation failed: {0}")]
+    MiddleFailure(#[source] MiddleError),
+}
+----
+
+If the caller attempts to print an `OuterError`, the innermost error will be
+omitted, because `MiddleError` is defined correctly:
+
+[source,rust]
+----
+// Prints the following (note the `lowest-level` error is missing!):
+//
+// ```
+// middle operation failed: inner operation failed
+// ```
+if let Err(outer_err) = some_function() {
+    println!("{outer_err}");
+}
+----
+
+Logging any error _must_ use an adapter as described in "Pitfall 1"; failure to
+do so will result in lost error causes in any error chains where any error in
+the chain has a correct `Display` impl. Using an adapter with the incorrect
+`OuterError` as defined will result in doublespeak, but at least all the
+information is present:
+
+[source,rust]
+----
+// Prints the full error chain, with doublespeak due to the incorrect
+// `OuterError` `Display` implementation:
+//
+// ```
+// middle operation failed: inner operation failed: inner operation failed: lowest-level error
+// ```
+if let Err(outer_err) = some_function() {
+    println!("{}", InlineErrorChain::new(&outer_err));
+}
+----
+
+If `OuterError` is corrected, using `InlineErrorChain` will display the full
+error chain without doublespeak:
+
+[source,rust]
+----
+// Corrected display implementation
+#[derive(Debug, thiserror::Error)]
+enum OuterError {
+    #[error("middle operation failed")]
+    MiddleFailure(#[source] MiddleError),
+}
+
+// Prints the full error chain with no doublespeak:
+//
+// ```
+// middle operation failed: inner operation failed: lowest-level error
+// ```
+if let Err(outer_err) = some_function() {
+    println!("{}", InlineErrorChain::new(&outer_err));
+}
+----
+
+[NOTE]
+====
+If you have control over the entire chain of errors, you might ask if it would
+be safer to define _all_ the `Display` impls incorrectly, hoping that would
+result in doublespeak, but at least it wouldn't lose information! However, this
+only works if you maintain control over the entire chain of errors (unlikely in
+practice), and as logging sites are updated to use an adapter like
+`InlineErrorChain`, the doublespeak gets silly and confusing.
+
+In the above example, if `MiddleError` also had an incorrect `Display` impl,
+printing an `OuterError` via `InlineErrorChain` would result in:
+
+```
+middle operation failed: inner operation failed: lowest-level error: inner operation failed: lowest-level error: lowest-level error
+```
+
+and this problem only gets worse as more errors are added to the chain. All the
+information is present, but understanding it gets difficult due to the
+nonsensical repeats.
+====
+
+This property that `std::error::Error` display implementations should not
+recurse to their source errors is not currently well-documented (to the best of
+my knowledge!). It matches the example from the standard library documentation
+on `Error::source()`, where ``SuperError``'s display implementation only
+displays itself:
+
+[source,rust]
+----
+#[derive(Debug)]
+struct SuperError {
+    source: SuperErrorSideKick,
+}
+
+impl fmt::Display for SuperError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SuperError is here!")
+    }
+}
+
+impl Error for SuperError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+#[derive(Debug)]
+struct SuperErrorSideKick;
+
+impl fmt::Display for SuperErrorSideKick {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SuperErrorSideKick is here!")
+    }
+}
+
+impl Error for SuperErrorSideKick {}
+----
+
+There is an https://github.com/rust-lang/api-guidelines/pull/210[open PR] to add
+this guidance to the Rust API guidelines. This links to a discussion including
+https://users.rust-lang.org/t/do-people-not-care-about-printable-error-chains-a-k-a-how-to-nicely-implement-display-for-an-error/35362/2[comments
+from the `thiserror` author] confirming this point.
+
+=== Pitfall 3: Overusing ``#[from]``
+
+Unlike pitfalls 1 and 2, which lead to _incorrect_ error definitions and lost
+error causes, Pitfall 3 is more of a "strong recommendation" that has exceptions
+(use your best judgment!).
+
+`thiserror` allows an inner error to be specified as ``\#[from]`` instead of
+``#[source]``; e.g.,
+
+[source,rust]
+----
+#[derive(Debug, thiserror::Error)]
+enum WorseReadFileError {
+    #[error("an I/O error occurred")]
+    IoError(#[from] io::Error),
+}
+----
+
+``\#[from]`` implies ``#[source]`` and also provides a `From<InnerError> for YourError`
+implementation. The upside of this is that the producer of `YourError` can now
+use `?` when calling a function that emits the inner error type, which can be
+much shorter than using `.map_err()` to attach context:
+
+[source,rust]
+----
+fn read_file_with_worse_error(path: &Utf8Path) -> Result<(), WorseReadFileError> {
+    let mut f = File::open(path)?;
+
+    let mut header = [0; 64];
+    f.read_exact(&mut header)?;
+    // ... do something with `header` ...
+
+    let mut body = [0; 256];
+    f.read_exact(&mut body)?;
+    // ... do something with `body` ...
+
+    Ok(())
+}
+----
+
+The downside is that an error variant with a `#[from]` inner error can't include
+any _other_ information, which makes it difficult to attach meaningful context.
+In this example, the "context" we attach is useless:
+
+[source]
+----
+an I/O error occurred: No such file or directory (os error 2)
+an I/O error occurred: Permission denied (os error 13)
+an I/O error occurred: failed to fill whole buffer
+an I/O error occurred: failed to fill whole buffer
+----
+
+This pitfall isn't a hard and fast rule. There are occasionally times where an
+error variant can attach meaningful context even without including other data.
+In cases where there is truly no meaningful context to attach (e.g., if wrapping
+an inner error that already includes all relevant context), consider using
+``\#[error(transparent)]`` with ``#[from]``; this will delegate the `Display`
+impl for this variant directly to the inner error.
+
+== Using `anyhow`
+
+`thiserror` and `anyhow` are crates from the same author that provide different
+kinds of tooling for reporting errors. The `thiserror` docs describe `anyhow` as
+"a convenient single error type to use in application code", which has become
+the general guidance to "use `thiserror` for libraries and `anyhow` for
+applications".
+
+We can refine that some: Using `thiserror` is always fine, even for
+applications, and is the right choice if any consumers of the error type(s) want
+to match on the error kinds programmatically. `anyhow` is more convenient, but
+is fine only when callers never need to do that.
+
+Most Omicron code should default to using `thiserror`; we often want
+strongly-typed error types that can be acted on programmatically by callers. If
+using `anyhow`, the above guidance about "attach meaningful context to errors"
+still applies, but is easier to do at call sites. Continuing the example from
+above, we could rewrite our function to use ``anyhow``'s `Context` extension to
+`Result` and `Option`:
+
+[source,rust]
+----
+fn read_file_with_anyhow(path: &Utf8Path) -> anyhow::Result<()> {
+    let mut f = File::open(path)
+        .with_context(|| format!("failed to open `{path}`"))?;
+
+    let mut header = [0; 64];
+    f.read_exact(&mut header)
+        .with_context(|| format!("failed reading header of `{path}`"))?;
+    // ... do something with `header` ...
+
+    let mut body = [0; 256];
+    f.read_exact(&mut body)
+        .with_context(|| format!("failed reading body of `{path}`"))?;
+    // ... do something with `body` ...
+
+    Ok(())
+}
+----
+
+You must still be careful to print the full error chain! If printing an
+`anyhow::Error` directly, it will only display the outermost context, just like
+directly printing a `thiserror`-based error:
+
+[source,rust]
+----
+// This prints the outermost context only!
+//
+// ```
+// failed to open open `/some/file`
+// failed reading header of `/some/file`
+// failed reading body of `/some/file`
+// ```
+if let Err(err) = read_file_with_anyhow(path) {
+    println!("{err}");
+}
+----
+
+``anyhow::Error``'s `Debug` implementation will print the full error chain spread
+out across multiple lines; e.g.,
+
+[source,rust]
+----
+// This prints the full error chain across multiple lines; e.g.,
+//
+// ```
+// failed to open `/some/file`
+//
+// Caused by:
+//     Permission denied (os error 13)
+// ```
+if let Err(err) = read_file_with_anyhow(path) {
+    println!("{err:?}");
+}
+----
+
+It also supports the "alternate" format specifier, `#`, to print the full error
+chain in a colon-separated single line (just like `InlineErrorChain`):
+
+[source,rust]
+----
+// This prints the full error chain on one line; e.g.,
+//
+// ```
+// failed to open `/some/file`: Permission denied (os error 13)
+// ```
+if let Err(err) = read_file_with_anyhow(path) {
+    println!("{err:#}");
+}
+----
+
+If printing or logging an error that is guaranteed to be an `anyhow::Error`,
+using the `:#` format specifier is sufficient. However, if that error type ever
+changes (e.g., to a `thiserror`-based error), the `:#` format specifier will
+continue to compile but will no longer print the full error chain! If you want
+to be certain to print the full error chain, even under future changes to the
+error type, you can use `InlineErrorChain` with `anyhow::Error`:
+
+[source,rust]
+----
+// This also prints the full error chain on one line; e.g.,
+//
+// ```
+// failed to open `/some/file`: Permission denied (os error 13)
+// ```
+if let Err(err) = read_file_with_anyhow(path) {
+    println!("{}", InlineErrorChain::new(&*err));
+}
+----
+
+Note that this requires an extra dereference (`&*err` instead of just `&err`).
+If the type of `err` changes in the future, this dereference will no longer
+compile, but that's a much better outcome than losing the chain of error
+sources.

@@ -1,4 +1,8 @@
-use std::{collections::HashSet, sync::Arc};
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::{collections::HashSet, net::IpAddr, sync::Arc};
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -68,14 +72,27 @@ impl BackgroundTask for V2PManager {
             // create a set of updates from the v2p mappings
             let desired_v2p: HashSet<_> = v2p_mappings
                 .into_iter()
-                .map(|mapping| {
-                    VirtualNetworkInterfaceHost {
-                        virtual_ip: mapping.ip.ip(),
-                        virtual_mac: *mapping.mac,
-                        physical_host_ip: *mapping.sled_ip,
-                        vni: mapping.vni.0,
-                    }
+                .flat_map(|mapping| {
+                    [
+                        mapping.ipv4.map(|x| {
+                            VirtualNetworkInterfaceHost {
+                                virtual_ip: IpAddr::from(x),
+                                virtual_mac: *mapping.mac,
+                                physical_host_ip: *mapping.sled_ip,
+                                vni: mapping.vni.0,
+                            }
+                        }),
+                        mapping.ipv6.map(|x| {
+                            VirtualNetworkInterfaceHost {
+                                virtual_ip: IpAddr::from(x),
+                                virtual_mac: *mapping.mac,
+                                physical_host_ip: *mapping.sled_ip,
+                                vni: mapping.vni.0,
+                            }
+                        }),
+                    ]
                 })
+                .flatten()
                 .collect();
 
             for (sled, client) in sled_clients {

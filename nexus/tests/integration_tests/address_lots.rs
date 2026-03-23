@@ -10,12 +10,12 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
+use nexus_types::external_api::networking::{
     AddressLotBlockCreate, AddressLotCreate,
 };
 use omicron_common::api::external::{
     AddressLot, AddressLotBlock, AddressLotCreateResponse, AddressLotKind,
-    IdentityMetadataCreateParams,
+    AddressLotViewResponse, IdentityMetadataCreateParams,
 };
 use std::net::IpAddr;
 
@@ -39,7 +39,7 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(lots.len(), 1, "Expected one lot");
 
     // Create a lot
-    let params = AddressLotCreate {
+    let mut params = AddressLotCreate {
         identity: IdentityMetadataCreateParams {
             name: "parkinglot".parse().unwrap(),
             description: "an address parking lot".into(),
@@ -78,6 +78,25 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
         "203.0.113.20".parse::<IpAddr>().unwrap()
     );
 
+    // View a single lot by name
+    let view_lot = NexusRequest::object_get(
+        client,
+        "/v1/system/networking/address-lot/parkinglot",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<AddressLotViewResponse>()
+    .await;
+    assert_eq!(view_lot.lot.identity.name, "parkinglot");
+    assert_eq!(view_lot.blocks.len(), params.blocks.len());
+    assert_eq!(
+        view_lot.blocks[0].first_address,
+        "203.0.113.10".parse::<IpAddr>().unwrap()
+    );
+    assert_eq!(
+        view_lot.blocks[0].last_address,
+        "203.0.113.20".parse::<IpAddr>().unwrap()
+    );
+
     // Verify there are lots
     let lots = NexusRequest::iter_collection_authn::<AddressLot>(
         client,
@@ -105,6 +124,39 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
 
     assert_eq!(blist.len(), 1, "Expected 1 address lot block");
     assert_eq!(blist[0], blocks[0]);
+
+    // add a block to a lot
+    params.blocks.push(AddressLotBlockCreate {
+        first_address: "fd00:203:113::10".parse().unwrap(),
+        last_address: "fd00:203:113::20".parse().unwrap(),
+    });
+    let response: AddressLotCreateResponse = NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(response.blocks.len(), params.blocks.len());
+
+    // remove block from lot
+    params.blocks.pop();
+    let response: AddressLotCreateResponse = NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(response.blocks.len(), params.blocks.len());
 }
 
 #[nexus_test]

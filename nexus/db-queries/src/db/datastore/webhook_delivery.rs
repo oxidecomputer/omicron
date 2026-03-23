@@ -191,8 +191,10 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &AlertReceiverUuid,
         cfg: &DeliveryConfig,
-    ) -> Result<impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static, Error>
-    {
+    ) -> Result<
+        impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static + use<>,
+        Error,
+    > {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
@@ -446,10 +448,11 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::model;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::alert;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
@@ -467,7 +470,7 @@ mod test {
         let rx = datastore
             .webhook_rx_create(
                 opctx,
-                params::WebhookCreate {
+                alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "test-webhook".parse().unwrap(),
                         description: String::new(),
@@ -483,17 +486,17 @@ mod test {
             .unwrap();
         let rx_id = rx.rx.identity.id.into();
         let alert_id = AlertUuid::new_v4();
+        let alert = model::Alert::new(
+            alert_id,
+            model::AlertClass::TestFoo,
+            serde_json::json!({
+                "answer": 42,
+            }),
+        );
         datastore
-            .alert_create(
-                &opctx,
-                alert_id,
-                AlertClass::TestFoo,
-                serde_json::json!({
-                    "answer": 42,
-                }),
-            )
+            .alert_create(&opctx, alert)
             .await
-            .expect("can't create ye event");
+            .expect("can't create ye alert");
 
         let dispatch1 = WebhookDelivery::new(
             &alert_id,

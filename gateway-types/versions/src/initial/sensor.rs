@@ -1,0 +1,61 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use crate::v1::component::SpIdentifier;
+
+/// Result of reading an SP sensor.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct SpSensorReading {
+    /// SP-centric timestamp of when `result` was recorded from this sensor.
+    ///
+    /// Currently this value represents "milliseconds since the last SP boot"
+    /// and is primarily useful as a delta between sensors on this SP (assuming
+    /// no reboot in between). The meaning could change with future SP releases.
+    pub timestamp: u64,
+    /// Value (or error) from the sensor.
+    pub result: SpSensorReadingResult,
+}
+
+/// Single reading (or error) from an SP sensor.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SpSensorReadingResult {
+    Success { value: f32 },
+    DeviceOff,
+    DeviceError,
+    DeviceNotPresent,
+    DeviceUnavailable,
+    DeviceTimeout,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpSensorId {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// ID for the sensor on the SP.
+    pub sensor_id: u32,
+}

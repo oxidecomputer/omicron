@@ -27,7 +27,7 @@ const CTD_ALL: i32 = 2;
 type ct_stathdl_t = *mut c_void;
 
 #[link(name = "contract")]
-extern "C" {
+unsafe extern "C" {
     fn ct_status_read(
         fd: c_int,
         detail: c_int,

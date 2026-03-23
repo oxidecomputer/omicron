@@ -307,6 +307,17 @@ Once everything is up and running, you can use the system in a few ways:
 * Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults with `omicron-dev run-all`, you can reach the console at `http://127.0.0.1:12220/projects`.  If you ran a second Nexus using the `config-second.toml` config file, it will be on port `12222` instead (because that config file specifies port 12222).  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
 * Use the xref:cli.adoc[`oxide` CLI].
 
+You can authenticate using a username of `test-privileged` and a password of `oxide`.
+
+If the console endpoints are returning a 404 run `cargo xtask download console`.
+
+Initiate a cli login using
+
+[source,text]
+----
+$ oxide auth login --host http://localhost:12220
+----
+
 == Running with TLS
 
 When you run the above, you will wind up with Nexus listening on HTTP (with no TLS) on its external address.  This is convenient for debugging, but not representative of a real system.  If you want to run it with TLS, you need to tweak the above procedure slightly:

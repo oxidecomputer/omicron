@@ -4,6 +4,7 @@
 
 //! Tools for managing Dendrite during development
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -36,38 +37,51 @@ pub struct DendriteInstance {
 }
 
 impl DendriteInstance {
-    pub async fn start(port: u16) -> Result<Self, anyhow::Error> {
+    pub async fn start(
+        port: u16,
+        nexus_address: Option<SocketAddr>,
+        mgs_address: Option<SocketAddr>,
+    ) -> Result<Self, anyhow::Error> {
         let mut port = port;
         let temp_dir = TempDir::new()?;
         let address_one = format!("[::1]:{port}");
 
-        let args = vec![
+        let mut args = vec![
             "run".to_string(),
             "--listen-addresses".to_string(),
             address_one,
+            "--enable-rpw".to_string(),
         ];
 
-        let child = tokio::process::Command::new("dpd")
+        if let Some(socket_addr) = nexus_address {
+            args.push("--nexus-address".to_string());
+            args.push(socket_addr.to_string());
+        }
+
+        if let Some(socket_addr) = mgs_address {
+            args.push("--mgs-address".to_string());
+            args.push(socket_addr.to_string());
+        }
+
+        let mut child = tokio::process::Command::new("dpd")
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::from(redirect_file(
                 temp_dir.path(),
                 "dendrite_stdout",
             )?))
-            .stderr(Stdio::from(redirect_file(
-                temp_dir.path(),
-                "dendrite_stderr",
-            )?))
+            .stderr(Stdio::piped())
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `dpd` (with args: {:?})", &args)
             })?;
-
-        let child = Some(child);
+        let stderr = child.stderr.take().unwrap();
 
         let temp_dir = temp_dir.keep();
         if port == 0 {
             port = discover_port(
+                &mut child,
+                stderr,
                 temp_dir.join("dendrite_stdout").display().to_string(),
             )
             .await
@@ -79,7 +93,7 @@ impl DendriteInstance {
             })?;
         }
 
-        Ok(Self { port, args, child, data_dir: Some(temp_dir) })
+        Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
     }
 
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
@@ -129,20 +143,45 @@ fn redirect_file(
         .with_context(|| format!("open \"{}\"", out_path.display()))
 }
 
-async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
+async fn discover_port(
+    child: &mut tokio::process::Child,
+    stderr: tokio::process::ChildStderr,
+    logfile: String,
+) -> Result<u16, anyhow::Error> {
     let timeout = Instant::now() + DENDRITE_TIMEOUT;
-    tokio::time::timeout_at(timeout, find_dendrite_port_in_log(logfile))
-        .await
-        .context("time out while discovering dendrite port number")?
+    tokio::time::timeout_at(
+        timeout,
+        find_dendrite_port_in_log(child, stderr, logfile),
+    )
+    .await
+    .context("time out while discovering dendrite port number")?
 }
 
 async fn find_dendrite_port_in_log(
+    child: &mut tokio::process::Child,
+    mut stderr: tokio::process::ChildStderr,
     logfile: String,
 ) -> Result<u16, anyhow::Error> {
     let re = regex::Regex::new(r#""local_addr":"\[::1\]:([0-9]+)""#).unwrap();
     let mut reader = BufReader::new(File::open(&logfile).await?);
     let mut lines = reader.lines();
     loop {
+        // Exit early if the process has exited.
+        if let Some(exit_status) = child.try_wait()? {
+            let mut stderr_contents = String::new();
+            tokio::io::AsyncReadExt::read_to_string(
+                &mut stderr,
+                &mut stderr_contents,
+            )
+            .await?;
+
+            anyhow::bail!(
+                "dpd exited with status {} before port could be discovered: {}",
+                exit_status,
+                stderr_contents
+            );
+        }
+
         match lines.next_line().await? {
             Some(line) => {
                 if let Some(cap) = re.captures(&line) {
@@ -196,10 +235,22 @@ mod tests {
         writeln!(file, "Another garbage line").unwrap();
         file.flush().unwrap();
 
+        let mut child = tokio::process::Command::new("yes")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stderr = child.stderr.take().unwrap();
+
         assert_eq!(
-            find_dendrite_port_in_log(file.path().display().to_string())
-                .await
-                .unwrap(),
+            find_dendrite_port_in_log(
+                &mut child,
+                stderr,
+                file.path().display().to_string()
+            )
+            .await
+            .unwrap(),
             EXPECTED_PORT
         );
     }

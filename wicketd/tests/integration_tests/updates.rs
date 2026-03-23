@@ -17,18 +17,20 @@ use maplit::btreeset;
 use omicron_common::{
     disk::DiskIdentity,
     update::{
-        MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+        MupdateOverrideInfo, OmicronInstallManifest,
+        OmicronInstallManifestSource,
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use sled_agent_config_reconciler::{
-    InternalDisksReceiver, InternalDisksWithBootDisk,
+    InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
-use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
-use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_agent_resolvable_files::ZoneImageSourceResolver;
+use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
+use update_common::artifacts::UpdatePlan;
 use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
@@ -95,7 +97,7 @@ async fn test_updates() {
         .into_inner();
 
     // We should have an artifact for every known artifact kind (except
-    // `Zone`)...
+    // `Zone`), as well as the installinator document...
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
         .filter(|k| !matches!(k, KnownArtifactKind::Zone))
         .map(ArtifactKind::from)
@@ -115,9 +117,11 @@ async fn test_updates() {
         assert!(expected_installable_kinds.remove(&remove.into()));
     }
     for add in [
-        ArtifactKind::HOST_PHASE_1,
+        ArtifactKind::GIMLET_HOST_PHASE_1,
+        ArtifactKind::COSMO_HOST_PHASE_1,
         ArtifactKind::HOST_PHASE_2,
-        ArtifactKind::TRAMPOLINE_PHASE_1,
+        ArtifactKind::GIMLET_TRAMPOLINE_PHASE_1,
+        ArtifactKind::COSMO_TRAMPOLINE_PHASE_1,
         ArtifactKind::TRAMPOLINE_PHASE_2,
         ArtifactKind::GIMLET_ROT_IMAGE_A,
         ArtifactKind::GIMLET_ROT_IMAGE_B,
@@ -298,7 +302,11 @@ async fn test_updates() {
 // multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_installinator_fetch() {
-    let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
+    let gateway = gateway_setup::test_setup(
+        "test_installinator_fetch_no_installinator_document",
+        SpPort::One,
+    )
+    .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
@@ -335,10 +343,21 @@ async fn test_installinator_fetch() {
         .artifact_store
         .current_plan()
         .expect("we just uploaded a repository, so there should be a plan");
-    let host_phase_2_hash = update_plan.host_phase_2_hash.to_string();
-    let control_plane_hash = update_plan.control_plane_hash.to_string();
 
-    // Are the artifacts available when looked up by hash?
+    installinator_fetch_impl(&wicketd_testctx, &temp_dir, &update_plan).await;
+
+    wicketd_testctx.teardown().await;
+}
+
+async fn installinator_fetch_impl(
+    wicketd_testctx: &WicketdTestContext,
+    temp_dir: &Utf8TempDir,
+    update_plan: &UpdatePlan,
+) {
+    let log = wicketd_testctx.log();
+
+    // Are the host phase 2 and control plane artifacts available when looked up
+    // by hash?
     let host_phase_2_id = ArtifactHashId {
         kind: ArtifactKind::HOST_PHASE_2,
         hash: update_plan.host_phase_2_hash,
@@ -362,6 +381,23 @@ async fn test_installinator_fetch() {
             .contains_by_hash(&control_plane_id),
         "control plane ID found by hash"
     );
+
+    let installinator_doc_hash = update_plan
+        .installinator_doc_hash
+        .expect("expected installinator document to be present");
+    let installinator_doc_id = ArtifactHashId {
+        kind: KnownArtifactKind::InstallinatorDocument.into(),
+        hash: installinator_doc_hash,
+    };
+    assert!(
+        wicketd_testctx
+            .server
+            .artifact_store
+            .contains_by_hash(&installinator_doc_id),
+        "installinator document ID found by hash"
+    );
+
+    let installinator_doc_hash = installinator_doc_hash.to_string();
 
     // Tell the installinator to download artifacts from that location.
     let peers_list = format!(
@@ -394,25 +430,27 @@ async fn test_installinator_fetch() {
         temp_dir.path().join("pool/int").join(non_boot_zpool.to_string());
 
     let update_id_str = mupdate_id.to_string();
-    let args = installinator::InstallinatorApp::try_parse_from([
+
+    let mut args = vec![
         "installinator",
         "install",
         "--mechanism",
         peers_list.as_str(),
         "--update-id",
         update_id_str.as_str(),
-        "--host-phase-2",
-        host_phase_2_hash.as_str(),
-        "--control-plane",
-        control_plane_hash.as_str(),
         a_path.as_str(),
         b_path.as_str(),
         "--data-link0",
         "cxgbe0",
         "--data-link1",
         "cxgbe1",
-    ])
-    .expect("installinator args parsed successfully");
+    ];
+
+    // Pass in the installinator document hash
+    args.extend(["--installinator-doc", installinator_doc_hash.as_str()]);
+
+    let args = installinator::InstallinatorApp::try_parse_from(args)
+        .expect("installinator args parsed successfully");
 
     args.exec(&log.new(slog::o!("crate" => "installinator")))
         .await
@@ -481,43 +519,72 @@ async fn test_installinator_fetch() {
 
     // Ensure that the zone manifest can be parsed.
     let a_manifest_path =
-        a_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+        a_path.join("install").join(OmicronInstallManifest::ZONES_FILE_NAME);
     let a_manifest_bytes = std::fs::read(a_manifest_path)
         .expect("zone manifest file successfully read");
-    let a_manifest =
-        serde_json::from_slice::<OmicronZoneManifest>(&a_manifest_bytes)
+    let a_zone_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
             .expect("zone manifest file successfully deserialized");
 
     // Check that the source was correctly specified and that the mupdate ID
     // matches.
     assert_eq!(
-        a_manifest.source,
-        OmicronZoneManifestSource::Installinator { mupdate_id },
+        a_zone_manifest.source,
+        OmicronInstallManifestSource::Installinator { mupdate_id },
         "mupdate ID matches",
     );
 
     // Check that the images are present in the zone set.
     for file_name in FAKE_NON_SEMVER_ZONE_FILE_NAMES {
         assert!(
-            a_manifest.zones.contains_key(file_name),
+            a_zone_manifest.files.contains_key(file_name),
             "{file_name} is present in the zone set"
         );
     }
 
     // Ensure that the B path also had the same file written out.
     let b_manifest_path =
-        b_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+        b_path.join("install").join(OmicronInstallManifest::ZONES_FILE_NAME);
     assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
     // Ensure that the zone manifest can be parsed.
     let b_override_bytes = std::fs::read(b_manifest_path)
         .expect("zone manifest file successfully read");
-    let b_manifest =
-        serde_json::from_slice::<OmicronZoneManifest>(&b_override_bytes)
+    let b_zone_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&b_override_bytes)
             .expect("zone manifest file successfully deserialized");
 
     assert_eq!(
-        a_manifest, b_manifest,
+        a_zone_manifest, b_zone_manifest,
         "zone manifests match across A and B drives"
+    );
+
+    // Ensure that the measurement manifest can be parsed.
+    let a_manifest_path = a_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    let a_manifest_bytes = std::fs::read(a_manifest_path)
+        .expect("measurement manifest file successfully read");
+    let a_measurement_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&a_manifest_bytes)
+            .expect("measurement manifest file successfully deserialized");
+
+    // Ensure that the B path also had the same file written out.
+    let b_manifest_path = b_path
+        .join("install")
+        .join("measurements")
+        .join(OmicronInstallManifest::MEASUREMENT_FILE_NAME);
+    assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
+    // Ensure that the measurement manifest can be parsed.
+    let b_override_bytes = std::fs::read(b_manifest_path)
+        .expect("zone manifest file successfully read");
+    let b_measurement_manifest =
+        serde_json::from_slice::<OmicronInstallManifest>(&b_override_bytes)
+            .expect("measurement manifest file successfully deserialized");
+
+    assert_eq!(
+        a_measurement_manifest, b_measurement_manifest,
+        "measurement manifests match across A and B drives"
     );
 
     // Run sled-agent-zone-images against these paths, and ensure that the
@@ -538,7 +605,7 @@ async fn test_installinator_fetch() {
         .expect("zone manifest successful");
     assert!(result.is_valid(), "zone manifest: boot disk result is valid");
     assert_eq!(
-        result.manifest, a_manifest,
+        result.manifest, a_zone_manifest,
         "zone manifest: manifest matches a_manifest"
     );
 
@@ -574,8 +641,6 @@ async fn test_installinator_fetch() {
     );
 
     recv_handle.await.expect("recv_handle succeeded");
-
-    wicketd_testctx.teardown().await;
 }
 
 // See documentation for extract_nested_artifact_pair in update_plan.rs for why
@@ -694,10 +759,19 @@ fn make_internal_disks(
     boot_zpool: InternalZpoolUuid,
     other_zpools: &[InternalZpoolUuid],
 ) -> InternalDisksWithBootDisk {
-    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
-        vendor: "wicketd-integration-test".to_string(),
-        model: "fake-disk".to_string(),
-        serial: zpool.to_string(),
+    let fake_from_zpool = |zpool: InternalZpoolUuid, is_boot_disk: bool| {
+        let identity = DiskIdentity {
+            vendor: "wicketd-integration-test".to_string(),
+            model: "fake-disk".to_string(),
+            serial: zpool.to_string(),
+        };
+        InternalDiskDetails::fake_details(
+            identity,
+            zpool,
+            is_boot_disk,
+            None,
+            None,
+        )
     };
     let mount_config = MountConfig {
         root: root.to_path_buf(),
@@ -705,11 +779,11 @@ fn make_internal_disks(
     };
     InternalDisksReceiver::fake_static(
         Arc::new(mount_config),
-        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
+        std::iter::once(fake_from_zpool(boot_zpool, true)).chain(
             other_zpools
                 .iter()
                 .copied()
-                .map(|pool| (identity_from_zpool(pool), pool)),
+                .map(|pool| fake_from_zpool(pool, false)),
         ),
     )
     .current_with_boot_disk()

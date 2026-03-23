@@ -21,6 +21,12 @@ transactions, we actually require that there are no writes of any kind. In
 practice, this means `oximeter` **must not** be running when this is called.
 Similarly, there must be only a single instance of this program at a time.
 
+_NB: Schema changes for the `oximeter` database are not allowed because there
+is no mechanism to apply them to existing systems. If we need to support schema
+changes at some point, we'll have to do the work to update them during automated
+update. See omicron [#8862](https://github.com/oxidecomputer/omicron/issues/8862)
+for details._
+
 To run this program:
 
 - Ensure the ClickHouse server is running, and grab its IP address;

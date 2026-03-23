@@ -15,31 +15,36 @@ use crate::InventoryError;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::DatasetProperties;
 use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
+use key_manager_types::VersionedAes256GcmDiskEncryptionKey;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
+use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::inventory::InventoryDataset;
+use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_storage::keyfile::KeyFile;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -160,18 +165,63 @@ pub enum NestedDatasetListError {
     },
 }
 
+/// Error returned when ZFS encryption key rotation fails.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to rotate encryption key for dataset {dataset}")]
+pub struct KeyRotationError {
+    dataset: String,
+    #[source]
+    err: anyhow::Error,
+}
+
+/// Information for rekeying a single dataset.
+#[derive(Debug)]
+pub struct DatasetRekeyInfo {
+    /// Full ZFS dataset name (e.g., `oxp_<uuid>/crypt`)
+    pub dataset_name: String,
+    /// The new encryption key with its epoch.
+    pub key: VersionedAes256GcmDiskEncryptionKey,
+    /// Identity of the physical disk (used to construct keyfile path).
+    pub disk_identity: DiskIdentity,
+}
+
+/// Request to rekey a batch of datasets.
+#[derive(Debug, Default)]
+pub struct RekeyRequest {
+    /// Datasets to rekey, keyed by physical disk UUID.
+    pub disks: BTreeMap<PhysicalDiskUuid, DatasetRekeyInfo>,
+}
+
+/// Result of a batch rekey operation.
+#[derive(Debug, Default)]
+pub struct RekeyResult {
+    /// Disks that were successfully rekeyed.
+    pub succeeded: BTreeSet<PhysicalDiskUuid>,
+    /// Disks that failed to rekey.
+    pub failed: BTreeSet<PhysicalDiskUuid>,
+}
+
+impl RekeyResult {
+    /// Returns true if any rekey operations failed.
+    pub fn has_failures(&self) -> bool {
+        !self.failed.is_empty()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct DatasetEnsureResult {
     pub(crate) config: DatasetConfig,
     pub(crate) result: Result<(), Arc<DatasetEnsureError>>,
 }
 
-impl IdMappable for DatasetEnsureResult {
-    type Id = DatasetUuid;
+impl IdOrdItem for DatasetEnsureResult {
+    type Key<'a> = DatasetUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.config.id
     }
+
+    id_upcast!();
 }
 
 #[derive(Debug, Clone)]
@@ -231,17 +281,34 @@ impl DatasetTaskHandle {
             .await
     }
 
-    pub async fn datasets_report_orphans(
+    /// Destroy any orphaned Omicron datasets.
+    ///
+    /// This method will _not_ destroy arbitrary datasets. For each dataset
+    /// present on a zpool in `currently_managed_zpools`, it will look at its
+    /// name and perform the following checks:
+    ///
+    /// * Can we parse the name as a [`DatasetName`]? If not, ignore the
+    ///   dataset; we don't know what it is and it won't conflict with any
+    ///   datasets we want to create or use.
+    /// * Is the dataset still present in the config specified by `datasets`? If
+    ///   so, don't destroy it: it's not an orphan.
+    /// * Is the [`DatasetKind`] (which we've inferred from the parsed name) a
+    ///   kind that we ought to destroy? See
+    ///   `reason_to_skip_orphaned_dataset_destruction` for kinds we refuse to
+    ///   destroy.
+    ///
+    /// The returned map lists includes the orphaned datasets we found but did
+    /// not destroy, either because of one of the checks above or because we
+    /// attempted destruction but it failed.
+    pub async fn datasets_destroy_orphans(
         &self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        destroy_orphans: bool,
     ) -> Result<anyhow::Result<IdOrdMap<OrphanedDataset>>, DatasetTaskError>
     {
-        self.try_send_request(|tx| DatasetTaskRequest::DatasetsReportOrphans {
+        self.try_send_request(|tx| DatasetTaskRequest::DatasetsDestroyOrphans {
             datasets,
             currently_managed_zpools,
-            destroy_orphans,
             tx,
         })
         .await
@@ -249,9 +316,9 @@ impl DatasetTaskHandle {
 
     pub async fn datasets_ensure(
         &self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-    ) -> Result<IdMap<DatasetEnsureResult>, DatasetTaskError> {
+    ) -> Result<IdOrdMap<DatasetEnsureResult>, DatasetTaskError> {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsEnsure {
             datasets,
             currently_managed_zpools,
@@ -283,6 +350,7 @@ impl DatasetTaskHandle {
         .await
     }
 
+    // Returns a "not found" error if the dataset does not exist
     pub async fn nested_dataset_destroy(
         &self,
         name: NestedDatasetLocation,
@@ -305,6 +373,18 @@ impl DatasetTaskHandle {
         self.try_send_request(|tx| DatasetTaskRequest::NestedDatasetList {
             dataset,
             options,
+            tx,
+        })
+        .await
+    }
+
+    /// Rotate encryption keys for multiple datasets.
+    pub async fn rekey_datasets(
+        &self,
+        request: RekeyRequest,
+    ) -> Result<RekeyResult, DatasetTaskError> {
+        self.try_send_request(|tx| DatasetTaskRequest::DatasetsRekey {
+            request,
             tx,
         })
         .await
@@ -359,17 +439,15 @@ impl DatasetTask {
             DatasetTaskRequest::Inventory { zpools, tx } => {
                 _ = tx.0.send(self.inventory(zpools, zfs).await);
             }
-            DatasetTaskRequest::DatasetsReportOrphans {
+            DatasetTaskRequest::DatasetsDestroyOrphans {
                 datasets,
                 currently_managed_zpools,
-                destroy_orphans,
                 tx,
             } => {
                 _ = tx.0.send(
-                    self.datasets_report_orphans(
+                    self.datasets_destroy_orphans(
                         datasets,
                         currently_managed_zpools,
-                        destroy_orphans,
                         zfs,
                     )
                     .await,
@@ -402,6 +480,9 @@ impl DatasetTask {
                 _ = tx.0.send(
                     self.nested_dataset_list(dataset, options, zfs).await,
                 );
+            }
+            DatasetTaskRequest::DatasetsRekey { request, tx } => {
+                _ = tx.0.send(self.datasets_rekey(request, zfs).await);
             }
         }
     }
@@ -438,11 +519,10 @@ impl DatasetTask {
         Ok(props.into_iter().map(From::from).collect())
     }
 
-    async fn datasets_report_orphans<T: ZfsImpl>(
+    async fn datasets_destroy_orphans<T: ZfsImpl>(
         &mut self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        destroy_orphans: bool,
         zfs: &T,
     ) -> anyhow::Result<IdOrdMap<OrphanedDataset>> {
         let mut orphaned_datasets = IdOrdMap::new();
@@ -535,10 +615,9 @@ impl DatasetTask {
                 continue;
             }
 
-            // Try to destroy this dataset, if destruction was requested. If
-            // destruction is disabled or enabled but we fail, record the reason
-            // this dataset is left orphaned.
-            let maybe_reason = if destroy_orphans {
+            // Try to destroy this dataset. If we fail, record the reason this
+            // dataset is left orphaned.
+            let maybe_reason =
                 match zfs.destroy_dataset(&dataset_full_name).await {
                     Ok(()) => {
                         info!(
@@ -557,14 +636,7 @@ impl DatasetTask {
                         );
                         Some(InlineErrorChain::new(&err).to_string())
                     }
-                }
-            } else {
-                Some(
-                    "`destroy_orphans` chicken switch is off \
-                    (full dataset destruction is tracked by omicron#6177)"
-                        .to_string(),
-                )
-            };
+                };
 
             if let Some(reason) = maybe_reason {
                 orphaned_datasets.insert_overwrite(OrphanedDataset {
@@ -583,11 +655,11 @@ impl DatasetTask {
 
     async fn datasets_ensure<T: ZfsImpl>(
         &mut self,
-        config: IdMap<DatasetConfig>,
+        config: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         zfs: &T,
-    ) -> IdMap<DatasetEnsureResult> {
-        let mut ensure_results = IdMap::new();
+    ) -> IdOrdMap<DatasetEnsureResult> {
+        let mut ensure_results = IdOrdMap::new();
 
         // There's an implicit hierarchy inside the list of `DatasetConfig`s:
         //
@@ -629,10 +701,15 @@ impl DatasetTask {
                     "dataset" => ?dataset,
                 );
                 let err = DatasetEnsureError::ZpoolNotFound(*zpool);
-                ensure_results.insert(DatasetEnsureResult {
-                    config: dataset,
-                    result: Err(Arc::new(err)),
-                });
+                ensure_results
+                    .insert_unique(DatasetEnsureResult {
+                        config: dataset,
+                        result: Err(Arc::new(err)),
+                    })
+                    .expect(
+                        "DatasetConfig and DatasetEnsureResult both use \
+                         DatasetUuid as their key, so this is unique",
+                    );
                 continue;
             }
 
@@ -669,7 +746,9 @@ impl DatasetTask {
                 | DatasetKind::ClickhouseServer
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns
-                | DatasetKind::Debug => {
+                | DatasetKind::Debug
+                | DatasetKind::LocalStorage
+                | DatasetKind::LocalStorageUnencrypted => {
                     non_transient_zone_configs.push(dataset);
                 }
             }
@@ -722,7 +801,8 @@ impl DatasetTask {
         .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
 
         while let Some((config, result)) = non_transient_zones.next().await {
-            ensure_results.insert(DatasetEnsureResult { config, result });
+            ensure_results
+                .insert_overwrite(DatasetEnsureResult { config, result });
         }
 
         // For each transient zone dataset: either ensure it or mark down why we
@@ -738,7 +818,9 @@ impl DatasetTask {
                 else {
                     let err =
                         DatasetEnsureError::TransientZoneRootNoConfig(zpool);
-                    ensure_results.insert(DatasetEnsureResult {
+                    // Inserting into ensure_results here should also be unique
+                    // but it's hard to tell by code inspection.
+                    ensure_results.insert_overwrite(DatasetEnsureResult {
                         config: dataset,
                         result: Err(Arc::new(err)),
                     });
@@ -757,7 +839,9 @@ impl DatasetTask {
                                 zpool,
                                 err: Arc::clone(err),
                             };
-                        ensure_results.insert(DatasetEnsureResult {
+                        // Inserting into ensure_results here should also be
+                        // unique but it's hard to tell by code inspection.
+                        ensure_results.insert_overwrite(DatasetEnsureResult {
                             config: dataset,
                             result: Err(Arc::new(err)),
                         });
@@ -790,7 +874,10 @@ impl DatasetTask {
         let mut transient_zones = futures::stream::iter(transient_zone_futures)
             .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
         while let Some((config, result)) = transient_zones.next().await {
-            ensure_results.insert(DatasetEnsureResult { config, result });
+            // Inserting into ensure_results here should also be unique but it's
+            // hard to tell by code inspection.
+            ensure_results
+                .insert_overwrite(DatasetEnsureResult { config, result });
         }
 
         // Remember all successfully-ensured datasets (used by
@@ -1007,6 +1094,7 @@ impl DatasetTask {
         }
     }
 
+    // Returns a "not found" error if the dataset does not exist
     async fn nested_dataset_destroy<T: ZfsImpl>(
         &self,
         name: NestedDatasetLocation,
@@ -1040,7 +1128,7 @@ impl DatasetTask {
         let root_path = dataset.full_name();
         let get_properties_result = zfs
             .get_dataset_properties(
-                &[root_path.clone()],
+                std::slice::from_ref(&root_path),
                 WhichDatasets::SelfAndChildren,
             )
             .await;
@@ -1092,6 +1180,123 @@ impl DatasetTask {
             })
             .collect())
     }
+
+    /// Rotate encryption keys for multiple datasets.
+    ///
+    /// For each request, checks if the dataset is already at the target epoch
+    /// (idempotent), and if not, rotates the key and sets the epoch property
+    /// (atomically with the key rotation).
+    ///
+    /// This is a batch operation so that the caller can ensure that all
+    /// datasets are updated together with no intervening operations. It does
+    /// not guarantee that the operation will succeed atomically across all
+    /// datasets.
+    async fn datasets_rekey<T: ZfsImpl>(
+        &mut self,
+        request: RekeyRequest,
+        zfs: &T,
+    ) -> RekeyResult {
+        let log = self.log.new(slog::o!("request" => "datasets_rekey"));
+        let mut succeeded = BTreeSet::new();
+        let mut failed = BTreeSet::new();
+
+        // Batch fetch current epochs for all datasets to check for idempotency
+        let dataset_names: Vec<String> =
+            request.disks.values().map(|r| r.dataset_name.clone()).collect();
+        let current_epochs: BTreeMap<String, Option<u64>> = match zfs
+            .get_dataset_properties(&dataset_names, WhichDatasets::SelfOnly)
+            .await
+        {
+            Ok(props) => props.into_iter().map(|p| (p.name, p.epoch)).collect(),
+            Err(e) => {
+                // If we can't read properties, log and proceed with all rekeys
+                warn!(
+                    log,
+                    "Could not read dataset properties, proceeding with rekeys";
+                    "error" => %e,
+                );
+                BTreeMap::new()
+            }
+        };
+
+        for (disk_id, req) in request.disks {
+            let new_epoch = req.key.epoch();
+            let current_epoch =
+                current_epochs.get(&req.dataset_name).copied().flatten();
+
+            // Check current epoch - skip if already at target
+            if current_epoch == Some(new_epoch) {
+                info!(
+                    log,
+                    "Dataset already at target epoch, skipping";
+                    "dataset" => &req.dataset_name,
+                    "epoch" => new_epoch,
+                );
+                succeeded.insert(disk_id);
+                continue;
+            }
+
+            info!(
+                log,
+                "Rotating encryption key";
+                "dataset" => &req.dataset_name,
+                "current_epoch" => ?current_epoch,
+                "new_epoch" => new_epoch,
+            );
+
+            // Write the new key to the keylocation file, invoke
+            // `zfs change-key`, then zero and unlink the keyfile.
+            let keypath =
+                Keypath::new(&req.disk_identity, &self.mount_config.root);
+            let mut keyfile = match KeyFile::create(
+                keypath.clone(),
+                req.key.expose_secret(),
+                &log,
+            )
+            .await
+            {
+                Ok(kf) => kf,
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to create keyfile for rekey";
+                        "dataset" => &req.dataset_name,
+                        InlineErrorChain::new(&e),
+                    );
+                    failed.insert(disk_id);
+                    continue;
+                }
+            };
+
+            match zfs.change_key(&req.dataset_name, new_epoch).await {
+                Ok(()) => {
+                    succeeded.insert(disk_id);
+                }
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to rotate encryption key";
+                        "dataset" => &req.dataset_name,
+                        "current_epoch" => ?current_epoch,
+                        "new_epoch" => new_epoch,
+                        "error" => %e,
+                    );
+                    failed.insert(disk_id);
+                }
+            }
+
+            if let Err(e) = keyfile.zero_and_unlink().await {
+                warn!(
+                    log,
+                    "Failed to zero keyfile after rekey";
+                    "path" => %keypath,
+                    InlineErrorChain::new(&e),
+                );
+            }
+        }
+
+        RekeyResult { succeeded, failed }
+    }
 }
 
 #[derive(Debug)]
@@ -1102,18 +1307,17 @@ enum DatasetTaskRequest {
             oneshot::Sender<Result<Vec<InventoryDataset>, InventoryError>>,
         >,
     },
-    DatasetsReportOrphans {
-        datasets: IdMap<DatasetConfig>,
+    DatasetsDestroyOrphans {
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        destroy_orphans: bool,
         tx: DebugIgnore<
             oneshot::Sender<anyhow::Result<IdOrdMap<OrphanedDataset>>>,
         >,
     },
     DatasetsEnsure {
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        tx: DebugIgnore<oneshot::Sender<IdMap<DatasetEnsureResult>>>,
+        tx: DebugIgnore<oneshot::Sender<IdOrdMap<DatasetEnsureResult>>>,
     },
     NestedDatasetMount {
         name: NestedDatasetLocation,
@@ -1137,6 +1341,10 @@ enum DatasetTaskRequest {
                 Result<Vec<NestedDatasetConfig>, NestedDatasetListError>,
             >,
         >,
+    },
+    DatasetsRekey {
+        request: RekeyRequest,
+        tx: DebugIgnore<oneshot::Sender<RekeyResult>>,
     },
 }
 
@@ -1172,7 +1380,10 @@ fn reason_to_skip_orphaned_dataset_destruction(
         // These kinds are part of our config, but it would be surprising to
         // have them disappear: they should always be present for any managed
         // disk. Refuse to remove them.
-        DatasetKind::TransientZoneRoot | DatasetKind::Debug => Some(format!(
+        DatasetKind::TransientZoneRoot
+        | DatasetKind::Debug
+        | DatasetKind::LocalStorage
+        | DatasetKind::LocalStorageUnencrypted => Some(format!(
             "refusing to delete dataset of kind {kind:?} \
              (expected to exist for all managed disks)",
         )),
@@ -1212,6 +1423,18 @@ trait ZfsImpl: Send + Sync + 'static {
         datasets: &[String],
         which: WhichDatasets,
     ) -> impl Future<Output = anyhow::Result<Vec<DatasetProperties>>> + Send;
+
+    /// Change the encryption key and set the oxide:epoch property.
+    ///
+    /// This is used for ZFS key rotation when a new Trust Quorum epoch is
+    /// committed. The caller is responsible for writing the new key to the
+    /// dataset's keylocation before calling this, and zeroing the keyfile
+    /// afterward.
+    fn change_key(
+        &self,
+        dataset: &str,
+        epoch: u64,
+    ) -> impl Future<Output = Result<(), KeyRotationError>> + Send;
 }
 
 struct RealZfs;
@@ -1257,12 +1480,24 @@ impl ZfsImpl for RealZfs {
     ) -> anyhow::Result<Vec<DatasetProperties>> {
         Zfs::get_dataset_properties(datasets, which).await
     }
+
+    async fn change_key(
+        &self,
+        dataset: &str,
+        epoch: u64,
+    ) -> Result<(), KeyRotationError> {
+        Zfs::change_key(dataset, epoch).await.map_err(|err| KeyRotationError {
+            dataset: dataset.to_string(),
+            err: err.into(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
+    use anyhow::anyhow;
     use assert_matches::assert_matches;
     use illumos_utils::zfs::DestroyDatasetErrorVariant;
     use omicron_common::api::external::ByteCount;
@@ -1344,6 +1579,7 @@ mod tests {
                     .as_ref()
                     .map(|sd| sd.compression.to_string())
                     .unwrap_or_else(|| "on".to_string()),
+                epoch: args.encryption_details.as_ref().map(|ed| ed.epoch),
             };
             state.datasets.insert(props.name.clone(), props);
             Ok(())
@@ -1444,6 +1680,23 @@ mod tests {
                 .map(|(_, props)| props.clone())
                 .collect())
         }
+
+        async fn change_key(
+            &self,
+            dataset: &str,
+            epoch: u64,
+        ) -> Result<(), KeyRotationError> {
+            let mut state = self.inner.lock().unwrap();
+
+            // Verify dataset exists and update its epoch
+            let props =
+                state.datasets.get_mut(dataset).ok_or(KeyRotationError {
+                    dataset: dataset.to_string(),
+                    err: anyhow!("dataset does not exist"),
+                })?;
+            props.epoch = Some(epoch);
+            Ok(())
+        }
     }
 
     #[derive(Debug, Arbitrary, PartialEq, Eq, PartialOrd, Ord)]
@@ -1532,7 +1785,7 @@ mod tests {
             .cycle()
             .map(|zpool| make_dataset_config(zpool, DatasetKind::Crucible))
             .take(100)
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
         let currently_managed_zpools =
@@ -1651,7 +1904,7 @@ mod tests {
                     )
                 }))
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Configure our fake ZFS to fail to mount some of the transient zone
         // root.
@@ -1782,7 +2035,7 @@ mod tests {
                     ),
                 ]
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
         let currently_managed_zpools =
@@ -1847,7 +2100,7 @@ mod tests {
                 .into_iter()
                 .map(move |kind| make_dataset_config(zpool, kind))
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
         let currently_managed_zpools =
@@ -1981,7 +2234,7 @@ mod tests {
         // 2. The set of `DatasetConfig`s
         // 3. The set of datasets that don't have `DatasetConfig`s
         let mut pools: BTreeSet<ZpoolName> = BTreeSet::new();
-        let mut dataset_configs = IdMap::new();
+        let mut dataset_configs = IdOrdMap::new();
         let mut datasets_in_config = BTreeSet::new();
         let mut datasets_not_in_config = BTreeSet::new();
         for input in inputs {
@@ -1993,7 +2246,7 @@ mod tests {
                 if in_config {
                     assert!(!datasets_not_in_config.contains(&name));
                     assert!(datasets_in_config.insert(name.clone()));
-                    dataset_configs.insert(DatasetConfig {
+                    dataset_configs.insert_overwrite(DatasetConfig {
                         id: DatasetUuid::new_v4(),
                         name,
                         inner: SharedDatasetConfig::default(),
@@ -2024,6 +2277,7 @@ mod tests {
                         quota: None,
                         reservation: None,
                         compression: CompressionAlgorithm::On.to_string(),
+                        epoch: None,
                     },
                 );
             }
@@ -2039,62 +2293,9 @@ mod tests {
             zfs.clone(),
         );
 
-        // Check for orphans without destroying them.
+        // Destroy all orphans.
         let orphans = task_handle
-            .datasets_report_orphans(
-                dataset_configs.clone(),
-                currently_managed_zpools.clone(),
-                false, // destroy_orphans
-            )
-            .await
-            .expect("no task error")
-            .expect("no zfs error");
-
-        // We should report no orphans that were present in the config.
-        for dataset in &datasets_in_config {
-            assert!(
-                !orphans.contains_key(&dataset),
-                "found unexpected orphan {}",
-                dataset.full_name()
-            );
-        }
-
-        // All the datasets in `datasets_not_in_config` should be orphans, but
-        // they should all still exist (we passed destroy_orphans=false).
-        {
-            let zfs = zfs.inner.lock().unwrap();
-            for dataset in &datasets_not_in_config {
-                let name = dataset.full_name();
-                assert!(
-                    zfs.datasets.contains_key(&name),
-                    "dataset should not have been destroyed (destruction \
-                    not requested): {name}"
-                );
-
-                // We shouldn't find transient zone roots at all (they're
-                // grandchildren of the datasets we search for).
-                if matches!(dataset.kind(), DatasetKind::TransientZone { .. }) {
-                    let orphan = orphans.get(dataset);
-                    assert!(
-                        orphan.is_none(),
-                        "found unexpected orphan {orphan:?}"
-                    );
-                } else {
-                    assert!(
-                        orphans.contains_key(dataset),
-                        "didn't find expected orphan {name}",
-                    );
-                }
-            }
-        }
-
-        // Check for orphans and destroy them.
-        let orphans = task_handle
-            .datasets_report_orphans(
-                dataset_configs,
-                currently_managed_zpools,
-                true, // destroy_orphans
-            )
+            .datasets_destroy_orphans(dataset_configs, currently_managed_zpools)
             .await
             .expect("no task error")
             .expect("no zfs error");
@@ -2228,7 +2429,7 @@ mod tests {
             .iter()
             .filter(|input| input.is_debug_datset_mounted)
             .map(|input| make_dataset_config(input.pool, DatasetKind::Debug))
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Spawn the task and feed our setup to it. All the debug datasets
         // should successfully be created.
@@ -2360,6 +2561,7 @@ mod illumos_tests {
     use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
+    use iddqd::id_ord_map;
     use illumos_utils::zpool::Zpool;
     use key_manager::KeyManager;
     use key_manager::SecretRetriever;
@@ -2383,7 +2585,7 @@ mod illumos_tests {
     #[async_trait::async_trait]
     impl SecretRetriever for HardcodedSecretRetriever {
         async fn get_latest(
-            &self,
+            &mut self,
         ) -> Result<key_manager::VersionedIkm, SecretRetrieverError> {
             let epoch = 0;
             let salt = [0u8; 32];
@@ -2393,7 +2595,7 @@ mod illumos_tests {
         }
 
         async fn get(
-            &self,
+            &mut self,
             epoch: u64,
         ) -> Result<key_manager::SecretState, SecretRetrieverError> {
             if epoch != 0 {
@@ -2763,12 +2965,10 @@ mod illumos_tests {
 
         // Because `dataset` has kind `TransientZone { .. }`, we also need to
         // supply its parent root.
-        let dataset_configs: IdMap<_> = [
+        let dataset_configs = id_ord_map! {
             dataset.clone(),
             make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
-        ]
-        .into_iter()
-        .collect();
+        };
 
         // Create the datasets.
         let result = task_handle
@@ -2837,14 +3037,23 @@ mod illumos_tests {
         );
 
         // Build configs for a few datasets on each zpool
-        let mut datasets = IdMap::new();
+        let mut datasets = IdOrdMap::new();
         for &zpool in &zpools {
-            datasets.insert(make_dataset_config(zpool, DatasetKind::Crucible));
-            datasets.insert(make_dataset_config(zpool, DatasetKind::Debug));
-            datasets.insert(make_dataset_config(
-                zpool,
-                DatasetKind::TransientZoneRoot,
-            ));
+            datasets
+                .insert_unique(make_dataset_config(
+                    zpool,
+                    DatasetKind::Crucible,
+                ))
+                .unwrap();
+            datasets
+                .insert_unique(make_dataset_config(zpool, DatasetKind::Debug))
+                .unwrap();
+            datasets
+                .insert_unique(make_dataset_config(
+                    zpool,
+                    DatasetKind::TransientZoneRoot,
+                ))
+                .unwrap();
         }
 
         // Create the datasets.

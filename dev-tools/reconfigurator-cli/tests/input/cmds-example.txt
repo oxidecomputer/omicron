@@ -15,7 +15,7 @@ blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 inventory-generate
 
 wipe system
-load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
+load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4
 
 sled-list
 inventory-list
@@ -31,7 +31,7 @@ blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 # the rest of the diff output small.
 
 wipe all
-load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
+load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4
 
 blueprint-list
 blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
@@ -52,12 +52,49 @@ load-example --seed test-basic --nsleds 3 --sled-policy 1:non-provisionable --sl
 
 blueprint-list
 blueprint-show latest
+inventory-show latest all
 
 # Plan a blueprint run -- this will cause zones and disks on the expunged
 # sled to be expunged.
 blueprint-plan latest
 blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest
 
+# Set planner config.
+set planner-config --add-zones-with-mupdate-override false
+set planner-config --add-zones-with-mupdate-override true
+set planner-config --add-zones-with-mupdate-override true
+
 # Sled index out of bounds, will error out.
 wipe all
 load-example --seed test-basic --nsleds 3 --sled-policy 3:non-provisionable
+
+log
+log --verbose
+
+# Switch states with a full UUID.
+switch 4d8d6725-1ae3-4f88-b9cb-a34db82d7439
+log
+
+# Switch states with a unique prefix.
+switch 860f
+log
+
+# Switch states with an ambiguous prefix (should fail).
+switch 4
+
+# Switch states with a non-existent prefix (should fail).
+switch zzzz
+
+# Make a new branch.
+sled-add
+sled-add
+
+# Make an additional branch based on the previous branch.
+switch 4d8d6725
+sled-add
+
+# Go back to the previous branch.
+switch 5c53cf4b
+
+log
+log --verbose

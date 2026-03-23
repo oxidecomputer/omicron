@@ -82,11 +82,12 @@ impl DataStore {
                 .map(|(nic, sled, vpc): (NetworkInterface, Sled, Vpc)| {
                     V2PMappingView {
                         nic_id: nic.identity.id,
-                        sled_id: sled.identity.id,
+                        sled_id: sled.identity.id.into(),
                         sled_ip: sled.ip,
                         vni: vpc.vni,
                         mac: nic.mac,
-                        ip: nic.ip,
+                        ipv4: nic.ipv4,
+                        ipv6: nic.ipv6,
                     }
                 })
                 .collect();
@@ -134,11 +135,12 @@ impl DataStore {
                 .map(|(nic, sled, vpc): (NetworkInterface, Sled, Vpc)| {
                     V2PMappingView {
                         nic_id: nic.identity.id,
-                        sled_id: sled.identity.id,
+                        sled_id: sled.identity.id.into(),
                         sled_ip: sled.ip,
                         vni: vpc.vni,
                         mac: nic.mac,
-                        ip: nic.ip,
+                        ipv4: nic.ipv4,
+                        ipv6: nic.ipv6,
                     }
                 })
                 .collect();

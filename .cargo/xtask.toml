@@ -11,7 +11,6 @@
 [libraries."libdoor.so.1"]
 [libraries."libefi.so.1"]
 [libraries."libgcc_s.so.1"]
-[libraries."libipcc.so.1"]
 [libraries."libkstat.so.1"]
 [libraries."liblzma.so.5"]
 [libraries."libm.so.2"]
@@ -27,6 +26,17 @@
 [libraries."libumem.so.1"]
 [libraries."libxml2.so.2"]
 [libraries."libxmlsec1.so.1"]
+
+# libipcc should only be depended on by binaries that communicate with ipcc.
+[libraries."libipcc.so.1"]
+binary_allow_list = [
+  "installinator",
+  "mgs",
+  "mgs-dev",
+  "omicron-dev",
+  "sled-agent",
+  "sled-agent-sim",
+]
 
 # libnvme is a global zone only library and therefore we must be sure that only
 # programs running in the gz require it. Additionally only sled-agent should be

@@ -35,7 +35,7 @@ omdb Cargo.toml file:
 [package]
 name = "omicron-omdb"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 ```
 

@@ -51,6 +51,15 @@
         }
       }
     },
+    "SledUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::SledUuid",
+        "version": "*"
+      }
+    },
     "StartSledAgentRequestBody": {
       "description": "This is the actual app level data of `StartSledAgentRequest`\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
       "type": "object",
@@ -66,7 +75,7 @@
           "description": "Uuid of the Sled Agent to be created.",
           "allOf": [
             {
-              "$ref": "#/definitions/TypedUuidForSledKind"
+              "$ref": "#/definitions/SledUuid"
             }
           ]
         },
@@ -92,10 +101,6 @@
           "type": "boolean"
         }
       }
-    },
-    "TypedUuidForSledKind": {
-      "type": "string",
-      "format": "uuid"
     }
   }
 }

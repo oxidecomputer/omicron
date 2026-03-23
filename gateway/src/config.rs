@@ -50,13 +50,13 @@ pub struct PartialDropshotConfig {
 
 #[derive(Debug, Error, SlogInlineError)]
 pub enum LoadError {
-    #[error("error reading \"{path}\": {err}")]
+    #[error("error reading \"{path}\"")]
     Io {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("error parsing \"{path}\": {err}")]
+    #[error("error parsing \"{path}\"")]
     Parse {
         path: Utf8PathBuf,
         #[source]

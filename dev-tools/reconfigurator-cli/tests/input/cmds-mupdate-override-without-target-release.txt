@@ -1,0 +1,24 @@
+# Test clearing the mupdate override if a target release isn't set.
+load-example --nsleds 1 --ndisks-per-sled 3
+
+# Create a TUF repository from a fake manifest. We don't set this as the
+# target release; rather, we just MUPdate to it (also setting the mupdate
+# override).
+tuf-assemble ../../update-common/manifests/fake.toml
+sled-update-install-dataset serial0 --from-repo repo-1.0.0.zip
+sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
+
+# Generate a new inventory and plan against that. This diff will have the
+# "will remove mupdate override" message within it.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now apply the remove-mupdate-override instruction to the sled.
+sled-set serial0 mupdate-override unset
+
+# Plan again. This diff should show that the remove-mupdate-override instruction
+# was removed from the blueprint.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest

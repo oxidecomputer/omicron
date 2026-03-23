@@ -41,6 +41,7 @@ impl LiveTestContext {
         let datastore = create_datastore(&log, &resolver).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         check_hardware_environment(&opctx, &datastore).await?;
+        check_configuration(&opctx, &datastore).await?;
         Ok(LiveTestContext { logctx, opctx, resolver, datastore })
     }
 
@@ -72,20 +73,20 @@ impl LiveTestContext {
     pub fn specific_internal_nexus_client(
         &self,
         sockaddr: SocketAddrV6,
-    ) -> nexus_client::Client {
+    ) -> nexus_lockstep_client::Client {
         let url = format!("http://{}", sockaddr);
         let log = self.logctx.log.new(o!("nexus_internal_url" => url.clone()));
-        nexus_client::Client::new(&url, log)
+        nexus_lockstep_client::Client::new(&url, log)
     }
 
     /// Returns a list of clients for the internal APIs for all Nexus instances
     /// found in DNS
     pub async fn all_internal_nexus_clients(
         &self,
-    ) -> Result<Vec<nexus_client::Client>, anyhow::Error> {
+    ) -> Result<Vec<nexus_lockstep_client::Client>, anyhow::Error> {
         Ok(self
             .resolver
-            .lookup_all_socket_v6(ServiceName::Nexus)
+            .lookup_all_socket_v6(ServiceName::NexusLockstep)
             .await
             .context("looking up Nexus in internal DNS")?
             .into_iter()
@@ -229,6 +230,11 @@ async fn check_hardware_environment(
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
+        // test rig: "berlin"
+        "BRM42220011",
+        "BRM44220007",
+        "BRM42220082",
+        "BRM06240029",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide
@@ -253,5 +259,27 @@ async fn check_hardware_environment(
             "refusing to operate in an environment with an unknown system: {}",
             scary_sleds.join(", ")
         ))
+    }
+}
+
+/// Performs checks on the system configuration to determine if it's appropriate
+/// for live tests
+///
+/// Currently, this just verifies that the planner is off.
+async fn check_configuration(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let reconfigurator_config = datastore
+        .reconfigurator_config_get_latest(opctx)
+        .await
+        .expect("obtained latest reconfigurator config")
+        .unwrap_or_default();
+    if reconfigurator_config.config.planner_enabled {
+        Err(anyhow!(
+            "refusing to operate on a system with blueprint planning enabled"
+        ))
+    } else {
+        Ok(())
     }
 }

@@ -31,6 +31,7 @@ impl KeyFile {
         // We want to overwrite any existing contents.
         let mut file = tokio::fs::File::create(&path.0).await?;
         file.write_all(key).await?;
+        file.flush().await?;
         info!(log, "Created keyfile"; "path" => ?path);
         Ok(KeyFile {
             path,

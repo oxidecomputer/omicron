@@ -106,7 +106,7 @@ pub static NEXUS_ICMP_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
                     // Type 3 -- Destination Unreachable
                     icmp_type: 3,
                     // Codes 3,4 -- Port Unreachable, Fragmentation needed
-                    code: Some((3..=4).into()),
+                    code: Some((3..=4).try_into().expect("3 <= 4")),
                 })),
                 VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                     // Type 5 -- Redirect

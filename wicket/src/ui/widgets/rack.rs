@@ -71,7 +71,7 @@ impl Rack<'_> {
                             self.state.knight_rider_mode
                         {
                             let width = inner.width as usize;
-                            let go_right = (count / width) % 2 == 0;
+                            let go_right = (count / width).is_multiple_of(2);
                             let offset = if go_right {
                                 count % width
                             } else {
@@ -415,5 +415,5 @@ type ComponentRectsMap = BTreeMap<ComponentId, Rect>;
 
 /// Ensure that a u16 is an even number by adding 1 if necessary.
 pub fn make_even(val: u16) -> u16 {
-    if val % 2 == 0 { val } else { val + 1 }
+    if val.is_multiple_of(2) { val } else { val + 1 }
 }

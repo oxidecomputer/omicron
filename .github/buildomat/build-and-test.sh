@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.98'
+NEXTEST_VERSION='0.9.131'
 
 cargo --version
 rustc --version
@@ -105,32 +105,72 @@ export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1
 # We're building once, so there's no need to incur the overhead of an incremental build.
 export CARGO_INCREMENTAL=0
-# This allows us to build with unstable options, which gives us access to some
-# timing information.
-#
-# If we remove "--timings=json" below, this would no longer be needed.
+# This allows us to use -Zbuild-analysis to collect per-crate build timing
+# data in JSONL format.
 export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
-# We report build progress to stderr, and the "--timings=json" output goes to stdout.
 #
 # The build graph ends up building several bin/test targets that depend on
 # omicron-nexus at the same time, which uses significant memory to compile on
 # illumos. To mitigate this we build everything except omicron-nexus's bin/test
 # targets first, then finish the build after.
-ptime -m cargo build -Z unstable-options --timings=json \
-    --workspace --exclude=omicron-nexus --tests --locked --verbose \
-    1>> "$OUTPUT_DIR/crate-build-timings.json"
-ptime -m cargo build -Z unstable-options --timings=json \
-    --workspace --tests --locked --verbose \
-    1>> "$OUTPUT_DIR/crate-build-timings.json"
+#
+# Both invocations use the same flags to avoid cache invalidation.
+# We collect timing data only from the second (full workspace) build.
+ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
+    --workspace --exclude=omicron-nexus --tests --locked --verbose
+ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
+    --workspace --tests --locked --verbose
+cp "$(ls -t "${CARGO_HOME:-$HOME/.cargo}/log/"*.jsonl | head -1)" \
+    "$OUTPUT_DIR/cargo-build-analysis.jsonl"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
-#
+# To avoid too many tests running at the same time, we choose a test threads
+# 2 less (negative 2) than the default.  This avoids many test flakes where
+# the test would have worked but the system was too overloaded and tests
+# take longer than their default timeouts.
+
+# Create a user config file that enables test recording.
+RECORDING_CONFIG_DIR="/tmp/nextest-recording-config"
+RECORDING_CONFIG="$RECORDING_CONFIG_DIR/config.toml"
+NEXTEST_STATE_DIR="$(mktemp -d /tmp/nextest-state.XXXXXX)"
+ARCHIVE_PATH="/tmp/nextest-run-archive.zip"
+CHROME_TRACE_PATH="/tmp/nextest-chrome-trace.json"
+
+mkdir -p "$RECORDING_CONFIG_DIR"
+printf '[experimental]\nrecord = true\n\n[record]\nenabled = true\n' \
+    > "$RECORDING_CONFIG"
+
+export NEXTEST_STATE_DIR
+
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
+
+# Export an archive even on test failure.
+NEXTEST_EXIT=0
+ptime -m timeout 2h cargo nextest run --profile ci --locked \
+    --test-threads -2 \
+    --user-config-file "$RECORDING_CONFIG" \
+    || NEXTEST_EXIT=$?
+
+if ! ptime -m cargo nextest store export latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --archive-file "$ARCHIVE_PATH"; then
+    echo "warning: failed to export recording archive" >&2
+fi
+
+if ! ptime -m cargo nextest store export-chrome-trace latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --output "$CHROME_TRACE_PATH"; then
+    echo "warning: failed to export Chrome trace" >&2
+fi
+
+if [[ "$NEXTEST_EXIT" -ne 0 ]]; then
+    echo "error: cargo nextest run failed with exit code $NEXTEST_EXIT" >&2
+    exit "$NEXTEST_EXIT"
+fi
 
 #
 # https://github.com/nextest-rs/nextest/issues/16

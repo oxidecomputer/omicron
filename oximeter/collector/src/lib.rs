@@ -4,7 +4,7 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 pub use collection_task::ForcedCollectionError;
 use dropshot::ConfigDropshot;
@@ -33,6 +33,7 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -52,6 +53,34 @@ pub use agent::OximeterAgent;
 pub use http_entrypoints::oximeter_api;
 pub use standalone::Server as StandaloneNexus;
 pub use standalone::standalone_nexus_api;
+
+#[usdt::provider(provider = "oximeter")]
+mod probes {
+    /// Fires when a producer is registered or updated.
+    ///
+    /// The interval is given in milliseconds.
+    fn producer__registered(
+        collector_id: &str,
+        producer_id: &str,
+        addr: &str,
+        interval: u64,
+    ) {
+    }
+
+    /// Fires when a new producer is deleted.
+    fn producer__deleted(collector_id: &str, producer_id: &str) {}
+
+    /// Fires just before starting a collection from a producer.
+    fn collection__start(producer_id: &str, addr: &str) {}
+
+    /// Fires just after a successful collection from a producer, with the
+    /// number of samples collected.
+    fn collection__done(producer_id: &str, n_samples: u64) {}
+
+    /// Fires just after a failed collection from a producer, with an error
+    /// message describing the failure.
+    fn collection__failed(producer_id: &str, msg: &str) {}
+}
 
 /// Errors collecting metric data
 #[derive(Debug, Error)]
@@ -158,8 +187,9 @@ impl Config {
     /// Load configuration for an Oximeter server from a file.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, Error> {
         let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| Error::Server(e.to_string()))?;
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            Error::Server(InlineErrorChain::new(&e).to_string())
+        })?;
         toml::from_str(&contents).map_err(|e| Error::Server(e.to_string()))
     }
 }
@@ -205,10 +235,9 @@ impl Oximeter {
         config: &Config,
         args: &OximeterArguments,
     ) -> Result<Self, Error> {
-        let log = config
-            .log
-            .to_logger("oximeter")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let log = config.log.to_logger("oximeter").map_err(|msg| {
+            Error::Server(InlineErrorChain::new(&msg).to_string())
+        })?;
         Self::with_logger(config, args, log).await
     }
 
@@ -311,6 +340,12 @@ impl Oximeter {
             bind_address: SocketAddr::V6(args.address),
             ..Default::default()
         })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                oximeter_api::VERSION_INITIAL,
+            ),
+        )))
         .start()
         .map_err(|e| Error::Server(e.to_string()))?;
 
@@ -423,6 +458,12 @@ impl Oximeter {
             bind_address: SocketAddr::V6(args.address),
             ..Default::default()
         })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                oximeter_api::VERSION_INITIAL,
+            ),
+        )))
         .start()
         .map_err(|e| Error::Server(e.to_string()))?;
         info!(log, "started oximeter standalone server");
@@ -439,9 +480,17 @@ impl Oximeter {
                 })
                 .send()
                 .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                .map_err(|e| {
+                    backoff::BackoffError::transient(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?
                 .error_for_status()
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+                .map_err(|e| {
+                    backoff::BackoffError::transient(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })
         };
         let log_notification_failure = |error, delay| {
             warn!(
@@ -480,25 +529,25 @@ impl Oximeter {
     /// already outstanding calls to force a collection. It rarely makes sense
     /// to have multiple concurrent calls here, so that should not impact most
     /// callers.
-    pub async fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
-        self.server.app_private().try_force_collection().await
+    pub fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
+        self.server.app_private().try_force_collection()
     }
 
     /// List producers.
     ///
     /// This returns up to `limit` producers, whose ID is _strictly greater_
     /// than `start`, or all producers if `start` is `None`.
-    pub async fn list_producers(
+    pub fn list_producers(
         &self,
         start: Option<Uuid>,
         limit: usize,
     ) -> Vec<ProducerEndpoint> {
-        self.agent.list_producers(start, limit).await
+        self.agent.list_producers(start, limit)
     }
 
     /// Delete a producer by ID, stopping its collection task.
-    pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
-        self.agent.delete_producer(id).await
+    pub fn delete_producer(&self, id: Uuid) {
+        self.agent.delete_producer(id);
     }
 
     /// Return the ID of this collector.

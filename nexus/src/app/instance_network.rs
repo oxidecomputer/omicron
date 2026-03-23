@@ -5,29 +5,71 @@
 //! Routines that manage instance-related networking state.
 
 use crate::app::switch_port;
-use ipnetwork::IpNetwork;
 use nexus_background_task_interface::BackgroundTasks;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
-use nexus_db_model::Ipv4NatEntry;
-use nexus_db_model::Ipv4NatValues;
+use nexus_db_model::NatEntry;
+use nexus_db_model::NatEntryValues;
 use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use oxnet::Ipv4Net;
+use oxnet::IpNet;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::SwitchSlot;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::str::FromStr;
 use uuid::Uuid;
 
 use super::Nexus;
+
+/// Filter external IP addresses when modifying instance networking state.
+#[derive(Clone, Copy, Debug)]
+pub enum InstanceIpFilter {
+    /// Notify Dendrite about all external IPs for an instance.
+    All,
+    /// Notify Dendrite about exactly one IP by ID for an instance.
+    Exactly(Uuid),
+}
+
+/// Filter attached subnets when modifying instance networking state.
+#[derive(Clone, Copy, Debug)]
+pub enum AttachedSubnetFilter {
+    /// Do not notify Dendrite about any attached subnets.
+    None,
+    /// Notify Dendrite about all attached subnets for an instance.
+    All,
+}
+
+/// Filters applied during `instance_ensure_dpd_config()` below.
+#[derive(Clone, Copy, Debug)]
+pub struct InstanceNetworkFilters {
+    /// Filters applied to external IPs.
+    pub ips: InstanceIpFilter,
+    /// Filters applied to attached subnets.
+    pub subnets: AttachedSubnetFilter,
+}
+
+impl InstanceNetworkFilters {
+    /// Construct a filter to push a single external IP for an instance.
+    pub fn single_ip(id: Uuid) -> Self {
+        Self {
+            ips: InstanceIpFilter::Exactly(id),
+            subnets: AttachedSubnetFilter::None,
+        }
+    }
+
+    /// Construct a filter to push all networking state.
+    pub fn all() -> Self {
+        Self { ips: InstanceIpFilter::All, subnets: AttachedSubnetFilter::All }
+    }
+}
 
 impl Nexus {
     /// Returns the set of switches with uplinks configured and boundary
@@ -35,7 +77,7 @@ impl Nexus {
     pub(crate) async fn boundary_switches(
         &self,
         opctx: &OpContext,
-    ) -> Result<HashSet<SwitchLocation>, Error> {
+    ) -> Result<HashSet<SwitchSlot>, Error> {
         boundary_switches(&self.db_datastore, opctx).await
     }
 
@@ -53,21 +95,20 @@ impl Nexus {
     /// - `instance_id`: The ID of the instance to act on.
     /// - `sled_ip_address`: The internal IP address assigned to the sled's
     ///   sled agent.
-    /// - `ip_filter`: An optional filter on the index into the instance's
-    ///   external IP array.
-    ///   - If this is `Some(id)`, this routine configures DPD state for only the
-    ///     external IP with `id` in the collection returned from CRDB. This will
-    ///     proceed even when the target IP is 'attaching'.
-    ///   - If this is `None`, this routine configures DPD for all external
-    ///     IPs and *will back out* if any IPs are not yet fully attached to
-    ///     the instance.
+    /// - `filters`: Filters describing which networking state to push. See the
+    ///   `InstanceNetworkFilters` type for the contents. This can be used to
+    ///   push either all or a subset of the networking state for the instance.
+    ///   For example, it is used to push exactly one new IP address during the
+    ///   instance IP attachment saga; or all IP addresses during an instance
+    ///   start saga. In the latter case, the method will fail if any of the IP
+    ///   addresses are not fully attached to this instance.
     pub(crate) async fn instance_ensure_dpd_config(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
         sled_ip_address: &std::net::SocketAddrV6,
-        ip_filter: Option<Uuid>,
-    ) -> Result<Vec<Ipv4NatEntry>, Error> {
+        filters: InstanceNetworkFilters,
+    ) -> Result<Vec<NatEntry>, Error> {
         instance_ensure_dpd_config(
             &self.db_datastore,
             &self.log,
@@ -76,15 +117,15 @@ impl Nexus {
             &self.opctx_alloc,
             instance_id,
             sled_ip_address,
-            ip_filter,
+            filters,
         )
         .await
     }
 
-    // The logic of this function should follow very closely what
-    // `instance_ensure_dpd_config` does. However, there are enough differences
-    // in the mechanics of how the logic is being carried out to justify having
-    // this separate function, it seems.
+    /// The logic of this function should follow very closely what
+    /// `instance_ensure_dpd_config` does. However, there are enough differences
+    /// in the mechanics of how the logic is being carried out to justify having
+    /// this separate function, it seems.
     pub(crate) async fn probe_ensure_dpd_config(
         &self,
         opctx: &OpContext,
@@ -170,7 +211,7 @@ impl Nexus {
     pub(crate) async fn delete_dpd_config_by_entry(
         &self,
         opctx: &OpContext,
-        nat_entry: &Ipv4NatEntry,
+        nat_entry: &NatEntry,
     ) -> Result<(), Error> {
         delete_dpd_config_by_entry(
             &self.db_datastore,
@@ -179,6 +220,36 @@ impl Nexus {
             opctx,
             &self.opctx_alloc,
             nat_entry,
+        )
+        .await
+    }
+
+    /// Send a single attached subnet to Dendrite.
+    pub(crate) async fn send_attached_subnet_to_dendrite(
+        &self,
+        subnets: &[IpNet],
+        target: dpd_client::types::InstanceTarget,
+    ) -> Result<(), Error> {
+        send_subnet_attachments_to_dendrite_inner(
+            &self.db_datastore,
+            &self.log,
+            self.resolver(),
+            &self.opctx_alloc,
+            subnets,
+            target,
+        )
+        .await
+    }
+
+    /// Attempt to delete a single attached subnet from Dendrite.
+    pub(crate) async fn delete_attached_subnet_from_dendrite(
+        &self,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        delete_attached_subnets_from_dendrite_inner(
+            &self.log,
+            self.resolver(),
+            &[subnet],
         )
         .await
     }
@@ -210,19 +281,12 @@ impl Nexus {
 pub(crate) async fn boundary_switches(
     datastore: &DataStore,
     opctx: &OpContext,
-) -> Result<HashSet<SwitchLocation>, Error> {
-    let mut boundary_switches: HashSet<SwitchLocation> = HashSet::new();
+) -> Result<HashSet<SwitchSlot>, Error> {
+    let mut boundary_switches: HashSet<SwitchSlot> = HashSet::new();
     let uplinks =
         switch_port::list_switch_ports_with_uplinks(datastore, opctx).await?;
     for uplink in &uplinks {
-        let location: SwitchLocation =
-            uplink.switch_location.parse().map_err(|_| {
-                Error::internal_error(&format!(
-                    "invalid switch location in uplink config: {}",
-                    uplink.switch_location
-                ))
-            })?;
-        boundary_switches.insert(location);
+        boundary_switches.insert(SwitchSlot::from(uplink.switch_slot));
     }
     Ok(boundary_switches)
 }
@@ -249,14 +313,8 @@ pub(crate) async fn boundary_switches(
 /// - `instance_id`: The ID of the instance to act on.
 /// - `sled_ip_address`: The internal IP address assigned to the sled's
 ///   sled agent.
-/// - `ip_filter`: An optional filter on the index into the instance's
-///   external IP array.
-///   - If this is `Some(id)`, this routine configures DPD state for only the
-///     external IP with `id` in the collection returned from CRDB. This will
-///     proceed even when the target IP is 'attaching'.
-///   - If this is `None`, this routine configures DPD for all external
-///     IPs and *will back out* if any IPs are not yet fully attached to
-///     the instance.
+/// - `filters`: Describes which networking state to push. See
+///   `InstanceNetworkFilters`.
 #[allow(clippy::too_many_arguments)] // I don't like it either, clippy...
 pub(crate) async fn instance_ensure_dpd_config(
     datastore: &DataStore,
@@ -266,23 +324,24 @@ pub(crate) async fn instance_ensure_dpd_config(
     opctx_alloc: &OpContext,
     instance_id: InstanceUuid,
     sled_ip_address: &std::net::SocketAddrV6,
-    ip_filter: Option<Uuid>,
-) -> Result<Vec<Ipv4NatEntry>, Error> {
-    info!(log, "looking up instance's primary network interface";
-            "instance_id" => %instance_id);
+    filters: InstanceNetworkFilters,
+) -> Result<Vec<NatEntry>, Error> {
+    info!(
+        log,
+        "looking up instance's primary network interface";
+        "instance_id" => %instance_id
+    );
 
     let (.., authz_instance) = LookupPath::new(opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::ListChildren)
         .await?;
 
-    // XXX: Need to abstract over v6 and v4 entries here.
+    // All networking resources map to the primary network interface, so find
+    // that interface. If there is no such interface, there's no way to route
+    // traffic destined to those the instance, so there's nothing to configure
+    // and it's safe to return early.
     let mut nat_entries = vec![];
-
-    // All external IPs map to the primary network interface, so find that
-    // interface. If there is no such interface, there's no way to route
-    // traffic destined to those IPs, so there's nothing to configure and
-    // it's safe to return early.
     let network_interface = match datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await?
@@ -291,38 +350,35 @@ pub(crate) async fn instance_ensure_dpd_config(
     {
         Some(interface) => interface,
         None => {
-            info!(log, "Instance has no primary network interface";
-                    "instance_id" => %instance_id);
+            info!(
+                log,
+                "Instance has no primary network interface";
+                "instance_id" => %instance_id
+            );
             return Ok(nat_entries);
         }
     };
 
-    let mac_address =
-        macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to convert mac address: {e}"
-                ))
-            })?;
-
-    info!(log, "looking up instance's external IPs";
-            "instance_id" => %instance_id);
+    info!(
+        log,
+        "looking up instance's external IPs";
+        "instance_id" => %instance_id
+    );
 
     let ips =
         datastore.instance_lookup_external_ips(&opctx, instance_id).await?;
 
-    let (ips_of_interest, must_all_be_attached) = if let Some(wanted_id) =
-        ip_filter
-    {
-        if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
-            (std::slice::from_ref(ip), false)
-        } else {
-            return Err(Error::internal_error(&format!(
-                "failed to find external ip address with id: {wanted_id}, saw {ips:?}",
-            )));
+    let (ips_of_interest, must_all_be_attached) = match filters.ips {
+        InstanceIpFilter::All => (&ips[..], true),
+        InstanceIpFilter::Exactly(wanted_id) => {
+            if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
+                (std::slice::from_ref(ip), false)
+            } else {
+                return Err(Error::internal_error(&format!(
+                    "failed to find external ip address with id: {wanted_id}, saw {ips:?}",
+                )));
+            }
         }
-    } else {
-        (&ips[..], true)
     };
 
     // This is performed so that an IP attach/detach will block the
@@ -336,8 +392,6 @@ pub(crate) async fn instance_ensure_dpd_config(
         ));
     }
 
-    let sled_address = Ipv6Net::host_net(*sled_ip_address.ip());
-
     // If all of our IPs are attached or are guaranteed to be owned
     // by the saga calling this fn, then we need to disregard and
     // remove conflicting rows. No other instance/service should be
@@ -345,6 +399,8 @@ pub(crate) async fn instance_ensure_dpd_config(
     // the case where we have a concurrent stop -> detach followed
     // by an attach to another instance, or other ongoing attach saga
     // cleanup.
+    let sled_address = Ipv6Net::host_net(*sled_ip_address.ip());
+    let mac_address = network_interface.mac.0;
     let mut err_and_limit = None;
     for (i, external_ip) in ips_of_interest.iter().enumerate() {
         // For each external ip, add a nat entry to the database
@@ -411,23 +467,53 @@ pub(crate) async fn instance_ensure_dpd_config(
         return Err(e);
     }
 
-    notify_dendrite_nat_state(
+    // We should not bail out if there is an error while notifying dendrite.
+    // If there is an error communicating with one dendrite instance but the
+    // other is operational and we bail here, it will prevent users from starting
+    // an instance. Dendrite should still catch back up via a RPW if we fail to
+    // notify it here.
+    if let Err(e) = notify_dendrite_nat_state(
         datastore,
         log,
         resolver,
         opctx_alloc,
         Some(instance_id),
-        true,
     )
-    .await?;
+    .await
+    {
+        warn!(
+            log,
+            "error encountered when notifying dendrite";
+            "error" => %e
+        )
+    }
+
+    match filters.subnets {
+        AttachedSubnetFilter::None => {}
+        AttachedSubnetFilter::All => {
+            let instance_target = dpd_client::types::InstanceTarget {
+                inner_mac: dpd_client::types::MacAddr {
+                    a: network_interface.mac.into_array(),
+                },
+                internal_ip: *sled_ip_address.ip(),
+                vni: dpd_client::types::Vni(network_interface.vni.into()),
+            };
+            let _ = instance_send_attached_subnets_to_dendrite(
+                datastore,
+                log,
+                resolver,
+                opctx,
+                opctx_alloc,
+                instance_id,
+                instance_target,
+            )
+            .await;
+        }
+    }
 
     Ok(nat_entries)
 }
 
-// The logic of this function should follow very closely what
-// `instance_ensure_dpd_config` does. However, there are enough differences
-// in the mechanics of how the logic is being carried out to justify having
-// this separate function, it seems.
 pub(crate) async fn probe_ensure_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,
@@ -506,15 +592,15 @@ pub(crate) async fn probe_ensure_dpd_config(
     // Notify dendrite that there are changes for it to reconcile.
     // In the event of a failure to notify dendrite, we'll log an error
     // and rely on dendrite's RPW timer to catch it up.
-    if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+    if let Err(e) = dpd_client.nat_trigger_update().await {
         error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
     };
 
     Ok(())
 }
 
-/// Attempts to delete all of the Dendrite NAT configuration for the
-/// instance identified by `authz_instance`.
+/// Attempts to delete all of the Dendrite configuration for the instance
+/// identified by `authz_instance`.
 ///
 /// Unlike `instance_ensure_dpd_config`, this function will disregard the
 /// attachment states of any external IPs because likely callers (instance
@@ -529,12 +615,6 @@ pub(crate) async fn probe_ensure_dpd_config(
 /// - If an operation fails while this routine is walking NAT entries, it
 ///   will continue trying to delete subsequent entries but will return the
 ///   first error it encountered.
-/// - `ip_filter`: An optional filter on the index into the instance's
-///   external IP array.
-///   - If this is `Some(id)`, this routine configures DPD state for only the
-///     external IP with `id` in the collection returned from CRDB.
-///   - If this is `None`, this routine configures DPD for all external
-///     IPs.
 pub(crate) async fn instance_delete_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,
@@ -555,16 +635,215 @@ pub(crate) async fn instance_delete_dpd_config(
         external_ip_delete_dpd_config_inner(&datastore, &log, opctx, &entry)
             .await?;
     }
-
+    // TODO-performance: This duplicates some work with the below call notifying
+    // Dendrite about NAT state, such as looking up boundary switches and doing
+    // DNS resolution for those clients.
+    //
+    // That call below should go away or at least change with the resolution of
+    // https://github.com/oxidecomputer/omicron/issues/8748 which removes the
+    // "upcall" from Dendrite to Nexus about the NAT state, in favor of Nexus
+    // only pushing it to Dendrite. This also isn't that performance-sensitive
+    // of a code path, but it would still be nice to share some work.
+    let _ = instance_delete_attached_subnets_from_dendrite(
+        datastore,
+        log,
+        resolver,
+        opctx,
+        instance_id,
+    )
+    .await;
     notify_dendrite_nat_state(
         datastore,
         log,
         resolver,
         opctx_alloc,
         Some(instance_id),
-        false,
     )
     .await
+}
+
+async fn instance_send_attached_subnets_to_dendrite(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    resolver: &internal_dns_resolver::Resolver,
+    opctx: &OpContext,
+    opctx_alloc: &OpContext,
+    instance_id: InstanceUuid,
+    instance_target: dpd_client::types::InstanceTarget,
+) -> Result<(), Error> {
+    let subnets = match datastore
+        .instance_lookup_attached_subnets(opctx, instance_id)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            error!(
+                log,
+                "failed to lookup instance's attached subnet";
+                "instance_id" => %instance_id,
+                "error" => InlineErrorChain::new(&e),
+            );
+            return Err(e);
+        }
+    };
+    if subnets.is_empty() {
+        debug!(
+            log,
+            "no subnets attached to instance, \
+            nothing to notify Dendrite about";
+            "instance_id" => %instance_id,
+        );
+        return Ok(());
+    }
+    let subnets = subnets.into_iter().map(|s| s.subnet).collect::<Vec<_>>();
+    send_subnet_attachments_to_dendrite_inner(
+        datastore,
+        log,
+        resolver,
+        opctx_alloc,
+        &subnets,
+        instance_target,
+    )
+    .await
+}
+
+async fn send_subnet_attachments_to_dendrite_inner(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    resolver: &internal_dns_resolver::Resolver,
+    opctx_alloc: &OpContext,
+    subnets: &[IpNet],
+    instance_target: dpd_client::types::InstanceTarget,
+) -> Result<(), Error> {
+    let boundary_switches =
+        match boundary_switches(datastore, opctx_alloc).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to lookup boundary switches";
+                    "error" => InlineErrorChain::new(&e),
+                );
+                return Err(e);
+            }
+        };
+    let clients = match super::dpd_clients(resolver, log).await {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("failed to get dpd clients: {e}");
+            error!(
+                log,
+                "failed to look up Dendrite clients";
+                "error" => %msg,
+            );
+            return Err(Error::internal_error(&e));
+        }
+    };
+    // Find the boundary switches, and create clients for them through
+    // the resolver.
+    //
+    // TODO-correctness: This should take into account the rack in the
+    // list of attached subnets, once we address
+    // https://github.com/oxidecomputer/omicron/issues/5201.
+
+    // Add all the subnets for this instance to each Dendrite.
+    for switch in &boundary_switches {
+        let Some(client) = clients.get(switch) else {
+            error!(
+                log,
+                "cannot find Dendrite client for boundary switch, \
+                        will not send instance's attached subnets";
+                "switch" => ?switch,
+            );
+            continue;
+        };
+        for subnet in subnets.iter() {
+            match client.attached_subnet_create(&subnet, &instance_target).await
+            {
+                Ok(_) => debug!(
+                    log,
+                    "created instance attached subnet on switch";
+                    "subnet" => %subnet,
+                    "switch" => ?switch,
+                ),
+                Err(e) => error!(
+                    log,
+                    "failed to create instance attached subnet on switch";
+                    "subnet" => %subnet,
+                    "switch" => ?switch,
+                    "error" => InlineErrorChain::new(&e),
+                ),
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn instance_delete_attached_subnets_from_dendrite(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    resolver: &internal_dns_resolver::Resolver,
+    opctx: &OpContext,
+    instance_id: InstanceUuid,
+) -> Result<(), Error> {
+    let subnets = datastore
+        .instance_lookup_attached_subnets(opctx, instance_id)
+        .await?
+        .into_iter()
+        .map(|s| s.subnet)
+        .collect::<Vec<_>>();
+    if subnets.is_empty() {
+        return Ok(());
+    }
+    delete_attached_subnets_from_dendrite_inner(log, resolver, &subnets).await
+}
+
+async fn delete_attached_subnets_from_dendrite_inner(
+    log: &slog::Logger,
+    resolver: &internal_dns_resolver::Resolver,
+    subnets: &[IpNet],
+) -> Result<(), Error> {
+    // NOTE: We really want to delete this specific mapping from IP subnet to
+    // instance target, at a specific generation. Dendrite's API isn't really
+    // expressive enough to say that today, but see
+    // https://github.com/oxidecomputer/dendrite/issues/209. In the meantime, we
+    // intentionally delete this mapping from _all_ switches. That's the same
+    // thing as "both" switches, since (1) we have only a single rack and (2) we
+    // don't list the switches (per-rack or otherwise) in the database. See
+    // https://github.com/oxidecomputer/omicron/issues/6394 for that one.
+    let switches = HashSet::from([SwitchSlot::Switch0, SwitchSlot::Switch1]);
+    let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
+        Error::internal_error(&format!("failed to get dpd clients: {e}"))
+    })?;
+    for switch in switches.iter() {
+        let Some(client) = clients.get(switch) else {
+            error!(
+                log,
+                "cannot find Dendrite client for boundary switch, \
+                will not delete attached subnet";
+                "switch" => ?switch,
+            );
+            continue;
+        };
+        for subnet in subnets.iter() {
+            match client.attached_subnet_delete(subnet).await {
+                Ok(_) => debug!(
+                    log,
+                    "deleted attached subnet from switch";
+                    "subnet" => %subnet,
+                    "switch" => ?switch,
+                ),
+                Err(e) => error!(
+                    log,
+                    "failed to delete attached subnet from switch";
+                    "subnet" => %subnet,
+                    "switch" => ?switch,
+                    "error" => InlineErrorChain::new(&e),
+                ),
+            }
+        }
+    }
+    Ok(())
 }
 
 // The logic of this function should follow very closely what
@@ -589,7 +868,7 @@ pub(crate) async fn probe_delete_dpd_config(
     let mut errors = vec![];
     for entry in external_ips {
         // Soft delete the NAT entry
-        match datastore.ipv4_nat_delete_by_external_ip(&opctx, &entry).await {
+        match datastore.nat_delete_by_external_ip(&opctx, &entry).await {
             Ok(_) => Ok(()),
             Err(err) => match err {
                 Error::ObjectNotFound { .. } => {
@@ -610,9 +889,11 @@ pub(crate) async fn probe_delete_dpd_config(
     let boundary_switches = boundary_switches(datastore, opctx_alloc).await?;
 
     for switch in &boundary_switches {
-        debug!(log, "notifying dendrite of updates";
-                "probe_id" => %probe_id,
-                "switch" => switch.to_string());
+        debug!(
+            log, "notifying dendrite of updates";
+            "probe_id" => %probe_id,
+            "switch" => ?switch,
+        );
 
         let dpd_clients =
             super::dpd_clients(resolver, log).await.map_err(|e| {
@@ -623,7 +904,7 @@ pub(crate) async fn probe_delete_dpd_config(
 
         let client_result = dpd_clients.get(switch).ok_or_else(|| {
             Error::internal_error(&format!(
-                "unable to find dendrite client for {switch}"
+                "unable to find dendrite client for {switch:?}"
             ))
         });
 
@@ -639,7 +920,7 @@ pub(crate) async fn probe_delete_dpd_config(
         // Notify dendrite that there are changes for it to reconcile.
         // In the event of a failure to notify dendrite, we'll log an error
         // and rely on dendrite's RPW timer to catch it up.
-        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+        if let Err(e) = dpd_client.nat_trigger_update().await {
             error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
         };
     }
@@ -663,13 +944,16 @@ pub(crate) async fn delete_dpd_config_by_entry(
     log: &slog::Logger,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
-    nat_entry: &Ipv4NatEntry,
+    nat_entry: &NatEntry,
 ) -> Result<(), Error> {
-    info!(log, "deleting individual NAT entry from dpd configuration";
-            "id" => ?nat_entry.id,
-            "version_added" => %nat_entry.external_address.0);
+    info!(
+        log,
+        "deleting individual NAT entry from dpd configuration";
+        "id" => ?nat_entry.id,
+        "version_added" => %nat_entry.external_address,
+    );
 
-    match datastore.ipv4_nat_delete(&opctx, nat_entry).await {
+    match datastore.nat_delete(&opctx, nat_entry).await {
         Ok(_) => {}
         Err(err) => match err {
             Error::ObjectNotFound { .. } => {
@@ -684,15 +968,7 @@ pub(crate) async fn delete_dpd_config_by_entry(
         },
     }
 
-    notify_dendrite_nat_state(
-        datastore,
-        log,
-        resolver,
-        opctx_alloc,
-        None,
-        false,
-    )
-    .await
+    notify_dendrite_nat_state(datastore, log, resolver, opctx_alloc, None).await
 }
 
 /// Soft-delete an individual external IP from the NAT RPW, without
@@ -704,7 +980,7 @@ async fn external_ip_delete_dpd_config_inner(
     external_ip: &ExternalIp,
 ) -> Result<(), Error> {
     // Soft delete the NAT entry
-    match datastore.ipv4_nat_delete_by_external_ip(&opctx, external_ip).await {
+    match datastore.nat_delete_by_external_ip(&opctx, external_ip).await {
         Ok(_) => Ok(()),
         Err(err) => match err {
             Error::ObjectNotFound { .. } => {
@@ -724,33 +1000,34 @@ async fn external_ip_delete_dpd_config_inner(
 /// Informs all available boundary switches that the set of NAT entries
 /// has changed.
 ///
-/// When `fail_fast` is set, this function will return on any error when
-/// acquiring a handle to a DPD client. Otherwise, it will attempt to notify
-/// all clients and then finally return the first error.
+/// It will attempt to notify all dpd daemons and then finally return the first error,
+/// if any errors were encountered.
 async fn notify_dendrite_nat_state(
     datastore: &DataStore,
     log: &slog::Logger,
     resolver: &internal_dns_resolver::Resolver,
     opctx_alloc: &OpContext,
     instance_id: Option<InstanceUuid>,
-    fail_fast: bool,
 ) -> Result<(), Error> {
     // Querying boundary switches also requires fleet access and the use of the
     // instance allocator context.
     let boundary_switches = boundary_switches(datastore, opctx_alloc).await?;
 
+    let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
+        Error::internal_error(&format!("failed to get dpd clients: {e}"))
+    })?;
+
     let mut errors = vec![];
     for switch in &boundary_switches {
-        debug!(log, "notifying dendrite of updates";
-                    "instance_id" => ?instance_id,
-                    "switch" => switch.to_string());
+        debug!(
+            log, "notifying dendrite of updates";
+            "instance_id" => ?instance_id,
+            "switch" => ?switch,
+        );
 
-        let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
-            Error::internal_error(&format!("failed to get dpd clients: {e}"))
-        })?;
         let client_result = clients.get(switch).ok_or_else(|| {
             Error::internal_error(&format!(
-                "unable to find dendrite client for {switch}"
+                "unable to find dendrite client for {switch:?}"
             ))
         });
 
@@ -758,18 +1035,14 @@ async fn notify_dendrite_nat_state(
             Ok(client) => client,
             Err(new_error) => {
                 errors.push(new_error);
-                if fail_fast {
-                    break;
-                } else {
-                    continue;
-                }
+                continue;
             }
         };
 
         // Notify dendrite that there are changes for it to reconcile.
         // In the event of a failure to notify dendrite, we'll log an error
         // and rely on dendrite's RPW timer to catch it up.
-        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+        if let Err(e) = dpd_client.nat_trigger_update().await {
             error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
         };
     }
@@ -788,26 +1061,16 @@ async fn ensure_nat_entry(
     network_interface: &NetworkInterface,
     mac_address: macaddr::MacAddr6,
     opctx: &OpContext,
-) -> Result<Ipv4NatEntry, Error> {
-    match target_ip.ip {
-        IpNetwork::V4(v4net) => {
-            let nat_entry = Ipv4NatValues {
-                external_address: Ipv4Net::from(v4net).into(),
-                first_port: target_ip.first_port,
-                last_port: target_ip.last_port,
-                sled_address: sled_address.into(),
-                vni: DbVni(network_interface.vni),
-                mac: nexus_db_model::MacAddr(
-                    omicron_common::api::external::MacAddr(mac_address),
-                ),
-            };
-            Ok(datastore.ensure_ipv4_nat_entry(opctx, nat_entry).await?)
-        }
-        IpNetwork::V6(_v6net) => {
-            // TODO: implement handling of v6 nat.
-            return Err(Error::InternalError {
-                internal_message: "ipv6 nat is not yet implemented".into(),
-            });
-        }
-    }
+) -> Result<NatEntry, Error> {
+    let nat_entry = NatEntryValues {
+        external_address: nexus_db_model::IpNet::from(target_ip.ip),
+        first_port: target_ip.first_port,
+        last_port: target_ip.last_port,
+        sled_address: nexus_db_model::Ipv6Net::from(sled_address),
+        vni: DbVni(network_interface.vni),
+        mac: nexus_db_model::MacAddr(omicron_common::api::external::MacAddr(
+            mac_address,
+        )),
+    };
+    datastore.ensure_nat_entry(opctx, nat_entry).await
 }

@@ -25,6 +25,7 @@ const DLADM: &str = "/usr/sbin/dladm";
 pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
+pub const SVCS: &str = "/usr/bin/svcs";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
 pub const ROUTE: &str = "/usr/sbin/route";
 
@@ -42,7 +43,7 @@ pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
-    #[error("Zone execution error: {0}")]
+    #[error("Zone execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
@@ -94,7 +95,7 @@ impl AdmError {
 
 /// Errors which may be encountered when deleting addresses.
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to delete address '{addrobj}' in zone '{zone}': {err}")]
+#[error("Failed to delete address '{addrobj}' in zone '{zone}'")]
 pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
@@ -106,7 +107,7 @@ pub struct DeleteAddressError {
 /// Error which may be returned accessing the control interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetControlInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]
@@ -121,7 +122,7 @@ pub enum GetControlInterfaceError {
 /// Error which may be returned accessing the bootstrap interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetBootstrapInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]

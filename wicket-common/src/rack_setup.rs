@@ -5,18 +5,8 @@
 // Copyright 2024 Oxide Computer Company
 
 use omicron_common::address;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::BgpPeerConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::PortFec;
-use omicron_common::api::internal::shared::PortSpeed;
-use omicron_common::api::internal::shared::RouteConfig;
-use omicron_common::api::internal::shared::TxEqConfig;
-use omicron_common::api::internal::shared::UplinkAddressConfig;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use oxnet::IpNet;
@@ -26,12 +16,21 @@ use serde::Serialize;
 use serde::Serializer;
 use sha2::Digest;
 use sha2::Sha256;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
@@ -94,13 +93,13 @@ pub struct BootstrapSledDescription {
     pub bootstrap_ip: Option<Ipv6Addr>,
 }
 
-/// User-specified parts of
-/// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
+/// User-specified parts of `RackNetworkConfig`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
-    pub infra_ip_first: Ipv4Addr,
-    pub infra_ip_last: Ipv4Addr,
+    pub rack_subnet_address: Option<Ipv6Addr>,
+    pub infra_ip_first: IpAddr,
+    pub infra_ip_last: IpAddr,
     // Map of switch -> port -> configuration, under the assumption that
     // (switch, port) is unique.
     pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,
@@ -121,11 +120,11 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns the port map for a particular switch location.
     pub fn port_map(
         &self,
-        switch: SwitchLocation,
+        switch: SwitchSlot,
     ) -> &BTreeMap<String, UserSpecifiedPortConfig> {
         match switch {
-            SwitchLocation::Switch0 => &self.switch0,
-            SwitchLocation::Switch1 => &self.switch1,
+            SwitchSlot::Switch0 => &self.switch0,
+            SwitchSlot::Switch1 => &self.switch1,
         }
     }
 
@@ -137,17 +136,17 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns an iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks(
         &self,
-    ) -> impl Iterator<Item = (SwitchLocation, &str, &UserSpecifiedPortConfig)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &UserSpecifiedPortConfig)>
     {
         let iter0 = self
             .switch0
             .iter()
-            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
         let iter1 = self
             .switch1
             .iter()
-            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }
@@ -155,29 +154,27 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns a mutable iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks_mut(
         &mut self,
-    ) -> impl Iterator<Item = (SwitchLocation, &str, &mut UserSpecifiedPortConfig)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &mut UserSpecifiedPortConfig)>
     {
         let iter0 = self
             .switch0
             .iter_mut()
-            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
         let iter1 = self
             .switch1
             .iter_mut()
-            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }
 }
 
-/// User-specified version of [`PortConfigV2`].
+/// User-specified version of `PortConfig`.
 ///
-/// All of [`PortConfigV2`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfigV2`]. So this has all of
+/// All of `PortConfig` is user-specified. But we expect the port name to
+/// be a key, rather than a field as in `PortConfig`. So this has all of
 /// the fields other than the port name.
-///
-/// [`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
@@ -199,8 +196,6 @@ pub struct UserSpecifiedPortConfig {
 /// This is similar to [`BgpPeerConfig`], except it doesn't have the sensitive
 /// `md5_auth_key` parameter, instead requiring that the user provide the key
 /// separately.
-///
-/// [`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedBgpPeerConfig {
@@ -209,7 +204,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    pub addr: Ipv4Addr,
+    pub addr: Option<IpAddr>,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
@@ -255,6 +250,9 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    #[serde(default)]
+    pub router_lifetime: u16,
 }
 
 impl UserSpecifiedBgpPeerConfig {
@@ -566,10 +564,10 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The above is equivalent to an Option<Vec<IpNet>>.
-        Option::<Vec<IpNet>>::json_schema(gen)
+        Option::<Vec<IpNet>>::json_schema(r#gen)
     }
 }
 

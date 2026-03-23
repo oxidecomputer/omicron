@@ -10,42 +10,75 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
-use display_error_chain::DisplayErrorChain;
 use dropshot::{
     ApiDescription, Body, ErrorStatusCode, FreeformBody, Header, HttpError,
     HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     Query, RequestContext, StreamingBody, TypedBody,
 };
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
-use sled_agent_types::boot_disk::{
-    BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
-    BootDiskWriteStartQueryParams,
+use sled_agent_types::artifact::{
+    ArtifactConfig, ArtifactCopyFromDepotBody, ArtifactCopyFromDepotResponse,
+    ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
+    ArtifactQueryParam,
+};
+use sled_agent_types::attached_subnet::{
+    AttachedSubnet, AttachedSubnets, VmmSubnetPathParam,
 };
 use sled_agent_types::bootstore::BootstoreStatus;
-use sled_agent_types::disk::DiskEnsureBody;
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::dataset::{
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
+};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
+use sled_agent_types::diagnostics::{
+    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+};
+use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
+    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+};
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
 };
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::time_sync::TimeSync;
-use sled_agent_types::zone_bundle::{
-    BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
-    StorageLimit, ZoneBundleId, ZoneBundleMetadata,
+use sled_agent_types::support_bundle::{
+    RangeRequestHeaders, SupportBundleFilePathParam,
+    SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
+    SupportBundleMetadata, SupportBundlePathParam,
+    SupportBundleTransferQueryParams,
 };
+use sled_agent_types::trust_quorum::{
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+};
+use sled_agent_types::uplink::SwitchPorts;
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
+    CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
+    ZoneBundleMetadata, ZonePathParam,
+};
+use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+
+// Fixed identifiers for prior versions only
+use sled_agent_types_versions::{v1, v20, v25, v26};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -70,10 +103,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError> {
         let sa = rqctx.context();
         let filter = query.into_inner().filter;
-        sa.list_all_zone_bundles(filter.as_deref())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.list_all_zone_bundles(filter.as_deref())
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zone_bundle_list(
@@ -83,10 +120,14 @@ impl SledAgentApi for SledAgentImpl {
         let params = params.into_inner();
         let zone_name = params.zone_name;
         let sa = rqctx.context();
-        sa.list_zone_bundles(&zone_name)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.list_zone_bundles(&zone_name)
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zone_bundle_get(
@@ -98,39 +139,46 @@ impl SledAgentApi for SledAgentImpl {
         let zone_name = params.zone_name;
         let bundle_id = params.bundle_id;
         let sa = rqctx.context();
-        let Some(path) = sa
-            .get_zone_bundle_paths(&zone_name, &bundle_id)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let Some(path) = sa
+                    .get_zone_bundle_paths(&zone_name, &bundle_id)
+                    .await
+                    .map_err(HttpError::from)?
+                    .into_iter()
+                    .next()
+                else {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        format!(
+                            "No zone bundle for zone '{}' with ID '{}'",
+                            zone_name, bundle_id
+                        ),
+                    ));
+                };
+                let f = tokio::fs::File::open(&path).await.map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "failed to open zone bundle file at \"{}\": {}",
+                        path,
+                        InlineErrorChain::new(&e),
+                    ))
+                })?;
+                let file_access =
+                    hyper_staticfile::vfs::TokioFileAccess::new(f);
+                let file_stream =
+                    hyper_staticfile::util::FileBytesStream::new(file_access);
+                let body =
+                    Body::wrap(hyper_staticfile::Body::Full(file_stream));
+                let body = FreeformBody(body);
+                let mut response =
+                    HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
+                response.headers_mut().append(
+                    http::header::CONTENT_TYPE,
+                    "application/gzip".try_into().unwrap(),
+                );
+                Ok(response)
+            })
             .await
-            .map_err(HttpError::from)?
-            .into_iter()
-            .next()
-        else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!(
-                    "No zone bundle for zone '{}' with ID '{}'",
-                    zone_name, bundle_id
-                ),
-            ));
-        };
-        let f = tokio::fs::File::open(&path).await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failed to open zone bundle file at {}: {:?}",
-                path, e,
-            ))
-        })?;
-        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(f);
-        let file_stream =
-            hyper_staticfile::util::FileBytesStream::new(file_access);
-        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
-        let body = FreeformBody(body);
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
-        response.headers_mut().append(
-            http::header::CONTENT_TYPE,
-            "application/gzip".try_into().unwrap(),
-        );
-        Ok(response)
     }
 
     async fn zone_bundle_delete(
@@ -141,27 +189,32 @@ impl SledAgentApi for SledAgentImpl {
         let zone_name = params.zone_name;
         let bundle_id = params.bundle_id;
         let sa = rqctx.context();
-        let paths = sa
-            .get_zone_bundle_paths(&zone_name, &bundle_id)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let paths = sa
+                    .get_zone_bundle_paths(&zone_name, &bundle_id)
+                    .await
+                    .map_err(HttpError::from)?;
+                if paths.is_empty() {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        format!(
+                            "No zone bundle for zone '{}' with ID '{}'",
+                            zone_name, bundle_id
+                        ),
+                    ));
+                };
+                for path in paths.into_iter() {
+                    tokio::fs::remove_file(&path).await.map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "Failed to delete zone bundle: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
+                }
+                Ok(HttpResponseDeleted())
+            })
             .await
-            .map_err(HttpError::from)?;
-        if paths.is_empty() {
-            return Err(HttpError::for_not_found(
-                None,
-                format!(
-                    "No zone bundle for zone '{}' with ID '{}'",
-                    zone_name, bundle_id
-                ),
-            ));
-        };
-        for path in paths.into_iter() {
-            tokio::fs::remove_file(&path).await.map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "Failed to delete zone bundle: {e}"
-                ))
-            })?;
-        }
-        Ok(HttpResponseDeleted())
     }
 
     async fn zone_bundle_utilization(
@@ -171,17 +224,25 @@ impl SledAgentApi for SledAgentImpl {
         HttpError,
     > {
         let sa = rqctx.context();
-        sa.zone_bundle_utilization()
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.zone_bundle_utilization()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zone_bundle_cleanup_context(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<CleanupContext>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.zone_bundle_cleanup_context().await))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.zone_bundle_cleanup_context().await))
+            })
+            .await
     }
 
     async fn zone_bundle_cleanup_context_update(
@@ -190,23 +251,36 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let params = body.into_inner();
-        let new_period =
-            params.period.map(CleanupPeriod::new).transpose().map_err(|e| {
-                HttpError::from(SledAgentError::from(BundleError::from(e)))
-            })?;
-        let new_priority = params.priority;
-        let new_limit =
-            params.storage_limit.map(StorageLimit::new).transpose().map_err(
-                |e| HttpError::from(SledAgentError::from(BundleError::from(e))),
-            )?;
-        sa.update_zone_bundle_cleanup_context(
-            new_period,
-            new_limit,
-            new_priority,
-        )
-        .await
-        .map(|_| HttpResponseUpdatedNoContent())
-        .map_err(HttpError::from)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let new_period =
+                    params.period.map(CleanupPeriod::new).transpose().map_err(
+                        |e| {
+                            HttpError::from(SledAgentError::from(
+                                BundleError::from(e),
+                            ))
+                        },
+                    )?;
+                let new_priority = params.priority;
+                let new_limit = params
+                    .storage_limit
+                    .map(StorageLimit::new)
+                    .transpose()
+                    .map_err(|e| {
+                        HttpError::from(SledAgentError::from(
+                            BundleError::from(e),
+                        ))
+                    })?;
+                sa.update_zone_bundle_cleanup_context(
+                    new_period,
+                    new_limit,
+                    new_priority,
+                )
+                .await
+                .map(|_| HttpResponseUpdatedNoContent())
+                .map_err(HttpError::from)
+            })
+            .await
     }
 
     async fn support_bundle_list(
@@ -214,40 +288,84 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundleListPathParam { zpool_id, dataset_id } =
             path_params.into_inner();
-
-        let bundles =
-            sa.as_support_bundle_storage().list(zpool_id, dataset_id).await?;
-
-        Ok(HttpResponseOk(bundles))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let bundles = sa
+                    .as_support_bundle_storage()
+                    .list(zpool_id, dataset_id)
+                    .await?;
+                Ok(HttpResponseOk(bundles))
+            })
+            .await
     }
 
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let metadata = sa
+                    .as_support_bundle_storage()
+                    .start_creation(zpool_id, dataset_id, support_bundle_id)
+                    .await?;
+                Ok(HttpResponseCreated(metadata))
+            })
+            .await
+    }
+
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+        let SupportBundleTransferQueryParams { offset } =
+            query_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let metadata = sa
+                    .as_support_bundle_storage()
+                    .transfer(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        offset,
+                        body.into_stream(),
+                    )
+                    .await?;
+                Ok(HttpResponseCreated(metadata))
+            })
+            .await
+    }
 
-        let metadata = sa
-            .as_support_bundle_storage()
-            .create(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                hash,
-                body.into_stream(),
-            )
-            .await?;
-
-        Ok(HttpResponseCreated(metadata))
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleFinalizeQueryParams { hash } =
+            query_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let metadata = sa
+                    .as_support_bundle_storage()
+                    .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+                    .await?;
+                Ok(HttpResponseCreated(metadata))
+            })
+            .await
     }
 
     async fn support_bundle_download(
@@ -258,21 +376,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Whole,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .get(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Whole,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_download_file(
@@ -286,21 +407,24 @@ impl SledAgentApi for SledAgentImpl {
                 SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
             file,
         } = path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Path { file_path: file },
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .get(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Path { file_path: file },
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_index(
@@ -311,21 +435,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Index,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .get(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Index,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_head(
@@ -336,21 +463,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .head(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Whole,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .head(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Whole,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_head_file(
@@ -364,21 +494,24 @@ impl SledAgentApi for SledAgentImpl {
                 SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
             file,
         } = path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .head(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Path { file_path: file },
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .head(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Path { file_path: file },
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_head_index(
@@ -389,21 +522,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .head(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Index,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .head(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Index,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_delete(
@@ -411,14 +547,16 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
-        sa.as_support_bundle_storage()
-            .delete(zpool_id, dataset_id, support_bundle_id)
-            .await?;
-        Ok(HttpResponseDeleted())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.as_support_bundle_storage()
+                    .delete(zpool_id, dataset_id, support_bundle_id)
+                    .await?;
+                Ok(HttpResponseDeleted())
+            })
+            .await
     }
 
     async fn zone_bundle_cleanup(
@@ -426,17 +564,28 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
     {
         let sa = rqctx.context();
-        sa.zone_bundle_cleanup()
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.zone_bundle_cleanup()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zones_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = rqctx.context();
-        sa.zones_list().await.map(HttpResponseOk).map_err(HttpError::from)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.zones_list()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
+            .await
     }
 
     async fn omicron_config_put(
@@ -445,15 +594,23 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        sa.set_omicron_config(body_args).await??;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_omicron_config(body_args).await??;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.get_role()))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.get_role()))
+            })
+            .await
     }
 
     async fn vmm_register(
@@ -464,9 +621,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_ensure_registered(propolis_id, body_args).await?,
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.instance_ensure_registered(propolis_id, body_args)
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn vmm_unregister(
@@ -475,7 +637,11 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_ensure_unregistered(id).await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.instance_ensure_unregistered(id).await?))
+            })
+            .await
     }
 
     async fn vmm_put_state(
@@ -486,7 +652,13 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(sa.instance_ensure_state(id, body_args.state).await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.instance_ensure_state(id, body_args.state).await?,
+                ))
+            })
+            .await
     }
 
     async fn vmm_get_state(
@@ -495,7 +667,11 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_get_state(id).await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.instance_get_state(id).await?))
+            })
+            .await
     }
 
     async fn vmm_put_external_ip(
@@ -506,8 +682,12 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_put_external_ip(id, &body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_put_external_ip(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn vmm_delete_external_ip(
@@ -518,8 +698,44 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_delete_external_ip(id, &body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_delete_external_ip(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_join_multicast_group(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_leave_multicast_group(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn disk_put(
@@ -530,41 +746,60 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let disk_id = path_params.into_inner().disk_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.disk_ensure(
-                disk_id,
-                body_args.initial_runtime.clone(),
-                body_args.target.clone(),
-            )
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.disk_ensure(
+                        disk_id,
+                        body_args.initial_runtime.clone(),
+                        body_args.target.clone(),
+                    )
+                    .await
+                    .map_err(|e| Error::from(e))?,
+                ))
+            })
             .await
-            .map_err(|e| Error::from(e))?,
-        ))
     }
 
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError> {
-        Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.artifact_store().list().await?))
+            })
+            .await
     }
 
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
-        match rqctx.context().artifact_store().get_config() {
-            Some(config) => Ok(HttpResponseOk(config)),
-            None => Err(HttpError::for_not_found(
-                None,
-                "No artifact configuration present".to_string(),
-            )),
-        }
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                match sa.artifact_store().get_config() {
+                    Some(config) => Ok(HttpResponseOk(config)),
+                    None => Err(HttpError::for_not_found(
+                        None,
+                        "No artifact configuration present".to_string(),
+                    )),
+                }
+            })
+            .await
     }
 
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ArtifactConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        rqctx.context().artifact_store().put_config(body.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.artifact_store().put_config(body.into_inner()).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn artifact_copy_from_depot(
@@ -574,15 +809,18 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
     {
+        let sa = rqctx.context();
         let sha256 = path_params.into_inner().sha256;
         let generation = query_params.into_inner().generation;
         let depot_base_url = body.into_inner().depot_base_url;
-        rqctx
-            .context()
-            .artifact_store()
-            .copy_from_depot(sha256, generation, &depot_base_url)
-            .await?;
-        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.artifact_store()
+                    .copy_from_depot(sha256, generation, &depot_base_url)
+                    .await?;
+                Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
+            })
+            .await
     }
 
     async fn artifact_put(
@@ -591,15 +829,18 @@ impl SledAgentApi for SledAgentImpl {
         query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
+        let sa = rqctx.context();
         let sha256 = path_params.into_inner().sha256;
         let generation = query_params.into_inner().generation;
-        Ok(HttpResponseOk(
-            rqctx
-                .context()
-                .artifact_store()
-                .put_body(sha256, generation, body)
-                .await?,
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.artifact_store()
+                        .put_body(sha256, generation, body)
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn vmm_issue_disk_snapshot_request(
@@ -611,17 +852,19 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let path_params = path_params.into_inner();
         let body = body.into_inner();
-
-        sa.vmm_issue_disk_snapshot_request(
-            path_params.propolis_id,
-            path_params.disk_id,
-            body.snapshot_id,
-        )
-        .await?;
-
-        Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
-            snapshot_id: body.snapshot_id,
-        }))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.vmm_issue_disk_snapshot_request(
+                    path_params.propolis_id,
+                    path_params.disk_id,
+                    body.snapshot_id,
+                )
+                .await?;
+                Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
+                    snapshot_id: body.snapshot_id,
+                }))
+            })
+            .await
     }
 
     async fn vpc_firewall_rules_put(
@@ -632,12 +875,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let _vpc_id = path_params.into_inner().vpc_id;
         let body_args = body.into_inner();
-
-        sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
             .await
-            .map_err(Error::from)?;
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn set_v2p(
@@ -646,10 +891,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-
-        sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_virtual_nic_host(&body_args)
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn del_v2p(
@@ -658,10 +907,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-
-        sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.unset_virtual_nic_host(&body_args)
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn list_v2p(
@@ -669,17 +922,13 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>
     {
         let sa = rqctx.context();
-
-        let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;
-
-        Ok(HttpResponseOk(vnics))
-    }
-
-    async fn timesync_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.timesync_get().await.map_err(|e| Error::from(e))?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let vnics =
+                    sa.list_virtual_nics().await.map_err(Error::from)?;
+                Ok(HttpResponseOk(vnics))
+            })
+            .await
     }
 
     async fn uplink_ensure(
@@ -687,45 +936,123 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        sa.ensure_scrimlet_host_ports(body.into_inner().uplinks).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.ensure_scrimlet_host_ports(body.into_inner().uplinks)
+                    .await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        // This endpoint has been removed, so we're forever pinned to returning
+        // a `v20::early_networking::EarlyNetworkConfigBody`. If a new version
+        // of that type is added, we'll need to update this code to convert from
+        // the version we get back from `deserialize_from_bootstore()` into the
+        // v20 version we need.
+        //
+        // Use shorter names so rustfmt doesn't give up on this function.
+        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
+        type LatestEnvelope = EarlyNetworkConfigEnvelope;
+
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let bs = sa.bootstore();
+
+                let config = bs.get_network_config().await.map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "failed to get bootstore: {}",
+                        InlineErrorChain::new(&e)
+                    ))
+                })?;
+
+                let config = match config {
+                    Some(config) => {
+                        let body: BodyV20 =
+                            LatestEnvelope::deserialize_from_bootstore(&config)
+                                .and_then(|envelope| {
+                                    envelope.deserialize_body()
+                                })
+                                .map_err(|err| {
+                                    HttpError::for_internal_error(format!(
+                                        "failed to deserialize \
+                                         early network config: {}",
+                                        InlineErrorChain::new(&err),
+                                    ))
+                                })?
+                                .into();
+                        v20::early_networking::EarlyNetworkConfig {
+                            generation: config.generation,
+                            schema_version: BodyV20::SCHEMA_VERSION,
+                            body,
+                        }
+                    }
+                    None => {
+                        return Err(HttpError::for_unavail(
+                            None,
+                            "early network config does not exist yet".into(),
+                        ));
+                    }
+                };
+
+                Ok(HttpResponseOk(config))
+            })
+            .await
+    }
+
+    async fn write_network_bootstore_config_v26(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
 
-        let config = bs.get_network_config().await.map_err(|e| {
+        bs.update_network_config(config).await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "failed to get bootstore: {e}"
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
             ))
         })?;
 
-        let config = match config {
-            Some(config) => EarlyNetworkConfig::deserialize_bootstore_config(
-                &rqctx.log, &config,
-            )
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "deserialize early network config: {e}"
-                ))
-            })?,
-            None => {
-                return Err(HttpError::for_unavail(
-                    None,
-                    "early network config does not exist yet".into(),
-                ));
-            }
-        };
-
-        Ok(HttpResponseOk(config))
+        Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn write_network_bootstore_config(
+    async fn write_network_bootstore_config_v25(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    // As explained in `sled-agent-api`, we must faithfully implement old
+    // versions of `write_network_bootstore_config()` _without_ upconverting the
+    // request into the latest bootstore `NetworkConfig` we understand.
+    async fn write_network_bootstore_config_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let bs = sa.bootstore();
@@ -742,154 +1069,117 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
+    // As explained in `sled-agent-api`, we must faithfully implement old
+    // versions of `write_network_bootstore_config()` _without_ upconverting the
+    // request into the latest bootstore `NetworkConfig` we understand.
+    async fn write_network_bootstore_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let config = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let bs = sa.bootstore();
+                bs.update_network_config(NetworkConfig::from(config))
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "failed to write updated config to boot store: {}",
+                            InlineErrorChain::new(&e)
+                        ))
+                    })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let request = body.into_inner();
-
-        // Perform some minimal validation
-        if request.start_request.body.use_trust_quorum
-            && !request.start_request.body.is_lrtq_learner
-        {
-            return Err(HttpError::for_bad_request(
-                None,
-                "New sleds must be LRTQ learners if trust quorum is in use"
-                    .to_string(),
-            ));
-        }
-
-        crate::sled_agent::sled_add(
-            sa.logger().clone(),
-            sa.sprockets().clone(),
-            request.sled_id,
-            request.start_request,
-        )
-        .await
-        .map_err(|e| {
-            let message = format!("Failed to add sled to rack cluster: {e}");
-            HttpError {
-                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
-                error_code: None,
-                external_message: message.clone(),
-                internal_message: message,
-                headers: None,
-            }
-        })?;
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn host_os_write_start(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-        query_params: Query<BootDiskWriteStartQueryParams>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let boot_disk = path_params.into_inner().boot_disk;
-
-        // Find our corresponding disk.
-        let maybe_disk_path = sa.boot_image_raw_devfs_path(boot_disk);
-
-        let disk_path = match maybe_disk_path {
-            Some(Ok(path)) => path,
-            Some(Err(err)) => {
-                let message = format!(
-                    "failed to find devfs path for {boot_disk:?}: {}",
-                    DisplayErrorChain::new(&err)
-                );
-                return Err(HttpError {
-                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
-                    error_code: None,
-                    external_message: message.clone(),
-                    internal_message: message,
-                    headers: None,
-                });
-            }
-            None => {
-                let message = format!("no disk found for slot {boot_disk:?}",);
-                return Err(HttpError {
-                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
-                    error_code: None,
-                    external_message: message.clone(),
-                    internal_message: message,
-                    headers: None,
-                });
-            }
-        };
-
-        let BootDiskWriteStartQueryParams { update_id, sha3_256_digest } =
-            query_params.into_inner();
-        sa.boot_disk_os_writer()
-            .start_update(
-                boot_disk,
-                disk_path,
-                update_id,
-                sha3_256_digest,
-                body.into_stream(),
-            )
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                crate::sled_agent::sled_add(
+                    sa.logger().clone(),
+                    sa.sprockets().clone(),
+                    sa.measurements().clone(),
+                    request.sled_id,
+                    request.start_request,
+                )
+                .await
+                .map_err(|e| {
+                    let message = format!(
+                        "Failed to add sled to rack cluster: {}",
+                        InlineErrorChain::new(&e)
+                    );
+                    HttpError {
+                        status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                        headers: None,
+                    }
+                })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
             .await
-            .map_err(|err| HttpError::from(&*err))?;
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn host_os_write_status_get(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
-        let sa = request_context.context();
-        let boot_disk = path_params.into_inner().boot_disk;
-        let status = sa.boot_disk_os_writer().status(boot_disk);
-        Ok(HttpResponseOk(status))
-    }
-
-    async fn host_os_write_status_delete(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<BootDiskUpdatePathParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let BootDiskUpdatePathParams { boot_disk, update_id } =
-            path_params.into_inner();
-        sa.boot_disk_os_writer()
-            .clear_terminal_status(boot_disk, update_id)
-            .map_err(|err| HttpError::from(&err))?;
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn inventory(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(sa.inventory().await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.inventory().await?))
+            })
+            .await
     }
 
     async fn sled_identifiers(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
-        Ok(HttpResponseOk(request_context.context().sled_identifiers()))
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.sled_identifiers()))
+            })
+            .await
     }
 
     async fn bootstore_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
         let sa = request_context.context();
-        let bootstore = sa.bootstore();
-        let status = bootstore
-            .get_status()
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let bootstore = sa.bootstore();
+                let status = bootstore
+                    .get_status()
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?
+                    .into();
+                Ok(HttpResponseOk(status))
+            })
             .await
-            .map_err(|e| {
-                HttpError::from(omicron_common::api::external::Error::from(e))
-            })?
-            .into();
-        Ok(HttpResponseOk(status))
     }
 
     async fn list_vpc_routes(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(sa.list_vpc_routes()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.list_vpc_routes()))
+            })
+            .await
     }
 
     async fn set_vpc_routes(
@@ -897,8 +1187,12 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<Vec<ResolvedVpcRouteSet>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        sa.set_vpc_routes(body.into_inner())?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.set_vpc_routes(body.into_inner())?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn set_eip_gateways(
@@ -906,16 +1200,24 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<ExternalIpGatewayMap>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        sa.set_eip_gateways(body.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.set_eip_gateways(body.into_inner()).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_zoneadm_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_zoneadm_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_ipadm_info(
@@ -923,13 +1225,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_ipadm_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_ipadm_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_dladm_info(
@@ -937,21 +1243,29 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_dladm_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_dladm_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_nvmeadm_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_nvmeadm_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_nvmeadm_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_pargs_info(
@@ -959,13 +1273,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_pargs_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_pargs_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_pstack_info(
@@ -973,13 +1291,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_pstack_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_pstack_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_pfiles_info(
@@ -987,29 +1309,41 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_pfiles_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_pfiles_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_zfs_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_zfs_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_zfs_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_zpool_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_zpool_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_zpool_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_health_check(
@@ -1017,62 +1351,550 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_health_check()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_health_check()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_logs(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = request_context.context();
-        sa.as_support_bundle_logs()
-            .zones_list()
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_logs()
+                    .zones_list()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
         query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = request_context.context();
-        let SledDiagnosticsLogsDownloadPathParm { zone } =
+        let SledDiagnosticsLogsDownloadPathParam { zone } =
             path_params.into_inner();
         let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
             query_params.into_inner();
-
-        sa.as_support_bundle_logs()
-            .get_logs_for_zone(zone, max_rotated)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_logs()
+                    .get_logs_for_zone(zone, max_rotated)
+                    .await
+                    .map_err(HttpError::from)
+            })
             .await
-            .map_err(HttpError::from)
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get(
+    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
+    ) -> Result<
+        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    > {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                // This API has been removed, but we still provide an endpoint for
+                // backwards compatibility. Only `omdb` ever called this endpoint, so we
+                // could probably just always return an error, but we can at least
+                // attempt to do something reasonable. We've removed this chicken switch
+                // and always attempt to destroy orphans, so we can just claim the
+                // chicken switch is always in that state.
+                let destroy_orphans = true;
+                Ok(HttpResponseOk(
+                    v1::debug::ChickenSwitchDestroyOrphanedDatasets {
+                        destroy_orphans,
+                    },
+                ))
+            })
+            .await
+    }
+
+    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
+            body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                // This API has been removed, but we still provide an endpoint for
+                // backwards compatibility. Only `omdb` ever called this endpoint, so we
+                // could probably just always return an error, but we can at least
+                // attempt to do something reasonable. We've removed this chicken switch
+                // and always attempt to destroy orphans, so we can treat requests to
+                // destroy orphans as successful and attempts to disable it as an error.
+                if destroy_orphans {
+                    Ok(HttpResponseUpdatedNoContent())
+                } else {
+                    Err(HttpError::for_bad_request(
+                    None,
+                    "orphaned dataset destruction can no longer be disabled"
+                        .to_string(),
+                ))
+                }
+            })
+            .await
+    }
+
+    async fn debug_operator_switch_zone_policy_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.hardware_monitor().current_switch_zone_policy(),
+                ))
+            })
+            .await
+    }
+
+    async fn debug_operator_switch_zone_policy_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let policy = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                match policy {
+                    OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
+                    OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
+                        let our_switch_zone_ip =
+                            sa.switch_zone_underlay_info().ip;
+                        if request_context.request.remote_addr().ip()
+                            == our_switch_zone_ip
+                        {
+                            let message =
+                                "requests to disable the switch zone must \
+                                       come from the other switch zone"
+                                    .to_string();
+                            return Err(HttpError {
+                                status_code: ErrorStatusCode::BAD_REQUEST,
+                                error_code: None,
+                                external_message: message.clone(),
+                                internal_message: message,
+                                headers: None,
+                            });
+                        }
+                    }
+                }
+                sa.hardware_monitor().set_switch_zone_policy(policy);
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.set_probes(body.into_inner().probes);
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn local_storage_dataset_ensure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.create_local_storage_dataset(request).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.delete_local_storage_dataset(request).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let msg = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.trust_quorum().reconfigure(msg).await.map_err(|e| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let msg = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(
+                    |e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    },
+                )?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .commit(request.rack_id, request.epoch)
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                if status == CommitStatus::Pending {
+                    return Err(HttpError::for_internal_error(
+                        "commit returned Pending, which is unexpected"
+                            .to_string(),
+                    ));
+                }
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status =
+                    sa.trust_quorum().coordinator_status().await.map_err(
+                        |e| {
+                            HttpError::for_internal_error(
+                                InlineErrorChain::new(&e).to_string(),
+                            )
+                        },
+                    )?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .prepare_and_commit(request.config)
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .proxy()
+                    .commit(
+                        request.destination,
+                        request.request.rack_id,
+                        request.request.epoch,
+                    )
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                if status == CommitStatus::Pending {
+                    return Err(HttpError::for_internal_error(
+                        "commit returned Pending, which is unexpected"
+                            .to_string(),
+                    ));
+                }
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .proxy()
+                    .prepare_and_commit(
+                        request.destination,
+                        request.request.config,
+                    )
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+        let destination = query_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .proxy()
+                    .status(destination)
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn trust_quorum_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa.trust_quorum().status().await.map_err(|e| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn trust_quorum_network_config_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
     {
         let sa = request_context.context();
-        let destroy_orphans = sa.chicken_switch_destroy_orphaned_datasets();
-        Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
-            destroy_orphans,
-        }))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let config =
+                    sa.trust_quorum().network_config().await.map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+            })
+            .await
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_put(
+    async fn trust_quorum_network_config_put(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        body: TypedBody<TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
-            body.into_inner();
         let sa = request_context.context();
-        sa.set_chicken_switch_destroy_orphaned_datasets(destroy_orphans);
-        Ok(HttpResponseUpdatedNoContent())
+        let config = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.trust_quorum()
+                    .update_network_config(config.into())
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_put_attached_subnets(propolis_id, body.into_inner())
+                    .await
+                    .map(|_| HttpResponseUpdatedNoContent())
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_delete_attached_subnets(propolis_id)
+                    .await
+                    .map(|_| HttpResponseDeleted())
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_attach_subnet(propolis_id, subnet)
+                    .await
+                    .map(|_| HttpResponseUpdatedNoContent())
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_detach_subnet(propolis_id, subnet)
+                    .await
+                    .map(|_| HttpResponseDeleted())
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let log = rot.get_measurement_log().await?;
+                Ok(HttpResponseOk(log.into()))
+            })
+            .await
+    }
+
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let chain = rot.get_certificate_chain().await?;
+                Ok(HttpResponseOk(chain.into()))
+            })
+            .await
+    }
+
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+        body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let nonce = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let attestation = rot.attest(nonce.into()).await?;
+                Ok(HttpResponseOk(attestation.into()))
+            })
+            .await
     }
 }

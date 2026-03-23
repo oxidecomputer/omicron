@@ -4,16 +4,15 @@
 
 //! Metrics
 
-use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::{context::OpContext, db::fixed_data::FLEET_ID};
 use nexus_external_api::TimeseriesSchemaPaginationParams;
-use nexus_types::external_api::params::SystemMetricName;
+use nexus_types::external_api::metrics::{ResourceMetrics, SystemMetricName};
 use omicron_common::api::external::{Error, InternalContext};
 use oximeter_db::{
-    Measurement, TimeseriesSchema, oxql::query::QueryAuthzScope,
+    Measurement, OxqlResult, TimeseriesSchema, oxql::query::QueryAuthzScope,
 };
 use std::num::NonZeroU32;
 
@@ -130,7 +129,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         query: impl AsRef<str>,
-    ) -> Result<Vec<oxql_types::Table>, Error> {
+    ) -> Result<OxqlResult, Error> {
         // Must be a fleet user to list timeseries schema.
         //
         // TODO-security: We need to figure out how to implement proper security
@@ -140,14 +139,6 @@ impl super::Nexus {
         self.timeseries_client
             .oxql_query(query, QueryAuthzScope::Fleet)
             .await
-            // TODO-observability: The query method returns information
-            // about the duration of the OxQL query and the database
-            // resource usage for each contained SQL query. We should
-            // publish this as a timeseries itself, so that we can track
-            // improvements to query processing.
-            //
-            // For now, simply return the tables alone.
-            .map(|result| result.tables)
             .map_err(map_timeseries_err)
     }
 
@@ -157,7 +148,7 @@ impl super::Nexus {
         _opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         query: impl AsRef<str>,
-    ) -> Result<Vec<oxql_types::Table>, Error> {
+    ) -> Result<OxqlResult, Error> {
         // Ensure the user has read access to the project
         let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::Read).await?;
@@ -170,7 +161,6 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|result| result.tables)
             .map_err(map_timeseries_err)
     }
 }

@@ -2,7 +2,7 @@
 #:
 #: name = "helios / build TUF repo"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-2.0-16c128gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/manifest.toml",
@@ -14,20 +14,10 @@
 #:	"%/work/*.log",
 #: ]
 #: access_repos = [
-#:	"oxidecomputer/amd-apcb",
-#:	"oxidecomputer/amd-efs",
 #:	"oxidecomputer/amd-firmware",
-#:	"oxidecomputer/amd-flash",
-#:	"oxidecomputer/amd-host-image-builder",
-#:	"oxidecomputer/boot-image-tools",
 #:	"oxidecomputer/chelsio-t6-roms",
-#:	"oxidecomputer/compliance-pilot",
-#:	"oxidecomputer/facade",
-#:	"oxidecomputer/helios",
-#:	"oxidecomputer/helios-omicron-brand",
-#:	"oxidecomputer/helios-omnios-build",
-#:	"oxidecomputer/helios-omnios-extra",
-#:	"oxidecomputer/nanobl-rs",
+#:	"oxidecomputer/dmar-report",
+#:	"oxidecomputer/pilot",
 #: ]
 #:
 #: [[publish]]
@@ -57,7 +47,7 @@
 #:
 #: [[publish]]
 #: series = "rot-all"
-#: name = "incorporation.p5m"
+#: name = "incorporation.p5p"
 #: from_output = "/work/incorporation.p5p"
 #:
 

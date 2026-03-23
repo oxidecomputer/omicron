@@ -14,6 +14,7 @@ use dhcproto::{
 };
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use macaddr::MacAddr6;
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddrV4, UdpSocket},
@@ -119,7 +120,7 @@ pub fn main() -> Result<()> {
         let dst =
             SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), src.port());
         if let Err(e) = sock.send_to(&buf, dst) {
-            eprintln!("send reply error: {e}");
+            eprintln!("send reply error: {}", InlineErrorChain::new(&e));
         }
     }
 }

@@ -1,0 +1,28 @@
+# Load an example system.
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Set CockroachDB settings.
+set cockroachdb-settings --fingerprint abcdef0123456789abcdef0123456789abcdef01
+set cockroachdb-settings --version 22.1
+set cockroachdb-settings --preserve-downgrade 22.1
+
+# Try a no-op update.
+set cockroachdb-settings --preserve-downgrade 22.1
+
+# Run the planner and verify CRDB settings appear in the new blueprint.
+blueprint-plan latest
+blueprint-diff latest
+
+# Run blueprint-edit and verify CRDB settings are preserved.
+blueprint-edit latest noop
+blueprint-diff latest
+
+# Save and reload to verify round-trip preservation.
+save saved-crdb.json
+wipe system
+load saved-crdb.json
+
+# Generate a new blueprint. The new blueprint should not show any
+# CRDB setting changes.
+blueprint-plan latest
+blueprint-diff latest

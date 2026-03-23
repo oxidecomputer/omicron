@@ -6,21 +6,20 @@
 
 use std::{collections::BTreeSet, net::Ipv6Addr};
 
+use gateway_types::component::SpType;
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::{
-        external::AllowedSourceIps,
-        internal::shared::{
-            BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
-            PortSpeed, RouteConfig, TxEqConfig,
-        },
-    },
+    api::external::AllowedSourceIps,
+};
+use sled_agent_types::early_networking::{
+    BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
+    PortFec, PortSpeed, RouteConfig, TxEqConfig, UplinkAddressConfig,
 };
 use sled_hardware_types::Baseboard;
 
 use crate::{
-    inventory::{SpIdentifier, SpType},
+    inventory::SpIdentifier,
     rack_setup::{
         BgpAuthKeyId, BootstrapSledDescription,
         CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,
@@ -99,7 +98,7 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: "10.2.3.4".parse().unwrap(),
+                addr: Some("10.2.3.4".parse().unwrap()),
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -118,10 +117,11 @@ impl ExampleRackSetupData {
                     "127.0.0.1/8".parse().unwrap(),
                 ]),
                 vlan_id: None,
+                router_lifetime: 0,
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
-                addr: "10.2.3.5".parse().unwrap(),
+                addr: Some("10.2.3.5".parse().unwrap()),
                 port: "port0".into(),
                 remote_asn: Some(200),
                 hold_time: Some(10),
@@ -141,12 +141,13 @@ impl ExampleRackSetupData {
                 ]),
                 allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![]),
                 vlan_id: None,
+                router_lifetime: 0,
             },
         ];
 
         let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
             asn: 47,
-            addr: "10.2.3.4".parse().unwrap(),
+            addr: Some("10.2.3.4".parse().unwrap()),
             port: "port0".into(),
             hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
             idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -165,6 +166,7 @@ impl ExampleRackSetupData {
             ]),
             allowed_export: UserSpecifiedImportExportPolicy::NoFiltering,
             vlan_id: None,
+            router_lifetime: 0,
         }];
 
         let switch0_port0_lldp = Some(LldpPortConfig {
@@ -195,13 +197,19 @@ impl ExampleRackSetupData {
             management_addrs: Some(vec!["172.32.0.4".parse().unwrap()]),
         });
 
+        let rack_subnet_address =
+            Some(Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0));
+
         let rack_network_config = UserSpecifiedRackNetworkConfig {
+            rack_subnet_address,
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]
             switch0: btreemap! {
-		"port0".to_owned() => UserSpecifiedPortConfig {
-		    addresses: vec!["172.30.0.1/24".parse().unwrap()],
+                "port0".to_owned() => UserSpecifiedPortConfig {
+                    addresses: vec![UplinkAddressConfig::without_vlan(
+                        "172.30.0.1/24".parse().unwrap(),
+                    )],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
@@ -211,17 +219,19 @@ impl ExampleRackSetupData {
                     bgp_peers: switch0_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: Some(PortFec::Firecode),
-		    lldp: switch0_port0_lldp,
-		    tx_eq,
-		    autoneg: true,
-		},
-	    },
+                    lldp: switch0_port0_lldp,
+                    tx_eq,
+                    autoneg: true,
+                },
+            },
             #[rustfmt::skip]
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec!["172.32.0.1/24".parse().unwrap()],
+                    addresses: vec![UplinkAddressConfig::without_vlan(
+                        "172.32.0.1/24".parse().unwrap(),
+                    )],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.33.0.10".parse().unwrap(),
@@ -232,7 +242,7 @@ impl ExampleRackSetupData {
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: None,
                     lldp: switch1_port0_lldp,
-		    tx_eq,
+                    tx_eq,
                     autoneg: true,
                 },
             },
@@ -241,6 +251,7 @@ impl ExampleRackSetupData {
                 originate: vec!["10.0.0.0/16".parse().unwrap()],
                 shaper: None,
                 checker: None,
+                max_paths: MaxPathConfig::default(),
             }],
         };
 

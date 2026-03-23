@@ -8,7 +8,6 @@ use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use omicron_common::update::ArtifactId;
-use slog::error;
 use thiserror::Error;
 use tufaceous_artifact::{
     ArtifactHashId, ArtifactKind, ArtifactVersion, KnownArtifactKind,
@@ -96,6 +95,9 @@ pub enum RepositoryError {
     #[error("multiple artifacts found for kind `{0:?}`")]
     DuplicateArtifactKind(KnownArtifactKind),
 
+    #[error("multiple installinator documents found")]
+    DuplicateInstallinatorDocument,
+
     #[error("duplicate board found for kind `{kind:?}`: `{board}`")]
     DuplicateBoardEntry { board: String, kind: KnownArtifactKind },
 
@@ -136,6 +138,9 @@ pub enum RepositoryError {
 
     #[error("error reading name from hubris caboose of {0:?}: non-utf8 value")]
     ReadHubrisCabooseNameUtf8(ArtifactId),
+
+    #[error("missing sign from hubris caboose of {0:?}")]
+    MissingHubrisCabooseSign(ArtifactId),
 
     #[error("missing artifact of kind `{0:?}`")]
     MissingArtifactKind(KnownArtifactKind),
@@ -196,9 +201,11 @@ impl RepositoryError {
 
             // Errors that are definitely caused by bad repository contents.
             RepositoryError::DuplicateArtifactKind(_)
+            | RepositoryError::DuplicateInstallinatorDocument
             | RepositoryError::LocateTarget { .. }
             | RepositoryError::TargetHashLength(_)
             | RepositoryError::MissingArtifactKind(_)
+            | RepositoryError::MissingHubrisCabooseSign(_)
             | RepositoryError::MissingTarget(_)
             | RepositoryError::DuplicateHashEntry(_)
             | RepositoryError::DuplicateBoardEntry { .. }

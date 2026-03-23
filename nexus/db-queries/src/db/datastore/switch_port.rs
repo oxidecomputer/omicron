@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use super::DataStore;
 use crate::context::OpContext;
@@ -15,8 +15,8 @@ use crate::db::model::{
     LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchLinkFec,
     SwitchLinkSpeed, SwitchPort, SwitchPortAddressConfig,
     SwitchPortBgpPeerConfig, SwitchPortConfig, SwitchPortLinkConfig,
-    SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroup,
-    SwitchPortSettingsGroups, SwitchVlanInterfaceConfig, TxEqConfig,
+    SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroups,
+    SwitchVlanInterfaceConfig, TxEqConfig,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
@@ -30,73 +30,106 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, SqlU8, SqlU16, SqlU32,
+    AddressLot, BgpConfig, DbSwitchSlot, SqlU16,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error,
-    ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    SwitchPortAddressView, UpdateResult,
+    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BgpPeerConfig {
-    pub port_settings_id: Uuid,
-    pub bgp_config_id: Uuid,
-    pub interface_name: Name,
-    pub addr: IpNetwork,
-    pub hold_time: SqlU32,
-    pub idle_hold_time: SqlU32,
-    pub delay_open: SqlU32,
-    pub connect_retry: SqlU32,
-    pub keepalive: SqlU32,
-    pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU8>,
-    pub md5_auth_key: Option<String>,
-    pub multi_exit_discriminator: Option<SqlU32>,
-    pub local_pref: Option<SqlU32>,
-    pub enforce_first_as: bool,
-    pub allowed_import: ImportExportPolicy,
-    pub allowed_export: ImportExportPolicy,
-    pub communities: Vec<u32>,
-    pub vlan_id: Option<SqlU16>,
+/// This is a wrapper around [`networking::BgpPeer`], with two additions:
+///
+/// * [`BgpPeerFromDb::bgp_config_id`] is guaranteed to be an ID, unlike the
+///   inner [`networking::BgpPeer::bgp_config`] which might be an ID or might be
+///   a [`Name`].
+/// * Adds [`BgpPeerFromDb::port_settings_id`], which doesn't exist in
+///   inner [`networking::BgpPeer`].
+#[derive(Clone, Debug)]
+pub struct BgpPeerFromDb {
+    port_settings_id: Uuid,
+    bgp_config_id: Uuid,
+    inner: networking::BgpPeer,
 }
 
-impl Into<external::BgpPeer> for BgpPeerConfig {
-    fn into(self) -> external::BgpPeer {
-        external::BgpPeer {
-            bgp_config: self.bgp_config_id.into(),
-            interface_name: self.interface_name.into(),
-            addr: self.addr.ip(),
-            hold_time: self.hold_time.into(),
-            idle_hold_time: self.idle_hold_time.into(),
-            delay_open: self.delay_open.into(),
-            connect_retry: self.connect_retry.into(),
-            keepalive: self.keepalive.into(),
-            remote_asn: self.remote_asn.map(Into::into),
-            min_ttl: self.min_ttl.map(Into::into),
-            md5_auth_key: self.md5_auth_key.clone(),
-            multi_exit_discriminator: self
-                .multi_exit_discriminator
-                .map(Into::into),
-            communities: self.communities,
-            local_pref: self.local_pref.map(Into::into),
-            enforce_first_as: self.enforce_first_as,
-            allowed_import: self.allowed_import,
-            allowed_export: self.allowed_export,
-            vlan_id: self.vlan_id.map(Into::into),
+impl From<BgpPeerFromDb> for networking::BgpPeer {
+    fn from(value: BgpPeerFromDb) -> Self {
+        value.inner
+    }
+}
+
+impl BgpPeerFromDb {
+    pub fn port_settings_id(&self) -> Uuid {
+        self.port_settings_id
+    }
+
+    pub fn bgp_config_id(&self) -> Uuid {
+        self.bgp_config_id
+    }
+
+    pub fn as_bgp_peer(&self) -> &networking::BgpPeer {
+        &self.inner
+    }
+}
+
+// Helper to build a `BgpPeerFromDb`. This is a struct instead of a function so
+// we get named arguments, particularly for the import/export policy values that
+// have the same type.
+struct BgpPeerFromDbBuilder<'a> {
+    peer_config: &'a SwitchPortBgpPeerConfig,
+    communities: Vec<u32>,
+    allowed_import: ImportExportPolicy,
+    allowed_export: ImportExportPolicy,
+}
+
+impl BgpPeerFromDbBuilder<'_> {
+    fn build(self) -> BgpPeerFromDb {
+        let Self {
+            peer_config: p,
+            communities,
+            allowed_import,
+            allowed_export,
+        } = self;
+        BgpPeerFromDb {
+            port_settings_id: p.port_settings_id,
+            bgp_config_id: p.bgp_config_id,
+            inner: networking::BgpPeer {
+                bgp_config: p.bgp_config_id.into(),
+                interface_name: p.interface_name.clone().into(),
+                addr: p.addr.map(|a| a.ip()),
+                hold_time: p.hold_time.into(),
+                idle_hold_time: p.idle_hold_time.into(),
+                delay_open: p.delay_open.into(),
+                connect_retry: p.connect_retry.into(),
+                keepalive: p.keepalive.into(),
+                remote_asn: p.remote_asn.map(From::from),
+                min_ttl: p.min_ttl.map(From::from),
+                md5_auth_key: p.md5_auth_key.clone(),
+                multi_exit_discriminator: p
+                    .multi_exit_discriminator
+                    .map(From::from),
+                local_pref: p.local_pref.map(From::from),
+                enforce_first_as: p.enforce_first_as,
+                vlan_id: p.vlan_id.map(From::from),
+                router_lifetime: p.router_lifetime.into(),
+                communities,
+                allowed_import,
+                allowed_export,
+            },
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SwitchPortSettingsCombinedResult {
     pub settings: SwitchPortSettings,
     pub groups: Vec<SwitchPortSettingsGroups>,
@@ -107,7 +140,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub interfaces: Vec<SwitchInterfaceConfig>,
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
-    pub bgp_peers: Vec<BgpPeerConfig>,
+    pub bgp_peers: Vec<BgpPeerFromDb>,
     pub addresses: Vec<SwitchPortAddressView>,
 }
 
@@ -129,9 +162,9 @@ impl SwitchPortSettingsCombinedResult {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings {
+impl Into<networking::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
+    fn into(self) -> networking::SwitchPortSettings {
+        networking::SwitchPortSettings {
             identity: self.settings.identity(),
             port: self.port.into(),
             groups: self.groups.into_iter().map(Into::into).collect(),
@@ -147,12 +180,6 @@ impl Into<external::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
             addresses: self.addresses,
         }
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SwitchPortSettingsGroupCreateResult {
-    pub group: SwitchPortSettingsGroup,
-    pub settings: SwitchPortSettingsCombinedResult,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -224,7 +251,7 @@ impl DataStore {
     pub async fn switch_port_settings_create(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let err = OptionalError::new();
@@ -271,7 +298,7 @@ impl DataStore {
     pub async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &networking::SwitchPortSettingsSelector,
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -318,7 +345,7 @@ impl DataStore {
     pub async fn switch_port_settings_update(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
         id: Uuid,
     ) -> UpdateResult<SwitchPortSettingsCombinedResult> {
         let delete_err = OptionalError::new();
@@ -504,7 +531,6 @@ impl DataStore {
                 result.link_lldp = lldp_link_config::dsl::lldp_link_config
                     .filter(lldp_link_config::id.eq_any(lldp_link_ids))
                     .select(LldpLinkConfig::as_select())
-                    .limit(1)
                     .load_async::<LldpLinkConfig>(&conn)
                     .await?;
 
@@ -523,7 +549,6 @@ impl DataStore {
                 let configs = tx_eq_config::dsl::tx_eq_config
                     .filter(tx_eq_config::id.eq_any(tx_eq_ids))
                     .select(TxEqConfig::as_select())
-                    .limit(1)
                     .load_async::<TxEqConfig>(&conn)
                     .await?;
                     result.tx_eq = tx_eq_ids_and_nulls
@@ -614,12 +639,18 @@ impl DataStore {
                         .await?;
 
                 for p in peers.iter() {
+                    // For unnumbered peers (addr is None), use the sentinel value
+                    // (UNSPECIFIED address) for lookups since that's how they're stored.
+                    let lookup_addr: IpNetwork = p.addr.unwrap_or_else(|| {
+                        IpNetwork::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                    });
+
                     let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
                         let db_list: Vec<SwitchPortBgpPeerConfigAllowImport> =
                             allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
                                 .filter(allow_import_dsl::port_settings_id.eq(id))
                                 .filter(allow_import_dsl::interface_name.eq(p.interface_name.clone()))
-                                .filter(allow_import_dsl::addr.eq(p.addr))
+                                .filter(allow_import_dsl::addr.eq(lookup_addr))
                                 .select(SwitchPortBgpPeerConfigAllowImport::as_select())
                                 .load_async::<SwitchPortBgpPeerConfigAllowImport>(&conn)
                                 .await?;
@@ -638,7 +669,7 @@ impl DataStore {
                             allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export
                                 .filter(allow_export_dsl::port_settings_id.eq(id))
                                 .filter(allow_export_dsl::interface_name.eq(p.interface_name.clone()))
-                                .filter(allow_export_dsl::addr.eq(p.addr))
+                                .filter(allow_export_dsl::addr.eq(lookup_addr))
                                 .select(SwitchPortBgpPeerConfigAllowExport::as_select())
                                 .load_async::<SwitchPortBgpPeerConfigAllowExport>(&conn)
                                 .await?;
@@ -656,34 +687,20 @@ impl DataStore {
                         bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities
                             .filter(bgp_communities_dsl::port_settings_id.eq(id))
                             .filter(bgp_communities_dsl::interface_name.eq(p.interface_name.clone()))
-                            .filter(bgp_communities_dsl::addr.eq(p.addr))
+                            .filter(bgp_communities_dsl::addr.eq(lookup_addr))
                             .select(SwitchPortBgpPeerConfigCommunity::as_select())
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
 
-                    let view = BgpPeerConfig {
-                        port_settings_id: p.port_settings_id,
-                        bgp_config_id: p.bgp_config_id,
-                        interface_name: p.interface_name.clone(),
-                        addr: p.addr,
-                        hold_time: p.hold_time,
-                        idle_hold_time: p.idle_hold_time,
-                        delay_open: p.delay_open,
-                        connect_retry: p.connect_retry,
-                        keepalive: p.keepalive,
-                        remote_asn: p.remote_asn,
-                        min_ttl: p.min_ttl,
-                        md5_auth_key: p.md5_auth_key.clone(),
-                        multi_exit_discriminator: p.multi_exit_discriminator,
-                        local_pref: p.local_pref,
-                        enforce_first_as: p.enforce_first_as,
-                        vlan_id: p.vlan_id,
-                        communities: communities.into_iter().map(|c| c.community.0).collect(),
+                    result.bgp_peers.push(BgpPeerFromDbBuilder {
+                        peer_config: p,
+                        communities: communities
+                            .into_iter()
+                            .map(|c| c.community.0)
+                            .collect(),
                         allowed_import,
                         allowed_export,
-                    };
-
-                    result.bgp_peers.push(view);
+                    }.build());
                 }
 
                 // get the address configs
@@ -732,7 +749,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         #[derive(Debug)]
@@ -743,8 +760,7 @@ impl DataStore {
         let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let switch_port =
-            SwitchPort::new(rack_id, switch_location.to_string(), port.clone());
+        let switch_port = SwitchPort::new(rack_id, switch_slot, port.clone());
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
@@ -793,10 +809,7 @@ impl DataStore {
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPort,
-                            &format!(
-                                "{}/{}/{}",
-                                rack_id, &switch_location, &port,
-                            ),
+                            &format!("{rack_id}/{switch_slot:?}/{port}"),
                         ),
                     )
                 }
@@ -807,7 +820,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         portname: &external::Name,
-        params: &params::SwitchPortSelector,
+        params: &networking::SwitchPortSelector,
     ) -> DeleteResult {
         #[derive(Debug)]
         enum SwitchPortDeleteError {
@@ -816,7 +829,6 @@ impl DataStore {
         }
 
         let err = OptionalError::new();
-
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
@@ -828,14 +840,13 @@ impl DataStore {
                     use nexus_db_schema::schema::switch_port;
                     use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
-                    let switch_location = params.switch_location.to_string();
                     let port_name = portname.to_string();
+                    let switch_slot = DbSwitchSlot::from(
+                        params.switch_slot,
+                    );
                     let port: SwitchPort = switch_port_dsl::switch_port
                         .filter(switch_port::rack_id.eq(params.rack_id))
-                        .filter(
-                            switch_port::switch_location
-                                .eq(switch_location.clone()),
-                        )
+                        .filter(switch_port::switch_slot.eq(switch_slot))
                         .filter(switch_port::port_name.eq(port_name.clone()))
                         .select(SwitchPort::as_select())
                         .limit(1)
@@ -944,9 +955,9 @@ impl DataStore {
                     // what switch are we adding a configuration to?
                     let switch = switch_port_dsl::switch_port
                         .filter(switch_port_dsl::id.eq(switch_port_id))
-                        .select(switch_port_dsl::switch_location)
+                        .select(switch_port_dsl::switch_slot)
                         .limit(1)
-                        .first_async::<String>(&conn)
+                        .first_async::<DbSwitchSlot>(&conn)
                         .await
                         .map_err(|e: diesel::result::Error| {
                             let msg = "failed to look up switch port by id";
@@ -985,13 +996,13 @@ impl DataStore {
                                     let msg = "failed to check if bgp peer exists in switch port settings";
                                     match e {
                                         diesel::result::Error::NotFound => {
-					    debug!(opctx.log, "{msg}"; "error" => ?e);
+                                            debug!(opctx.log, "{msg}"; "error" => ?e);
                                             Ok(None)
                                         },
                                         _ => {
-					    error!(opctx.log, "{msg}"; "error" => ?e);
-					    Err(err.bail(Error::internal_error(msg)))
-					}
+                                            error!(opctx.log, "{msg}"; "error" => ?e);
+                                            Err(err.bail(Error::internal_error(msg)))
+                                        }
                                     }
                                 }
                             }?;
@@ -1015,7 +1026,7 @@ impl DataStore {
                                 .inner_join(bgp_config_dsl::bgp_config.on(
                                     bgp_peer_dsl::bgp_config_id.eq(bgp_config_dsl::id),
                                 ))
-                                .filter(switch_port_dsl::switch_location.eq(switch))
+                                .filter(switch_port_dsl::switch_slot.eq(switch))
                                 .filter(switch_port_dsl::port_settings_id.is_not_null())
                                 .filter(bgp_config_dsl::asn.ne(config.asn))
                                 .select(BgpConfig::as_select())
@@ -1088,18 +1099,17 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
         use nexus_db_schema::schema::switch_port;
         use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        let switch_slot = DbSwitchSlot::from(switch_slot);
         let id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(
-                switch_port::switch_location.eq(switch_location.to_string()),
-            )
+            .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
             .limit(1)
@@ -1194,7 +1204,7 @@ type SpsCreateError = SwitchPortSettingsCreateError;
 async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
     id: Option<Uuid>,
-    params: &params::SwitchPortSettingsCreate,
+    params: &networking::SwitchPortSettingsCreate,
     err: OptionalError<SwitchPortSettingsCreateError>,
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use nexus_db_schema::schema::{
@@ -1354,7 +1364,7 @@ async fn do_switch_port_settings_create(
             i.kind.into(),
         );
         interface_config.push(ifx_config.clone());
-        if let params::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
+        if let networking::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
             vlan_interface_config.push(SwitchVlanInterfaceConfig::new(
                 ifx_config.id,
                 vlan_if.vid,
@@ -1397,13 +1407,17 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    let mut peer_by_addr: BTreeMap<IpAddr, &external::BgpPeer> =
+    let mut peer_by_addr: BTreeMap<IpAddr, &networking::BgpPeer> =
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
     for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
-            peer_by_addr.insert(p.addr, &p);
+            // Track peers for policy lookup. For unnumbered peers (addr is None),
+            // use UNSPECIFIED as the sentinel value.
+            let lookup_addr =
+                p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            peer_by_addr.insert(lookup_addr, &p);
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1437,6 +1451,12 @@ async fn do_switch_port_settings_create(
                 }
             };
 
+            // For unnumbered peers (addr is None), use UNSPECIFIED as a sentinel
+            // value in the communities/import/export tables since addr is part
+            // of the primary key.
+            let db_addr: IpNetwork =
+                p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)).into();
+
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
@@ -1445,7 +1465,7 @@ async fn do_switch_port_settings_create(
                     .map(|x| SwitchPortBgpPeerConfigAllowImport {
                         port_settings_id: id,
                         interface_name: peer_config.link_name.clone().into(),
-                        addr: p.addr.into(),
+                        addr: db_addr,
                         prefix: x.into(),
                     })
                     .collect();
@@ -1464,7 +1484,7 @@ async fn do_switch_port_settings_create(
                     .map(|x| SwitchPortBgpPeerConfigAllowExport {
                         port_settings_id: id,
                         interface_name: peer_config.link_name.clone().into(),
-                        addr: p.addr.into(),
+                        addr: db_addr,
                         prefix: x.into(),
                     })
                     .collect();
@@ -1484,7 +1504,7 @@ async fn do_switch_port_settings_create(
                     .map(|x| SwitchPortBgpPeerConfigCommunity {
                         port_settings_id: id,
                         interface_name: peer_config.link_name.clone().into(),
-                        addr: p.addr.into(),
+                        addr: db_addr,
                         community: x.into(),
                     })
                     .collect();
@@ -1512,40 +1532,33 @@ async fn do_switch_port_settings_create(
             .await?;
 
     for p in db_bgp_peers.into_iter() {
-        let view = BgpPeerConfig {
-            port_settings_id: p.port_settings_id,
-            bgp_config_id: p.bgp_config_id,
-            interface_name: p.interface_name,
-            addr: p.addr,
-            hold_time: p.hold_time,
-            idle_hold_time: p.idle_hold_time,
-            delay_open: p.delay_open,
-            connect_retry: p.connect_retry,
-            keepalive: p.keepalive,
-            remote_asn: p.remote_asn,
-            min_ttl: p.min_ttl,
-            md5_auth_key: p.md5_auth_key,
-            multi_exit_discriminator: p.multi_exit_discriminator,
-            local_pref: p.local_pref,
-            enforce_first_as: p.enforce_first_as,
-            vlan_id: p.vlan_id,
-            allowed_import: peer_by_addr
-                .get(&p.addr.ip())
+        // Lookup policies and communities for peers. For unnumbered peers (addr
+        // is None), use UNSPECIFIED as the lookup key.
+        let lookup_addr =
+            p.addr.map(|a| a.ip()).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        let (allowed_import, allowed_export, communities) = (
+            peer_by_addr
+                .get(&lookup_addr)
                 .map(|x| x.allowed_import.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering)
-                .clone(),
-            allowed_export: peer_by_addr
-                .get(&p.addr.ip())
+                .unwrap_or(ImportExportPolicy::NoFiltering),
+            peer_by_addr
+                .get(&lookup_addr)
                 .map(|x| x.allowed_export.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering)
-                .clone(),
-            communities: peer_by_addr
-                .get(&p.addr.ip())
+                .unwrap_or(ImportExportPolicy::NoFiltering),
+            peer_by_addr
+                .get(&lookup_addr)
                 .map(|x| x.communities.clone())
-                .unwrap_or(Vec::new())
-                .clone(),
-        };
-        result.bgp_peers.push(view);
+                .unwrap_or(Vec::new()),
+        );
+        result.bgp_peers.push(
+            BgpPeerFromDbBuilder {
+                peer_config: &p,
+                communities,
+                allowed_import,
+                allowed_export,
+            }
+            .build(),
+        );
     }
 
     let mut address_config = Vec::new();
@@ -1850,15 +1863,16 @@ async fn do_switch_port_settings_delete(
 mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::external_api::params::{
-        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
+    use nexus_types::external_api::networking::{
+        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        BgpPeer, IdentityMetadataCreateParams, ImportExportPolicy, Name,
-        NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
+    use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
@@ -1870,11 +1884,11 @@ mod test {
 
         let rack_id: Uuid =
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
-        let switch0: Name = "switch0".parse().expect("parse switch location");
+        let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
         let port_result = datastore
-            .switch_port_create(&opctx, rack_id, switch0.into(), qsfp0.into())
+            .switch_port_create(&opctx, rack_id, switch0, qsfp0.into())
             .await
             .expect("switch port create");
 
@@ -1900,6 +1914,7 @@ mod test {
             vrf: None,
             checker: None,
             shaper: None,
+            max_paths: Default::default(),
         };
 
         datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
@@ -1924,7 +1939,9 @@ mod test {
                         "test-bgp-config".parse().unwrap(),
                     ),
                     interface_name: "qsfp0".parse().unwrap(),
-                    addr: "192.168.1.1".parse().unwrap(),
+                    addr: Some(
+                        "192.168.1.1".parse::<std::net::IpAddr>().unwrap(),
+                    ),
                     hold_time: 0,
                     idle_hold_time: 0,
                     delay_open: 0,
@@ -1940,6 +1957,7 @@ mod test {
                     allowed_export: ImportExportPolicy::NoFiltering,
                     allowed_import: ImportExportPolicy::NoFiltering,
                     vlan_id: None,
+                    router_lifetime: 0,
                 }],
             }],
             addresses: vec![],
@@ -2129,15 +2147,15 @@ mod test {
         let mut db_peers = HashMap::new();
 
         for peer in db_settings.bgp_peers {
-            db_peers.insert(peer.interface_name.clone(), peer);
+            db_peers.insert(peer.inner.interface_name.clone(), peer);
         }
 
         for config in settings.bgp_peers {
             let db_peer = db_peers
-                .get(&config.link_name.into())
+                .get(&config.link_name)
                 .expect("requested peer should be present");
 
-            for peer in config.peers {
+            for mut peer in config.peers {
                 match peer.bgp_config {
                     NameOrId::Id(id) => {
                         assert_eq!(db_peer.bgp_config_id, id);
@@ -2158,25 +2176,21 @@ mod test {
                     }
                 }
 
-                assert_eq!(db_peer.addr.ip(), peer.addr);
-                assert_eq!(*db_peer.hold_time, peer.hold_time);
-                assert_eq!(*db_peer.idle_hold_time, peer.idle_hold_time);
-                assert_eq!(*db_peer.delay_open, peer.delay_open);
-                assert_eq!(*db_peer.connect_retry, peer.connect_retry);
-                assert_eq!(*db_peer.keepalive, peer.keepalive);
-                assert_eq!(db_peer.remote_asn.map(|asn| *asn), peer.remote_asn);
-                assert_eq!(db_peer.min_ttl.map(|ttl| *ttl), peer.min_ttl);
-                assert_eq!(db_peer.md5_auth_key, peer.md5_auth_key);
-                assert_eq!(
-                    db_peer.multi_exit_discriminator.map(|med| *med),
-                    peer.multi_exit_discriminator
-                );
-                assert_eq!(db_peer.communities, peer.communities);
-                assert_eq!(db_peer.local_pref.map(|lp| *lp), peer.local_pref);
-                assert_eq!(db_peer.enforce_first_as, peer.enforce_first_as);
-                assert_eq!(db_peer.allowed_export, peer.allowed_export);
-                assert_eq!(db_peer.allowed_import, peer.allowed_import);
-                assert_eq!(db_peer.vlan_id.map(|vid| *vid), peer.vlan_id);
+                // We now know `db_peer.bgp_config_id` is correct; set
+                // `peer.bgp_config` to an ID (potentially replacing a Name) so
+                // we can compare the rest of the struct at once, since
+                // `db_peer.inner.bgp_config` is always populated with an ID.
+                peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
+
+                // TODO-correctness We don't faithfully persist
+                // `interface_name`, and should probably remove the field
+                // entirely
+                // (https://github.com/oxidecomputer/omicron/issues/10104).
+                // For now, manually set the field to match so we can assert_eq
+                // over the entire struct below.
+                peer.interface_name = db_peer.inner.interface_name.clone();
+
+                assert_eq!(peer, db_peer.inner);
             }
         }
 

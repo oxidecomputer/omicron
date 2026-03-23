@@ -4,15 +4,17 @@
 
 //! Built-ins and roles
 
-use crate::external_api::shared;
 use anyhow::Context;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::SiloGroup;
+use nexus_db_queries::db::datastore::SiloUser;
 use nexus_db_queries::db::model::Name;
-use nexus_types::external_api::params;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::user;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -20,6 +22,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -29,7 +34,7 @@ impl super::Nexus {
     pub(crate) async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<shared::Policy<shared::FleetRole>> {
+    ) -> LookupResult<policy::Policy<policy::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
@@ -38,14 +43,14 @@ impl super::Nexus {
             .map(|r| r.try_into().context("parsing database role assignment"))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     pub(crate) async fn fleet_update_policy(
         &self,
         opctx: &OpContext,
-        policy: &shared::Policy<shared::FleetRole>,
-    ) -> UpdateResult<shared::Policy<shared::FleetRole>> {
+        policy: &policy::Policy<policy::FleetRole>,
+    ) -> UpdateResult<policy::Policy<policy::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(
@@ -57,7 +62,7 @@ impl super::Nexus {
             .into_iter()
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     // Silo users
@@ -67,7 +72,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloUser> {
+    ) -> ListResultVec<SiloUser> {
         let authz_silo = opctx
             .authn
             .silo_required()
@@ -84,8 +89,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-        group_id: &Uuid,
-    ) -> ListResultVec<db::model::SiloUser> {
+        group_id: &SiloGroupUuid,
+    ) -> ListResultVec<SiloUser> {
         let authz_silo = opctx
             .authn
             .silo_required()
@@ -112,23 +117,23 @@ impl super::Nexus {
     pub(crate) async fn silo_user_fetch_self(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<db::model::SiloUser> {
+    ) -> LookupResult<SiloUser> {
         let &actor = opctx
             .authn
             .actor_required()
             .internal_context("loading current user")?;
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(actor.actor_id())
+            .silo_user_actor(&actor)?
             .fetch()
             .await?;
-        Ok(db_silo_user)
+        Ok(db_silo_user.into())
     }
 
     pub(crate) async fn silo_user_fetch_groups_for_self(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloGroup> {
+    ) -> ListResultVec<SiloGroup> {
         self.db_datastore.silo_groups_for_self(opctx, pagparams).await
     }
 
@@ -138,7 +143,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloGroup> {
+    ) -> ListResultVec<SiloGroup> {
         let authz_silo = opctx
             .authn
             .silo_required()
@@ -161,14 +166,13 @@ impl super::Nexus {
     pub fn user_builtin_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        user_selector: &'a params::UserBuiltinSelector,
+        user_selector: &'a user::UserBuiltinSelector,
     ) -> LookupResult<lookup::UserBuiltin<'a>> {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         let user = match user_selector {
-            params::UserBuiltinSelector { user: NameOrId::Id(id) } => {
-                lookup_path.user_builtin_id(*id)
-            }
-            params::UserBuiltinSelector { user: NameOrId::Name(name) } => {
+            user::UserBuiltinSelector { user: NameOrId::Id(id) } => lookup_path
+                .user_builtin_id(BuiltInUserUuid::from_untyped_uuid(*id)),
+            user::UserBuiltinSelector { user: NameOrId::Name(name) } => {
                 lookup_path.user_builtin_name(Name::ref_cast(name))
             }
         };

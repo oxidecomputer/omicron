@@ -20,7 +20,7 @@ example pagination parameters: scan by name or id, using name ascending
 }
 example pagination parameters: scan by time and id, ascending
 {
-  "sort_by": "ascending"
+  "sort_by": "time_and_id_ascending"
 }
 example pagination parameters: page selector: by id ascending
 {
@@ -44,7 +44,7 @@ example pagination parameters: page selector: by name or id, using id ascending
 }
 example pagination parameters: page selector: by time and id, ascending
 {
-  "sort_by": "ascending",
+  "sort_by": "time_and_id_ascending",
   "last_seen": [
     "2025-03-20T10:30:45Z",
     "61a78113-d3c6-4b35-a410-23e9eae64328"

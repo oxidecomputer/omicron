@@ -4,14 +4,14 @@
 
 use db_macros::Resource;
 use nexus_db_schema::schema::user_builtin;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::user;
 use nexus_types::identity::Resource;
-use uuid::Uuid;
+use omicron_uuid_kinds::BuiltInUserUuid;
 
 /// Describes a built-in user, as stored in the database
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
 #[diesel(table_name = user_builtin)]
+#[resource(uuid_kind = BuiltInUserKind)]
 pub struct UserBuiltin {
     #[diesel(embed)]
     pub identity: UserBuiltinIdentity,
@@ -19,12 +19,12 @@ pub struct UserBuiltin {
 
 impl UserBuiltin {
     /// Creates a new database UserBuiltin object.
-    pub fn new(id: Uuid, params: params::UserBuiltinCreate) -> Self {
+    pub fn new(id: BuiltInUserUuid, params: user::UserBuiltinCreate) -> Self {
         Self { identity: UserBuiltinIdentity::new(id, params.identity) }
     }
 }
 
-impl From<UserBuiltin> for views::UserBuiltin {
+impl From<UserBuiltin> for user::UserBuiltin {
     fn from(user: UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }

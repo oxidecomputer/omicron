@@ -10,45 +10,52 @@ use super::params::version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use sled_agent_measurements::{MeasurementError, MeasurementsHandle};
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::SlogInlineError;
 use sprockets_tls::client::Client as SprocketsClient;
 use sprockets_tls::keys::SprocketsConfig;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, SlogInlineError)]
 pub enum Error {
-    #[error("Could not connect to {addr}: {err}")]
-    Connect { addr: SocketAddrV6, err: sprockets_tls::Error },
+    #[error("Could not connect to {addr}")]
+    Connect {
+        addr: SocketAddrV6,
+        #[source]
+        err: sprockets_tls::Error,
+    },
 
-    #[error("Failed serializing request: {0}")]
-    Serialize(serde_json::Error),
+    #[error("Failed serializing request")]
+    Serialize(#[source] serde_json::Error),
 
-    #[error("Failed writing request length prefix: {0}")]
-    WriteLengthPrefix(io::Error),
+    #[error("Failed writing request length prefix")]
+    WriteLengthPrefix(#[source] io::Error),
 
-    #[error("Failed writing request: {0}")]
-    WriteRequest(io::Error),
+    #[error("Failed writing request")]
+    WriteRequest(#[source] io::Error),
 
-    #[error("Failed flushing request: {0}")]
-    FlushRequest(io::Error),
+    #[error("Failed flushing request")]
+    FlushRequest(#[source] io::Error),
 
-    #[error("Failed reading response length prefix: {0}")]
-    ReadLengthPrefix(io::Error),
+    #[error("Failed reading response length prefix")]
+    ReadLengthPrefix(#[source] io::Error),
 
     #[error("Received bogus response length: {0}")]
     BadResponseLength(u32),
 
-    #[error("Failed reading response: {0}")]
-    ReadResponse(io::Error),
+    #[error("Failed reading response")]
+    ReadResponse(#[source] io::Error),
 
-    #[error("Failed deserializing response: {0}")]
-    Deserialize(serde_json::Error),
+    #[error("Failed deserializing response")]
+    Deserialize(#[source] serde_json::Error),
 
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
@@ -60,6 +67,8 @@ pub enum Error {
         "Bogus response from server (expected {expected} but received {received})"
     )]
     InvalidResponse { expected: &'static str, received: &'static str },
+    #[error("Reference measurements error")]
+    MeasurementError(#[source] MeasurementError),
 }
 
 /// A TCP client used to connect to bootstrap agents for rack initialization
@@ -72,15 +81,17 @@ pub(crate) struct Client {
     addr: SocketAddrV6,
     log: Logger,
     sprockets_conf: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl Client {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sprockets_conf: SprocketsConfig,
+        measurements: Arc<MeasurementsHandle>,
         log: Logger,
     ) -> Self {
-        Self { addr, sprockets_conf, log }
+        Self { addr, sprockets_conf, log, measurements }
     }
 
     /// Start sled agent by sending an initialization request determined from
@@ -111,9 +122,16 @@ impl Client {
         let log = self.log.new(o!("component" => "SledAgentSprocketsClient"));
         // Establish connection and sprockets connection (if possible).
         // The sprockets client loads the associated root certificates at this point.
+        //
+        let corpus = self
+            .measurements
+            .current_measurements()
+            .map_err(Error::MeasurementError)?;
+
         let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,
+            corpus,
             log.clone(),
         )
         .await

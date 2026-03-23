@@ -461,6 +461,19 @@ async fn start_pollers(
 impl SpPoller {
     async fn run(mut self, apictx: Arc<ServerContext>) {
         let mut interval = tokio::time::interval(SP_POLL_INTERVAL);
+        // The goal is to poll each SP once per SP_POLL_INTERVAL. If we miss
+        // that interval because, say, MGS was busy doing other things, the
+        // network was congested, or due to vagaries of OS scheduling, we don't
+        // want to issue a whole bunch of polls with less than a second part.
+        // This is what we would get with the default,
+        // `MissedTickBehavior::Burst`. Instead, configure the `Interval` to
+        // skip missed ticks, so that we poll the SP a maximum of once per
+        // second, with potential gaps if MGS was not able to poll the SP within
+        // a given second. This should mean that if MGS is delayed, we don't
+        // overwhelm the poor SP's network stack with a big burst of requests.
+        interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         let switch = &apictx.mgmt_switch;
         let sp = match switch.sp(self.spid) {
             Ok(sp) => sp,

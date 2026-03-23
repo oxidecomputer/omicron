@@ -9,12 +9,11 @@ use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
-use omicron_common::api::external::Name;
+use omicron_common::api::external::{Generation, Name};
 
 use crate::{
     deployment::{
-        Blueprint, BlueprintZoneDisposition, BlueprintZoneType, SledFilter,
-        blueprint_zone_type,
+        Blueprint, BlueprintZoneType, SledFilter, blueprint_zone_type,
     },
     internal_api::params::{DnsConfigZone, DnsRecord},
     silo::{default_silo_name, silo_dns_name},
@@ -29,6 +28,7 @@ use super::{
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &IdOrdMap<Sled>,
+    active_nexus_generation: Generation,
     overrides: &Overridables,
 ) -> anyhow::Result<DnsConfigZone> {
     // The DNS names configured here should match what RSS configures for the
@@ -39,9 +39,7 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    'all_zones: for (_, zone) in
-        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    'all_zones: for (_, zone) in blueprint.in_service_zones() {
         let (service_name, &address) = match &zone.zone_type {
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { address, .. },
@@ -97,8 +95,22 @@ pub fn blueprint_internal_dns_config(
             ) => (ServiceName::Cockroach, address),
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
+                nexus_generation,
+                lockstep_port,
                 ..
-            }) => (ServiceName::Nexus, internal_address),
+            }) => {
+                if *nexus_generation == active_nexus_generation {
+                    // Add both the `nexus` service as well as the
+                    // `nexus-lockstep` service.  Continue so we don't fall
+                    // through and call `host_zone_with_one_backend`.
+                    dns_builder.host_zone_nexus(
+                        zone.id,
+                        *internal_address,
+                        *lockstep_port,
+                    )?;
+                }
+                continue 'all_zones;
+            }
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
                 ..
@@ -156,18 +168,29 @@ pub fn blueprint_internal_dns_config(
     // replicated synchronously or atomically to all instances.  That is: a
     // consumer should be careful when fetching an artifact about whether they
     // really can just pick any backend of this service or not.
+    //
+    // We currently limit the repo depot backends to keep us under current DNS
+    // limits.  See oxidecomputer/omicron#6342.  This number is chosen somewhat
+    // arbitrarily: it's small enough to fit under the DNS limit, but enough
+    // to give some redundancy.  We're implicitly assuming iteration over
+    // `sleds_by_id` will be stable so that we're not thrashing on the DNS
+    // names.
+    let mut nrepo_depots = 6;
     for sled in sleds_by_id {
-        if !sled.policy().matches(SledFilter::TufArtifactReplication) {
+        if !SledFilter::TufArtifactReplication.matches_policy(sled.policy()) {
             continue;
         }
 
         let dns_sled = dns_builder
             .host_sled(sled.id(), *sled.sled_agent_address().ip())?;
-        dns_builder.service_backend_sled(
-            ServiceName::RepoDepot,
-            &dns_sled,
-            sled.repo_depot_address().port(),
-        )?;
+        if nrepo_depots > 0 {
+            dns_builder.service_backend_sled(
+                ServiceName::RepoDepot,
+                &dns_sled,
+                sled.repo_depot_address().port(),
+            )?;
+            nrepo_depots -= 1;
+        }
     }
 
     Ok(dns_builder.build_zone())
@@ -177,8 +200,10 @@ pub fn blueprint_external_dns_config<'a>(
     blueprint: &Blueprint,
     silos: impl IntoIterator<Item = &'a Name>,
     external_dns_zone_name: String,
+    active_nexus_generation: Generation,
 ) -> DnsConfigZone {
-    let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
+    let nexus_external_ips =
+        blueprint_nexus_external_ips(blueprint, active_nexus_generation);
     let mut dns_external_ips = blueprint_external_dns_nameserver_ips(blueprint);
 
     let nexus_dns_records: Vec<DnsRecord> = nexus_external_ips

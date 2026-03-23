@@ -15,6 +15,16 @@ macro_rules! define_enums {
             #[diesel(postgres_type(name = $postgres_name, schema = "public"))]
             pub struct $enum_name;
         )*
+
+        /// Returns a mapping from CRDB enum type name to the Diesel
+        /// `type_name` string for every enum defined in this module.
+        pub fn crdb_to_diesel_enum_type_names()
+            -> Vec<(&'static str, &'static str)>
+        {
+            vec![
+                $(($postgres_name, std::any::type_name::<$enum_name>()),)*
+            ]
+        }
     };
 }
 
@@ -23,6 +33,9 @@ define_enums! {
     AddressLotKindEnum => "address_lot_kind",
     AffinityPolicyEnum => "affinity_policy",
     AlertClassEnum => "alert_class",
+    AuditLogActorKindEnum => "audit_log_actor_kind",
+    AuditLogAuthMethodEnum => "audit_log_auth_method",
+    AuditLogResultKindEnum => "audit_log_result_kind",
     AlertDeliveryTriggerEnum => "alert_delivery_trigger",
     AlertDeliveryStateEnum => "alert_delivery_state",
     AuthenticationModeEnum => "authentication_mode",
@@ -30,29 +43,43 @@ define_enums! {
     BlockSizeEnum => "block_size",
     BpDatasetDispositionEnum => "bp_dataset_disposition",
     BpPhysicalDiskDispositionEnum => "bp_physical_disk_disposition",
+    BpSourceEnum => "bp_source",
+    BpSledMeasurementsEnum => "bp_sled_measurements",
     BpZoneDispositionEnum => "bp_zone_disposition",
     BpZoneImageSourceEnum => "bp_zone_image_source",
     CabooseWhichEnum => "caboose_which",
     ClickhouseModeEnum => "clickhouse_mode",
     DatasetKindEnum => "dataset_kind",
+    DbMetadataNexusStateEnum => "db_metadata_nexus_state",
+    DiagnosisEngineEnum => "diagnosis_engine",
+    DiskTypeEnum => "disk_type",
     DnsGroupEnum => "dns_group",
     DownstairsClientStopRequestReasonEnum => "downstairs_client_stop_request_reason_type",
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",
+    EreporterTypeEnum => "ereporter_type",
     FailureDomainEnum => "failure_domain",
+    HwM2SlotEnum => "hw_m2_slot",
     HwPowerStateEnum => "hw_power_state",
     HwRotSlotEnum => "hw_rot_slot",
     IdentityProviderTypeEnum => "provider_type",
     IdentityTypeEnum => "identity_type",
     InstanceAutoRestartPolicyEnum => "instance_auto_restart",
+    InstanceCpuPlatformEnum => "instance_cpu_platform",
     InstanceStateEnum => "instance_state_v2",
     InstanceIntendedStateEnum => "instance_intended_state",
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
     InvZoneImageSourceEnum => "inv_zone_image_source",
     InvZoneManifestSourceEnum => "inv_zone_manifest_source",
+    InvZpoolHealthEnum => "inv_zpool_health",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
+    IpPoolReservationTypeEnum => "ip_pool_reservation_type",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
+    IpPoolTypeEnum => "ip_pool_type",
+    IpVersionEnum => "ip_version",
     MigrationStateEnum => "migration_state",
+    MulticastGroupStateEnum => "multicast_group_state",
+    MulticastGroupMemberStateEnum => "multicast_group_member_state",
     NetworkInterfaceKindEnum => "network_interface_kind",
     OximeterReadModeEnum => "oximeter_read_mode",
     PhysicalDiskKindEnum => "physical_disk_kind",
@@ -65,11 +92,15 @@ define_enums! {
     RegionReservationPercentEnum => "region_reservation_percent",
     RegionSnapshotReplacementStateEnum => "region_snapshot_replacement_state",
     RegionSnapshotReplacementStepStateEnum => "region_snapshot_replacement_step_state",
+    // NOTE: The database enum name starts with "clear_" for legacy reasons.
+    // Prefer "remove" in the future.
+    RemoveMupdateOverrideBootSuccessEnum => "clear_mupdate_override_boot_success",
     RotImageErrorEnum => "rot_image_error",
     RotPageWhichEnum => "root_of_trust_page_which",
     RouterRouteKindEnum => "router_route_kind",
     SagaStateEnum => "saga_state",
     ServiceKindEnum => "service_kind",
+    SledCpuFamilyEnum => "sled_cpu_family",
     SledPolicyEnum => "sled_policy",
     SledRoleEnum => "sled_role",
     SledStateEnum => "sled_state",
@@ -80,12 +111,16 @@ define_enums! {
     SwitchLinkFecEnum => "switch_link_fec",
     SwitchLinkSpeedEnum => "switch_link_speed",
     SwitchPortGeometryEnum => "switch_port_geometry",
+    SwitchSlotEnum => "switch_slot",
     TargetReleaseSourceEnum => "target_release_source",
+    TrustQuorumConfigurationStateEnum => "trust_quorum_configuration_state",
+    TrustQuorumMemberStateEnum => "trust_quorum_member_state",
     UpstairsRepairNotificationTypeEnum => "upstairs_repair_notification_type",
     UpstairsRepairTypeEnum => "upstairs_repair_type",
     UserDataExportResourceTypeEnum => "user_data_export_resource_type",
     UserDataExportStateEnum => "user_data_export_state",
     UserProvisionTypeEnum => "user_provision_type",
+    VmmCpuPlatformEnum => "vmm_cpu_platform",
     VmmStateEnum => "vmm_state",
     VolumeResourceUsageTypeEnum => "volume_resource_usage_type",
     VpcFirewallRuleActionEnum => "vpc_firewall_rule_action",

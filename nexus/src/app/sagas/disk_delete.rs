@@ -5,15 +5,23 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
+use crate::app::InlineErrorChain;
 use crate::app::sagas::SagaInitError;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
-use omicron_uuid_kinds::VolumeUuid;
+use omicron_common::api::external::Error;
+use omicron_common::backoff::backon_retry_policy_internal_service;
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -24,8 +32,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
-    pub disk_id: Uuid,
-    pub volume_id: VolumeUuid,
+    pub disk: datastore::Disk,
 }
 
 // disk delete saga: actions
@@ -39,6 +46,12 @@ declare_saga_actions! {
     SPACE_ACCOUNT -> "no_result1" {
         + sdd_account_space
         - sdd_account_space_undo
+    }
+    DELETE_LOCAL_STORAGE -> "delete_local_storage" {
+        + sdd_delete_local_storage
+    }
+    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
+        + sdd_deallocate_local_storage
     }
 }
 
@@ -61,36 +74,50 @@ impl NexusSaga for SagaDiskDelete {
         builder.append(delete_disk_record_action());
         builder.append(space_account_action());
 
-        let subsaga_params = volume_delete::Params {
-            serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.volume_id,
-        };
+        match &params.disk {
+            datastore::Disk::Crucible(disk) => {
+                let subsaga_params = volume_delete::Params {
+                    serialized_authn: params.serialized_authn.clone(),
+                    volume_id: disk.volume_id(),
+                };
 
-        let subsaga_dag = {
-            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-                volume_delete::SagaVolumeDelete::NAME,
-            ));
-            volume_delete::SagaVolumeDelete::make_saga_dag(
-                &subsaga_params,
-                subsaga_builder,
-            )?
-        };
+                let subsaga_dag = {
+                    let subsaga_builder =
+                        steno::DagBuilder::new(steno::SagaName::new(
+                            volume_delete::SagaVolumeDelete::NAME,
+                        ));
+                    volume_delete::SagaVolumeDelete::make_saga_dag(
+                        &subsaga_params,
+                        subsaga_builder,
+                    )?
+                };
 
-        builder.append(Node::constant(
-            "params_for_volume_delete_subsaga",
-            serde_json::to_value(&subsaga_params).map_err(|e| {
-                SagaInitError::SerializeError(
-                    "params_for_volume_delete_subsaga".to_string(),
-                    e,
-                )
-            })?,
-        ));
+                builder.append(Node::constant(
+                    "params_for_volume_delete_subsaga",
+                    serde_json::to_value(&subsaga_params).map_err(|e| {
+                        SagaInitError::SerializeError(
+                            "params_for_volume_delete_subsaga".to_string(),
+                            e,
+                        )
+                    })?,
+                ));
 
-        builder.append(Node::subsaga(
-            "volume_delete_subsaga_no_result",
-            subsaga_dag,
-            "params_for_volume_delete_subsaga",
-        ));
+                builder.append(Node::subsaga(
+                    "volume_delete_subsaga_no_result",
+                    subsaga_dag,
+                    "params_for_volume_delete_subsaga",
+                ));
+            }
+
+            datastore::Disk::LocalStorage(_) => {
+                // Attempt deleting the local storage before removing the
+                // database record. If the delete does not succeed, at least the
+                // user can re-request the deletion.
+
+                builder.append(delete_local_storage_action());
+                builder.append(deallocate_local_storage_action());
+            }
+        }
 
         Ok(builder.build()?)
     }
@@ -107,11 +134,11 @@ async fn sdd_delete_disk_record(
     let disk = osagactx
         .datastore()
         .project_delete_disk_no_auth(
-            &params.disk_id,
+            &params.disk.id(),
             &[DiskState::Detached, DiskState::Faulted],
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(disk)
 }
@@ -124,9 +151,9 @@ async fn sdd_delete_disk_record_undo(
 
     osagactx
         .datastore()
-        .project_undelete_disk_set_faulted_no_auth(&params.disk_id)
+        .project_undelete_disk_set_faulted_no_auth(&params.disk.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -151,7 +178,7 @@ async fn sdd_account_space(
             deleted_disk.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -175,7 +202,112 @@ async fn sdd_account_space_undo(
             deleted_disk.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
+    Ok(())
+}
+
+async fn sdd_delete_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let datastore::Disk::LocalStorage(disk) = params.disk else {
+        unreachable!(
+            "check during `make_saga_dag` should have ensured disk type is \
+            local storage"
+        );
+    };
+
+    let Some(allocation) = disk.local_storage_dataset_allocation else {
+        // Nothing to do!
+        return Ok(());
+    };
+
+    let sled_id = allocation.sled_id();
+
+    let request = LocalStorageDatasetDeleteRequest {
+        zpool_id: allocation.pool_id(),
+        dataset_id: allocation.id(),
+        encrypted_at_rest: allocation.encrypted_at_rest(),
+    };
+
+    // Get a sled agent client
+
+    let sled_agent_client = osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(saga_action_failed)?;
+
+    // Ensure that the local storage is deleted
+
+    let delete_operation = || async {
+        sled_agent_client.local_storage_dataset_delete(&request).await
+    };
+
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
+    let gone_check = || async {
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
+    };
+
+    let log = osagactx.log().clone();
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        delete_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to delete local storage dataset, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to delete local storage: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
+
+    Ok(())
+}
+
+async fn sdd_deallocate_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let datastore::Disk::LocalStorage(disk) = params.disk else {
+        unreachable!(
+            "check during `make_saga_dag` should have ensured disk type is \
+            local storage"
+        );
+    };
+
+    osagactx
+        .datastore()
+        .delete_local_storage_dataset_allocations(&opctx, &disk)
+        .await
+        .map_err(saga_action_failed)?;
+
     Ok(())
 }
 
@@ -185,13 +317,13 @@ pub(crate) mod test {
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
         app::sagas::disk_delete::SagaDiskDelete,
     };
-    use nexus_db_model::Disk;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::Disk;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::project;
     use omicron_common::api::external::Name;
 
     type ControlPlaneTestContext =
@@ -210,9 +342,10 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
+        let project_selector = project::ProjectSelector {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
+
         let project_lookup =
             nexus.project_lookup(&opctx, project_selector).unwrap();
 
@@ -242,9 +375,9 @@ pub(crate) mod test {
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
-            disk_id: disk.id(),
-            volume_id: disk.volume_id(),
+            disk,
         };
+
         nexus.sagas.saga_execute::<SagaDiskDelete>(params).await.unwrap();
     }
 
@@ -264,9 +397,9 @@ pub(crate) mod test {
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
-            disk_id: disk.id(),
-            volume_id: disk.volume_id(),
+            disk,
         };
+
         let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,

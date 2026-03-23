@@ -2,28 +2,90 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::UserProvisionType;
+use crate::DbTypedUuid;
+use crate::to_db_typed_uuid;
 use db_macros::Asset;
 use nexus_db_schema::schema::{silo_group, silo_group_membership};
-use nexus_types::external_api::views;
-use nexus_types::identity::Asset;
+use omicron_uuid_kinds::SiloGroupKind;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserKind;
+use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
 #[derive(Asset, Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_group)]
+#[asset(uuid_kind = SiloGroupKind)]
 pub struct SiloGroup {
     #[diesel(embed)]
-    identity: SiloGroupIdentity,
+    pub identity: SiloGroupIdentity,
+    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
 
     pub silo_id: Uuid,
 
-    /// The identity provider's name for this group.
-    pub external_id: String,
+    /// If the user provision type is ApiOnly or JIT, then the external id is
+    /// the identity provider's ID for this group. There is a database
+    /// constraint (`external_id_consistency`) that ensures this field must be
+    /// non-null for those provision types.
+    ///
+    /// For SCIM, this may be null, which would trigger the uniqueness
+    /// constraint if that wasn't limited to specific provision types.
+    pub external_id: Option<String>,
+
+    pub user_provision_type: UserProvisionType,
+
+    /// For SCIM groups, display name must be Some. There is a database
+    /// constraint (`display_name_consistency`) that ensures this field is
+    /// non-null for that provision type.
+    pub display_name: Option<String>,
 }
 
 impl SiloGroup {
-    pub fn new(id: Uuid, silo_id: Uuid, external_id: String) -> Self {
-        Self { identity: SiloGroupIdentity::new(id), silo_id, external_id }
+    pub fn new_api_only(
+        id: SiloGroupUuid,
+        silo_id: Uuid,
+        external_id: String,
+    ) -> Self {
+        Self {
+            identity: SiloGroupIdentity::new(id),
+            time_deleted: None,
+            silo_id,
+            user_provision_type: UserProvisionType::ApiOnly,
+            external_id: Some(external_id),
+            display_name: None,
+        }
+    }
+
+    pub fn new_jit(
+        id: SiloGroupUuid,
+        silo_id: Uuid,
+        external_id: String,
+    ) -> Self {
+        Self {
+            identity: SiloGroupIdentity::new(id),
+            time_deleted: None,
+            silo_id,
+            user_provision_type: UserProvisionType::Jit,
+            external_id: Some(external_id),
+            display_name: None,
+        }
+    }
+
+    pub fn new_scim(
+        id: SiloGroupUuid,
+        silo_id: Uuid,
+        display_name: String,
+        external_id: Option<String>,
+    ) -> Self {
+        Self {
+            identity: SiloGroupIdentity::new(id),
+            time_deleted: None,
+            silo_id,
+            user_provision_type: UserProvisionType::Scim,
+            external_id,
+            display_name: Some(display_name),
+        }
     }
 }
 
@@ -31,23 +93,18 @@ impl SiloGroup {
 #[derive(Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_group_membership)]
 pub struct SiloGroupMembership {
-    pub silo_group_id: Uuid,
-    pub silo_user_id: Uuid,
+    pub silo_group_id: DbTypedUuid<SiloGroupKind>,
+    pub silo_user_id: DbTypedUuid<SiloUserKind>,
 }
 
 impl SiloGroupMembership {
-    pub fn new(silo_group_id: Uuid, silo_user_id: Uuid) -> Self {
-        Self { silo_group_id, silo_user_id }
-    }
-}
-
-impl From<SiloGroup> for views::Group {
-    fn from(group: SiloGroup) -> Self {
+    pub fn new(
+        silo_group_id: SiloGroupUuid,
+        silo_user_id: SiloUserUuid,
+    ) -> Self {
         Self {
-            id: group.id(),
-            // TODO the use of external_id as display_name is temporary
-            display_name: group.external_id,
-            silo_id: group.silo_id,
+            silo_group_id: to_db_typed_uuid(silo_group_id),
+            silo_user_id: to_db_typed_uuid(silo_user_id),
         }
     }
 }

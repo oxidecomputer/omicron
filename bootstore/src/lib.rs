@@ -11,3 +11,9 @@ use serde::{Deserialize, Serialize};
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct Sha3_256Digest([u8; 32]);
+
+impl Sha3_256Digest {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Sha3_256Digest(bytes)
+    }
+}

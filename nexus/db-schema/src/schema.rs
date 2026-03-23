@@ -6,7 +6,30 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use diesel::{allow_tables_to_appear_in_same_query, joinable, table};
+use diesel::{allow_tables_to_appear_in_same_query, joinable};
+
+/// Shadow of `diesel::table!` that also auto-registers table metadata
+/// into the test-only `DIESEL_TABLES` list for validation.
+macro_rules! table {
+    // Variant: with primary key
+    ($table_name:ident ($($pk:tt)*) {
+        $($col_name:ident -> $col_type:ty),* $(,)?
+    }) => {
+        diesel::table! {
+            $table_name ($($pk)*) { $($col_name -> $col_type,)* }
+        }
+        $crate::__register_table!($table_name; $($col_name),*);
+    };
+    // Variant: without primary key
+    ($table_name:ident {
+        $($col_name:ident -> $col_type:ty),* $(,)?
+    }) => {
+        diesel::table! {
+            $table_name { $($col_name -> $col_type,)* }
+        }
+        $crate::__register_table!($table_name; $($col_name),*);
+    };
+}
 
 table! {
     disk (id) {
@@ -18,19 +41,39 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         project_id -> Uuid,
-        volume_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
-        time_state_updated -> Timestamptz,
         slot -> Nullable<Int2>,
+        time_state_updated -> Timestamptz,
         size_bytes -> Int8,
         block_size -> crate::enums::BlockSizeEnum,
+        disk_type -> crate::enums::DiskTypeEnum,
+    }
+}
+
+table! {
+    disk_type_crucible (disk_id) {
+        disk_id -> Uuid,
+        volume_id -> Uuid,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
         pantry_address -> Nullable<Text>,
+        read_only -> Bool,
     }
 }
+
+allow_tables_to_appear_in_same_query!(
+    disk,
+    disk_type_crucible,
+    disk_type_local_storage,
+);
+
+allow_tables_to_appear_in_same_query!(volume, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(
+    disk_type_crucible,
+    virtual_provisioning_resource
+);
 
 table! {
     image (id) {
@@ -95,9 +138,9 @@ table! {
     switch_port (id) {
         id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         port_name -> Text,
         port_settings_id -> Nullable<Uuid>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -160,10 +203,10 @@ table! {
         chassis_id -> Nullable<Text>,
         system_name -> Nullable<Text>,
         system_description -> Nullable<Text>,
-        management_ip -> Nullable<Inet>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        management_ip -> Nullable<Inet>,
     }
 }
 
@@ -202,16 +245,16 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int2>,
+        rib_priority -> Nullable<Int2>,
     }
 }
 
 table! {
-    switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
+    switch_port_settings_bgp_peer_config (id) {
         port_settings_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         hold_time -> Int8,
         idle_hold_time -> Int8,
         delay_open -> Int8,
@@ -225,7 +268,9 @@ table! {
         enforce_first_as -> Bool,
         allow_import_list_active -> Bool,
         allow_export_list_active -> Bool,
-        vlan_id -> Nullable<Int4>
+        vlan_id -> Nullable<Int4>,
+        id -> Uuid,
+        router_lifetime -> Int4,
     }
 }
 
@@ -265,31 +310,33 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         asn -> Int8,
-        bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+        bgp_announce_set_id -> Uuid,
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
+        max_paths -> Int2,
     }
 }
 
 table! {
-    bgp_peer_view (switch_location, port_name) {
-        switch_location -> Text,
+    bgp_peer_view (switch_slot, port_name) {
+        switch_slot -> crate::enums::SwitchSlotEnum,
         port_name -> Text,
-        addr -> Inet,
-        asn -> Int8,
-        connect_retry -> Int8,
-        delay_open -> Int8,
+        addr -> Nullable<Inet>,
         hold_time -> Int8,
         idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
         keepalive -> Int8,
         remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
         md5_auth_key -> Nullable<Text>,
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
         vlan_id -> Nullable<Int4>,
+        router_lifetime -> Int4,
+        asn -> Int8,
     }
 }
 
@@ -362,27 +409,9 @@ table! {
         address_lot_block_id -> Uuid,
         rsvd_address_lot_block_id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         address -> Inet,
         anycast -> Bool,
-    }
-}
-
-table! {
-    global_image (id) {
-        id -> Uuid,
-        name -> Text,
-        description -> Text,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-        volume_id -> Uuid,
-        url -> Nullable<Text>,
-        distribution -> Text,
-        version -> Text,
-        digest -> Nullable<Text>,
-        block_size -> crate::enums::BlockSizeEnum,
-        size_bytes -> Int8,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -401,7 +430,7 @@ table! {
 
         destination_volume_id -> Uuid,
 
-        gen -> Int8,
+        r#gen -> Int8,
         state -> crate::enums::SnapshotStateEnum,
         block_size -> crate::enums::BlockSizeEnum,
         size_bytes -> Int8,
@@ -418,22 +447,23 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        ncpus -> Int8,
-        memory -> Int8,
-        hostname -> Text,
-        auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
-        auto_restart_cooldown -> Nullable<Interval>,
-        boot_disk_id -> Nullable<Uuid>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        ncpus -> Int8,
+        memory -> Int8,
+        hostname -> Text,
+        updater_id -> Nullable<Uuid>,
+        updater_gen -> Int8,
         state -> crate::enums::InstanceStateEnum,
         time_last_auto_restarted -> Nullable<Timestamptz>,
+        auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
+        auto_restart_cooldown -> Nullable<Interval>,
+        boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
-        updater_id -> Nullable<Uuid>,
-        updater_gen-> Int8,
+        cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
     }
 }
 
@@ -445,12 +475,13 @@ table! {
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
         state -> crate::enums::VmmStateEnum,
+        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -461,13 +492,13 @@ table! {
         name -> Text,
         silo_name -> Text,
         project_name -> Text,
+        active_sled_id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::enums::VmmStateEnum,
-        active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
+        state -> crate::enums::VmmStateEnum,
     }
 }
 
@@ -541,13 +572,13 @@ table! {
     silo_utilization(silo_id) {
         silo_id -> Uuid,
         silo_name -> Text,
-        silo_discoverable -> Bool,
         cpus_provisioned -> Int8,
         memory_provisioned -> Int8,
         storage_provisioned -> Int8,
         cpus_allocated -> Int8,
         memory_allocated -> Int8,
         storage_allocated -> Int8,
+        silo_discoverable -> Bool,
     }
 }
 
@@ -573,10 +604,16 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        // NOTE: This is the IPv4 address, despite the name. We kept the
+        // original name of `ip` because renaming columns is not idempotent in
+        // CRDB as of today.
+        ip -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
+        // NOTE: These are the IPv4 transit IPs specifically.
         transit_ips -> Array<Inet>,
+        ipv6 -> Nullable<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 
@@ -592,10 +629,12 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
-        transit_ips -> Array<Inet>,
+        transit_ips_v4 -> Array<Inet>,
+        transit_ips_v6 -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -612,7 +651,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
     }
@@ -627,6 +667,9 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
+        ip_version -> crate::enums::IpVersionEnum,
+        reservation_type -> crate::enums::IpPoolReservationTypeEnum,
+        pool_type -> crate::enums::IpPoolTypeEnum,
     }
 }
 
@@ -636,6 +679,8 @@ table! {
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
         resource_id -> Uuid,
         is_default -> Bool,
+        pool_type -> crate::enums::IpPoolTypeEnum,
+        ip_version -> crate::enums::IpVersionEnum,
     }
 }
 
@@ -653,7 +698,7 @@ table! {
 }
 
 table! {
-    ipv4_nat_entry (id) {
+    nat_entry (id) {
         id -> Uuid,
         external_address -> Inet,
         first_port -> Int4,
@@ -668,9 +713,9 @@ table! {
     }
 }
 
-// View used for summarizing changes to ipv4_nat_entry
+// View used for summarizing changes to nat_entry
 table! {
-    ipv4_nat_changes (version) {
+    nat_changes (version) {
         external_address -> Inet,
         first_port -> Int4,
         last_port -> Int4,
@@ -683,9 +728,9 @@ table! {
 }
 
 // This is the sequence used for the version number
-// in ipv4_nat_entry.
+// in nat_entry.
 table! {
-    ipv4_nat_version (last_value) {
+    nat_version (last_value) {
         last_value -> Int8,
         log_cnt -> Int8,
         is_called -> Bool,
@@ -735,6 +780,69 @@ table! {
 }
 
 table! {
+    subnet_pool (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+        ip_version -> crate::enums::IpVersionEnum,
+    }
+}
+
+table! {
+    subnet_pool_silo_link (subnet_pool_id, silo_id) {
+        subnet_pool_id -> Uuid,
+        silo_id -> Uuid,
+        ip_version -> crate::enums::IpVersionEnum,
+        is_default -> Bool,
+    }
+}
+
+table! {
+    subnet_pool_member (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        subnet_pool_id -> Uuid,
+        subnet -> Inet,
+        first_address -> Inet,
+        last_address -> Inet,
+        min_prefix_length -> Int2,
+        max_prefix_length -> Int2,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    external_subnet (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        subnet_pool_id -> Uuid,
+        subnet_pool_member_id -> Uuid,
+        project_id -> Uuid,
+        subnet -> Inet,
+        attach_state -> crate::enums::IpAttachStateEnum,
+        instance_id -> Nullable<Uuid>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(external_subnet, project);
+allow_tables_to_appear_in_same_query!(external_subnet, instance);
+allow_tables_to_appear_in_same_query!(external_subnet, vmm);
+allow_tables_to_appear_in_same_query!(external_subnet, sled);
+allow_tables_to_appear_in_same_query!(external_subnet, network_interface);
+allow_tables_to_appear_in_same_query!(external_subnet, vpc);
+allow_tables_to_appear_in_same_query!(external_subnet, vpc_subnet);
+
+table! {
     silo (id) {
         id -> Uuid,
         name -> Text,
@@ -750,6 +858,8 @@ table! {
         mapped_fleet_roles -> Jsonb,
 
         rcgen -> Int8,
+
+        admin_group_name -> Nullable<Text>,
     }
 }
 
@@ -761,7 +871,10 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Text,
+        external_id -> Nullable<Text>,
+        user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        user_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 
@@ -781,7 +894,9 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Text,
+        external_id -> Nullable<Text>,
+        user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        display_name -> Nullable<Text>,
     }
 }
 
@@ -798,6 +913,8 @@ allow_tables_to_appear_in_same_query!(
     silo_group_membership,
     silo_user,
 );
+allow_tables_to_appear_in_same_query!(silo_group, silo);
+allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
@@ -863,9 +980,9 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        time_expunged -> Nullable<Timestamptz>,
         ip -> Inet,
         port -> Int4,
+        time_expunged -> Nullable<Timestamptz>,
     }
 }
 
@@ -971,6 +1088,7 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_gen -> Int8,
         repo_depot_port -> Int4,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
     }
 }
 
@@ -986,11 +1104,11 @@ table! {
 }
 
 table! {
-    sled_underlay_subnet_allocation (rack_id, sled_id) {
+    sled_underlay_subnet_allocation (hw_baseboard_id, sled_id) {
+        hw_baseboard_id -> Uuid,
         rack_id -> Uuid,
         sled_id -> Uuid,
         subnet_octet -> Int2,
-        hw_baseboard_id -> Uuid,
     }
 }
 allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
@@ -1023,9 +1141,9 @@ table! {
         model -> Text,
 
         variant -> crate::enums::PhysicalDiskKindEnum,
+        sled_id -> Uuid,
         disk_policy -> crate::enums::PhysicalDiskPolicyEnum,
         disk_state -> crate::enums::PhysicalDiskStateEnum,
-        sled_id -> Uuid,
     }
 }
 
@@ -1048,11 +1166,7 @@ table! {
 table! {
     virtual_provisioning_collection {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1063,11 +1177,7 @@ table! {
 table! {
     virtual_provisioning_resource {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         resource_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1120,6 +1230,15 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(zpool, crucible_dataset);
+
+table! {
+    debug_log_blueprint_planning (blueprint_id) {
+        blueprint_id -> Uuid,
+        debug_blob -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(blueprint, debug_log_blueprint_planning);
 
 table! {
     rendezvous_debug_dataset (id) {
@@ -1196,9 +1315,9 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         system_router_id -> Uuid,
+        dns_name -> Text,
         vni -> Int4,
         ipv6_prefix -> Inet,
-        dns_name -> Text,
         firewall_gen -> Int8,
         subnet_gen -> Int8,
     }
@@ -1243,8 +1362,8 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        kind -> crate::enums::RouterRouteKindEnum,
         vpc_router_id -> Uuid,
+        kind -> crate::enums::RouterRouteKindEnum,
         target -> Text,
         destination -> Text,
         vpc_subnet_id -> Nullable<Uuid>,
@@ -1292,8 +1411,6 @@ table! {
 }
 
 table! {
-    use diesel::sql_types::*;
-
     vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,
@@ -1379,17 +1496,17 @@ table! {
 
 table! {
     role_assignment (
-        identity_type,
-        identity_id,
-        resource_type,
         resource_id,
-        role_name
+        resource_type,
+        role_name,
+        identity_id,
+        identity_type
     ) {
-        identity_type -> crate::enums::IdentityTypeEnum,
-        identity_id -> Uuid,
         resource_type -> Text,
         role_name -> Text,
         resource_id -> Uuid,
+        identity_id -> Uuid,
+        identity_type -> crate::enums::IdentityTypeEnum,
     }
 }
 
@@ -1402,6 +1519,7 @@ table! {
         valid_until -> Timestamptz,
         system_version -> Text,
         file_name -> Text,
+        time_pruned -> Nullable<Timestamptz>,
     }
 }
 
@@ -1415,6 +1533,8 @@ table! {
         sha256 -> Text,
         artifact_size -> Int8,
         generation_added -> Int8,
+        sign -> Nullable<Binary>,
+        board -> Nullable<Text>,
     }
 }
 
@@ -1441,6 +1561,15 @@ table! {
 }
 
 table! {
+    tuf_trust_root (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        root_role -> Jsonb,
+    }
+}
+
+table! {
     target_release (generation) {
         generation -> Int8,
         time_requested -> Timestamptz,
@@ -1460,6 +1589,7 @@ table! {
         dataset_id -> Uuid,
 
         assigned_nexus -> Nullable<Uuid>,
+        user_comment -> Nullable<Text>,
     }
 }
 
@@ -1548,6 +1678,29 @@ table! {
 }
 
 table! {
+    inv_host_phase_1_active_slot (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot -> crate::enums::HwM2SlotEnum,
+    }
+}
+
+table! {
+    inv_host_phase_1_flash_hash (inv_collection_id, hw_baseboard_id, slot) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot -> crate::enums::HwM2SlotEnum,
+        hash -> Text,
+    }
+}
+
+table! {
     inv_caboose (inv_collection_id, hw_baseboard_id, which) {
         inv_collection_id -> Uuid,
         hw_baseboard_id -> Uuid,
@@ -1601,6 +1754,13 @@ table! {
         mupdate_override_boot_disk_path -> Text,
         mupdate_override_id -> Nullable<Uuid>,
         mupdate_override_boot_disk_error -> Nullable<Text>,
+
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
+
+        measurement_manifest_boot_disk_path -> Text,
+        measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
+        measurement_manifest_mupdate_id -> Nullable<Uuid>,
+        measurement_manifest_boot_disk_error -> Nullable<Text>,
     }
 }
 
@@ -1616,6 +1776,10 @@ table! {
 
         boot_partition_a_error -> Nullable<Text>,
         boot_partition_b_error -> Nullable<Text>,
+
+        clear_mupdate_override_boot_success -> Nullable<crate::enums::RemoveMupdateOverrideBootSuccessEnum>,
+        clear_mupdate_override_boot_error -> Nullable<Text>,
+        clear_mupdate_override_non_boot_message -> Nullable<Text>,
     }
 }
 
@@ -1660,6 +1824,18 @@ table! {
 }
 
 table! {
+    inv_single_measurements
+        (inv_collection_id, sled_id, path)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        path -> Text,
+        error_message -> Nullable<Text>
+    }
+}
+
+table! {
     inv_last_reconciliation_orphaned_dataset
         (inv_collection_id, sled_id, pool_id, kind, zone_name)
     {
@@ -1687,6 +1863,18 @@ table! {
 }
 
 table! {
+    inv_zone_manifest_measurement (inv_collection_id, sled_id, measurement_file_name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        measurement_file_name -> Text,
+        path -> Text,
+        expected_size -> Int8,
+        expected_sha256 -> Text,
+        error -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_zone_manifest_zone (inv_collection_id, sled_id, zone_file_name) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
@@ -1700,6 +1888,17 @@ table! {
 
 table! {
     inv_zone_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_measurement_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
         non_boot_zpool_id -> Uuid,
@@ -1755,8 +1954,12 @@ table! {
         id -> Uuid,
         sled_id -> Uuid,
         total_size -> Int8,
+        health -> crate::enums::InvZpoolHealthEnum,
     }
 }
+
+allow_tables_to_appear_in_same_query!(zpool, inv_zpool);
+allow_tables_to_appear_in_same_query!(inv_zpool, physical_disk);
 
 table! {
     inv_dataset (inv_collection_id, sled_id, name) {
@@ -1782,6 +1985,7 @@ table! {
         remove_mupdate_override -> Nullable<Uuid>,
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
+        measurements -> Nullable<Array<Text>>,
     }
 }
 
@@ -1813,6 +2017,8 @@ table! {
 
         image_source -> crate::enums::InvZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+
+        nexus_lockstep_port -> Nullable<Int4>,
     }
 }
 
@@ -1835,7 +2041,6 @@ table! {
     inv_omicron_sled_config_dataset (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
-        sled_id -> Uuid,
         id -> Uuid,
 
         pool_id -> Uuid,
@@ -1852,7 +2057,6 @@ table! {
     inv_omicron_sled_config_disk (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
-        sled_id -> Uuid,
         id -> Uuid,
 
         vendor -> Text,
@@ -1873,10 +2077,37 @@ table! {
 }
 
 table! {
-    reconfigurator_chicken_switches (version) {
+    reconfigurator_config (version) {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
+        add_zones_with_mupdate_override -> Bool,
+        tuf_repo_pruner_enabled -> Bool,
+    }
+}
+
+table! {
+    inv_cockroachdb_status (inv_collection_id, node_id) {
+        inv_collection_id -> Uuid,
+        node_id -> Text,
+        ranges_underreplicated -> Nullable<Int8>,
+        liveness_live_nodes -> Nullable<Int8>,
+    }
+}
+
+table! {
+    inv_ntp_timesync (inv_collection_id, zone_id) {
+        inv_collection_id -> Uuid,
+        zone_id -> Uuid,
+        synced -> Bool,
+    }
+}
+
+table! {
+    inv_internal_dns (inv_collection_id, zone_id) {
+        inv_collection_id -> Uuid,
+        zone_id -> Uuid,
+        generation -> Int8,
     }
 }
 
@@ -1899,6 +2130,10 @@ table! {
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
 
         target_release_minimum_generation -> Int8,
+
+        nexus_generation -> Int8,
+
+        source -> crate::enums::BpSourceEnum,
     }
 }
 
@@ -1921,8 +2156,17 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
+
+        host_phase_2_desired_slot_a -> Nullable<Text>,
+        host_phase_2_desired_slot_b -> Nullable<Text>,
+
+        subnet -> Inet,
+        last_allocated_ip_subnet_offset -> Int4,
+        measurements -> crate::enums::BpSledMeasurementsEnum,
     }
 }
+
+allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact);
 
 table! {
     bp_omicron_physical_disk (blueprint_id, id) {
@@ -1963,12 +2207,22 @@ table! {
 }
 
 table! {
+    bp_single_measurements (blueprint_id, sled_id, image_artifact_sha256) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        image_artifact_sha256 -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(bp_single_measurements, tuf_artifact);
+
+table! {
     bp_omicron_zone (blueprint_id, id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
         id -> Uuid,
-        underlay_address -> Inet,
         zone_type -> crate::enums::ZoneTypeEnum,
 
         primary_service_ip -> Inet,
@@ -1987,13 +2241,15 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Uuid,
         disposition -> crate::enums::BpZoneDispositionEnum,
         disposition_expunged_as_of_generation -> Nullable<Int8>,
         disposition_expunged_ready_for_cleanup -> Bool,
-        external_ip_id -> Nullable<Uuid>,
-        filesystem_pool -> Uuid,
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+        nexus_generation -> Nullable<Int8>,
+        nexus_lockstep_port -> Nullable<Int4>,
     }
 }
 
@@ -2057,6 +2313,19 @@ table! {
 }
 
 table! {
+    bp_pending_mgs_update_rot_bootloader (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_stage0_version -> Text,
+        expected_stage0_next_version -> Nullable<Text>,
+    }
+}
+
+table! {
     bp_pending_mgs_update_sp (blueprint_id, hw_baseboard_id) {
         blueprint_id -> Uuid,
         hw_baseboard_id -> Uuid,
@@ -2066,6 +2335,42 @@ table! {
         artifact_version -> Text,
         expected_active_version -> Text,
         expected_inactive_version -> Nullable<Text>,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_rot (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_slot -> crate::enums::HwRotSlotEnum,
+        expected_active_version -> Text,
+        expected_inactive_version -> Nullable<Text>,
+        expected_persistent_boot_preference -> crate::enums::HwRotSlotEnum,
+        expected_pending_persistent_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+        expected_transient_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_host_phase_1 (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_phase_1_slot -> crate::enums::HwM2SlotEnum,
+        expected_boot_disk -> crate::enums::HwM2SlotEnum,
+        expected_active_phase_1_hash -> Text,
+        expected_active_phase_2_hash -> Text,
+        expected_inactive_phase_1_hash -> Text,
+        expected_inactive_phase_2_hash -> Text,
+        sled_agent_ip -> Inet,
+        sled_agent_port -> Int4,
     }
 }
 
@@ -2087,17 +2392,17 @@ table! {
 }
 
 table! {
-    bfd_session (remote, switch) {
+    bfd_session (id) {
         id -> Uuid,
         local -> Nullable<Inet>,
         remote -> Inet,
         detection_threshold -> Int8,
         required_rx -> Int8,
-        switch -> Text,
         mode -> crate::enums::BfdModeEnum,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -2249,6 +2554,14 @@ table! {
 }
 
 table! {
+    db_metadata_nexus (nexus_id) {
+        nexus_id -> Uuid,
+        last_drained_blueprint_id -> Nullable<Uuid>,
+        state -> crate::enums::DbMetadataNexusStateEnum,
+    }
+}
+
+table! {
     migration (id) {
         id -> Uuid,
         instance_id -> Uuid,
@@ -2268,6 +2581,10 @@ table! {
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
 joinable!(instance -> migration (migration_id));
+
+allow_tables_to_appear_in_same_query!(subnet_pool, subnet_pool_silo_link, silo);
+joinable!(subnet_pool_silo_link -> subnet_pool (subnet_pool_id));
+joinable!(subnet_pool_silo_link -> silo (silo_id));
 
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,
@@ -2295,6 +2612,7 @@ allow_tables_to_appear_in_same_query!(
     affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
+    bp_single_measurements,
     rendezvous_debug_dataset,
     crucible_dataset,
     disk,
@@ -2407,6 +2725,9 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+allow_tables_to_appear_in_same_query!(probe, external_ip);
+allow_tables_to_appear_in_same_query!(external_ip, vpc_subnet);
+allow_tables_to_appear_in_same_query!(external_ip, vpc);
 
 table! {
     volume_resource_usage (usage_id) {
@@ -2488,6 +2809,7 @@ table! {
         payload -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
+        case_id -> Nullable<Uuid>,
     }
 }
 
@@ -2533,37 +2855,23 @@ allow_tables_to_appear_in_same_query!(
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
 
 table! {
-    sp_ereport (restart_id, ena) {
+    ereport (restart_id, ena) {
         restart_id -> Uuid,
         ena -> Int8,
         time_deleted -> Nullable<Timestamptz>,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
-
-        sp_type -> crate::enums::SpTypeEnum,
-        sp_slot -> Int4,
 
         part_number -> Nullable<Text>,
         serial_number -> Nullable<Text>,
+
         class -> Nullable<Text>,
-
         report -> Jsonb,
-    }
-}
 
-table! {
-    host_ereport (restart_id, ena) {
-        restart_id -> Uuid,
-        ena -> Int8,
-        time_deleted -> Nullable<Timestamptz>,
-        time_collected -> Timestamptz,
-        collector_id -> Uuid,
-
-        sled_id -> Uuid,
-        sled_serial -> Text,
-        class -> Nullable<Text>,
-
-        report -> Jsonb,
+        reporter -> crate::enums::EreporterTypeEnum,
+        sp_type -> Nullable<crate::enums::SpTypeEnum>,
+        sp_slot -> Nullable<Int4>,
+        sled_id -> Nullable<Uuid>,
     }
 }
 
@@ -2584,4 +2892,327 @@ table! {
         volume_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    multicast_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vni -> Int4,
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        multicast_ip -> Inet,
+        underlay_group_id -> Nullable<Uuid>,
+        tag -> Nullable<Text>,
+        state -> crate::enums::MulticastGroupStateEnum,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        underlay_salt -> Nullable<Int2>,
+    }
+}
+
+table! {
+    multicast_group_member (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        external_group_id -> Uuid,
+        parent_id -> Uuid,
+        sled_id -> Nullable<Uuid>,
+        state -> crate::enums::MulticastGroupMemberStateEnum,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        multicast_ip -> Inet,
+        source_ips -> Array<Inet>,
+    }
+}
+
+table! {
+    underlay_multicast_group (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        multicast_ip -> Inet,
+        tag -> Nullable<Text>,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
+// Allow multicast tables to appear together for NOT EXISTS subqueries
+allow_tables_to_appear_in_same_query!(multicast_group, multicast_group_member);
+
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
+
+table! {
+    audit_log (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        time_completed -> Nullable<Timestamptz>,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
+        auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
+        credential_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    audit_log_complete (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        time_completed -> Timestamptz,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> crate::enums::AuditLogResultKindEnum,
+        auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
+        credential_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    scim_client_bearer_token (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        time_expires -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+
+        bearer_token -> Text,
+    }
+}
+
+table! {
+    rendezvous_local_storage_dataset (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, rendezvous_local_storage_dataset);
+allow_tables_to_appear_in_same_query!(
+    physical_disk,
+    rendezvous_local_storage_dataset
+);
+
+table! {
+    rendezvous_local_storage_unencrypted_dataset (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    zpool,
+    rendezvous_local_storage_unencrypted_dataset
+);
+allow_tables_to_appear_in_same_query!(
+    physical_disk,
+    rendezvous_local_storage_unencrypted_dataset
+);
+
+table! {
+    fm_sitrep (id) {
+        id -> Uuid,
+        parent_sitrep_id -> Nullable<Uuid>,
+        inv_collection_id -> Uuid,
+        time_created -> Timestamptz,
+        creator_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, inv_collection);
+
+table! {
+    fm_sitrep_history (version) {
+        version -> Int8,
+        sitrep_id -> Uuid,
+        time_made_current -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
+
+table! {
+    disk_type_local_storage (disk_id) {
+        disk_id -> Uuid,
+
+        required_dataset_overhead -> Int8,
+
+        local_storage_dataset_allocation_id -> Nullable<Uuid>,
+
+        local_storage_unencrypted_dataset_allocation_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    local_storage_dataset_allocation (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        local_storage_dataset_id -> Uuid,
+        pool_id -> Uuid,
+        sled_id -> Uuid,
+
+        dataset_size -> Int8,
+    }
+}
+
+table! {
+    local_storage_unencrypted_dataset_allocation (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        local_storage_unencrypted_dataset_id -> Uuid,
+        pool_id -> Uuid,
+        sled_id -> Uuid,
+
+        dataset_size -> Int8,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    disk_type_local_storage,
+    local_storage_dataset_allocation
+);
+
+allow_tables_to_appear_in_same_query!(
+    disk_type_local_storage,
+    local_storage_unencrypted_dataset_allocation
+);
+
+allow_tables_to_appear_in_same_query!(
+    rendezvous_local_storage_dataset,
+    local_storage_dataset_allocation
+);
+
+allow_tables_to_appear_in_same_query!(
+    rendezvous_local_storage_unencrypted_dataset,
+    local_storage_unencrypted_dataset_allocation
+);
+
+table! {
+    fm_case (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        de -> crate::enums::DiagnosisEngineEnum,
+
+        created_sitrep_id -> Uuid,
+        closed_sitrep_id -> Nullable<Uuid>,
+
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_ereport_in_case (sitrep_id, id) {
+        id -> Uuid,
+        restart_id -> Uuid,
+        ena -> Int8,
+        case_id -> Uuid,
+        sitrep_id -> Uuid,
+        assigned_sitrep_id -> Uuid,
+
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    fm_alert_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+        alert_class -> crate::enums::AlertClassEnum,
+        payload -> Jsonb,
+    }
+}
+
+table! {
+    trust_quorum_configuration (rack_id, epoch) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        last_committed_epoch -> Nullable<Int8>,
+        state -> crate::enums::TrustQuorumConfigurationStateEnum,
+        threshold -> Int2,
+        commit_crash_tolerance -> Int2,
+        coordinator -> Uuid,
+        encrypted_rack_secrets_salt -> Nullable<Text>,
+        encrypted_rack_secrets -> Nullable<Binary>,
+        time_created -> Timestamptz,
+        time_committing -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+        time_aborted -> Nullable<Timestamptz>,
+        abort_reason -> Nullable<Text>,
+    }
+}
+
+table! {
+    trust_quorum_member (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+        state -> crate::enums::TrustQuorumMemberStateEnum,
+        share_digest -> Nullable<Text>,
+        time_prepared -> Nullable<Timestamptz>,
+        time_committed -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
+joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));

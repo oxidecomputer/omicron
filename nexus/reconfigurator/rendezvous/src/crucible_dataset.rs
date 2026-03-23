@@ -15,7 +15,6 @@ use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::CrucibleDatasetsRendezvousStats;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid as _;
 use slog::info;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -49,11 +48,9 @@ pub(crate) async fn record_new_crucible_datasets(
     for bp_dataset in blueprint_datasets {
         // Filter down to Crucible datasets...
         let dataset = match (&bp_dataset.kind, bp_dataset.address) {
-            (DatasetKind::Crucible, Some(addr)) => CrucibleDataset::new(
-                bp_dataset.id,
-                bp_dataset.pool.id().into_untyped_uuid(),
-                addr,
-            ),
+            (DatasetKind::Crucible, Some(addr)) => {
+                CrucibleDataset::new(bp_dataset.id, bp_dataset.pool.id(), addr)
+            }
             (DatasetKind::Crucible, None) => {
                 // This should be impossible! Ideally we'd prevent it
                 // statically, but for now just fail at runtime.
@@ -130,6 +127,7 @@ mod tests {
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
@@ -139,7 +137,7 @@ mod tests {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::GenericUuid;
+
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -188,7 +186,7 @@ mod tests {
             // the DB.
             datastore
                 .sled_upsert(SledUpdate::new(
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     "[::1]:0".parse().unwrap(),
                     0,
                     SledBaseboard {
@@ -201,6 +199,7 @@ mod tests {
                         usable_hardware_threads: 128,
                         usable_physical_ram: (64 << 30).try_into().unwrap(),
                         reservoir_size: (16 << 30).try_into().unwrap(),
+                        cpu_family: SledCpuFamily::Unknown,
                     },
                     Uuid::new_v4(),
                     Generation::new(),
@@ -211,8 +210,8 @@ mod tests {
                 .zpool_insert(
                     opctx,
                     Zpool::new(
-                        zpool_id.into_untyped_uuid(),
-                        sled_id.into_untyped_uuid(),
+                        zpool_id,
+                        sled_id,
                         disk_id,
                         ByteCount::from(0).into(),
                     ),
@@ -242,7 +241,7 @@ mod tests {
                     .crucible_dataset_insert_if_not_exists(
                         CrucibleDataset::new(
                             d.id,
-                            d.pool.id().into_untyped_uuid(),
+                            d.pool.id(),
                             d.address.unwrap(),
                         ),
                     )

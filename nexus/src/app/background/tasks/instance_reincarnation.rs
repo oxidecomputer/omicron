@@ -4,6 +4,7 @@
 
 //! Background task for automatically restarting failed instances.
 
+use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas::NexusSaga;
@@ -29,6 +30,10 @@ pub struct InstanceReincarnation {
     /// The maximum number of concurrently executing instance-start sagas.
     concurrency_limit: NonZeroU32,
     disabled: bool,
+    /// Activator for the multicast reconciler background task.
+    /// Called after successful instance-start sagas to trigger member state
+    /// transitions ("Joining" → "Joined") for instances with multicast memberships.
+    task_multicast_reconciler: Activator,
 }
 
 const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
@@ -119,6 +124,13 @@ impl BackgroundTask for InstanceReincarnation {
                 );
             }
 
+            // Activate multicast reconciler if any instances were reincarnated.
+            // This triggers member state transitions ("Joining" → "Joined") for
+            // instances with multicast group memberships.
+            if !status.instances_reincarnated.is_empty() {
+                self.task_multicast_reconciler.activate();
+            }
+
             serde_json::json!(status)
         })
     }
@@ -129,12 +141,14 @@ impl InstanceReincarnation {
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
         disabled: bool,
+        task_multicast_reconciler: Activator,
     ) -> Self {
         Self {
             datastore,
             sagas,
             concurrency_limit: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
             disabled,
+            task_multicast_reconciler,
         }
     }
 
@@ -308,7 +322,6 @@ impl InstanceReincarnation {
 mod test {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
@@ -316,18 +329,20 @@ mod test {
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
-    use nexus_db_model::VmmRuntimeState;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
@@ -339,7 +354,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
     ) -> authz::Project {
-        create_default_ip_pool(&cptestctx.external_client).await;
+        create_default_ip_pools(&cptestctx.external_client).await;
         let project =
             create_project(&cptestctx.external_client, PROJECT_NAME).await;
 
@@ -369,7 +384,7 @@ mod test {
             object_create::<_, omicron_common::api::external::Instance>(
                 &cptestctx.external_client,
                 &instances_url,
-                &params::InstanceCreate {
+                &instance::InstanceCreate {
                     identity: IdentityMetadataCreateParams {
                         name,
                         description: "It's an instance".into(),
@@ -385,14 +400,16 @@ mod test {
                     hostname: "myhostname".try_into().unwrap(),
                     user_data: Vec::new(),
                     network_interfaces:
-                        params::InstanceNetworkInterfaceAttachment::None,
+                        instance::InstanceNetworkInterfaceAttachment::None,
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,
+                    cpu_platform: None,
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
                     anti_affinity_groups: Vec::new(),
+                    multicast_groups: Vec::new(),
                 },
             )
             .await;
@@ -434,33 +451,33 @@ mod test {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
-                        state: VmmState::SagaUnwound,
-                    },
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::SagaUnwound,
                 },
             )
             .await
             .expect("SagaUnwound VMM should be inserted");
         let vmm_id = vmm.id;
-        let prev_state = datastore
+        let prev_instance = datastore
             .instance_refetch(&opctx, &authz_instance)
             .await
-            .expect("instance must exist")
-            .runtime_state;
+            .expect("instance must exist");
         let updated = datastore
             .instance_update_runtime(
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(prev_state.r#gen.next()),
+                    generation: Generation(
+                        prev_instance.state_generation.next(),
+                    ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm_id),
-                    ..prev_state
+                    ..prev_instance.runtime()
                 },
             )
             .await
@@ -488,13 +505,12 @@ mod test {
             .lookup_for(authz::Action::Modify)
             .await
             .expect("instance must exist");
-        let prev_state = datastore
+        let prev_instance = datastore
             .instance_refetch(&opctx, &authz_instance)
             .await
-            .expect("instance must exist")
-            .runtime_state;
+            .expect("instance must exist");
         let propolis_id = if state == InstanceState::Vmm {
-            prev_state.propolis_id
+            prev_instance.propolis_id
         } else {
             None
         };
@@ -505,8 +521,10 @@ mod test {
                     time_updated: Utc::now(),
                     nexus_state: state,
                     propolis_id,
-                    r#gen: Generation(prev_state.r#gen.next()),
-                    ..prev_state
+                    generation: Generation(
+                        prev_instance.state_generation.next(),
+                    ),
+                    ..prev_instance.runtime()
                 },
             )
             .await
@@ -556,6 +574,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         // Noop test
@@ -608,6 +627,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         // Create an instance in the `Failed` state that's eligible to be
@@ -654,6 +674,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         // Create instances in the `Failed` state that are eligible to be
@@ -834,6 +855,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         let instance1 = create_instance(
@@ -906,8 +928,10 @@ mod test {
         .await;
 
         // Activate the background task again. Now, only instance 2 should be
-        // restarted.
+        // restarted.  Possible test flake here and this adds a bit more debug
+        // if we see this assertion fail.
         let status = assert_activation_ok!(task.activate(&opctx).await);
+        eprintln!("status: {:?}", status);
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,

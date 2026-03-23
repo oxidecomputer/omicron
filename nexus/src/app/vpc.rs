@@ -5,7 +5,6 @@
 //! VPCs and firewall rules
 
 use crate::app::sagas;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authn;
@@ -14,6 +13,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_defaults as defaults;
+use nexus_types::external_api::project;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -27,6 +28,8 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
+use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -36,23 +39,26 @@ impl super::Nexus {
     pub fn vpc_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        vpc_selector: params::VpcSelector,
+        vpc_selector: vpc::VpcSelector,
     ) -> LookupResult<lookup::Vpc<'a>> {
         match vpc_selector {
-            params::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
-                let vpc = LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
-                Ok(vpc)
+            vpc::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
+                let v = LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
+                Ok(v)
             }
-            params::VpcSelector {
+            vpc::VpcSelector {
                 vpc: NameOrId::Name(name),
-                project: Some(project),
+                project: Some(proj),
             } => {
-                let vpc = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                let v = self
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project: proj },
+                    )?
                     .vpc_name_owned(name.into());
-                Ok(vpc)
+                Ok(v)
             }
-            params::VpcSelector { vpc: NameOrId::Id(_), project: Some(_) } => {
+            vpc::VpcSelector { vpc: NameOrId::Id(_), project: Some(_) } => {
                 Err(Error::invalid_request(
                     "when providing vpc as an ID, project should not be specified",
                 ))
@@ -67,12 +73,13 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: &params::VpcCreate,
+        params: &vpc::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::CreateChild, &authz_vpc_list).await?;
 
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -108,7 +115,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
-        params: &params::VpcUpdate,
+        params: &vpc::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
@@ -122,7 +129,8 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
     ) -> DeleteResult {
-        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
+        let (.., authz_vpc, db_vpc) =
+            vpc_lookup.fetch_for(authz::Action::Delete).await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),
@@ -243,7 +251,7 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
-        sleds_filter: &[Uuid],
+        sleds_filter: &[SledUuid],
     ) -> Result<(), Error> {
         nexus_networking::send_sled_agents_firewall_rules(
             &self.db_datastore,
@@ -262,8 +270,7 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
-    ) -> Result<Vec<sled_agent_client::types::ResolvedVpcFirewallRule>, Error>
-    {
+    ) -> Result<Vec<ResolvedVpcFirewallRule>, Error> {
         nexus_networking::resolve_firewall_rules_for_sled_agent(
             &self.db_datastore,
             opctx,

@@ -15,28 +15,35 @@ use http::StatusCode;
 use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
-use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
-use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
-use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
-    Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
+    BestpathFanoutRequest, CheckerSource,
+    ImportExportPolicy4 as MgImportExportPolicy4,
+    ImportExportPolicy6 as MgImportExportPolicy6, JitterRange, ShaperSource,
+    StaticRoute4, StaticRoute4List, StaticRoute6, StaticRoute6List,
+};
+use mg_admin_client::types::{
+    BfdPeerConfig as MgBfdPeerConfig, Ipv4UnicastConfig,
+};
+use mg_admin_client::types::{
+    BgpPeerConfig as MgBgpPeerConfig, Ipv6UnicastConfig,
+    UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
-use omicron_common::api::external::{BfdMode, ImportExportPolicy};
-use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfig, PortFec, PortSpeed, RackNetworkConfig,
-    SwitchLocation,
-};
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
-    retry_policy_local,
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
+use rdb_types::{Prefix, Prefix4, Prefix6};
+use sled_agent_types::early_networking::{
+    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
+    PortSpeed, RackNetworkConfig, SwitchSlot,
+};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
@@ -55,7 +62,7 @@ pub enum EarlyNetworkSetupError {
     #[error("Bad configuration for setting up rack: {0}")]
     BadConfig(String),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
     #[error("Error during request to MGS: {0}")]
@@ -64,7 +71,7 @@ pub enum EarlyNetworkSetupError {
     #[error("Error during request to Dendrite: {0}")]
     Dendrite(String),
 
-    #[error("Error during DNS lookup: {0}")]
+    #[error("Error during DNS lookup")]
     DnsResolver(#[from] ResolveError),
 
     #[error("BGP configuration error: {0}")]
@@ -79,9 +86,9 @@ pub enum EarlyNetworkSetupError {
 
 enum LookupSwitchZoneAddrsResult {
     // We found every switch zone reported by internal DNS.
-    TotalSuccess(HashMap<SwitchLocation, Ipv6Addr>),
+    TotalSuccess(HashMap<SwitchSlot, Ipv6Addr>),
     // We found some (but not all) switch zones reported by internal DNS.
-    PartialSuccess(HashMap<SwitchLocation, Ipv6Addr>),
+    PartialSuccess(HashMap<SwitchSlot, Ipv6Addr>),
 }
 
 /// Code for configuring the necessary network bits to bring up the control
@@ -95,7 +102,7 @@ pub struct EarlyNetworkSetup<'a> {
 /// being up). The first two are related to finding the switch zones:
 ///
 /// * `lookup_switch_zone_underlay_addrs` attempts to find the underlay
-///   addresses and locations of all switch zones reported by internal DNS,
+///   addresses and slots of all switch zones reported by internal DNS,
 ///   which must already be up and populated with the switch zone services.
 /// * `lookup_uplinked_switch_zone_underlay_addrs` attempts to find the underlay
 ///   addresses of all switch zones that are configured with an uplink. Internal
@@ -121,76 +128,36 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// * If `rack_network_config` specifies only one switch with an uplink,
     ///   blocks until we can find that switch zone's underlay address.
     /// * If `rack_network_config` specifies two switches with uplinks, we will
-    ///   block for a while (~5 minutes, currently) trying to find both
-    ///   corresponding switch zones. If we pass our deadline without having
+    ///   block up to the `wait_for_at_least_one` duration trying to find both
+    ///   corresponding switch zones. If we pass the deadline without having
     ///   found both, we will return as soon after that as we can find one of
     ///   the switch zone's addresses.
     pub async fn lookup_uplinked_switch_zone_underlay_addrs(
         &self,
         resolver: &DnsResolver,
         config: &RackNetworkConfig,
-    ) -> HashSet<Ipv6Addr> {
+        wait_for_at_least_one: Duration,
+    ) -> HashMap<SwitchSlot, Ipv6Addr> {
         // Which switches have configured ports?
         let uplinked_switches = config
             .ports
             .iter()
             .map(|port_config| port_config.switch)
-            .collect::<HashSet<SwitchLocation>>();
+            .collect::<HashSet<SwitchSlot>>();
 
         // If we have no uplinks, we have nothing to look up.
         if uplinked_switches.is_empty() {
-            return HashSet::new();
+            return HashMap::new();
         }
 
-        let uplinked_switch_zone_addrs = self
-            .lookup_switch_zone_underlay_addrs_impl(
-                resolver,
-                Some(uplinked_switches),
-            )
-            .await;
-
-        // lookup_switch_zone_underlay_addrs_impl should not return until it
-        // finds at least one of the uplinked_switches
-        assert!(!uplinked_switch_zone_addrs.is_empty());
-
-        uplinked_switch_zone_addrs.into_values().collect()
-    }
-
-    /// Dynamically looks up (via internal DNS and queries to MGS) the underlay
-    /// addresses of the switch zones.
-    ///
-    /// Blocks until either:
-    ///
-    /// * We found the location and underlay addresses of all switch zones
-    ///   reported by internal DNS
-    /// * We've passed a substantial deadline (~5 minutes, currently) and have
-    ///   found the location and underlay address of one switch zone reported by
-    ///   internal DNS
-    pub async fn lookup_switch_zone_underlay_addrs(
-        &self,
-        resolver: &DnsResolver,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        self.lookup_switch_zone_underlay_addrs_impl(resolver, None).await
-    }
-
-    async fn lookup_switch_zone_underlay_addrs_impl(
-        &self,
-        resolver: &DnsResolver,
-        switches_to_find: Option<HashSet<SwitchLocation>>,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        // We will wait up to 5 minutes to try to find all switches; if we pass
-        // the 5 minute mark, we will return as soon as we find at least one
-        // switch.
-        const MAX_SWITCH_ZONE_WAIT_TIME: Duration = Duration::from_secs(60 * 5);
-
         let query_start = Instant::now();
-        retry_notify(
+        let uplinked_switch_zone_addrs = retry_notify(
             retry_policy_switch_mapping(),
             || async {
                 match self
                     .lookup_switch_zone_underlay_addrs_one_attempt(
                         resolver,
-                        switches_to_find.as_ref(),
+                        &uplinked_switches,
                     )
                     .await?
                 {
@@ -205,16 +172,16 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                     LookupSwitchZoneAddrsResult::PartialSuccess(map) => {
                         let elapsed = query_start.elapsed();
-                        if elapsed >= MAX_SWITCH_ZONE_WAIT_TIME {
+                        if elapsed >= wait_for_at_least_one {
                             // We only found one switch when we are expecting
                             // two, but we've been waiting for too long: go with
                             // just one.
                             warn!(
                                 self.log,
                                 "Only found one switch (expected two), \
-                                 but passed wait time of \
-                                 {MAX_SWITCH_ZONE_WAIT_TIME:?}: returning";
+                                 but passed requested wait time: returning";
                                 "switch_found" => ?map,
+                                "requested_wait_time" => ?wait_for_at_least_one,
                                 "total_elapsed" => ?elapsed,
                             );
                             Ok(map)
@@ -230,33 +197,40 @@ impl<'a> EarlyNetworkSetup<'a> {
                 }
             },
             |error, delay| {
+                let elapsed = query_start.elapsed();
                 warn!(
                     self.log,
-                    "Failed to look up switch zone locations";
+                    "Failed to look up switch zone slots";
                     "error" => #%error,
                     "retry_after" => ?delay,
+                    "requested_wait_time" => ?wait_for_at_least_one,
+                    "total_elapsed" => ?elapsed,
                 );
             },
         )
         .await
-        .expect("Expected an infinite retry loop finding switch zones")
+        .expect("Expected an infinite retry loop finding switch zones");
+
+        // lookup_switch_zone_underlay_addrs_impl should not return until it
+        // finds at least one of the uplinked_switches
+        assert!(!uplinked_switch_zone_addrs.is_empty());
+
+        uplinked_switch_zone_addrs
     }
 
-    // TODO: #3601 Audit switch location discovery logic for robustness
+    // TODO: #3601 Audit switch slot discovery logic for robustness
     // in multi-rack deployments. Query MGS servers in each switch zone to
     // determine which switch slot they are managing. This logic does not handle
     // an event where there are multiple racks. Is that ok?
     async fn lookup_switch_zone_underlay_addrs_one_attempt(
         &self,
         resolver: &DnsResolver,
-        switches_to_find: Option<&HashSet<SwitchLocation>>,
+        switches_to_find: &HashSet<SwitchSlot>,
     ) -> Result<LookupSwitchZoneAddrsResult, BackoffError<String>> {
-        if let Some(switches_to_find) = switches_to_find {
-            // We should only be called with a nonempty `switches_to_find`;
-            // otherwise we'll never return: we always want to find at least one
-            // of these switches.
-            assert!(!switches_to_find.is_empty());
-        }
+        // We should only be called with a nonempty `switches_to_find`;
+        // otherwise we'll never return: we always want to find at least one
+        // of these switches.
+        assert!(!switches_to_find.is_empty());
 
         // We might have stale DNS results; clear our resolver's cache.
         resolver.clear_cache();
@@ -279,7 +253,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 );
 
                 info!(
-                    self.log, "Querying MGS to determine switch location";
+                    self.log, "Querying MGS to determine switch slot";
                     "addr" => %addr,
                 );
                 let switch_slot = mgs_client
@@ -290,8 +264,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                     .slot;
 
                 match switch_slot {
-                    0 => Ok((SwitchLocation::Switch0, addr)),
-                    1 => Ok((SwitchLocation::Switch1, addr)),
+                    0 => Ok((SwitchSlot::Switch0, addr)),
+                    1 => Ok((SwitchSlot::Switch1, addr)),
                     _ => Err(anyhow!(
                         "Nonsense switch slot returned by MGS at \
                          {addr}: {switch_slot}"
@@ -299,12 +273,12 @@ impl<'a> EarlyNetworkSetup<'a> {
                 }
             });
 
-        let mut switch_location_map = HashMap::new();
+        let mut switch_slot_map = HashMap::new();
         for mgs_query_result in future::join_all(mgs_query_futures).await {
             match mgs_query_result {
-                Ok((location, addr)) => {
-                    info!(self.log, "Found {location:?} at {addr}");
-                    switch_location_map.insert(location, addr);
+                Ok((switch_slot, addr)) => {
+                    info!(self.log, "Found {switch_slot:?} at {addr}");
+                    switch_slot_map.insert(switch_slot, addr);
                 }
                 Err(err) => {
                     warn!(self.log, "{err:#}");
@@ -312,45 +286,18 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
         }
 
-        if let Some(switches_to_find) = switches_to_find {
-            // Were we tasked with finding _specific_ switches? If so, filter
-            // `switch_location_map` down to just the ones we care about, and
-            // then return total/partial/no success based on what's left.
-            switch_location_map
-                .retain(|location, _addr| switches_to_find.contains(location));
+        // Filter `switch_slot_map` down to just the ones we care about,
+        // and then return total/partial/no success based on what's left.
+        switch_slot_map.retain(|switch_slot, _addr| {
+            switches_to_find.contains(switch_slot)
+        });
 
-            if switch_location_map.is_empty() {
-                Err(BackoffError::transient(
-                    "No switch locations found".to_string(),
-                ))
-            } else if switch_location_map.len() == switches_to_find.len() {
-                Ok(LookupSwitchZoneAddrsResult::TotalSuccess(
-                    switch_location_map,
-                ))
-            } else {
-                Ok(LookupSwitchZoneAddrsResult::PartialSuccess(
-                    switch_location_map,
-                ))
-            }
+        if switch_slot_map.is_empty() {
+            Err(BackoffError::transient("No switch slots found".to_string()))
+        } else if switch_slot_map.len() == switches_to_find.len() {
+            Ok(LookupSwitchZoneAddrsResult::TotalSuccess(switch_slot_map))
         } else {
-            // We were not tasked with finding specific switches: we're done if
-            // we found both, or if we found one and internal DNS only gave us
-            // one IP address (e.g., in test environments with just one switch).
-            if switch_location_map.is_empty() {
-                Err(BackoffError::transient(
-                    "No switch locations found".to_string(),
-                ))
-            } else if switch_location_map.len() == 1
-                && switch_zone_addrs.len() > 1
-            {
-                Ok(LookupSwitchZoneAddrsResult::PartialSuccess(
-                    switch_location_map,
-                ))
-            } else {
-                Ok(LookupSwitchZoneAddrsResult::TotalSuccess(
-                    switch_location_map,
-                ))
-            }
+            Ok(LookupSwitchZoneAddrsResult::PartialSuccess(switch_slot_map))
         }
     }
 
@@ -369,36 +316,27 @@ impl<'a> EarlyNetworkSetup<'a> {
         // First, we have to know which switch we are: ask MGS.
         info!(
             self.log,
-            "Determining physical location of our switch zone at \
+            "Determining physical slot of our switch zone at \
              {switch_zone_underlay_ip}",
         );
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
             self.log.new(o!("component" => "MgsClient")),
         );
-        let switch_slot = retry_notify(
-            retry_policy_local(),
-            || async {
-                mgs_client
-                    .sp_local_switch_id()
-                    .await
-                    .map_err(BackoffError::transient)
-                    .map(|response| response.into_inner().slot)
-            },
-            |error, delay| {
-                warn!(
-                    self.log,
-                    "Failed to get switch ID from MGS (retrying in {delay:?})";
-                    "error" => ?error,
-                );
-            },
-        )
-        .await
-        .expect("Expected an infinite retry loop getting our switch ID");
+        let switch_slot = mgs_client
+            .sp_local_switch_id()
+            .await
+            .map_err(|err| {
+                EarlyNetworkSetupError::Mgs(format!(
+                    "failed to determine local switch ID via MGS: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?
+            .slot;
 
-        let switch_location = match switch_slot {
-            0 => SwitchLocation::Switch0,
-            1 => SwitchLocation::Switch1,
+        let switch_slot = match switch_slot {
+            0 => SwitchSlot::Switch0,
+            1 => SwitchSlot::Switch1,
             _ => {
                 // bail here because MGS is not reporting what we expect
                 // and we cannot proceed without trustworthy MGS
@@ -413,13 +351,13 @@ impl<'a> EarlyNetworkSetup<'a> {
         let our_ports = rack_network_config
             .ports
             .iter()
-            .filter(|port| port.switch == switch_location)
+            .filter(|port| port.switch == switch_slot)
             .cloned()
             .collect::<Vec<_>>();
 
         info!(
             self.log,
-            "Initializing {} Uplinks on {switch_location:?} at \
+            "Initializing {} Uplinks on {switch_slot:?} at \
              {switch_zone_underlay_ip}",
             our_ports.len(),
         );
@@ -432,7 +370,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         );
 
         // configure uplink for each requested uplink in configuration that
-        // matches our switch_location
+        // matches our switch_slot
         let mut uplink_configuration_errors = vec![];
 
         for port_config in &our_ports {
@@ -482,9 +420,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
 
         if uplink_configuration_errors.len() == our_ports.len() {
-            let message = format!(
-                "unable to configure any uplinks for {switch_location}"
-            );
+            let message =
+                format!("unable to configure any uplinks for {switch_slot:?}");
             return Err(EarlyNetworkSetupError::Dendrite(message));
         }
 
@@ -499,6 +436,90 @@ impl<'a> EarlyNetworkSetup<'a> {
         let mut config: Option<BgpConfig> = None;
         let mut bgp_peer_configs =
             HashMap::<String, Vec<MgBgpPeerConfig>>::new();
+        let mut bgp_unnumbered_peer_configs =
+            HashMap::<String, Vec<MgUnnumberedBgpPeerConfig>>::new();
+
+        // Helper function to build IPv4 unicast import/export policies
+        let build_ipv4_unicast = |peer: &BgpPeerConfig| Ipv4UnicastConfig {
+            nexthop: None,
+            import_policy: match &peer.allowed_import {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy4::NoFiltering
+                }
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy4::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V4(p) => Some(Prefix4 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V6(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+            export_policy: match &peer.allowed_export {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy4::NoFiltering
+                }
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy4::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V4(p) => Some(Prefix4 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V6(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+        };
+
+        // Helper function to build IPv6 unicast import/export policies
+        let build_ipv6_unicast = |peer: &BgpPeerConfig| Ipv6UnicastConfig {
+            nexthop: None,
+            import_policy: match &peer.allowed_import {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy6::NoFiltering
+                }
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy6::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V6(p) => Some(Prefix6 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V4(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+            export_policy: match &peer.allowed_export {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy6::NoFiltering
+                }
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy6::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V6(p) => Some(Prefix6 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V4(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+        };
 
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
@@ -533,85 +554,118 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                 }
 
-                let bpc = MgBgpPeerConfig {
-                    name: format!("{}", peer.addr),
-                    host: format!("{}:179", peer.addr),
-                    hold_time: peer.hold_time.unwrap_or(6),
-                    idle_hold_time: peer.idle_hold_time.unwrap_or(3),
-                    delay_open: peer.delay_open.unwrap_or(0),
-                    connect_retry: peer.connect_retry.unwrap_or(3),
-                    keepalive: peer.keepalive.unwrap_or(2),
-                    resolution: BGP_SESSION_RESOLUTION,
-                    passive: false,
-                    remote_asn: peer.remote_asn,
-                    min_ttl: peer.min_ttl,
-                    md5_auth_key: peer.md5_auth_key.clone(),
-                    multi_exit_discriminator: peer.multi_exit_discriminator,
-                    communities: peer.communities.clone(),
-                    local_pref: peer.local_pref,
-                    enforce_first_as: peer.enforce_first_as,
-                    allow_export: match &peer.allowed_export {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy::NoFiltering
+                // Determine if this is a numbered or unnumbered peer based on
+                // whether an address is specified (unspecified = unnumbered)
+                if !peer.addr.is_unspecified() {
+                    let addr = peer.addr;
+                    // Numbered peer - identified by address
+                    let bpc = MgBgpPeerConfig {
+                        name: format!("{}", addr),
+                        host: format!("{}:179", addr),
+                        hold_time: peer
+                            .hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                        idle_hold_time: peer
+                            .idle_hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                        delay_open: peer
+                            .delay_open
+                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                        connect_retry: peer
+                            .connect_retry
+                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                        keepalive: peer
+                            .keepalive
+                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                        resolution: BGP_SESSION_RESOLUTION,
+                        passive: false,
+                        remote_asn: peer.remote_asn,
+                        min_ttl: peer.min_ttl,
+                        md5_auth_key: peer.md5_auth_key.clone(),
+                        multi_exit_discriminator: peer.multi_exit_discriminator,
+                        communities: peer.communities.clone(),
+                        local_pref: peer.local_pref,
+                        enforce_first_as: peer.enforce_first_as,
+                        ipv4_unicast: Some(build_ipv4_unicast(peer)),
+                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
+                        vlan_id: peer.vlan_id,
+                        connect_retry_jitter: Some(JitterRange {
+                            max: 1.0,
+                            min: 0.75,
+                        }),
+                        deterministic_collision_resolution: false,
+                        idle_hold_jitter: None,
+                    };
+                    match bgp_peer_configs.get_mut(&port.port) {
+                        Some(peers) => {
+                            peers.push(bpc);
                         }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy::Allow(
-                                list.clone()
-                                    .iter()
-                                    .map(|x| match x {
-                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                    })
-                                    .collect(),
-                            )
+                        None => {
+                            bgp_peer_configs
+                                .insert(port.port.clone(), vec![bpc]);
                         }
-                    },
-                    allow_import: match &peer.allowed_import {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy::Allow(
-                                list.clone()
-                                    .iter()
-                                    .map(|x| match x {
-                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
-                    vlan_id: peer.vlan_id,
-                };
-                match bgp_peer_configs.get_mut(&port.port) {
-                    Some(peers) => {
-                        peers.push(bpc);
                     }
-                    None => {
-                        bgp_peer_configs.insert(port.port.clone(), vec![bpc]);
+                } else {
+                    // Unnumbered peer - identified by interface
+                    let bpc = MgUnnumberedBgpPeerConfig {
+                        name: format!("unnumbered-{}", port.port),
+                        interface: format!("tfport{}_0", port.port),
+                        hold_time: peer
+                            .hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                        idle_hold_time: peer
+                            .idle_hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                        delay_open: peer
+                            .delay_open
+                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                        connect_retry: peer
+                            .connect_retry
+                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                        keepalive: peer
+                            .keepalive
+                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                        resolution: BGP_SESSION_RESOLUTION,
+                        passive: false,
+                        remote_asn: peer.remote_asn,
+                        min_ttl: peer.min_ttl,
+                        md5_auth_key: peer.md5_auth_key.clone(),
+                        multi_exit_discriminator: peer.multi_exit_discriminator,
+                        communities: peer.communities.clone(),
+                        local_pref: peer.local_pref,
+                        enforce_first_as: peer.enforce_first_as,
+                        ipv4_unicast: Some(build_ipv4_unicast(peer)),
+                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
+                        vlan_id: peer.vlan_id,
+                        connect_retry_jitter: Some(JitterRange {
+                            max: 1.0,
+                            min: 0.75,
+                        }),
+                        deterministic_collision_resolution: false,
+                        idle_hold_jitter: None,
+                        router_lifetime: peer.router_lifetime.as_u16(),
+                    };
+                    match bgp_unnumbered_peer_configs.get_mut(&port.port) {
+                        Some(peers) => {
+                            peers.push(bpc);
+                        }
+                        None => {
+                            bgp_unnumbered_peer_configs
+                                .insert(port.port.clone(), vec![bpc]);
+                        }
                     }
                 }
             }
         }
 
-        if !bgp_peer_configs.is_empty() {
+        let has_bgp_config = !bgp_peer_configs.is_empty()
+            || !bgp_unnumbered_peer_configs.is_empty();
+        if has_bgp_config {
             if let Some(config) = &config {
                 let request = ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
+                    unnumbered_peers: bgp_unnumbered_peer_configs,
                     shaper: config.shaper.as_ref().map(|x| ShaperSource {
                         code: x.clone(),
                         asn: config.asn,
@@ -623,16 +677,38 @@ impl<'a> EarlyNetworkSetup<'a> {
                     originate: config
                         .originate
                         .iter()
-                        .map(|x| Prefix4 { length: x.width(), value: x.addr() })
+                        .map(|x| match x {
+                            IpNet::V4(ipv4_net) => Prefix::V4(Prefix4 {
+                                length: ipv4_net.width(),
+                                value: ipv4_net.addr(),
+                            }),
+                            IpNet::V6(ipv6_net) => Prefix::V6(Prefix6 {
+                                length: ipv6_net.width(),
+                                value: ipv6_net.addr(),
+                            }),
+                        })
                         .collect(),
                 };
 
-                if let Err(e) = mgd.bgp_apply(&request).await {
+                let fanout = BestpathFanoutRequest {
+                    fanout: config.max_paths.as_nonzero_u8(),
+                };
+
+                if let Err(e) = mgd.bgp_apply_v2(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
                         "error" => ?e,
                         "configuration" => ?request,
+                    );
+                }
+
+                if let Err(e) = mgd.update_rib_bestpath_fanout(&fanout).await {
+                    error!(
+                        self.log,
+                        "error while updating bestpath fanout";
+                        "error" => ?e,
+                        "configuration" => ?fanout,
                     );
                 }
             }
@@ -642,28 +718,53 @@ impl<'a> EarlyNetworkSetup<'a> {
         let mut rq = AddStaticRoute4Request {
             routes: StaticRoute4List { list: Vec::new() },
         };
+
+        let mut rqv6 = AddStaticRoute6Request {
+            routes: StaticRoute6List { list: Vec::new() },
+        };
+
         for port in &our_ports {
             for r in &port.routes {
-                let nexthop = match r.nexthop {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => continue,
-                };
-                let prefix = match r.destination.addr() {
-                    IpAddr::V4(v4) => {
-                        Prefix4 { value: v4, length: r.destination.width() }
-                    }
-                    IpAddr::V6(_) => continue,
-                };
                 let vlan_id = r.vlan_id;
-                let rib_priority = r.rib_priority;
-                let sr = StaticRoute4 {
-                    nexthop,
-                    prefix,
-                    vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                };
-                rq.routes.list.push(sr);
+                let rib_priority =
+                    r.rib_priority.unwrap_or(DEFAULT_RIB_PRIORITY_STATIC);
+
+                match (r.nexthop, r.destination.addr()) {
+                    (IpAddr::V4(nexthop), IpAddr::V4(dest_addr)) => {
+                        let prefix = Prefix4 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute4 {
+                            nexthop,
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rq.routes.list.push(sr);
+                    }
+                    (IpAddr::V6(nexthop), IpAddr::V6(dest_addr)) => {
+                        let prefix = Prefix6 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute6 {
+                            nexthop,
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rqv6.routes.list.push(sr);
+                    }
+                    _ => {
+                        error!(
+                            self.log,
+                            "nexthop and destination are different address types";
+                            "nexthop" => ?r.nexthop,
+                            "destination" => ?r.destination.addr(),
+                        );
+                    }
+                }
             }
         }
 
@@ -676,9 +777,18 @@ impl<'a> EarlyNetworkSetup<'a> {
             );
         };
 
+        if let Err(e) = mgd.static_add_v6_route(&rqv6).await {
+            error!(
+                self.log,
+                "static route configuration failed";
+                "error" => ?e,
+                "configuration" => ?rq,
+            );
+        };
+
         // BFD config
         for spec in &rack_network_config.bfd {
-            if spec.switch != switch_location {
+            if spec.switch != switch_slot {
                 continue;
             }
 
@@ -720,6 +830,9 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
+            if a.addr().is_unspecified() {
+                continue;
+            }
             // TODO We're discarding the `uplink_cidr.prefix()` here and only using
             // the IP address; at some point we probably need to give the full CIDR
             // to dendrite?

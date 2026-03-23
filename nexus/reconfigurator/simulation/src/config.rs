@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 use indexmap::IndexSet;
-use omicron_common::api::external::Name;
+use nexus_types::deployment::{Blueprint, BlueprintTarget};
+use omicron_common::api::external::{Generation, Name};
+use omicron_uuid_kinds::OmicronZoneUuid;
 
 use crate::{
     LoadSerializedResultBuilder,
@@ -37,6 +39,18 @@ pub struct SimConfig {
     /// We can likely make this better after addressing
     /// <https://github.com/oxidecomputer/omicron/issues/6803>.
     num_nexus: Option<u16>,
+
+    /// The Nexus generation to treat as the active set for the purposes of
+    /// simulating handoff between updates.
+    active_nexus_zone_generation: Generation,
+
+    /// Explicit override for active nexus zones.
+    /// When set, overrides generation-based inference.
+    explicit_active_nexus_zones: Option<BTreeSet<OmicronZoneUuid>>,
+
+    /// Explicit override for not-yet nexus zones.
+    /// When set, overrides generation-based inference.
+    explicit_not_yet_nexus_zones: Option<BTreeSet<OmicronZoneUuid>>,
 }
 
 impl SimConfig {
@@ -48,6 +62,9 @@ impl SimConfig {
                 .collect(),
             external_dns_zone_name: String::from("oxide.example"),
             num_nexus: None,
+            active_nexus_zone_generation: Generation::new(),
+            explicit_active_nexus_zones: None,
+            explicit_not_yet_nexus_zones: None,
         }
     }
 
@@ -64,6 +81,25 @@ impl SimConfig {
     #[inline]
     pub fn num_nexus(&self) -> Option<u16> {
         self.num_nexus
+    }
+
+    #[inline]
+    pub fn active_nexus_zone_generation(&self) -> Generation {
+        self.active_nexus_zone_generation
+    }
+
+    #[inline]
+    pub fn explicit_active_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.explicit_active_nexus_zones.as_ref()
+    }
+
+    #[inline]
+    pub fn explicit_not_yet_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.explicit_not_yet_nexus_zones.as_ref()
     }
 
     pub(crate) fn to_mut(&self) -> SimConfigBuilder {
@@ -105,16 +141,41 @@ impl SimConfigBuilder {
         self.inner.config.num_nexus()
     }
 
+    #[inline]
+    pub fn active_nexus_zone_generation(&self) -> Generation {
+        self.inner.config.active_nexus_zone_generation()
+    }
+
+    #[inline]
+    pub fn explicit_active_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.inner.config.explicit_active_nexus_zones()
+    }
+
+    #[inline]
+    pub fn explicit_not_yet_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.inner.config.explicit_not_yet_nexus_zones()
+    }
+
     /// Load a serialized configuration state.
     pub(crate) fn load_serialized(
         &mut self,
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
+        active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
+        target_blueprint: &BlueprintTarget,
+        all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
         self.inner.load_serialized_inner(
             external_dns_zone_names,
             silo_names,
+            active_nexus_zones,
+            target_blueprint,
+            all_blueprints,
             res,
         )
     }
@@ -141,6 +202,28 @@ impl SimConfigBuilder {
         self.log.push(SimConfigLogEntry::SetNumNexus(num_nexus));
     }
 
+    pub fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+        self.inner.set_active_nexus_zone_generation(generation);
+        self.log
+            .push(SimConfigLogEntry::SetActiveNexusZoneGeneration(generation));
+    }
+
+    pub fn set_explicit_active_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.inner.set_explicit_active_nexus_zones(zones.clone());
+        self.log.push(SimConfigLogEntry::SetExplicitActiveNexusZones(zones));
+    }
+
+    pub fn set_explicit_not_yet_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.inner.set_explicit_not_yet_nexus_zones(zones.clone());
+        self.log.push(SimConfigLogEntry::SetExplicitNotYetNexusZones(zones));
+    }
+
     pub fn wipe(&mut self) {
         self.inner.wipe_inner();
         self.log.push(SimConfigLogEntry::Wipe);
@@ -159,7 +242,75 @@ pub enum SimConfigLogEntry {
     SetSiloNames(IndexSet<Name>),
     SetExternalDnsZoneName(String),
     SetNumNexus(u16),
+    SetActiveNexusZoneGeneration(Generation),
+    SetExplicitActiveNexusZones(Option<BTreeSet<OmicronZoneUuid>>),
+    SetExplicitNotYetNexusZones(Option<BTreeSet<OmicronZoneUuid>>),
     Wipe,
+}
+
+impl fmt::Display for SimConfigLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimConfigLogEntry::LoadSerialized(result) => {
+                write!(f, "load serialized:\n{}", result)
+            }
+            SimConfigLogEntry::AddSilo(name) => {
+                write!(f, "add silo {}", name)
+            }
+            SimConfigLogEntry::RemoveSilo(name) => {
+                write!(f, "remove silo {}", name)
+            }
+            SimConfigLogEntry::SetSiloNames(names) => {
+                write!(
+                    f,
+                    "set silo names: {}",
+                    names
+                        .iter()
+                        .map(|n| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            SimConfigLogEntry::SetExternalDnsZoneName(name) => {
+                write!(f, "set external dns zone name: {}", name)
+            }
+            SimConfigLogEntry::SetNumNexus(num) => {
+                write!(f, "set num nexus: {}", num)
+            }
+            SimConfigLogEntry::SetActiveNexusZoneGeneration(generation) => {
+                write!(f, "set active nexus zone generation: {}", generation)
+            }
+            SimConfigLogEntry::SetExplicitActiveNexusZones(zones) => {
+                match zones {
+                    Some(zones) => write!(
+                        f,
+                        "set explicit active nexus zones: {}",
+                        zones
+                            .iter()
+                            .map(|z| z.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => write!(f, "clear explicit active nexus zones"),
+                }
+            }
+            SimConfigLogEntry::SetExplicitNotYetNexusZones(zones) => {
+                match zones {
+                    Some(zones) => write!(
+                        f,
+                        "set explicit not-yet nexus zones: {}",
+                        zones
+                            .iter()
+                            .map(|z| z.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => write!(f, "clear explicit not-yet nexus zones"),
+                }
+            }
+            SimConfigLogEntry::Wipe => write!(f, "wipe"),
+        }
+    }
 }
 
 /// The output of loading a serializable state into a [`SimConfigBuilder`].
@@ -171,6 +322,9 @@ pub struct LoadSerializedConfigResult {
 
     /// The silo names loaded.
     pub silo_names: Vec<Name>,
+
+    /// The generation of active Nexus zones loaded.
+    pub active_nexus_generation: Generation,
 }
 
 impl fmt::Display for LoadSerializedConfigResult {
@@ -185,6 +339,12 @@ impl fmt::Display for LoadSerializedConfigResult {
             f,
             "configured silo names: {}",
             join_comma_or_none(&self.silo_names)
+        )?;
+
+        writeln!(
+            f,
+            "active Nexus generation: {}",
+            self.active_nexus_generation,
         )?;
 
         Ok(())
@@ -205,6 +365,9 @@ impl SimConfigBuilderInner {
         &mut self,
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
+        active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
+        target_blueprint: &BlueprintTarget,
+        all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
         let nnames = external_dns_zone_names.len();
@@ -226,7 +389,30 @@ impl SimConfigBuilderInner {
 
         self.set_silo_names_inner(silo_names.clone());
 
-        LoadSerializedConfigResult { external_dns_zone_name, silo_names }
+        // Determine the active Nexus generation by comparing the current set of
+        // active Nexus zones to the current target blueprint.
+        let active_nexus_generation = match determine_active_nexus_generation(
+            active_nexus_zones,
+            target_blueprint,
+            all_blueprints,
+        ) {
+            Ok(generation) => generation,
+            Err(message) => {
+                res.warnings.push(format!(
+                    "could not determine active Nexus \
+                     generation from serialized state: \
+                     {message} (using default of 1)"
+                ));
+                Generation::new()
+            }
+        };
+        self.set_active_nexus_zone_generation(active_nexus_generation);
+
+        LoadSerializedConfigResult {
+            external_dns_zone_name,
+            silo_names,
+            active_nexus_generation,
+        }
     }
 
     // Not public: the only caller of this is load_serialized.
@@ -257,7 +443,64 @@ impl SimConfigBuilderInner {
         self.config.num_nexus = Some(num_nexus);
     }
 
+    fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+        self.config.active_nexus_zone_generation = generation;
+    }
+
+    fn set_explicit_active_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.config.explicit_active_nexus_zones = zones;
+    }
+
+    fn set_explicit_not_yet_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.config.explicit_not_yet_nexus_zones = zones;
+    }
+
     fn wipe_inner(&mut self) {
         self.config = SimConfig::new();
     }
+}
+
+fn determine_active_nexus_generation(
+    active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
+    target_blueprint: &BlueprintTarget,
+    all_blueprints: &[Blueprint],
+) -> Result<Generation, String> {
+    // Real systems always have at least one active Nexus zone, but our
+    // simulated system has some cases where we have none at all. We'll never be
+    // able to find the generation matching an empty set, but because this is a
+    // weird edge case that only applies to simulation, it's also fine to
+    // default to "the initial generation".
+    if active_nexus_zones.is_empty() {
+        return Ok(Generation::new());
+    }
+
+    let Some(blueprint) =
+        all_blueprints.iter().find(|bp| bp.id == target_blueprint.target_id)
+    else {
+        return Err(format!(
+            "target blueprint {} not found",
+            target_blueprint.target_id
+        ));
+    };
+
+    let maybe_gen = blueprint
+        .find_generation_for_nexus(active_nexus_zones)
+        .map_err(|err| format!("{err:#}"))?;
+
+    maybe_gen.ok_or_else(|| {
+        format!(
+            "could not find Nexus zones in current target blueprint: {:?}",
+            active_nexus_zones
+                .iter()
+                .map(|z| z.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })
 }

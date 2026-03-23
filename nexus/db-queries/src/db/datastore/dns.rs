@@ -70,9 +70,9 @@ impl DataStore {
         dns_group: DnsGroup,
     ) -> ListResultVec<DnsZone> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Ok(self
-            .dns_zones_list_all_on_connection(opctx, &conn, dns_group)
-            .await?)
+        self.dns_zones_list_all_on_connection(opctx, &conn, dns_group)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
     }
 
     /// Variant of [`Self::dns_zones_list_all`] which may be called from a
@@ -116,7 +116,8 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
                 dns_group,
             )
-            .await?;
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(version)
     }
 
@@ -411,7 +412,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -1865,12 +1866,11 @@ mod test {
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let error = Error::from(
-                datastore
-                    .dns_update_incremental(&opctx, &conn, update)
-                    .await
-                    .unwrap_err(),
-            );
+            let error = datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap_err()
+                .into_public_ignore_retries();
             let msg = error.to_string();
             assert!(msg.starts_with("Internal Error: "), "Message: {msg:}");
             assert!(

@@ -104,37 +104,41 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_idp_list: &authz::SiloIdentityProviderList,
-        provider: db::model::SamlIdentityProvider,
+        saml_provider: db::model::SamlIdentityProvider,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
         opctx.authorize(authz::Action::CreateChild, authz_idp_list).await?;
-        assert_eq!(provider.silo_id, authz_idp_list.silo().id());
+        assert_eq!(saml_provider.silo_id, authz_idp_list.silo().id());
 
-        let name = provider.identity().name.to_string();
+        let name = saml_provider.identity().name.to_string();
         let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Identity providers have two records, one generic, and one
+        // specialized. Create the generic one from the specialized one here.
+        let provider = db::model::IdentityProvider {
+            identity: db::model::IdentityProviderIdentity {
+                id: saml_provider.identity.id,
+                name: saml_provider.identity.name.clone(),
+                description: saml_provider.identity.description.clone(),
+                time_created: saml_provider.identity.time_created,
+                time_modified: saml_provider.identity.time_modified,
+                time_deleted: saml_provider.identity.time_deleted,
+            },
+            silo_id: saml_provider.silo_id,
+            provider_type: db::model::IdentityProviderType::Saml,
+        };
 
         self.transaction_retry_wrapper("saml_identity_provider_create")
             .transaction(&conn, |conn| {
+                let saml_provider = saml_provider.clone();
                 let provider = provider.clone();
+
                 async move {
                     // insert silo identity provider record with type Saml
-                    use nexus_db_schema::schema::identity_provider::dsl as idp_dsl;
+                    use nexus_db_schema::schema::identity_provider::dsl as
+                        idp_dsl;
+
                     diesel::insert_into(idp_dsl::identity_provider)
-                        .values(db::model::IdentityProvider {
-                            identity: db::model::IdentityProviderIdentity {
-                                id: provider.identity.id,
-                                name: provider.identity.name.clone(),
-                                description: provider
-                                    .identity
-                                    .description
-                                    .clone(),
-                                time_created: provider.identity.time_created,
-                                time_modified: provider.identity.time_modified,
-                                time_deleted: provider.identity.time_deleted,
-                            },
-                            silo_id: provider.silo_id,
-                            provider_type:
-                                db::model::IdentityProviderType::Saml,
-                        })
+                        .values(provider)
                         .execute_async(&conn)
                         .await?;
 
@@ -142,7 +146,7 @@ impl DataStore {
                     use nexus_db_schema::schema::saml_identity_provider::dsl;
                     let result =
                         diesel::insert_into(dsl::saml_identity_provider)
-                            .values(provider)
+                            .values(saml_provider)
                             .returning(
                                 db::model::SamlIdentityProvider::as_returning(),
                             )

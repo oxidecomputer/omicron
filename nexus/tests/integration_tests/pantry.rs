@@ -4,6 +4,7 @@
 
 //! Tests Nexus' interactions with Crucible's pantry
 
+use crate::integration_tests::instances::instance_simulate;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -13,13 +14,14 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::Snapshot;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::snapshot::Snapshot;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -27,10 +29,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_nexus::Nexus;
-use omicron_nexus::TestInterfaces as _;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -59,7 +59,7 @@ fn get_disk_attach_url(instance_name: &str) -> String {
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -85,15 +85,6 @@ async fn set_instance_state(
     .unwrap()
     .parsed_body()
     .unwrap()
-}
-
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let info = nexus
-        .active_instance_info(id, None)
-        .await
-        .unwrap()
-        .expect("instance must be on a sled to simulate a state change");
-    info.sled_client.vmm_finish_transition(info.propolis_id).await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
@@ -130,13 +121,15 @@ async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
     let _disk: Disk = object_create(
         client,
         &url,
-        &params::DiskCreate {
+        &disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::ImportingBlocks {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::ImportingBlocks {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -166,7 +159,7 @@ async fn create_instance_and_attach_disk(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
-            .body(Some(&params::DiskPath {
+            .body(Some(&path_params::DiskPath {
                 disk: DISK_NAME.to_string().try_into().unwrap(),
             }))
             .expect_status(Some(expected_status)),
@@ -182,7 +175,7 @@ async fn attach_disk_to_instance(client: &ClientTestContext) {
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
-            .body(Some(&params::DiskPath {
+            .body(Some(&path_params::DiskPath {
                 disk: DISK_NAME.to_string().try_into().unwrap(),
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
@@ -222,7 +215,7 @@ async fn bulk_write_bytes(client: &ClientTestContext) {
     for block in 0..8 {
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &bulk_write_url)
-                .body(Some(&params::ImportBlocksBulkWrite {
+                .body(Some(&disk::ImportBlocksBulkWrite {
                     offset: block * CHUNK_SIZE,
                     base64_encoded_data: base64::Engine::encode(
                         &base64::engine::general_purpose::STANDARD,
@@ -246,7 +239,7 @@ async fn bulk_write_bytes_expect_failure(client: &ClientTestContext) {
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &bulk_write_url)
-            .body(Some(&params::ImportBlocksBulkWrite {
+            .body(Some(&disk::ImportBlocksBulkWrite {
                 offset: CHUNK_SIZE,
                 base64_encoded_data: base64::Engine::encode(
                     &base64::engine::general_purpose::STANDARD,
@@ -272,7 +265,7 @@ async fn bulk_write_bytes_manual(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &bulk_write_url)
-            .body(Some(&params::ImportBlocksBulkWrite {
+            .body(Some(&disk::ImportBlocksBulkWrite {
                 offset,
                 base64_encoded_data: base64::Engine::encode(
                     &base64::engine::general_purpose::STANDARD,
@@ -357,13 +350,15 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::ImportingBlocks {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::ImportingBlocks {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -691,7 +686,7 @@ async fn test_cannot_bulk_write_data_non_base64(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &bulk_write_url)
-            .body(Some(&params::ImportBlocksBulkWrite {
+            .body(Some(&disk::ImportBlocksBulkWrite {
                 offset: 0,
                 base64_encoded_data: "this is not base64!".to_string(),
             }))

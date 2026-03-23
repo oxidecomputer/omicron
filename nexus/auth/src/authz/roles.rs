@@ -155,12 +155,25 @@ async fn load_directly_attached_roles(
             "resource_id" => resource_id.to_string(),
         );
 
+        let Some((identity_id, identity_type)) =
+            actor.id_and_type_for_role_assignment()
+        else {
+            trace!(
+                opctx.log,
+                "actor cannot have roles";
+                "actor" => ?actor,
+                "resource_type" => ?resource_type,
+                "resource_id" => resource_id.to_string(),
+            );
+            return Ok(());
+        };
+
         let roles = opctx
             .datastore()
             .role_asgn_list_for(
                 opctx,
-                actor.into(),
-                actor.actor_id(),
+                identity_type,
+                identity_id,
                 resource_type,
                 resource_id,
             )

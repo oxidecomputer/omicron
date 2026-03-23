@@ -11,8 +11,10 @@ use super::SchemeResult;
 use super::SiloUserSilo;
 use crate::authn;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
+use uuid::Uuid;
 
 // This scheme is intended for clients such as the API, CLI, etc.
 //
@@ -32,7 +34,7 @@ use headers::authorization::{Authorization, Bearer};
 // _authentication_ information.  Similarly, the "Unauthorized" HTTP response
 // code usually describes an _authentication_ error.)
 
-pub const TOKEN_SCHEME_NAME: authn::SchemeName = authn::SchemeName("token");
+pub const TOKEN_SCHEME_NAME: authn::SchemeName = authn::SchemeName::AccessToken;
 
 /// Prefix used on the bearer token to identify this scheme
 // RFC 6750 expects bearer tokens to be opaque base64-encoded data.  In our
@@ -63,9 +65,15 @@ where
         match parse_token(headers.typed_get().as_ref()) {
             Err(error) => SchemeResult::Failed(error),
             Ok(None) => SchemeResult::NotRequested,
-            Ok(Some(token)) => match ctx.token_actor(token).await {
+            Ok(Some(token)) => match ctx.authenticate_token(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok(actor) => SchemeResult::Authenticated(Details { actor }),
+                Ok((actor, device_token_expiration, token_id)) => {
+                    SchemeResult::Authenticated(Details {
+                        actor,
+                        device_token_expiration,
+                        credential_id: Some(token_id),
+                    })
+                }
             },
         }
     }
@@ -91,7 +99,12 @@ fn parse_token(
 /// A context that can look up a Silo user and client ID from a token.
 #[async_trait]
 pub trait TokenContext {
-    async fn token_actor(&self, token: String) -> Result<authn::Actor, Reason>;
+    /// Returns the actor authenticated by the token, the token's expiration
+    /// time (if any), and the token's ID.
+    async fn authenticate_token(
+        &self,
+        token: String,
+    ) -> Result<(authn::Actor, Option<DateTime<Utc>>, Uuid), Reason>;
 }
 
 #[cfg(test)]

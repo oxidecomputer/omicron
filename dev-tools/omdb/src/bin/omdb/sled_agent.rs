@@ -11,7 +11,8 @@ use anyhow::Context;
 use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
-use sled_agent_client::types::ChickenSwitchDestroyOrphanedDatasets;
+use sled_agent_client::types::NodeStatus;
+use sled_agent_client::types::OperatorSwitchZonePolicy;
 
 /// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
@@ -36,48 +37,62 @@ enum SledAgentCommands {
     #[clap(subcommand)]
     Zones(ZoneCommands),
 
+    /// control the switch zone policy
+    #[clap(subcommand)]
+    SwitchZonePolicy(SwitchZonePolicyCommands),
+
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
 
-    /// control "chicken switches" (potentially-destructive sled-agent behavior
-    /// that can be toggled on or off via `omdb`)
+    /// print information about the local trust quorum node
     #[clap(subcommand)]
-    ChickenSwitch(ChickenSwitchCommands),
+    TrustQuorum(TrustQuorumCommands),
 }
 
 #[derive(Debug, Subcommand)]
 enum ZoneCommands {
-    /// Print list of all running control plane zones
+    /// print list of all running control plane zones
     List,
 }
 
 #[derive(Debug, Subcommand)]
+enum SwitchZonePolicyCommands {
+    /// get the current policy
+    Get,
+
+    /// enable starting the switch zone if a switch is present
+    Enable,
+
+    /// disable the switch zone
+    ///
+    /// This is extremely dangerous! If used incorrectly, it can render the rack
+    /// inaccessible.
+    DangerDangerDisable,
+}
+
+#[derive(Debug, Subcommand)]
 enum BootstoreCommands {
-    /// Show the internal state of the local bootstore node
+    /// show the internal state of the local bootstore node
     Status,
 }
 
 #[derive(Debug, Subcommand)]
-enum ChickenSwitchCommands {
-    /// interact with the "destroy orphaned datasets" chicken switch
-    DestroyOrphans(DestroyOrphansArgs),
+enum TrustQuorumCommands {
+    /// show the status of the local trust quorum node
+    Status,
+    /// show the status of a trust quorum node via proxy
+    ProxyStatus(TrustQuorumProxyStatusArgs),
 }
 
 #[derive(Debug, Args)]
-struct DestroyOrphansArgs {
-    #[command(subcommand)]
-    command: DestroyOrphansCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum DestroyOrphansCommands {
-    /// Get the current chicken switch setting
-    Get,
-    /// Enable the current chicken switch setting
-    Enable,
-    /// Disable the current chicken switch setting
-    Disable,
+struct TrustQuorumProxyStatusArgs {
+    /// Oxide part number of the target sled
+    #[clap(long)]
+    part_number: String,
+    /// Serial number of the target sled
+    #[clap(long)]
+    serial_number: String,
 }
 
 impl SledAgentArgs {
@@ -102,32 +117,40 @@ impl SledAgentArgs {
             SledAgentCommands::Zones(ZoneCommands::List) => {
                 cmd_zones_list(&client).await
             }
+            SledAgentCommands::SwitchZonePolicy(
+                SwitchZonePolicyCommands::Get,
+            ) => cmd_switch_zone_policy_get(&client).await,
+            SledAgentCommands::SwitchZonePolicy(
+                SwitchZonePolicyCommands::Enable,
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_switch_zone_policy_put(
+                    &client,
+                    OperatorSwitchZonePolicy::StartIfSwitchPresent,
+                    token,
+                )
+                .await
+            }
+            SledAgentCommands::SwitchZonePolicy(
+                SwitchZonePolicyCommands::DangerDangerDisable,
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_switch_zone_policy_put(
+                    &client,
+                    OperatorSwitchZonePolicy::StopDespiteSwitchPresence,
+                    token,
+                )
+                .await
+            }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
             }
-            SledAgentCommands::ChickenSwitch(
-                ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
-                    command: DestroyOrphansCommands::Get,
-                }),
-            ) => cmd_chicken_switch_destroy_orphans_get(&client).await,
-            SledAgentCommands::ChickenSwitch(
-                ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
-                    command: DestroyOrphansCommands::Enable,
-                }),
-            ) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_chicken_switch_destroy_orphans_set(&client, true, token)
-                    .await
+            SledAgentCommands::TrustQuorum(TrustQuorumCommands::Status) => {
+                cmd_trust_quorum_status(&client).await
             }
-            SledAgentCommands::ChickenSwitch(
-                ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
-                    command: DestroyOrphansCommands::Disable,
-                }),
-            ) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_chicken_switch_destroy_orphans_set(&client, false, token)
-                    .await
-            }
+            SledAgentCommands::TrustQuorum(
+                TrustQuorumCommands::ProxyStatus(args),
+            ) => cmd_trust_quorum_proxy_status(&client, args).await,
         }
     }
 }
@@ -149,6 +172,44 @@ async fn cmd_zones_list(
     }
 
     Ok(())
+}
+
+/// Runs `omdb sled-agent switch-zone-policy get`
+async fn cmd_switch_zone_policy_get(
+    client: &sled_agent_client::Client,
+) -> anyhow::Result<()> {
+    let response = client
+        .debug_operator_switch_zone_policy_get()
+        .await
+        .context("getting policy")?;
+    let policy = response.into_inner();
+
+    match policy {
+        OperatorSwitchZonePolicy::StartIfSwitchPresent => {
+            println!("switch zone will start if a switch is present (default)");
+        }
+        OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
+            println!(
+                "switch zone DISABLED and will not start even if a \
+                 switch is present"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent switch-zone-policy {enable,danger-danger-disable}`
+async fn cmd_switch_zone_policy_put(
+    client: &sled_agent_client::Client,
+    policy: OperatorSwitchZonePolicy,
+    _destruction_token: DestructiveOperationToken,
+) -> anyhow::Result<()> {
+    client
+        .debug_operator_switch_zone_policy_put(policy)
+        .await
+        .context("setting policy")?;
+    cmd_switch_zone_policy_get(client).await
 }
 
 /// Runs `omdb sled-agent bootstore status`
@@ -194,32 +255,60 @@ async fn cmd_bootstore_status(
     Ok(())
 }
 
-/// Runs `omdb sled-agent chicken-switch destroy-orphans get`
-async fn cmd_chicken_switch_destroy_orphans_get(
+/// Runs `omdb sled-agent trust-quorum status`
+async fn cmd_trust_quorum_status(
     client: &sled_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
-    let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } = client
-        .chicken_switch_destroy_orphaned_datasets_get()
+    let status = client
+        .trust_quorum_status()
         .await
-        .context("get chicken switch value")?
+        .context("trust quorum status")?
         .into_inner();
-    let status = if destroy_orphans { "enabled" } else { "disabled" };
-    println!("destroy orphaned datasets {status}");
+
+    print_trust_quorum_status(status);
+
     Ok(())
 }
 
-/// Runs `omdb sled-agent chicken-switch destroy-orphans {enable,disable}`
-async fn cmd_chicken_switch_destroy_orphans_set(
+/// Runs `omdb sled-agent trust-quorum proxy-status`
+async fn cmd_trust_quorum_proxy_status(
     client: &sled_agent_client::Client,
-    destroy_orphans: bool,
-    _token: DestructiveOperationToken,
+    args: &TrustQuorumProxyStatusArgs,
 ) -> Result<(), anyhow::Error> {
-    let options = ChickenSwitchDestroyOrphanedDatasets { destroy_orphans };
-    client
-        .chicken_switch_destroy_orphaned_datasets_put(&options)
+    let status = client
+        .trust_quorum_proxy_status(&args.part_number, &args.serial_number)
         .await
-        .context("put chicken switch value")?;
-    let status = if destroy_orphans { "enabled" } else { "disabled" };
-    println!("destroy orphaned datasets {status}");
+        .context("trust quorum proxy status")?
+        .into_inner();
+
+    print_trust_quorum_status(status);
+
     Ok(())
+}
+
+fn print_trust_quorum_status(status: NodeStatus) {
+    println!("connected peers:");
+    if status.connected_peers.is_empty() {
+        println!("    <none>");
+    }
+    for peer in status.connected_peers.iter() {
+        println!("    {peer}");
+    }
+
+    println!("alarms:");
+    if status.alarms.is_empty() {
+        println!("    <none>");
+    }
+    for alarm in status.alarms.iter() {
+        println!("    {:?}", alarm);
+    }
+
+    println!("persistent state:");
+    println!("    has lrtq share: {}", status.persistent_state.has_lrtq_share);
+    println!("    configs: {:?}", status.persistent_state.configs);
+    println!("    shares: {:?}", status.persistent_state.shares);
+    println!("    commits: {:?}", status.persistent_state.commits);
+    println!("    expunged: {:?}", status.persistent_state.expunged);
+
+    println!("proxied requests: {}", status.proxied_requests);
 }

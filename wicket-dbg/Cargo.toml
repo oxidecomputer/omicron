@@ -1,7 +1,7 @@
 [package]
 name = "wicket-dbg"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -26,6 +26,7 @@ wicket.workspace = true
 # used only by wicket-dbg binary
 reedline.workspace = true
 omicron-workspace-hack.workspace = true
+slog-error-chain.workspace = true
 
 [[bin]]
 name = "wicket-dbg"

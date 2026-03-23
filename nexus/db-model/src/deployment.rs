@@ -5,47 +5,62 @@
 //! Types for representing the deployed software and configuration in the
 //! database
 
-use crate::inventory::{SpMgsSlot, SpType, ZoneType};
+use crate::inventory::{HwRotSlot, SpMgsSlot, SpType, ZoneType};
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode, Generation,
-    MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
+    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
     impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_oximeter_read_policy, bp_pending_mgs_update_sp, bp_sled_metadata,
-    bp_target,
+    bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
+    bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
+    bp_pending_mgs_update_sp, bp_single_measurements, bp_sled_metadata,
+    bp_target, debug_log_blueprint_planning,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::{
-    BlueprintDatasetConfig, BlueprintZoneImageVersion, OximeterReadMode,
+    BlueprintArtifactVersion, BlueprintDatasetConfig, OximeterReadMode,
 };
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredContents, PendingMgsUpdateHostPhase1Details,
+};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredSlots, PlanningReport,
+};
+use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
-use nexus_types::inventory::BaseboardId;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
@@ -54,6 +69,8 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_hardware_types::BaseboardId;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -72,6 +89,8 @@ pub struct Blueprint {
     pub creator: String,
     pub comment: String,
     pub target_release_minimum_generation: Generation,
+    pub nexus_generation: Generation,
+    pub source: DbBpSource,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -91,6 +110,8 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             target_release_minimum_generation: Generation(
                 bp.target_release_minimum_generation,
             ),
+            nexus_generation: Generation(bp.nexus_generation),
+            source: DbBpSource::from(&bp.source),
         }
     }
 }
@@ -104,6 +125,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             external_dns_version: *value.external_dns_version,
             target_release_minimum_generation: *value
                 .target_release_minimum_generation,
+            nexus_generation: *value.nexus_generation,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(
@@ -113,6 +135,47 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
+            source: value.source.into(),
+        }
+    }
+}
+
+impl_enum_type!(
+    BpSourceEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSource;
+
+    // Enum values
+    Rss => b"rss"
+    Planner => b"planner"
+    ReconfiguratorCliEdit => b"reconfigurator_cli_edit"
+    Test => b"test"
+);
+
+impl From<&'_ BlueprintSource> for DbBpSource {
+    fn from(value: &'_ BlueprintSource) -> Self {
+        match value {
+            BlueprintSource::Rss => Self::Rss,
+            // We don't store planning reports, so both of these variants squish
+            // to `Planner`.
+            BlueprintSource::Planner(_)
+            | BlueprintSource::PlannerLoadedFromDatabase => Self::Planner,
+            BlueprintSource::ReconfiguratorCliEdit => {
+                Self::ReconfiguratorCliEdit
+            }
+            BlueprintSource::Test => Self::Test,
+        }
+    }
+}
+
+impl From<DbBpSource> for BlueprintSource {
+    fn from(value: DbBpSource) -> Self {
+        match value {
+            DbBpSource::Rss => Self::Rss,
+            DbBpSource::Planner => Self::PlannerLoadedFromDatabase,
+            DbBpSource::ReconfiguratorCliEdit => Self::ReconfiguratorCliEdit,
+            DbBpSource::Test => Self::Test,
         }
     }
 }
@@ -148,6 +211,28 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
+impl_enum_type!(
+    BpSledMeasurementsEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSledMeasurements;
+
+    // Enum values
+    Unknown => b"unknown"
+    InstallDataset => b"install_dataset"
+    Artifacts => b"artifacts"
+);
+
+impl From<&BlueprintMeasurements> for DbBpSledMeasurements {
+    fn from(value: &BlueprintMeasurements) -> Self {
+        match value {
+            BlueprintMeasurements::InstallDataset => Self::InstallDataset,
+            BlueprintMeasurements::Unknown => Self::Unknown,
+            BlueprintMeasurements::Artifacts { .. } => Self::Artifacts,
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::BlueprintSledConfig::state`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_metadata)]
@@ -157,6 +242,71 @@ pub struct BpSledMetadata {
     pub sled_state: SledState,
     pub sled_agent_generation: Generation,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
+    pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
+    pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
+    /// Public only for easy of writing queries; consumers should prefer the
+    /// `subnet()` method.
+    pub subnet: IpNetwork,
+    pub last_allocated_ip_subnet_offset: SqlU16,
+    pub measurements: DbBpSledMeasurements,
+}
+
+impl BpSledMetadata {
+    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX>> {
+        let subnet = match self.subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "invalid subnet for sled {}: {subnet} (should be Ipv6)",
+                self.sled_id
+            ),
+            IpNetwork::V6(subnet) => subnet,
+        };
+
+        Ok(subnet.into())
+    }
+
+    pub fn host_phase_2(
+        &self,
+        slot_a_artifact_version: Option<DbArtifactVersion>,
+        slot_b_artifact_version: Option<DbArtifactVersion>,
+    ) -> BlueprintHostPhase2DesiredSlots {
+        // If we found an artifact version, use it; otherwise, use `Unknown`.
+        fn interpret_version(
+            maybe_version: Option<DbArtifactVersion>,
+        ) -> BlueprintArtifactVersion {
+            match maybe_version {
+                Some(version) => {
+                    BlueprintArtifactVersion::Available { version: version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            }
+        }
+
+        // If we have an artifact hash, use it (and attach a version).
+        // Otherwise, use `CurrentContents`.
+        fn interpret_slot(
+            maybe_hash: Option<ArtifactHash>,
+            maybe_version: Option<DbArtifactVersion>,
+        ) -> BlueprintHostPhase2DesiredContents {
+            match maybe_hash {
+                Some(hash) => BlueprintHostPhase2DesiredContents::Artifact {
+                    version: interpret_version(maybe_version),
+                    hash: hash.0,
+                },
+                None => BlueprintHostPhase2DesiredContents::CurrentContents,
+            }
+        }
+
+        BlueprintHostPhase2DesiredSlots {
+            slot_a: interpret_slot(
+                self.host_phase_2_desired_slot_a,
+                slot_a_artifact_version,
+            ),
+            slot_b: interpret_slot(
+                self.host_phase_2_desired_slot_b,
+                slot_b_artifact_version,
+            ),
+        }
+    }
 }
 
 impl_enum_type!(
@@ -467,6 +617,8 @@ pub struct BpOmicronZone {
 
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
+    pub nexus_generation: Option<Generation>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl BpOmicronZone {
@@ -528,6 +680,8 @@ impl BpOmicronZone {
             snat_ip: None,
             snat_first_port: None,
             snat_last_port: None,
+            nexus_generation: None,
+            nexus_lockstep_port: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -655,10 +809,12 @@ impl BpOmicronZone {
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
                 external_dns_servers,
+                nexus_generation,
             }) => {
                 // Set the common fields
                 bp_omicron_zone
@@ -668,6 +824,8 @@ impl BpOmicronZone {
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
                 bp_omicron_zone.second_service_ip =
                     Some(IpNetwork::from(external_ip.ip));
+                bp_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
                 bp_omicron_zone.nexus_external_tls = Some(*external_tls);
                 bp_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -676,6 +834,8 @@ impl BpOmicronZone {
                         .map(IpNetwork::from)
                         .collect(),
                 );
+                bp_omicron_zone.nexus_generation =
+                    Some(Generation::from(*nexus_generation));
             }
             BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
                 address,
@@ -763,7 +923,7 @@ impl BpOmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
+                        nexus_types::inventory::SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,
@@ -860,6 +1020,9 @@ impl BpOmicronZone {
             ZoneType::Nexus => {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id?,
                         ip: self
@@ -881,6 +1044,9 @@ impl BpOmicronZone {
                         .into_iter()
                         .map(|i| i.ip())
                         .collect(),
+                    nexus_generation: *self.nexus_generation.ok_or_else(
+                        || anyhow!("expected 'nexus_generation'"),
+                    )?,
                 })
             }
             ZoneType::Oximeter => {
@@ -1009,7 +1175,7 @@ struct DbBpZoneImageSourceColumns {
     // The BlueprintZoneImageVersion is not actually stored in bp_omicron_zone
     // table directly, but is instead looked up from the tuf_artifact table at
     // blueprint load time.
-    image_artifact_data: Option<(BlueprintZoneImageVersion, ArtifactHash)>,
+    image_artifact_data: Option<(BlueprintArtifactVersion, ArtifactHash)>,
 }
 
 impl DbBpZoneImageSourceColumns {
@@ -1022,10 +1188,10 @@ impl DbBpZoneImageSourceColumns {
         // Some.
         let image_artifact_data = image_artifact_sha256.map(|hash| {
             let version = match image_artifact_row {
-                Some(artifact_row) => BlueprintZoneImageVersion::Available {
+                Some(artifact_row) => BlueprintArtifactVersion::Available {
                     version: artifact_row.version.0,
                 },
-                None => BlueprintZoneImageVersion::Unknown,
+                None => BlueprintArtifactVersion::Unknown,
             };
             (version, hash)
         });
@@ -1074,6 +1240,44 @@ impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
             (DbBpZoneImageSource::InstallDataset, None) => {
                 Ok(Self::InstallDataset)
             }
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_single_measurements)]
+pub struct BpSingleMeasurement {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+
+    pub image_artifact_sha256: ArtifactHash,
+}
+
+impl BpSingleMeasurement {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        sled_id: SledUuid,
+        measurement: &BlueprintSingleMeasurement,
+    ) -> Self {
+        Self {
+            blueprint_id: blueprint_id.into(),
+            sled_id: sled_id.into(),
+            image_artifact_sha256: measurement.hash.into(),
+        }
+    }
+
+    pub fn to_measurement(
+        self,
+        artifact: Option<TufArtifact>,
+    ) -> BlueprintSingleMeasurement {
+        BlueprintSingleMeasurement {
+            version: match artifact {
+                Some(a) => {
+                    BlueprintArtifactVersion::Available { version: a.version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            },
+            hash: *self.image_artifact_sha256,
         }
     }
 }
@@ -1252,6 +1456,55 @@ impl BpOximeterReadPolicy {
     }
 }
 
+pub trait BpPendingMgsUpdateComponent {
+    /// Converts a BpMgsUpdate into a PendingMgsUpdate
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate;
+
+    /// Retrieves the baseboard ID
+    fn hw_baseboard_id(&self) -> &Uuid;
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_rot_bootloader)]
+pub struct BpPendingMgsUpdateRotBootloader {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_stage0_version: DbArtifactVersion,
+    pub expected_stage0_next_version: Option<DbArtifactVersion>,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRotBootloader {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: (*self.expected_stage0_version)
+                        .clone(),
+                    expected_stage0_next_version: match self
+                        .expected_stage0_next_version
+                    {
+                        Some(v) => ExpectedVersion::Version((*v).clone()),
+                        None => ExpectedVersion::NoValidVersion,
+                    },
+                },
+            ),
+        }
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_pending_mgs_update_sp)]
 pub struct BpPendingMgsUpdateSp {
@@ -1265,18 +1518,19 @@ pub struct BpPendingMgsUpdateSp {
     pub expected_inactive_version: Option<DbArtifactVersion>,
 }
 
-impl BpPendingMgsUpdateSp {
-    pub fn into_generic(
-        self,
-        baseboard_id: Arc<BaseboardId>,
-    ) -> PendingMgsUpdate {
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateSp {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
         PendingMgsUpdate {
             baseboard_id,
             sp_type: self.sp_type.into(),
             slot_id: **self.sp_slot,
             artifact_hash: self.artifact_sha256.into(),
             artifact_version: (*self.artifact_version).clone(),
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: (*self.expected_active_version)
                     .clone(),
                 expected_inactive_version: match self.expected_inactive_version
@@ -1284,7 +1538,153 @@ impl BpPendingMgsUpdateSp {
                     Some(v) => ExpectedVersion::Version((*v).clone()),
                     None => ExpectedVersion::NoValidVersion,
                 },
-            },
+            }),
         }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_rot)]
+pub struct BpPendingMgsUpdateRot {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_slot: HwRotSlot,
+    pub expected_active_version: DbArtifactVersion,
+    pub expected_inactive_version: Option<DbArtifactVersion>,
+    pub expected_persistent_boot_preference: HwRotSlot,
+    pub expected_pending_persistent_boot_preference: Option<HwRotSlot>,
+    pub expected_transient_boot_preference: Option<HwRotSlot>,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRot {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: self.expected_active_slot.into(),
+                    version: (*self.expected_active_version).clone(),
+                },
+                expected_inactive_version: self
+                    .expected_inactive_version
+                    .map(|v| ExpectedVersion::Version(v.into()))
+                    .unwrap_or(ExpectedVersion::NoValidVersion),
+                expected_persistent_boot_preference: self
+                    .expected_persistent_boot_preference
+                    .into(),
+                expected_pending_persistent_boot_preference: self
+                    .expected_pending_persistent_boot_preference
+                    .map(|s| s.into()),
+                expected_transient_boot_preference: self
+                    .expected_transient_boot_preference
+                    .map(|s| s.into()),
+            }),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_host_phase_1)]
+pub struct BpPendingMgsUpdateHostPhase1 {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_phase_1_slot: HwM2Slot,
+    pub expected_boot_disk: HwM2Slot,
+    pub expected_active_phase_1_hash: ArtifactHash,
+    pub expected_active_phase_2_hash: ArtifactHash,
+    pub expected_inactive_phase_1_hash: ArtifactHash,
+    pub expected_inactive_phase_2_hash: ArtifactHash,
+    sled_agent_ip: ipv6::Ipv6Addr,
+    sled_agent_port: SqlU16,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateHostPhase1 {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot: self
+                        .expected_active_phase_1_slot
+                        .into(),
+                    expected_boot_disk: self.expected_boot_disk.into(),
+                    expected_active_phase_1_hash: self
+                        .expected_active_phase_1_hash
+                        .into(),
+                    expected_active_phase_2_hash: self
+                        .expected_active_phase_2_hash
+                        .into(),
+                    expected_inactive_phase_1_hash: self
+                        .expected_inactive_phase_1_hash
+                        .into(),
+                    expected_inactive_phase_2_hash: self
+                        .expected_inactive_phase_2_hash
+                        .into(),
+                    sled_agent_address: SocketAddrV6::new(
+                        self.sled_agent_ip.into(),
+                        *self.sled_agent_port,
+                        0,
+                        0,
+                    ),
+                },
+            ),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = debug_log_blueprint_planning)]
+pub struct DebugLogBlueprintPlanning {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub debug_blob: serde_json::Value,
+}
+
+impl DebugLogBlueprintPlanning {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    ) -> Result<Self, serde_json::Error> {
+        let report = serde_json::to_value(report)?;
+
+        // We explicitly _don't_ define a struct describing the format of
+        // `debug_blob`, because we don't want anyone to attempt to parse it. It
+        // should only be useful to humans, potentially via omdb, and they (and
+        // omdb) can duplicate these fields to understand it.
+        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
+            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
+        } else {
+            env!("VERGEN_GIT_SHA")
+        };
+
+        let debug_blob = serde_json::json!({
+            "git-commit": git_commit,
+            "report": report,
+        });
+
+        Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
     }
 }

@@ -31,6 +31,9 @@ progenitor::generate_api!(
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord]},
         UplinkConfig = { derives = [PartialEq, Eq, PartialOrd, Ord] },
     },
+    crates = {
+        "omicron-uuid-kinds" = "*",
+    },
     replace = {
         AbortUpdateOptions = wicket_common::rack_update::AbortUpdateOptions,
         AllowedSourceIps = omicron_common::api::internal::shared::AllowedSourceIps,
@@ -83,9 +86,7 @@ progenitor::generate_api!(
         StepEventForUplinkPreflightSpec = wicket_common::preflight_check::StepEvent,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
-        SwitchLocation = omicron_common::api::internal::shared::SwitchLocation,
-        TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
-        TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
+        SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         UpdateSimulatedResult = wicket_common::rack_update::UpdateSimulatedResult,
         UpdateTestError = wicket_common::rack_update::UpdateTestError,
         UplinkPreflightStepId = wicket_common::preflight_check::UplinkPreflightStepId,

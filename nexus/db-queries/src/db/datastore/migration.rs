@@ -135,7 +135,7 @@ impl DataStore {
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
-        let generation = Generation(migration.r#gen);
+        let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration.migration_id))
             .filter(dsl::time_deleted.is_null())
@@ -157,7 +157,7 @@ impl DataStore {
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
-        let generation = Generation(migration.r#gen);
+        let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration.migration_id))
             .filter(dsl::time_deleted.is_null())
@@ -182,7 +182,8 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Project;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::project;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -204,7 +205,7 @@ mod tests {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
@@ -221,7 +222,7 @@ mod tests {
                 Instance::new(
                     instance_id,
                     project_id,
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "myinstance".parse().unwrap(),
                             description: "It's an instance".into(),
@@ -231,14 +232,16 @@ mod tests {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )

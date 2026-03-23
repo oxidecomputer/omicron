@@ -47,7 +47,7 @@ impl DataStore {
         authz_project: &authz::Project,
         snapshot: Snapshot,
     ) -> CreateResult<Snapshot> {
-        let gen = snapshot.gen;
+        let generation = snapshot.generation;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let project_id = snapshot.project_id;
@@ -153,9 +153,9 @@ impl DataStore {
             snapshot.state
         );
         bail_unless!(
-            snapshot.gen == gen,
+            snapshot.generation == generation,
             "newly-created Snapshot has unexpected generation: {:?}",
-            snapshot.gen
+            snapshot.generation
         );
 
         Ok(snapshot)
@@ -177,8 +177,8 @@ impl DataStore {
         diesel::update(dsl::snapshot)
             .filter(dsl::id.eq(authz_snapshot.id()))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::gen.eq(old_gen))
-            .set((dsl::state.eq(new_state), dsl::gen.eq(next_gen)))
+            .filter(dsl::r#gen.eq(old_gen))
+            .set((dsl::state.eq(new_state), dsl::r#gen.eq(next_gen)))
             .returning(Snapshot::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -236,13 +236,13 @@ impl DataStore {
         // then it was already deleted.
 
         let snapshot_id = authz_snapshot.id();
-        let gen = db_snapshot.gen;
+        let r#gen = db_snapshot.generation;
 
         use nexus_db_schema::schema::snapshot::dsl;
 
         let result = diesel::update(dsl::snapshot)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::gen.eq(gen))
+            .filter(dsl::r#gen.eq(r#gen))
             .filter(dsl::id.eq(snapshot_id))
             .filter(dsl::state.eq_any(ok_to_delete_states.clone()))
             .set((
@@ -284,10 +284,10 @@ impl DataStore {
                             "snapshot cannot be deleted in state {:?}",
                             snapshot.state,
                         )))
-                    } else if snapshot.gen != gen {
+                    } else if snapshot.generation != r#gen {
                         Err(Error::invalid_request(&format!(
                             "snapshot cannot be deleted: mismatched generation {:?} != {:?}",
-                            gen, snapshot.gen,
+                            r#gen, snapshot.generation,
                         )))
                     } else {
                         error!(

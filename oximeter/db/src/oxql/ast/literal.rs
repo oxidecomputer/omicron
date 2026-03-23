@@ -278,7 +278,7 @@ fn duration_to_db_interval(dur: &Duration) -> (u64, &'static str) {
     fn as_whole_multiple(dur: &Duration, base: &Duration) -> Option<u64> {
         let d = dur.as_nanos();
         let base = base.as_nanos();
-        if d % base == 0 {
+        if d.is_multiple_of(base) {
             Some(u64::try_from(d / base).unwrap())
         } else {
             None

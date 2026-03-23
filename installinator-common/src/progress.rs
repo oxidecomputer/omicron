@@ -9,7 +9,7 @@ use illumos_utils::zpool;
 use omicron_common::disk::M2Slot;
 use schemars::{
     JsonSchema,
-    gen::SchemaGenerator,
+    r#gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
 };
 use serde::{Deserialize, Serialize};
@@ -43,11 +43,17 @@ impl StepSpec for InstallinatorSpec {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum InstallinatorComponent {
+    /// The installinator document.
+    InstallinatorDocument,
+
     /// The host phase 2 component.
     HostPhase2,
 
     /// The control plane component.
     ControlPlane,
+
+    /// The measurement corpus component.
+    MeasurementCorpus,
 
     /// A component that means "both the host and the control plane", used for
     /// writes for now. It is possible that this component will go away in the
@@ -191,6 +197,9 @@ pub enum WriteComponent {
     /// The control plane component.
     ControlPlane,
 
+    /// The measurement corpus.
+    MeasurementCorpus,
+
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Unknown,
@@ -201,6 +210,7 @@ impl fmt::Display for WriteComponent {
         match self {
             Self::HostPhase2 => f.write_str("host phase 2"),
             Self::ControlPlane => f.write_str("control plane"),
+            Self::MeasurementCorpus => f.write_str("measurement corpus"),
             Self::Unknown => f.write_str("unknown"),
         }
     }
@@ -237,11 +247,18 @@ pub enum WriteError {
     },
     #[error("error validating checksum of written file")]
     ChecksumValidationError(#[source] anyhow::Error),
-    #[error("error removing files from {path}: {error}")]
-    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
-    #[error("error fsyncing output directory: {error}")]
-    SyncOutputDirError { error: std::io::Error },
-    #[error("error interacting with zpool: {error}")]
+    #[error("error removing files from {path}")]
+    RemoveFilesError {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error fsyncing output directory")]
+    SyncOutputDirError {
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error interacting with zpool")]
     ZpoolError {
         #[from]
         error: zpool::Error,
@@ -250,6 +267,11 @@ pub enum WriteError {
     ControlPlaneWriteError {
         #[source]
         error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
+    },
+    #[error("error creating directory")]
+    CreateDirError {
+        #[source]
+        error: std::io::Error,
     },
 }
 
@@ -300,6 +322,15 @@ pub enum ControlPlaneZonesStepId {
     /// Writing the zone manifest.
     ZoneManifest,
 
+    /// Writing the measurement manifest.
+    MeasurementManifest,
+
+    /// Writing the measurement corpus.
+    Measurement { name: String },
+
+    /// Ensure the measurement directory exists
+    CreateMeasurementDir,
+
     /// Syncing writes to disk.
     Fsync,
 
@@ -308,14 +339,15 @@ pub enum ControlPlaneZonesStepId {
     Unknown,
 }
 
-fn path_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+fn path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
 
-fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <Option<String>>::json_schema(gen).into();
+fn path_schema_opt(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject =
+        <Option<String>>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

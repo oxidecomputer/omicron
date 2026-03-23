@@ -21,6 +21,7 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceCpuCount;
+use crate::db::model::InstanceCpuPlatform;
 use crate::db::model::InstanceIntendedState;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
@@ -66,6 +67,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Returns the operator-visible [external API
@@ -80,9 +82,9 @@ pub struct InstanceStateComputer<'s> {
 impl<'s> InstanceStateComputer<'s> {
     pub fn new(instance: &'s Instance, vmm: Option<&'s Vmm>) -> Self {
         Self {
-            instance_state: &instance.runtime_state.nexus_state,
-            migration_id: instance.runtime_state.migration_id.as_ref(),
-            vmm_state: vmm.as_ref().map(|vmm| &vmm.runtime.state),
+            instance_state: &instance.nexus_state,
+            migration_id: instance.migration_id.as_ref(),
+            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
         }
     }
 
@@ -189,7 +191,7 @@ impl InstanceAndActiveVmm {
     }
 
     pub fn sled_id(&self) -> Option<SledUuid> {
-        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
+        self.vmm.as_ref().map(|v| v.sled_id())
     }
 
     /// Returns the operator-visible [external API
@@ -211,29 +213,28 @@ impl From<InstanceAndActiveVmm> for external::Instance {
         let time_run_state_updated = value
             .vmm
             .as_ref()
-            .map(|vmm| vmm.runtime.time_state_updated)
-            .unwrap_or(value.instance.runtime_state.time_updated);
+            .map(|vmm| vmm.time_state_updated)
+            .unwrap_or(value.instance.time_state_updated);
         let auto_restart_status = {
             let cooldown_expiration =
-                value.instance.runtime_state.time_last_auto_restarted.map(
-                    |t| {
-                        // The instance may or may not explicitly override the cooldown and
-                        // auto-restart policy settings. If it does not, return whatever
-                        // default values Nexus is currently using, so that they can be
-                        // displayed in the UI.
-                        //
-                        // Eventually, these fields may have project-level defaults, so if the
-                        // instance doesn't provide a value we'll have to use the
-                        // project's default if one exists. For now, though, fall back
-                        // to the hard- coded default if the instance hasn't overridden
-                        // it.
-                        let cooldown_duration =
-                            value.instance.auto_restart.cooldown.unwrap_or(
-                                InstanceAutoRestart::DEFAULT_COOLDOWN,
-                            );
-                        t + cooldown_duration
-                    },
-                );
+                value.instance.time_last_auto_restarted.map(|t| {
+                    // The instance may or may not explicitly override the cooldown and
+                    // auto-restart policy settings. If it does not, return whatever
+                    // default values Nexus is currently using, so that they can be
+                    // displayed in the UI.
+                    //
+                    // Eventually, these fields may have project-level defaults, so if the
+                    // instance doesn't provide a value we'll have to use the
+                    // project's default if one exists. For now, though, fall back
+                    // to the hard- coded default if the instance hasn't overridden
+                    // it.
+                    let cooldown_duration = value
+                        .instance
+                        .auto_restart
+                        .cooldown
+                        .unwrap_or(InstanceAutoRestart::DEFAULT_COOLDOWN);
+                    t + cooldown_duration
+                });
 
             let policy = value.instance.auto_restart.policy;
             // The active policy for this instance --- either its configured
@@ -265,12 +266,12 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
+            cpu_platform: value.instance.cpu_platform.map(Into::into),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
                 time_last_auto_restarted: value
                     .instance
-                    .runtime_state
                     .time_last_auto_restarted,
             },
 
@@ -356,7 +357,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let gen = instance.runtime().gen;
+        let generation = instance.runtime().generation;
         let name = instance.name().clone();
         let project_id = instance.project_id;
 
@@ -387,9 +388,9 @@ impl DataStore {
             instance.runtime().nexus_state
         );
         bail_unless!(
-            instance.runtime().gen == gen,
+            instance.runtime().generation == generation,
             "newly-created Instance has unexpected generation: {:?}",
-            instance.runtime().gen
+            instance.runtime().generation
         );
         Ok(instance)
     }
@@ -736,6 +737,62 @@ impl DataStore {
         Ok(InstanceGestalt { instance, migration, active_vmm, target_vmm })
     }
 
+    /// Batch-fetch instance and VMM records for multiple instances to avoid N+1 queries.
+    ///
+    /// This method efficiently retrieves multiple instances and their active VMMs
+    /// in a single database round-trip using a LEFT JOIN. It is used by the
+    /// multicast reconciler to check the state of many instances simultaneously.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping instance_id -> `(Instance, Option<Vmm>)` where:
+    /// - The VMM is `None` for stopped instances (no `active_propolis_id`)
+    /// - Deleted instances are excluded from the result
+    /// - Non-existent instance IDs are silently omitted from the map
+    pub async fn instance_and_vmm_batch_fetch(
+        &self,
+        opctx: &OpContext,
+        instance_ids: &[omicron_uuid_kinds::InstanceUuid],
+    ) -> Result<HashMap<Uuid, (Instance, Option<Vmm>)>, Error> {
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        if instance_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let results: Vec<(Instance, Option<Vmm>)> = instance_dsl::instance
+            .filter(
+                instance_dsl::id.eq_any(
+                    instance_ids
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async::<(Instance, Option<Vmm>)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let map = results
+            .into_iter()
+            .map(|(instance, vmm)| (instance.id(), (instance, vmm)))
+            .collect();
+
+        Ok(map)
+    }
+
     // TODO-design It's tempting to return the updated state of the Instance
     // here because it's convenient for consumers and by using a RETURNING
     // clause, we could ensure that the "update" and "fetch" are atomic.
@@ -757,7 +814,7 @@ impl DataStore {
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.generation))
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
@@ -1096,6 +1153,7 @@ impl DataStore {
                     auto_restart_policy,
                     ncpus,
                     memory,
+                    cpu_platform,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1109,12 +1167,13 @@ impl DataStore {
                         .await?;
 
                     // Set vCPUs and memory size.
-                    self.instance_set_size_on_conn(
+                    self.instance_set_cpu_and_mem_on_conn(
                         &conn,
                         &err,
                         &authz_instance,
                         ncpus,
                         memory,
+                        cpu_platform,
                     )
                     .await?;
 
@@ -1281,51 +1340,66 @@ impl DataStore {
         }
     }
 
-    /// Set an instance's CPU count and memory size to the provided values,
+    /// Set an instance's CPU/memory configuration to the provided values,
     /// within an existing transaction.
     ///
     /// The instance must be in an updatable state for this update to succeed.
     /// If the instance is not updatable, return `Error::Conflict`.
     ///
-    /// To update an instance's CPU or memory sizes an instance must not be
-    /// incarnated by a VMM. This constraint ensures that the sizes recorded in
-    /// Nexus sum to the actual peak possible resource usage of running
-    /// instances.
-    ///
-    /// Does not allow setting sizes of running instances to ensure that if an
-    /// instance is running, its resource reservation matches what we record in
-    /// the database.
-    async fn instance_set_size_on_conn(
+    /// These parameters all currently require the instance to not be incarnated
+    /// by a VMM to be changed. This is to ensure that if the instance is
+    /// running, its real allocation and platform are aligned with the
+    /// instance's database record.
+    async fn instance_set_cpu_and_mem_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: &OptionalError<Error>,
         authz_instance: &authz::Instance,
         ncpus: InstanceCpuCount,
         memory: ByteCount,
+        cpu_platform: Option<InstanceCpuPlatform>,
     ) -> Result<(), diesel::result::Error> {
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
-        let r = diesel::update(instance_dsl::instance)
+        let query = diesel::update(instance_dsl::instance)
+            .into_boxed()
             .filter(instance_dsl::id.eq(authz_instance.id()))
             .filter(
                 instance_dsl::state
                     .eq_any(InstanceState::NOT_INCARNATED_STATES),
-            )
-            .filter(
+            );
+
+        let query = if cpu_platform.is_some() {
+            query.filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
-                    .or(instance_dsl::memory.ne(memory)),
+                    .or(instance_dsl::memory.ne(memory))
+                    .or(instance_dsl::cpu_platform.ne(cpu_platform))
+                    .or(instance_dsl::cpu_platform.is_null()),
             )
+        } else {
+            query.filter(
+                instance_dsl::ncpus
+                    .ne(ncpus)
+                    .or(instance_dsl::memory.ne(memory))
+                    .or(instance_dsl::cpu_platform.is_not_null()),
+            )
+        };
+
+        let r = query
             .set((
                 instance_dsl::ncpus.eq(ncpus),
                 instance_dsl::memory.eq(memory),
+                instance_dsl::cpu_platform.eq(cpu_platform),
             ))
             .check_if_exists::<Instance>(authz_instance.id())
             .execute_and_check(&conn)
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
-                if (r.found.ncpus, r.found.memory) == (ncpus, memory) {
+                if (r.found.ncpus, r.found.memory, r.found.cpu_platform)
+                    == (ncpus, memory, cpu_platform)
+                {
                     // Not updated, because the update is no change..
                     return Ok(());
                 }
@@ -1334,21 +1408,22 @@ impl DataStore {
                     .contains(&r.found.runtime().nexus_state)
                 {
                     return Err(err.bail(Error::conflict(
-                        "instance must be stopped to be resized",
+                        "instance must be stopped to change CPU or memory",
                     )));
                 }
 
                 // There should be no other reason the update fails on an
                 // existing instance.
                 warn!(
-                    self.log, "failed to instance_set_size_on_conn on an \
+                    self.log, "failed to instance_set_cpu_and_mem_on_conn on an \
                     instance that should have been updatable";
                     "instance_id" => %r.found.id(),
                     "new ncpus" => ?ncpus,
                     "new memory" => ?memory,
+                    "new CPU platform" => ?cpu_platform,
                 );
                 return Err(err.bail(Error::internal_error(
-                    "unable to reconfigure instance size",
+                    "unable to change instance CPU or memory",
                 )));
             }
             UpdateStatus::Updated => Ok(()),
@@ -1494,14 +1569,13 @@ impl DataStore {
             // See also: "test_instance_deletion_is_idempotent".
             DetachManyError::CollectionNotFound => Ok(()),
             DetachManyError::NoUpdate { collection } => {
-                if collection.runtime_state.propolis_id.is_some() {
+                if collection.propolis_id.is_some() {
                     return Err(Error::invalid_request(
                         "cannot delete instance: instance is running or has \
                                 not yet fully stopped",
                     ));
                 }
-                let instance_state =
-                    collection.runtime_state.nexus_state.state();
+                let instance_state = collection.nexus_state.state();
                 match instance_state {
                     api::external::InstanceState::Stopped
                     | api::external::InstanceState::Failed => {
@@ -1990,7 +2064,7 @@ impl DataStore {
             // - the provided updater generation matches the current updater
             //   generation.
             .filter(dsl::updater_gen.eq(locked_gen))
-            .filter(dsl::state_generation.lt(new_runtime.r#gen))
+            .filter(dsl::state_generation.lt(new_runtime.generation))
             .set((
                 dsl::updater_gen.eq(Generation(locked_gen.0.next())),
                 dsl::updater_id.eq(None::<Uuid>),
@@ -2012,7 +2086,8 @@ impl DataStore {
 
         // The expected state generation number of the instance record *before*
         // applying the update.
-        let prev_state_gen = u64::from(new_runtime.r#gen.0).saturating_sub(1);
+        let prev_state_gen =
+            u64::from(new_runtime.generation.0).saturating_sub(1);
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
@@ -2043,7 +2118,8 @@ impl DataStore {
             // another execution of the same saga action has already updated the
             // instance record.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().r#gen.0) != prev_state_gen
+                if u64::from(found.runtime().generation.0)
+                    != prev_state_gen
                     && found.updater_gen != locked_gen =>
             {
                 debug_assert_ne!(found.updater_id, Some(updater_id));
@@ -2053,8 +2129,8 @@ impl DataStore {
                      and lock generation have advanced: the required updates \
                      have probably already been committed.";
                     "instance_id" => %instance_id,
-                    "expected_state_gen" => ?new_runtime.r#gen,
-                    "actual_state_gen" => ?found.runtime().r#gen,
+                    "expected_state_gen" => ?new_runtime.generation,
+                    "actual_state_gen" => ?found.runtime().generation,
                     "updater_id" => %updater_id,
                     "updater_gen" => ?locked_gen,
                     "actual_updater_gen" => ?found.updater_gen,
@@ -2067,7 +2143,8 @@ impl DataStore {
             // longer update the instance, as its state has changed, potentially
             // invalidating the updates. We need to unwind.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().r#gen.0) != prev_state_gen
+                if u64::from(found.runtime().generation.0)
+                    != prev_state_gen
                     && found.updater_gen == locked_gen
                     && found.updater_id == Some(updater_id) =>
             {
@@ -2076,8 +2153,8 @@ impl DataStore {
                     "cannot commit instance update, as the state generation \
                      has advanced, potentially invalidating the update";
                     "instance_id" => %instance_id,
-                    "expected_state_gen" => ?new_runtime.r#gen,
-                    "actual_state_gen" => ?found.runtime().r#gen,
+                    "expected_state_gen" => ?new_runtime.generation,
+                    "actual_state_gen" => ?found.runtime().generation,
                 );
                 Err(Error::conflict("instance state has changed"))
             }
@@ -2160,6 +2237,64 @@ impl DataStore {
             ))
         }
     }
+
+    /// Get the runtime state of an instance by ID.
+    ///
+    /// Returns the instance's current runtime state, or None if the instance
+    /// doesn't exist or has been deleted.
+    pub async fn instance_get_state(
+        &self,
+        opctx: &OpContext,
+        instance_id: &InstanceUuid,
+    ) -> Result<Option<InstanceRuntimeState>, external::Error> {
+        use nexus_db_schema::schema::instance::dsl;
+        let id = instance_id.into_untyped_uuid();
+
+        let instance = dsl::instance
+            .filter(dsl::id.eq(id))
+            .filter(dsl::time_deleted.is_null())
+            .select(Instance::as_select())
+            .first_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(instance.map(|i| i.runtime()))
+    }
+
+    /// Look up the sled hosting an instance via its active VMM.
+    ///
+    /// Returns None if the instance exists but has no active VMM (stopped
+    /// instance).
+    pub async fn instance_get_sled_id(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> Result<Option<Uuid>, external::Error> {
+        use nexus_db_schema::schema::{instance, vmm};
+        let maybe_row: Option<Option<Uuid>> = instance::table
+            .left_join(
+                vmm::table
+                    .on(instance::active_propolis_id.eq(vmm::id.nullable())),
+            )
+            .filter(instance::id.eq(instance_id))
+            .filter(instance::time_deleted.is_null())
+            .select(vmm::sled_id.nullable())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        match maybe_row {
+            None => Err(external::Error::not_found_by_id(
+                ResourceType::Instance,
+                &instance_id,
+            )),
+            Some(sled) => Ok(sled),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2171,9 +2306,11 @@ mod tests {
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::project;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external;
@@ -2193,7 +2330,7 @@ mod tests {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
@@ -2220,7 +2357,7 @@ mod tests {
                 Instance::new(
                     instance_id,
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
@@ -2230,14 +2367,16 @@ mod tests {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )
@@ -2520,7 +2659,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(external::Generation::from_u32(2)),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2568,7 +2707,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(external::Generation::from_u32(2)),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2630,7 +2769,7 @@ mod tests {
         .expect("instance should be locked");
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            r#gen: Generation(external::Generation::from_u32(2)),
+            generation: Generation(external::Generation::from_u32(2)),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: None,
             migration_id: None,
@@ -2670,7 +2809,7 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
-        assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
+        assert_eq!(instance.runtime().generation, new_runtime.generation);
 
         // Doing it again at the same generation with a *different* state
         // shouldn't change the instance at all.
@@ -2698,7 +2837,7 @@ mod tests {
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
         assert_eq!(instance.runtime().dst_propolis_id, None);
         assert_eq!(instance.runtime().migration_id, None);
-        assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
+        assert_eq!(instance.runtime().generation, new_runtime.generation);
 
         // Clean up.
         db.terminate().await;
@@ -2735,7 +2874,7 @@ mod tests {
         // acquired.
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            r#gen: Generation(external::Generation::from_u32(2)),
+            generation: Generation(external::Generation::from_u32(2)),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
@@ -2764,7 +2903,9 @@ mod tests {
                     &lock,
                     &InstanceRuntimeState {
                         time_updated: Utc::now(),
-                        r#gen: Generation(external::Generation::from_u32(2)),
+                        generation: Generation(external::Generation::from_u32(
+                            2
+                        )),
                         propolis_id: None,
                         dst_propolis_id: None,
                         migration_id: None,
@@ -2843,14 +2984,13 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        gen: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -2862,12 +3002,12 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(
-                        snapshot.instance.runtime_state.gen.0.next(),
+                    generation: Generation(
+                        snapshot.instance.state_generation.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
-                    ..snapshot.instance.runtime_state.clone()
+                    ..snapshot.instance.runtime()
                 },
             )
             .await
@@ -2905,14 +3045,13 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 666.into(),
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        gen: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -2934,8 +3073,8 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(
-                        snapshot.instance.runtime_state.gen.0.next(),
+                    generation: Generation(
+                        snapshot.instance.state_generation.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
@@ -3002,14 +3141,13 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
-                        state: VmmState::Stopped,
-                    },
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Stopped,
                 },
             )
             .await
@@ -3025,10 +3163,10 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(instance.runtime_state.gen.0.next()),
+                    generation: Generation(instance.state_generation.0.next()),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
-                    ..instance.runtime_state.clone()
+                    ..instance.runtime()
                 },
             )
             .await
@@ -3042,14 +3180,13 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3086,7 +3223,7 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation(vmm2.runtime.r#gen.0.next()),
+                        generation: Generation(vmm2.generation.0.next()),
                         state: VmmState::Running,
                     },
                 )
@@ -3144,14 +3281,13 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3186,7 +3322,7 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation(vmm2.runtime.r#gen.0.next().next()),
+                        generation: Generation(vmm2.generation.0.next().next()),
                         state: VmmState::SagaUnwound,
                     },
                 )
@@ -3259,7 +3395,7 @@ mod tests {
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         struct Ids {
-            sled_id: Uuid,
+            sled_id: SledUuid,
             vmm_id: Uuid,
             instance_id: Uuid,
         }
@@ -3290,14 +3426,13 @@ mod tests {
                             time_created: Utc::now(),
                             time_deleted: None,
                             instance_id,
-                            sled_id,
+                            sled_id: sled_id.into(),
                             propolis_ip: "10.1.9.42".parse().unwrap(),
                             propolis_port: 420.into(),
-                            runtime: VmmRuntimeState {
-                                time_state_updated: Utc::now(),
-                                r#gen: Generation::new(),
-                                state: VmmState::Running,
-                            },
+                            cpu_platform: VmmCpuPlatform::SledDefault,
+                            time_state_updated: Utc::now(),
+                            generation: Generation::new(),
+                            state: VmmState::Running,
                         },
                     )
                     .await
@@ -3308,7 +3443,7 @@ mod tests {
                         &InstanceUuid::from_untyped_uuid(instance_id),
                         &InstanceRuntimeState {
                             time_updated: Utc::now(),
-                            gen: Generation(Generation::new().next()),
+                            generation: Generation(Generation::new().next()),
                             nexus_state: InstanceState::Vmm,
                             propolis_id: Some(vmm_id),
                             dst_propolis_id: None,
@@ -3366,13 +3501,14 @@ mod tests {
             }
 
             i += 1;
-            paginator =
-                p.found_batch(&batch, &|(sled, _, vmm, _): &(
-                    Sled,
-                    Instance,
-                    Vmm,
-                    Project,
-                )| (sled.id(), vmm.id));
+            paginator = p.found_batch(&batch, &|(sled, _, vmm, _): &(
+                Sled,
+                Instance,
+                Vmm,
+                Project,
+            )| {
+                (sled.id().into_untyped_uuid(), vmm.id)
+            });
         }
 
         assert_eq!(expected_instances, found_instances);

@@ -21,6 +21,7 @@ use nexus_reconfigurator_execution::{RequiredRealizeArgs, realize_blueprint};
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledFilter;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -248,6 +249,7 @@ impl ReconfiguratorExec {
                 // closed.  Clone this sender so that it doesn't get shut down
                 // right away.
                 mgs_updates: mgs_updates.clone(),
+                saga_quiesce: SagaQuiesceHandle::new(opctx.log.clone()),
             }
             .into(),
         )

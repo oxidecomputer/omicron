@@ -297,7 +297,7 @@ mod test {
         // Shuffle these sagas into a random order to check that the pagination
         // order is working as intended on the read path, which we'll do later
         // in this test.
-        inserted_sagas.shuffle(&mut rand::thread_rng());
+        inserted_sagas.shuffle(&mut rand::rng());
 
         // Insert the batches of unfinished sagas into the database
         let conn = datastore
@@ -380,7 +380,7 @@ mod test {
         // Shuffle these nodes into a random order to check that the pagination
         // order is working as intended on the read path, which we'll do later
         // in this test.
-        inserted_nodes.shuffle(&mut rand::thread_rng());
+        inserted_nodes.shuffle(&mut rand::rng());
 
         // Insert them into the database
         let conn = datastore

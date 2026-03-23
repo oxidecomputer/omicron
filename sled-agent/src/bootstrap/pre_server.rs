@@ -17,7 +17,7 @@ use crate::config::Config;
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
-    LongRunningTaskHandles, spawn_all_longrunning_tasks,
+    LongRunningTaskHandles, LongRunningTaskResult, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
@@ -39,7 +39,7 @@ use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::underlay;
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
@@ -120,12 +120,12 @@ impl BootstrapAgentStartup {
 
         // Spawn all important long running tasks that live for the lifetime of
         // the process and are used by both the bootstrap agent and sled agent
-        let (
+        let LongRunningTaskResult {
             long_running_task_handles,
             config_reconciler_spawn_token,
             sled_agent_started_tx,
             service_manager_ready_tx,
-        ) = spawn_all_longrunning_tasks(
+        } = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
             startup_networking.global_zone_bootstrap_ip,
@@ -144,10 +144,6 @@ impl BootstrapAgentStartup {
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.zone_image_resolver.clone(),
-            long_running_task_handles
-                .config_reconciler
-                .internal_disks_rx()
-                .clone(),
         );
 
         // Inform the hardware monitor that the service manager is ready
@@ -307,7 +303,7 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
             }
             SledMode::Auto
         }
-        SledModeConfig::Gimlet => SledMode::Gimlet,
+        SledModeConfig::Sled => SledMode::Sled,
         SledModeConfig::Scrimlet => {
             let asic = if cfg!(feature = "switch-asic") {
                 DendriteAsic::TofinoAsic
@@ -352,10 +348,12 @@ impl BootstrapNetworking {
     async fn setup(config: &Config) -> Result<Self, StartError> {
         let link_for_mac =
             config.get_link().await.map_err(StartError::ConfigLink)?;
-        let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
-            .ip(&link_for_mac)
-            .await
-            .map_err(StartError::BootstrapLinkMac)?;
+        let global_zone_bootstrap_ip = underlay::bootstrap_ip(
+            BootstrapInterface::GlobalZone,
+            &link_for_mac,
+        )
+        .await
+        .map_err(StartError::BootstrapLinkMac)?;
 
         let bootstrap_etherstub =
             Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
@@ -392,10 +390,12 @@ impl BootstrapNetworking {
                 IpAddr::V6(addr) => addr,
             };
 
-        let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
-            .ip(&link_for_mac)
-            .await
-            .map_err(StartError::BootstrapLinkMac)?;
+        let switch_zone_bootstrap_ip = underlay::bootstrap_ip(
+            BootstrapInterface::SwitchZone,
+            &link_for_mac,
+        )
+        .await
+        .map_err(StartError::BootstrapLinkMac)?;
 
         let underlay_etherstub =
             Dladm::ensure_etherstub(dladm::UNDERLAY_ETHERSTUB_NAME)

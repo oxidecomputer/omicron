@@ -11,14 +11,15 @@ use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_queries::context::OpContext;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::SLED_AGENT_UUID;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::SledInstance;
-use nexus_types::external_api::views::{PhysicalDisk, Sled};
+use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::sled::Sled;
+use nexus_types::external_api::sled::SledInstance;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
@@ -66,7 +67,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let addr = cptestctx.server.get_http_server_internal_address();
         let update_directory = Utf8Path::new("/should/not/be/used");
         sas.push(
             start_sled_agent(
@@ -119,7 +120,7 @@ async fn test_physical_disk_create_list_delete(
     // Inject a disk into the database, observe it in the external API
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
+    let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
     let physical_disk = DbPhysicalDisk::new(
         PhysicalDiskUuid::new_v4(),
         "v".into(),
@@ -182,7 +183,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pools(&external_client).await;
     let project = create_project(&external_client, "test-project").await;
     let instance =
         create_instance(&external_client, "test-project", "test-instance")

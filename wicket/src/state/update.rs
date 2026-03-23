@@ -94,7 +94,7 @@ impl RackUpdateState {
         }
     }
 
-    pub fn item_state(&self, component: ComponentId) -> UpdateItemState {
+    pub fn item_state(&self, component: ComponentId) -> UpdateItemState<'_> {
         if self.artifacts.is_empty() {
             UpdateItemState::AwaitingRepository
         } else {

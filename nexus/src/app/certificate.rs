@@ -4,8 +4,6 @@
 
 //! x.509 Certificates
 
-use crate::external_api::params;
-use crate::external_api::shared;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -13,6 +11,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_types::external_api::certificate;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::InternalContext;
@@ -40,7 +39,7 @@ impl super::Nexus {
     pub(crate) async fn certificate_create(
         &self,
         opctx: &OpContext,
-        params: params::CertificateCreate,
+        params: certificate::CertificateCreate,
     ) -> CreateResult<db::model::Certificate> {
         let authz_silo = opctx
             .authn
@@ -78,7 +77,7 @@ impl super::Nexus {
             .await?;
 
         match kind {
-            shared::ServiceUsingCertificate::ExternalApi => {
+            certificate::ServiceUsingCertificate::ExternalApi => {
                 // TODO We could improve the latency of other Nexus instances
                 // noticing this certificate change with an explicit request to
                 // them.  Today, Nexus instances generally don't talk to each

@@ -3,21 +3,23 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
+use crate::DbTypedUuid;
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::sled::shared::Baseboard;
+use crate::sled_cpu_family::SledCpuFamily;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, sled, zpool};
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::execution;
 use nexus_types::{
-    external_api::{shared, views},
+    external_api::{hardware, sled as sled_types},
     identity::Asset,
     internal_api::params,
 };
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -40,12 +42,14 @@ pub struct SledSystemHardware {
 
     // current VMM reservoir size
     pub reservoir_size: ByteCount,
+
+    pub cpu_family: SledCpuFamily,
 }
 
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = sled)]
-// TODO-cleanup: use #[asset(uuid_kind = SledKind)]
+#[asset(uuid_kind = SledKind)]
 pub struct Sled {
     #[diesel(embed)]
     pub identity: SledIdentity,
@@ -84,6 +88,16 @@ pub struct Sled {
 
     // ServiceAddress (Repo Depot API). Uses `ip`.
     pub repo_depot_port: SqlU16,
+
+    /// The family of this sled's CPU.
+    ///
+    /// This is primarily useful for questions about instance CPU platform
+    /// compatibility; it is too broad for topology-related sled selection
+    /// and more precise than a more general report of microarchitecture. We
+    /// likely should include much more about the sled's CPU alongside this for
+    /// those broader questions and reporting (see
+    /// <https://github.com/oxidecomputer/omicron/issues/8730> for examples).
+    pub cpu_family: SledCpuFamily,
 }
 
 impl Sled {
@@ -111,9 +125,9 @@ impl Sled {
         &self.part_number
     }
 
-    /// The policy here is the `views::SledPolicy` because we expect external
+    /// The policy here is the `sled_types::SledPolicy` because we expect external
     /// users to always use that.
-    pub fn policy(&self) -> views::SledPolicy {
+    pub fn policy(&self) -> sled_types::SledPolicy {
         self.policy.into()
     }
 
@@ -127,12 +141,12 @@ impl Sled {
     }
 }
 
-impl From<Sled> for views::Sled {
+impl From<Sled> for sled_types::Sled {
     fn from(sled: Sled) -> Self {
         Self {
             identity: sled.identity(),
             rack_id: sled.rack_id,
-            baseboard: shared::Baseboard {
+            baseboard: hardware::Baseboard {
                 serial: sled.serial_number,
                 part: sled.part_number,
                 revision: *sled.revision,
@@ -148,7 +162,7 @@ impl From<Sled> for views::Sled {
 impl From<Sled> for execution::Sled {
     fn from(sled: Sled) -> Self {
         Self::new(
-            SledUuid::from_untyped_uuid(sled.id()),
+            sled.id(),
             sled.policy(),
             sled.address(),
             *sled.repo_depot_port,
@@ -176,7 +190,7 @@ impl From<Sled> for params::SledAgentInfo {
             sa_address: sled.address(),
             repo_depot_port: sled.repo_depot_port.into(),
             role,
-            baseboard: Baseboard {
+            baseboard: hardware::Baseboard {
                 serial: sled.serial_number.clone(),
                 part: sled.part_number.clone(),
                 revision: *sled.revision,
@@ -185,13 +199,14 @@ impl From<Sled> for params::SledAgentInfo {
             usable_physical_ram: sled.usable_physical_ram.into(),
             reservoir_size: sled.reservoir_size.into(),
             generation: sled.sled_agent_gen.into(),
+            cpu_family: sled.cpu_family.into(),
             decommissioned,
         }
     }
 }
 
 impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SledKind>;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = physical_disk::dsl::id;
@@ -199,7 +214,7 @@ impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
 
 // TODO: Can we remove this? We have one for physical disks now.
 impl DatastoreCollectionConfig<super::Zpool> for Sled {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SledKind>;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
@@ -209,7 +224,7 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
 /// columns that are present in `Sled` because sled-agent doesn't control them.
 #[derive(Debug, Clone)]
 pub struct SledUpdate {
-    id: Uuid,
+    id: SledUuid,
 
     pub rack_id: Uuid,
 
@@ -229,13 +244,15 @@ pub struct SledUpdate {
     // ServiceAddress (Repo Depot API). Uses `ip`.
     pub repo_depot_port: SqlU16,
 
+    pub cpu_family: SledCpuFamily,
+
     // Generation number - owned and incremented by sled-agent.
     pub sled_agent_gen: Generation,
 }
 
 impl SledUpdate {
     pub fn new(
-        id: Uuid,
+        id: SledUuid,
         addr: SocketAddrV6,
         repo_depot_port: u16,
         baseboard: SledBaseboard,
@@ -258,6 +275,7 @@ impl SledUpdate {
             ip: addr.ip().into(),
             port: addr.port().into(),
             repo_depot_port: repo_depot_port.into(),
+            cpu_family: hardware.cpu_family,
             sled_agent_gen,
         }
     }
@@ -296,10 +314,11 @@ impl SledUpdate {
             repo_depot_port: self.repo_depot_port,
             last_used_address,
             sled_agent_gen: self.sled_agent_gen,
+            cpu_family: self.cpu_family,
         }
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> SledUuid {
         self.id
     }
 
@@ -327,24 +346,38 @@ impl SledUpdate {
 /// A set of constraints that can be placed on operations that select a sled.
 #[derive(Clone, Debug)]
 pub struct SledReservationConstraints {
-    must_select_from: Vec<Uuid>,
+    must_select_from: Vec<SledUuid>,
+    cpu_families: Vec<SledCpuFamily>,
 }
 
 impl SledReservationConstraints {
     /// Creates a constraint set with no constraints in it.
     pub fn none() -> Self {
-        Self { must_select_from: Vec::new() }
+        Self { must_select_from: Vec::new(), cpu_families: Vec::new() }
     }
 
     /// If the constraints include a set of sleds that the caller must select
     /// from, returns `Some` and a slice containing the members of that set.
     ///
     /// If no "must select from these" constraint exists, returns None.
-    pub fn must_select_from(&self) -> Option<&[Uuid]> {
+    pub fn must_select_from(&self) -> Option<&[SledUuid]> {
         if self.must_select_from.is_empty() {
             None
         } else {
             Some(&self.must_select_from)
+        }
+    }
+
+    /// If the constraints include a list of acceptable sled CPU families,
+    /// returns `Some` and a slice containing the members of that set.
+    ///
+    /// If no "must select a sled with one of these CPUs" constraint exists,
+    /// returns None.
+    pub fn cpu_families(&self) -> Option<&[SledCpuFamily]> {
+        if self.cpu_families.is_empty() {
+            None
+        } else {
+            Some(&self.cpu_families)
         }
     }
 }
@@ -364,8 +397,13 @@ impl SledReservationConstraintBuilder {
     /// Adds a "must select from the following sled IDs" constraint. If such a
     /// constraint already exists, appends the supplied sled IDs to the "must
     /// select from" list.
-    pub fn must_select_from(mut self, sled_ids: &[Uuid]) -> Self {
+    pub fn must_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
         self.constraints.must_select_from.extend(sled_ids);
+        self
+    }
+
+    pub fn cpu_families(mut self, families: &[SledCpuFamily]) -> Self {
+        self.constraints.cpu_families.extend(families);
         self
     }
 
@@ -383,10 +421,7 @@ mod diesel_util {
         query_dsl::methods::FilterDsl,
     };
     use nexus_db_schema::schema::sled::{sled_policy, sled_state};
-    use nexus_types::{
-        deployment::SledFilter,
-        external_api::views::{SledPolicy, SledState},
-    };
+    use nexus_types::deployment::SledFilter;
 
     /// An extension trait to apply a [`SledFilter`] to a Diesel expression.
     ///
@@ -412,11 +447,10 @@ mod diesel_util {
             use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
             // These are only boxed for ease of reference above.
-            let all_matching_policies: BoxedIterator<DbSledPolicy> = Box::new(
-                SledPolicy::all_matching(filter).map(to_db_sled_policy),
-            );
+            let all_matching_policies: BoxedIterator<DbSledPolicy> =
+                Box::new(filter.all_matching_policies().map(to_db_sled_policy));
             let all_matching_states: BoxedIterator<crate::SledState> =
-                Box::new(SledState::all_matching(filter).map(Into::into));
+                Box::new(filter.all_matching_states().map(Into::into));
 
             FilterDsl::filter(
                 self,

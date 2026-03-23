@@ -5,8 +5,9 @@
 use super::InstanceIntendedState as IntendedState;
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState, Vmm, VmmState,
+    InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
+use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
 use chrono::{DateTime, TimeDelta, Utc};
@@ -15,8 +16,8 @@ use diesel::expression::{ValidGrouping, is_aggregate};
 use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
-use nexus_db_schema::schema::{disk, external_ip, instance};
-use nexus_types::external_api::params;
+use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
+use nexus_types::external_api::instance as instance_types;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -44,6 +45,31 @@ pub struct Instance {
     /// user data for instance initialization systems (e.g. cloud-init)
     pub user_data: Vec<u8>,
 
+    /// The time at which the runtime state was last updated. This is distinct
+    /// from the time the record was last modified, because some updates don't
+    /// modify the runtime state.
+    #[diesel(column_name = time_state_updated)]
+    pub time_state_updated: DateTime<Utc>,
+
+    /// The generation number for the information stored in the runtime state,
+    /// including the fallback state, the instance's active Propolis ID, and its
+    /// migration IDs.
+    #[diesel(column_name = state_generation)]
+    pub state_generation: Generation,
+
+    /// The ID of the Propolis server hosting the current incarnation of this
+    /// instance, or None if the instance has no active VMM.
+    #[diesel(column_name = active_propolis_id)]
+    pub propolis_id: Option<Uuid>,
+
+    /// If a migration is in progress, the ID of the target Propolis server.
+    #[diesel(column_name = target_propolis_id)]
+    pub dst_propolis_id: Option<Uuid>,
+
+    /// If a migration is in progress, a UUID identifying that migration.
+    #[diesel(column_name = migration_id)]
+    pub migration_id: Option<Uuid>,
+
     /// The number of vCPUs (i.e., virtual logical processors) to allocate for
     /// this instance.
     #[diesel(column_name = ncpus)]
@@ -60,25 +86,6 @@ pub struct Instance {
     // type.
     #[diesel(column_name = hostname)]
     pub hostname: String,
-
-    #[diesel(embed)]
-    pub auto_restart: InstanceAutoRestart,
-
-    /// The primary boot disk for this instance.
-    #[diesel(column_name = boot_disk_id)]
-    pub boot_disk_id: Option<Uuid>,
-
-    #[diesel(embed)]
-    pub runtime_state: InstanceRuntimeState,
-
-    /// The most recently requested state of the instance.
-    ///
-    /// This is used to determine whether the instance should be automatically
-    /// restarted when it fails. Instances that were requested to stop should
-    /// not be automatically restarted if they have transitioned to the `Failed`
-    /// state.
-    #[diesel(column_name = intended_state)]
-    pub intended_state: IntendedState,
 
     /// A UUID identifying the saga currently holding the update lock on this
     /// instance. If this is [`None`] the instance is not locked. Otherwise, if
@@ -97,6 +104,38 @@ pub struct Instance {
     /// lock was not held is still valid when setting the lock ID.
     #[diesel(column_name = updater_gen)]
     pub updater_gen: Generation,
+
+    /// The "internal" state of this instance. The instance's externally-visible
+    /// state may be delegated to the instance's active VMM, if it has one.
+    #[diesel(column_name = state)]
+    pub nexus_state: InstanceState,
+
+    /// The timestamp of the most recent auto-restart attempt, or `None` if this
+    /// instance has never been auto-restarted by the control plane.
+    #[diesel(column_name = time_last_auto_restarted)]
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
+
+    #[diesel(embed)]
+    pub auto_restart: InstanceAutoRestart,
+
+    /// The primary boot disk for this instance.
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
+
+    /// The most recently requested state of the instance.
+    ///
+    /// This is used to determine whether the instance should be automatically
+    /// restarted when it fails. Instances that were requested to stop should
+    /// not be automatically restarted if they have transitioned to the `Failed`
+    /// state.
+    #[diesel(column_name = intended_state)]
+    pub intended_state: IntendedState,
+
+    /// The instance's required CPU platform. If this is `None`, Nexus will not
+    /// constrain placement decisions by CPU platform. Instead, after selecting
+    /// a sled by any other constraints the instance will be incarnated with the
+    /// most general CPU platform supported by the selected sled.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 impl Instance {
@@ -105,17 +144,13 @@ impl Instance {
     pub fn new(
         instance_id: InstanceUuid,
         project_id: Uuid,
-        params: &params::InstanceCreate,
+        params: &instance_types::InstanceCreate,
     ) -> Self {
         let identity = InstanceIdentity::new(
             instance_id.into_untyped_uuid(),
             params.identity.clone(),
         );
-
-        let runtime_state = InstanceRuntimeState::new(
-            InstanceState::Creating,
-            identity.time_modified,
-        );
+        let creation_time = identity.time_modified;
 
         let auto_restart = InstanceAutoRestart {
             policy: params.auto_restart_policy.map(Into::into),
@@ -132,24 +167,58 @@ impl Instance {
             identity,
             project_id,
             user_data: params.user_data.clone(),
+            time_state_updated: creation_time,
+            state_generation: Generation::new(),
+            propolis_id: None,
+            dst_propolis_id: None,
+            migration_id: None,
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
+            updater_id: None,
+            updater_gen: Generation::new(),
+            nexus_state: InstanceState::Creating,
+            time_last_auto_restarted: None,
             auto_restart,
             // Intentionally ignore `params.boot_disk_id` here: we can't set
             // `boot_disk_id` until the referenced disk is attached.
             boot_disk_id: None,
-
-            runtime_state,
             intended_state,
-
-            updater_gen: Generation::new(),
-            updater_id: None,
+            cpu_platform: params.cpu_platform.map(Into::into),
         }
     }
 
-    pub fn runtime(&self) -> &InstanceRuntimeState {
-        &self.runtime_state
+    /// Returns the runtime state of this instance.
+    pub fn runtime(&self) -> InstanceRuntimeState {
+        InstanceRuntimeState {
+            time_updated: self.time_state_updated,
+            generation: self.state_generation,
+            propolis_id: self.propolis_id,
+            dst_propolis_id: self.dst_propolis_id,
+            migration_id: self.migration_id,
+            nexus_state: self.nexus_state,
+            time_last_auto_restarted: self.time_last_auto_restarted,
+        }
+    }
+
+    /// Sets the runtime state of this instance.
+    pub fn set_runtime(&mut self, new_runtime: InstanceRuntimeState) {
+        let InstanceRuntimeState {
+            time_updated,
+            generation,
+            propolis_id,
+            dst_propolis_id,
+            migration_id,
+            nexus_state,
+            time_last_auto_restarted,
+        } = new_runtime;
+        self.time_state_updated = time_updated;
+        self.state_generation = generation;
+        self.propolis_id = propolis_id;
+        self.dst_propolis_id = dst_propolis_id;
+        self.migration_id = migration_id;
+        self.nexus_state = nexus_state;
+        self.time_last_auto_restarted = time_last_auto_restarted;
     }
 
     /// Returns an instance's karmic status.
@@ -157,14 +226,14 @@ impl Instance {
         &self,
         active_vmm: Option<&Vmm>,
     ) -> InstanceKarmicStatus {
-        let state = &self.runtime_state;
+        let runtime = self.runtime();
         // Instances only need to be automatically restarted if they are in the
         // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
         //
         // If the instance's intended state is not Running, it should
         // not be reincarnated, even if it has failed.
         let needs_reincarnation =
-            match (self.intended_state, state.nexus_state, active_vmm) {
+            match (self.intended_state, self.nexus_state, active_vmm) {
                 (IntendedState::Running, InstanceState::Failed, _vmm) => {
                     debug_assert!(
                         _vmm.is_none(),
@@ -174,7 +243,7 @@ impl Instance {
                 }
                 (IntendedState::Running, InstanceState::Vmm, Some(ref vmm)) => {
                     debug_assert_eq!(
-                        state.propolis_id,
+                        self.propolis_id,
                         Some(vmm.id),
                         "don't call `Instance::auto_restart_status` with a VMM \
                          that isn't this instance's active VMM!?!?"
@@ -182,14 +251,14 @@ impl Instance {
                     // Note that we *don't* reincarnate instances with `Failed` active
                     // VMMs; in that case, an instance-update saga must first run to
                     // move the *instance* record to the `Failed` state.
-                    vmm.runtime.state == VmmState::SagaUnwound
+                    vmm.state == VmmState::SagaUnwound
                 }
                 _ => false,
             };
 
         InstanceKarmicStatus {
             needs_reincarnation,
-            can_reincarnate: self.auto_restart.can_reincarnate(&state),
+            can_reincarnate: self.auto_restart.can_reincarnate(&runtime),
         }
     }
 }
@@ -216,6 +285,17 @@ impl DatastoreAttachTargetConfig<ExternalIp> for Instance {
     type ResourceIdColumn = external_ip::dsl::id;
     type ResourceCollectionIdColumn = external_ip::dsl::parent_id;
     type ResourceTimeDeletedColumn = external_ip::dsl::time_deleted;
+}
+
+impl DatastoreAttachTargetConfig<ExternalSubnet> for Instance {
+    type Id = Uuid;
+
+    type CollectionIdColumn = instance::dsl::id;
+    type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
+
+    type ResourceIdColumn = external_subnet::dsl::id;
+    type ResourceCollectionIdColumn = external_subnet::dsl::instance_id;
+    type ResourceTimeDeletedColumn = external_subnet::dsl::time_deleted;
 }
 
 /// Runtime state of the Instance, including the actual running state and minimal
@@ -247,7 +327,8 @@ pub struct InstanceRuntimeState {
     /// including the fallback state, the instance's active Propolis ID, and its
     /// migration IDs.
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -284,20 +365,6 @@ pub struct InstanceRuntimeState {
     /// This field is guarded by the instance's `gen`.
     #[diesel(column_name = time_last_auto_restarted)]
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
-}
-
-impl InstanceRuntimeState {
-    fn new(initial_state: InstanceState, creation_time: DateTime<Utc>) -> Self {
-        Self {
-            nexus_state: initial_state,
-            time_updated: creation_time,
-            propolis_id: None,
-            dst_propolis_id: None,
-            migration_id: None,
-            gen: Generation::new(),
-            time_last_auto_restarted: None,
-        }
-    }
 }
 
 /// Configuration for automatic instance restarts.
@@ -368,9 +435,9 @@ pub enum Reincarnatability {
 
 impl InstanceAutoRestart {
     /// The default cooldown used when an instance has no overridden cooldown.
-    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
+    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_minutes(5) {
         Some(delta) => delta,
-        None => unreachable!(), // 1 hour should be representable...
+        None => unreachable!(), // 5 minutes should be representable...
     };
 
     /// The default policy used when an instance does not override the
@@ -493,4 +560,6 @@ pub struct InstanceUpdate {
     pub ncpus: InstanceCpuCount,
 
     pub memory: ByteCount,
+
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }

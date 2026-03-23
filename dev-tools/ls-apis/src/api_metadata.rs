@@ -11,6 +11,9 @@ use crate::ServerPackageName;
 use crate::cargo::DepPath;
 use crate::workspaces::Workspaces;
 use anyhow::{Result, bail};
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -27,6 +30,7 @@ pub struct AllApiMetadata {
     deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
+    intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
 }
 
 impl AllApiMetadata {
@@ -68,6 +72,13 @@ impl AllApiMetadata {
     /// Progenitor-based clients
     pub fn ignored_non_clients(&self) -> &BTreeSet<ClientPackageName> {
         &self.ignored_non_clients
+    }
+
+    /// Returns the list of intra-deployment-unit-only edges
+    pub fn intra_deployment_unit_only_edges(
+        &self,
+    ) -> &[IntraDeploymentUnitOnlyEdge] {
+        &self.intra_deployment_unit_only_edges
     }
 
     /// Returns how we should filter the given dependency
@@ -135,6 +146,7 @@ struct RawApiMetadata {
     deployment_units: Vec<DeploymentUnitInfo>,
     dependency_filter_rules: Vec<DependencyFilterRule>,
     ignored_non_clients: Vec<ClientPackageName>,
+    intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -185,8 +197,30 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         for client_pkg in raw.ignored_non_clients {
             if !ignored_non_clients.insert(client_pkg.clone()) {
                 bail!(
-                    "entry in ignored_non_clients appearead twice: {:?}",
+                    "entry in ignored_non_clients appeared twice: {:?}",
                     &client_pkg
+                );
+            }
+        }
+
+        // Validate that IDU-only edges reference only known server components
+        // and APIs.
+        let known_components: BTreeSet<_> =
+            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
+        for edge in &raw.intra_deployment_unit_only_edges {
+            if !known_components.contains(&edge.server) {
+                bail!(
+                    "intra_deployment_unit_only_edges: \
+                     unknown server component {:?}",
+                    edge.server
+                );
+            }
+
+            if !apis.contains_key(&edge.client) {
+                bail!(
+                    "intra_deployment_unit_only_edges: \
+                     unknown client {:?}",
+                    edge.client,
                 );
             }
         }
@@ -196,6 +230,8 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             deployment_units,
             dependency_rules,
             ignored_non_clients,
+            intra_deployment_unit_only_edges: raw
+                .intra_deployment_unit_only_edges,
         })
     }
 }
@@ -228,6 +264,13 @@ pub struct ApiMetadata {
     pub label: String,
     /// package name of the server that provides the corresponding API
     pub server_package_name: ServerPackageName,
+    /// expected consumers (Rust packages) that use this API
+    ///
+    /// By default, we don't make any assertions about expected consumers. But
+    /// some APIs must have a fixed list of consumers, and we assert on that
+    /// via this array.
+    #[serde(default)]
+    pub restricted_to_consumers: ApiExpectedConsumers,
     /// human-readable notes about this API
     pub notes: Option<String>,
     /// describes how we've decided this API will be versioned
@@ -246,6 +289,121 @@ impl ApiMetadata {
     pub fn deployed(&self) -> bool {
         !self.dev_only
     }
+}
+
+/// Expected consumers (Rust packages) for an API.
+#[derive(Debug, Default)]
+pub enum ApiExpectedConsumers {
+    /// This API has no configured restrictions on which consumers can use it.
+    #[default]
+    Unrestricted,
+    /// This API is restricted to exactly these consumers.
+    Restricted(IdOrdMap<ApiExpectedConsumer>),
+}
+
+impl ApiExpectedConsumers {
+    pub fn status(
+        &self,
+        server_pkgname: &ServerComponentName,
+    ) -> ApiConsumerStatus {
+        match self {
+            ApiExpectedConsumers::Unrestricted => {
+                ApiConsumerStatus::NoAssertion
+            }
+            ApiExpectedConsumers::Restricted(consumers) => {
+                if let Some(consumer) =
+                    consumers.iter().find(|c| c.name == *server_pkgname)
+                {
+                    ApiConsumerStatus::Expected {
+                        reason: consumer.reason.clone(),
+                    }
+                } else {
+                    ApiConsumerStatus::Unexpected
+                }
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ApiExpectedConsumers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        struct ApiExpectedConsumersVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ApiExpectedConsumersVisitor {
+            type Value = ApiExpectedConsumers;
+
+            fn expecting(
+                &self,
+                formatter: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                formatter.write_str(
+                    "null (for no assertions) or a list of Rust package names",
+                )
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(ApiExpectedConsumers::Unrestricted)
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(ApiExpectedConsumers::Unrestricted)
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                // Note IdOrdMap deserializes as a sequence by default.
+                let consumers = IdOrdMap::<ApiExpectedConsumer>::deserialize(
+                    serde::de::value::SeqAccessDeserializer::new(seq),
+                )?;
+                Ok(ApiExpectedConsumers::Restricted(consumers))
+            }
+        }
+
+        deserializer.deserialize_any(ApiExpectedConsumersVisitor)
+    }
+}
+
+/// Describes a single allowed consumer for an API.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApiExpectedConsumer {
+    /// The name of the Rust package.
+    pub name: ServerComponentName,
+    /// The reason this consumer is allowed.
+    pub reason: String,
+}
+
+impl IdOrdItem for ApiExpectedConsumer {
+    type Key<'a> = &'a ServerComponentName;
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+    id_upcast!();
+}
+
+/// The status of an API consumer that was discovered by walking the Cargo
+/// metadata graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiConsumerStatus {
+    /// No assertions were made about this API consumer.
+    NoAssertion,
+    /// The API consumer is expected to be used.
+    Expected { reason: String },
+    /// The API consumer was not expected. This is an error case.
+    Unexpected,
 }
 
 /// Describes a unit that combines one or more servers that get deployed
@@ -290,4 +448,31 @@ pub enum Evaluation {
     NonDag,
     /// This dependency should be part of the update DAG
     Dag,
+}
+
+/// An edge that should be excluded from the deployment unit dependency graph
+/// because it represents communication that only happens locally within a
+/// single instance of a single deployment unit.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntraDeploymentUnitOnlyEdge {
+    /// The server component that consumes the API.
+    pub server: ServerComponentName,
+    /// The client package consumed.
+    pub client: ClientPackageName,
+    /// Explanation of why this edge is intra-deployment-unit-only.
+    pub note: String,
+    /// Permalinks to source code referenced by `note`
+    pub permalinks: Vec<String>,
+}
+
+impl IntraDeploymentUnitOnlyEdge {
+    /// Returns true if this rule matches the given (server, client) pair.
+    pub fn matches(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        self.server == *server && self.client == *client
+    }
 }

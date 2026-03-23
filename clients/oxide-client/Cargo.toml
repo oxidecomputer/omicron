@@ -1,7 +1,7 @@
 [package]
 name = "oxide-client"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -19,10 +19,11 @@ progenitor.workspace = true
 progenitor-client.workspace = true
 rand.workspace = true
 regress.workspace = true
-reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
+reqwest = { workspace = true, features = [ "json", "rustls", "stream" ] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "net" ] }
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true

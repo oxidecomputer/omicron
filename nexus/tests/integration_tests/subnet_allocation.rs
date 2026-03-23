@@ -13,17 +13,20 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     InstanceNetworkInterface,
 };
 use oxnet::Ipv4Net;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =
@@ -36,8 +39,8 @@ async fn create_instance_expect_failure(
     subnet_name: &str,
 ) -> HttpErrorResponseBody {
     let network_interfaces =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
-            params::InstanceNetworkInterfaceCreate {
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
+            instance::InstanceNetworkInterfaceCreate {
                 identity: IdentityMetadataCreateParams {
                     // We're using the name of the instance purposefully, to
                     // avoid any naming conflicts on the interface.
@@ -46,10 +49,10 @@ async fn create_instance_expect_failure(
                 },
                 vpc_name: "default".parse().unwrap(),
                 subnet_name: subnet_name.parse().unwrap(),
-                ip: None,
+                ip_config: PrivateIpStackCreate::auto_ipv4(),
             },
         ]);
-    let new_instance = params::InstanceCreate {
+    let new_instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: name.parse().unwrap(),
             description: "".to_string(),
@@ -63,9 +66,11 @@ async fn create_instance_expect_failure(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     };
 
     NexusRequest::new(
@@ -88,7 +93,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
     create_project(&client, project_name).await;
     let url_instances = format!("/v1/instances?project={}", project_name);
 
@@ -106,7 +111,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
     let subnet = Ipv4Net::new(network_address, subnet_size)
         .expect("Invalid IPv4 network");
-    let subnet_create = params::VpcSubnetCreate {
+    let subnet_create = vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet_name.parse().unwrap(),
             description: String::from("a small subnet"),
@@ -125,15 +130,15 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // The valid addresses for allocation in `subnet` are 192.168.42.5 and
     // 192.168.42.6. The rest are reserved as described in RFD21.
     const SUBNET_NAME: &str = "small";
-    let nic = params::InstanceNetworkInterfaceAttachment::Create(vec![
-        params::InstanceNetworkInterfaceCreate {
+    let nic = instance::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "eth0".parse().unwrap(),
                 description: String::from("some iface"),
             },
             vpc_name: "default".parse().unwrap(),
             subnet_name: SUBNET_NAME.parse().unwrap(),
-            ip: None,
+            ip_config: PrivateIpStackCreate::auto_ipv4(),
         },
     ]);
 
@@ -151,11 +156,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             &format!("i{}", i),
             &nic,
             // Disks=
-            Vec::<params::InstanceDiskAttachment>::new(),
+            Vec::<instance::InstanceDiskAttachment>::new(),
             // External IPs=
-            Vec::<params::ExternalIpCreate>::new(),
+            Vec::<instance::ExternalIpCreate>::new(),
             true,
             Default::default(),
+            None,
+            Vec::new(),
         )
         .await;
     }
@@ -169,8 +176,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert!(error.message.starts_with(&format!(
-        "No available IP addresses for interface in \
-        subnet '{SUBNET_NAME}' with ID '"
+        "No available IPv4 addresses for interface \
+        in subnet '{SUBNET_NAME}' with ID '"
     )));
 
     // Verify the subnet lists the two addresses as in use
@@ -184,14 +191,22 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             .items;
     assert_eq!(network_interfaces.len(), subnet_size);
 
-    // Sort by IP address to simplify the checks
-    network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
+    // Sort by IP address(es) to simplify the checks.
+    network_interfaces.sort_by(|a, b| {
+        a.ip_stack
+            .ipv4_addr()
+            .cmp(&b.ip_stack.ipv4_addr())
+            .then(a.ip_stack.ipv6_addr().cmp(&b.ip_stack.ipv6_addr()))
+    });
     for (iface, addr) in network_interfaces
         .iter()
         .zip(subnet.addr_iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
-            iface.ip, addr,
+            IpAddr::V4(
+                *iface.ip_stack.ipv4_addr().expect("Expected an IPv4 stack")
+            ),
+            addr,
             "Nexus should provide auto-assigned IP addresses in order within an IP subnet"
         );
     }
