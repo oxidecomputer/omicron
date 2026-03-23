@@ -1613,6 +1613,8 @@ fn push_instance_state_verification_subquery<'a>(
 /// `parent_id` and `interface_id` as strings in this type.
 ///
 /// The `instance` CTE is only present if the interface is an instance-kind.
+///
+/// See `tests/output/delete_vnic_*_query.sql` for the full generated SQL.
 #[derive(Debug, Clone)]
 pub struct DeleteQuery {
     interface_id: Uuid,
@@ -1724,6 +1726,11 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_bind_param::<sql_types::Text, &str>(
             &DeleteError::HAS_SECONDARIES_SENTINEL,
         )?;
+        // `found_interface` selects the interface (even if deleted) and
+        // `updated` performs the actual soft-delete. The final SELECT
+        // LEFT JOINs them so the caller can distinguish three cases:
+        // (found + deleted) = success, (found + NULL) = existed but
+        // couldn't delete, (NULL + NULL) = not found.
         out.push_sql(") AS UUID) AS ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql("), found_interface AS (SELECT ");
