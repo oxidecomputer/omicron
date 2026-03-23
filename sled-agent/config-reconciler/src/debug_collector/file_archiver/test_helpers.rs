@@ -259,7 +259,7 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 } else {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
                 }
-            } else if s.contains("/var/debug_drop") {
+            } else if s.contains(oxide_debug_dropbox::DEBUG_DROPBOX_PATH) {
                 // XXX-dap find constant for this
                 Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
             } else {

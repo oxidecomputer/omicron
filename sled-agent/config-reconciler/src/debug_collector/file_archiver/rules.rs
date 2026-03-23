@@ -114,6 +114,14 @@ static VAR_ADM: &str = "var/adm";
 ///   (rules should not specify overlapping files)
 /// * that all rules are covered by the test data
 pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
+    // unwrap(): DEBUG_DROPBOX_PATH is a path under `/`.  We should never fail
+    // to strip the leading '/'.
+    let debug_dropbox: Utf8PathBuf =
+        Utf8Path::new(oxide_debug_dropbox::DEBUG_DROPBOX_PATH)
+            .strip_prefix("/")
+            .unwrap()
+            .to_owned();
+    assert!(debug_dropbox.is_relative());
     let rules = [
         Rule {
             label: "process core files",
@@ -158,7 +166,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
         Rule {
             label: "debug dropbox",
             rule_scope: RuleScope::ZoneAlways,
-            directory: "var/debug_drop".parse().unwrap(),
+            directory: debug_dropbox,
             regex: "^.*$".parse().unwrap(),
             delete_original: true,
             naming: &NameDropbox,
@@ -318,7 +326,6 @@ impl NamingRule for NameDropbox {
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error> {
-        // XXX-dap sync with RFD
         let mtime_as_seconds =
             source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
         for i in 0..MAX_COLLIDING_FILENAMES {
@@ -345,6 +352,6 @@ impl NamingRule for NameDropbox {
         //
         // unwrap(): this static str is a valid Filename
         // (no slashes, not '.' or '..')
-        Some(Filename::try_from("debug_drop".to_string()).unwrap())
+        Some(Filename::try_from("debug_dropbox".to_string()).unwrap())
     }
 }
