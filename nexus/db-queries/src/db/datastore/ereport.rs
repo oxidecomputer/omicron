@@ -255,106 +255,6 @@ impl DataStore {
         .select(EreporterRestart::as_select())
     }
 
-    /// Recognize a new restart ID for the reporter at a given location, if one
-    /// has not already been recorded.
-    ///
-    /// Reporter restarts are tracked for each unique tuple of `(reporter_type,
-    /// slot_type, slot)`. When a never-before-seen restart ID is inserted, it
-    /// is assigned the next generation number for that location. Inserting a
-    /// restart ID for a given location is idempotent; recording the same ID
-    /// multiple times will have no effect. However, attempting to insert an ID
-    /// that already exists at a _different_ location returns an error.
-    pub async fn ereporter_restart_insert(
-        &self,
-        opctx: &OpContext,
-        reporter_type: nexus_db_model::EreporterType,
-        slot_type: SpType,
-        slot: SpMgsSlot,
-        restart_id: EreporterRestartUuid,
-    ) -> CreateResult<()> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        let query = Self::restart_insert_query(
-            reporter_type,
-            slot_type,
-            slot.into(),
-            restart_id,
-        );
-        query
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(())
-    }
-
-    fn restart_insert_query(
-        reporter_type: nexus_db_model::EreporterType,
-        slot_type: SpType,
-        slot: SqlU16,
-        restart_id: EreporterRestartUuid,
-    ) -> TypedSqlQuery<sql_types::BigInt> {
-        let mut builder = QueryBuilder::new();
-        builder
-            .sql(
-                "WITH previous AS ( \
-                    SELECT generation \
-                    FROM omicron.public.ereporter_restart \
-                    WHERE reporter_type = ",
-            )
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql(" AND slot_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql(" AND slot = ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(
-                "
-                    ORDER BY generation DESC \
-                    LIMIT 1 \
-                )
-                INSERT INTO omicron.public.ereporter_restart ( \
-                    id, \
-                    generation, \
-                    reporter_type, \
-                    slot_type, \
-                    slot, \
-                    time_first_seen \
-                ) SELECT  ",
-            )
-            .param()
-            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
-            .sql(", COALESCE((SELECT generation FROM previous) + 1, 0), ")
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql(", ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql(", ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(", NOW() ")
-            // This is the idempotency bit...
-            .sql(
-                "WHERE NOT EXISTS ( \
-                    SELECT 1 FROM ereporter_restart WHERE id = ",
-            )
-            .param()
-            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
-            .sql(" AND reporter_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql(" AND slot_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql(" AND slot = ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(")");
-        builder.query()
-    }
-
     pub async fn latest_ereport_id(
         &self,
         opctx: &OpContext,
@@ -458,6 +358,109 @@ impl DataStore {
                 ))
             })?;
         Ok((created, latest))
+    }
+
+    /// Recognize a new restart ID for the reporter at a given location, if one
+    /// has not already been recorded.
+    ///
+    /// Reporter restarts are tracked for each unique tuple of `(reporter_type,
+    /// slot_type, slot)`. When a never-before-seen restart ID is inserted, it
+    /// is assigned the next generation number for that location. Inserting a
+    /// restart ID for a given location is idempotent; recording the same ID
+    /// multiple times will have no effect. However, attempting to insert an ID
+    /// that already exists at a _different_ location returns an error.
+    ///
+    /// This method returns `true` if the restart ID was not previously
+    /// recorded, and `false` if it was already known.
+    pub async fn ereporter_restart_insert(
+        &self,
+        opctx: &OpContext,
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SpMgsSlot,
+        restart_id: EreporterRestartUuid,
+    ) -> CreateResult<bool> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let query = Self::restart_insert_query(
+            reporter_type,
+            slot_type,
+            slot.into(),
+            restart_id,
+        );
+        let inserted = query
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(inserted != 0)
+    }
+
+    fn restart_insert_query(
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SqlU16,
+        restart_id: EreporterRestartUuid,
+    ) -> TypedSqlQuery<sql_types::BigInt> {
+        let mut builder = QueryBuilder::new();
+        builder
+            .sql(
+                "WITH previous AS ( \
+                    SELECT generation \
+                    FROM omicron.public.ereporter_restart \
+                    WHERE reporter_type = ",
+            )
+            .param()
+            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
+            .sql(" AND slot_type = ")
+            .param()
+            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
+            .sql(" AND slot = ")
+            .param()
+            .bind::<sql_types::Int4, _>(slot)
+            .sql(
+                "
+                    ORDER BY generation DESC \
+                    LIMIT 1 \
+                )
+                INSERT INTO omicron.public.ereporter_restart ( \
+                    id, \
+                    generation, \
+                    reporter_type, \
+                    slot_type, \
+                    slot, \
+                    time_first_seen \
+                ) SELECT  ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
+            .sql(", COALESCE((SELECT generation FROM previous) + 1, 0), ")
+            .param()
+            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
+            .sql(", ")
+            .param()
+            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
+            .sql(", ")
+            .param()
+            .bind::<sql_types::Int4, _>(slot)
+            .sql(", NOW() ")
+            // This is the idempotency bit...
+            .sql(
+                "WHERE NOT EXISTS ( \
+                    SELECT 1 FROM ereporter_restart WHERE id = ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
+            .sql(" AND reporter_type = ")
+            .param()
+            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
+            .sql(" AND slot_type = ")
+            .param()
+            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
+            .sql(" AND slot = ")
+            .param()
+            .bind::<sql_types::Int4, _>(slot)
+            .sql(")");
+        builder.query()
     }
 }
 
