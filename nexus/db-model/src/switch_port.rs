@@ -38,6 +38,7 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use uuid::Uuid;
 
 /// Extension trait on [`RouterPeerType`] for converting it to and from the way
@@ -1029,15 +1030,21 @@ impl SwitchPortAddressConfig {
         port_settings_id: Uuid,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
-        address: IpNetwork,
+        address: UplinkAddress,
         interface_name: Name,
         vlan_id: Option<u16>,
     ) -> Self {
+        // TODO-cleanup `switch_port_settings_address_config.address` is not
+        // nullable; we store addrconf addresses as the sentinel value `::/128`.
+        // We should consider reworking this to be consistent with BGP peers
+        // (e.g., store addrconf as `NULL`):
+        // https://github.com/oxidecomputer/omicron/issues/9832#issuecomment-4092974372
+        let address = address.ip_net_squashing_addrconf_to_unspecified();
         Self {
             port_settings_id,
             address_lot_block_id,
             rsvd_address_lot_block_id,
-            address,
+            address: address.into(),
             interface_name,
             vlan_id: vlan_id.map(|x| x.into()),
         }

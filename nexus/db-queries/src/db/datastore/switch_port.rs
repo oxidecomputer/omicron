@@ -1665,30 +1665,11 @@ async fn do_switch_port_settings_create(
                     ReserveBlockTxnError::Database(e) => e,
                 })?;
 
-            // We called try_reserve_block with a single address, so it should
-            // give us back a reserved block containing only that address.
-            let rsvd_address =
-                if rsvd_block.first_address == rsvd_block.last_address {
-                    rsvd_block.first_address
-                } else {
-                    return Err(err.bail(
-                        SwitchPortSettingsCreateError::InternalError(format!(
-                            "try_reserve_block() called with one address \
-                             ({:?}) returned a reserved block ({}) covering \
-                             multiple addresses: {}..={}",
-                            address.address,
-                            rsvd_block.id,
-                            rsvd_block.first_address,
-                            rsvd_block.last_address,
-                        )),
-                    ));
-                };
-
             address_config.push(SwitchPortAddressConfig::new(
                 psid,
                 block.id,
                 rsvd_block.id,
-                rsvd_address,
+                address.address,
                 a.link_name.clone().into(),
                 address.vlan_id,
             ));
@@ -2026,18 +2007,22 @@ mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::networking::{
+        Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
+    };
+    use nexus_types::external_api::networking::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, Name, NameOrId,
+        AddressLotKind, IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerType;
     use sled_agent_types::early_networking::SwitchSlot;
-    use std::{collections::HashMap, str::FromStr};
+    use sled_agent_types::early_networking::UplinkAddress;
+    use std::collections::HashMap;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -2050,6 +2035,28 @@ mod test {
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
         let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
+        let phy0: Name = "phy0".parse().expect("parse phy0");
+
+        let address_lot_id = datastore
+            .address_lot_create(
+                &opctx,
+                &AddressLotCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-address-lot".parse().expect("parse name"),
+                        description: "test address lot".to_owned(),
+                    },
+                    kind: AddressLotKind::Infra,
+                    blocks: vec![AddressLotBlockCreate {
+                        first_address: "::".parse().unwrap(),
+                        last_address: "ffff::".parse().unwrap(),
+                    }],
+                },
+            )
+            .await
+            .expect("address lot create")
+            .lot
+            .identity
+            .id;
 
         let port_result = datastore
             .switch_port_create(&opctx, rack_id, switch0, qsfp0.into())
@@ -2096,8 +2103,7 @@ mod test {
             interfaces: vec![],
             routes: vec![],
             bgp_peers: vec![BgpPeerConfig {
-                link_name: Name::from_str("phy0")
-                    .expect("phy0 should be a valid link name"),
+                link_name: phy0.clone(),
                 peers: vec![
                     BgpPeer {
                         bgp_config: bgp_config.identity.name.clone().into(),
@@ -2150,7 +2156,30 @@ mod test {
                     },
                 ],
             }],
-            addresses: vec![],
+            addresses: vec![AddressConfig {
+                link_name: phy0.clone(),
+                addresses: vec![
+                    Address {
+                        address_lot: address_lot_id.into(),
+                        address: UplinkAddress::AddrConf,
+                        vlan_id: None,
+                    },
+                    Address {
+                        address_lot: address_lot_id.into(),
+                        address: UplinkAddress::Static {
+                            ip_net: "fd00:1234::/64".parse().unwrap(),
+                        },
+                        vlan_id: Some(123),
+                    },
+                    Address {
+                        address_lot: address_lot_id.into(),
+                        address: UplinkAddress::Static {
+                            ip_net: "fd00:4567::/96".parse().unwrap(),
+                        },
+                        vlan_id: None,
+                    },
+                ],
+            }],
         };
 
         let settings_result = datastore
@@ -2305,21 +2334,31 @@ mod test {
             }
         }
 
-        assert_eq!(settings.addresses.len(), db_settings.addresses.len());
+        assert_eq!(
+            settings.addresses[0].addresses.len(),
+            db_settings.addresses.len()
+        );
         let mut db_addresses = HashMap::new();
 
         for address in db_settings.addresses {
-            db_addresses.insert(address.interface_name.clone(), address);
+            db_addresses.insert(address.address, address);
         }
 
         for config in settings.addresses {
-            let db_address = db_addresses
-                .get(&config.link_name)
-                .expect("requested address should be present");
-
             for address in config.addresses {
-                assert_eq!(db_address.address, address.address);
+                let expected_address =
+                    address.address.ip_net_squashing_addrconf_to_unspecified();
 
+                let db_address = match db_addresses.get(&expected_address) {
+                    Some(db_address) => db_address,
+                    None => panic!(
+                        "expected {expected_address:?} to be present \
+                         in db_addresses: {:?}",
+                        db_addresses.keys().collect::<Vec<_>>()
+                    ),
+                };
+
+                assert_eq!(db_address.address, expected_address,);
                 assert_eq!(db_address.vlan_id, address.vlan_id);
 
                 match address.address_lot {
