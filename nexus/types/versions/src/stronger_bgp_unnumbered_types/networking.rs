@@ -18,6 +18,7 @@
 //!   * [`SwitchPortSettings`]
 //!   * [`SwitchPortSettingsCreate`]
 
+use crate::v2025_11_20_00::networking::SwitchPortAddressView;
 use crate::v2025_11_20_00::networking::{
     AddressConfig, LinkConfigCreate, RouteConfig, SwitchInterfaceConfigCreate,
     SwitchPortConfigCreate,
@@ -355,7 +356,7 @@ pub struct SwitchPortSettings {
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl From<SwitchPortSettings>

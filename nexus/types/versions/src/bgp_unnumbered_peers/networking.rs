@@ -16,6 +16,7 @@
 //! - `SwitchPortSettings` updated to use the new `BgpPeer`
 //! - `SwitchPortSettingsCreate` updated to use the new `BgpPeerConfig`.
 
+use crate::v2025_11_20_00::networking::SwitchPortAddressView;
 use crate::v2025_12_12_00::networking::BgpPeerState;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
@@ -335,7 +336,7 @@ pub struct SwitchPortSettings {
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl TryFrom<SwitchPortSettings>
