@@ -33,6 +33,8 @@ use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_03_06_01;
+use nexus_types_versions::v2026_04_16_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -81,6 +83,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_20_00, STRONGER_UPLINK_ADDRESS_TYPES),
     (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
@@ -4469,7 +4472,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
-        versions = VERSION_SWITCH_SLOT_ENUM..,
+        versions = VERSION_STRONGER_UPLINK_ADDRESS_TYPES..,
     }]
     async fn networking_loopback_address_create(
         rqctx: RequestContext<Self::Context>,
@@ -4480,6 +4483,34 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::LoopbackAddress>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_loopback_address_create",
+        method = POST,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
+    }]
+    async fn networking_loopback_address_create_v2026_03_06_01(
+        rqctx: RequestContext<Self::Context>,
+        new_loopback_address: TypedBody<
+            v2026_03_06_01::networking::LoopbackAddressCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_03_06_01::networking::LoopbackAddress>,
+        HttpError,
+    > {
+        let new_loopback_address =
+            new_loopback_address.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?;
+        Self::networking_loopback_address_create(rqctx, new_loopback_address)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     /// Create loopback address
     #[endpoint {
@@ -4500,9 +4531,12 @@ pub trait NexusExternalApi {
     > {
         let new_loopback_address =
             new_loopback_address.try_map(TryInto::try_into)?;
-        Self::networking_loopback_address_create(rqctx, new_loopback_address)
-            .await
-            .map(|response| response.map(From::from))
+        Self::networking_loopback_address_create_v2026_03_06_01(
+            rqctx,
+            new_loopback_address,
+        )
+        .await
+        .map(|response| response.map(From::from))
     }
 
     /// Delete loopback address
@@ -4538,7 +4572,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
-        versions = VERSION_SWITCH_SLOT_ENUM..,
+        versions = VERSION_STRONGER_UPLINK_ADDRESS_TYPES..,
     }]
     async fn networking_loopback_address_list(
         rqctx: RequestContext<Self::Context>,
@@ -4547,6 +4581,32 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::networking::LoopbackAddress>>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_loopback_address_list",
+        method = GET,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
+    }]
+    async fn networking_loopback_address_list_v2026_03_06_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_03_06_01::networking::LoopbackAddress>,
+        >,
+        HttpError,
+    > {
+        Self::networking_loopback_address_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// List loopback addresses
     #[endpoint {
@@ -4565,14 +4625,17 @@ pub trait NexusExternalApi {
         >,
         HttpError,
     > {
-        Self::networking_loopback_address_list(rqctx, query_params).await.map(
-            |response| {
-                response.map(|page| ResultsPage {
-                    next_page: page.next_page,
-                    items: page.items.into_iter().map(From::from).collect(),
-                })
-            },
+        Self::networking_loopback_address_list_v2026_03_06_01(
+            rqctx,
+            query_params,
         )
+        .await
+        .map(|response| {
+            response.map(|page| ResultsPage {
+                next_page: page.next_page,
+                items: page.items.into_iter().map(From::from).collect(),
+            })
+        })
     }
 
     /// Create switch port settings
@@ -4580,7 +4643,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        versions = VERSION_STRONGER_UPLINK_ADDRESS_TYPES..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -4589,6 +4652,35 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
+    }]
+    async fn networking_switch_port_settings_create_v2026_03_18_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_04_16_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_04_16_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+        .map(|response| response.map(From::from))
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
@@ -4606,7 +4698,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create(
+        Self::networking_switch_port_settings_create_v2026_03_18_00(
             rqctx,
             new_settings.try_map(TryFrom::try_from).map_err(|err| {
                 HttpError::for_bad_request(

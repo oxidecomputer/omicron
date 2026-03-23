@@ -25,7 +25,6 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
-use oxnet::Ipv6Net;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
@@ -210,20 +209,6 @@ impl UplinkAddress {
         match self {
             UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             UplinkAddress::Static { ip_net } => ip_net.addr(),
-        }
-    }
-
-    /// Squash this address down to an [`IpNet`] address by converting
-    /// [`UplinkAddress::AddrConf`] to `::/128`.
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_net_squashing_addrconf_to_unspecified(&self) -> IpNet {
-        match *self {
-            UplinkAddress::AddrConf => {
-                IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
-            }
-            UplinkAddress::Static { ip_net } => ip_net.into(),
         }
     }
 

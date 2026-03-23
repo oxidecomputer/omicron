@@ -8,7 +8,7 @@ use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types_versions::v1::early_networking::BfdMode;
 use std::net::IpAddr;
 
 #[derive(

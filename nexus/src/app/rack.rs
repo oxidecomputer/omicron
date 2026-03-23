@@ -550,11 +550,7 @@ impl super::Nexus {
                 .iter()
                 .map(|a| networking::Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    // TODO-cleanup Extend stronger types out to the external
-                    // API (omicron#9832).
-                    address: a
-                        .address
-                        .ip_net_squashing_addrconf_to_unspecified(),
+                    address: a.address,
                     vlan_id: a.vlan_id,
                 })
                 .collect();

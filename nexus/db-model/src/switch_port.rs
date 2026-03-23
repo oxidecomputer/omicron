@@ -1044,18 +1044,6 @@ impl SwitchPortAddressConfig {
     }
 }
 
-impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
-    fn into(self) -> external::SwitchPortAddressConfig {
-        external::SwitchPortAddressConfig {
-            port_settings_id: self.port_settings_id,
-            address_lot_block_id: self.address_lot_block_id,
-            address: self.address.into(),
-            interface_name: self.interface_name.into(),
-            vlan_id: self.vlan_id.map(|x| x.into()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
