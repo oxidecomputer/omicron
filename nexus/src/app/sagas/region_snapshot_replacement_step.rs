@@ -47,6 +47,7 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::db::datastore;
 use crate::app::db::datastore::ExistingTarget;
 use crate::app::db::datastore::ReplacementTarget;
 use crate::app::db::datastore::VolumeReplaceResult;
@@ -398,49 +399,12 @@ async fn rsrss_replace_snapshot_in_volume_undo(
 
 async fn notify_potential_propolis_upstairs(
     sagactx: NexusActionContext,
-    disk: nexus_db_model::Disk,
+    disk: datastore::CrucibleDisk,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
-
-    // If the associated volume was deleted, then skip this notification step as
-    // there is no Upstairs to talk to. Continue with the saga to transition the
-    // step request to Complete, and then perform the associated clean up.
-
-    let volume_replace_snapshot_result = sagactx
-        .lookup::<VolumeReplaceResult>("volume_replace_snapshot_result")?;
-    if matches!(
-        volume_replace_snapshot_result,
-        VolumeReplaceResult::ExistingVolumeSoftDeleted
-            | VolumeReplaceResult::ExistingVolumeHardDeleted
-    ) {
-        return Ok(());
-    }
-
-    // Make an effort to notify a Propolis if one was booted for this volume.
-    // This is best effort: if there is a failure, this saga will unwind and be
-    // triggered again for the same request. If there is no Propolis booted for
-    // this volume, then there's nothing to be done: any future Propolis will
-    // receive the updated Volume.
-    //
-    // Unlike for region replacement, there's no step required here if there
-    // isn't an active Propolis: any Upstairs created after the snapshot_addr
-    // is replaced will reference the cloned data.
-
-    let Some(disk) = osagactx
-        .datastore()
-        .disk_for_volume_id(params.request.volume_id())
-        .await
-        .map_err(saga_action_failed)?
-    else {
-        return Ok(());
-    };
-
-    let Some(instance_id) = disk.runtime().attach_instance_id else {
-        return Ok(());
-    };
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -600,8 +564,8 @@ async fn notify_potential_propolis_upstairs(
         }
 
         propolis_client::types::ReplaceResult::Missing => {
-            // The volume does not contain the region to be replaced. This is an
-            // error!
+            // The volume does not contain the read-only target to be replaced.
+            // This is an error!
             return Err(saga_action_failed(Error::internal_error(
                 "saw ReplaceResult::Missing",
             )));
@@ -633,17 +597,17 @@ async fn notify_pantry_upstairs(
     let volume_construction_request = match datastore
         .volume_get(params.request.volume_id())
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
         Some(volume) => serde_json::from_str(&volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to deserialize volume {} data: {e}",
                 volume.id()
             )))
         })?,
 
         None => {
-            return Err(ActionError::action_failed(Error::internal_error(
+            return Err(saga_action_failed(Error::internal_error(
                 "new volume is gone!",
             )));
         }
@@ -660,7 +624,7 @@ async fn notify_pantry_upstairs(
         .replace(&attachment_id.to_string(), &replace_request)
         .await
         .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
+            saga_action_failed(Error::internal_error(&e.to_string()))
         })?;
 
     match replace_result.into_inner() {
@@ -685,8 +649,8 @@ async fn notify_pantry_upstairs(
         crucible_pantry_client::types::ReplaceResult::Missing => {
             // The volume does not contain the read-only target to be replaced.
             // This is an error!
-            return Err(ActionError::action_failed(String::from(
-                "saw ReplaceResult::Missing",
+            return Err(saga_action_failed(Error::internal_error(
+                String::from("saw ReplaceResult::Missing"),
             )));
         }
     }
@@ -733,7 +697,7 @@ async fn rsrss_notify_upstairs(
         .datastore()
         .disk_for_volume_id(params.request.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let maybe_user_data_export = osagactx
         .datastore()
@@ -742,18 +706,20 @@ async fn rsrss_notify_upstairs(
             params.request.volume_id(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     if let Some(disk) = maybe_disk {
         notify_potential_propolis_upstairs(sagactx, disk).await?;
     } else if let Some(record) = maybe_user_data_export {
         let (pantry_address, volume_id) = match record.is_live() {
             Err(s) => {
-                // There was an error with a Live user data export that means we
-                // have to unwind here. This will likely require support
-                // intervention, as the record is in state Live but does not
-                // have either a Pantry address or volume id.
-                return Err(ActionError::action_failed(s.to_string()));
+                // There was an error with a Live user data export record that
+                // means we have to unwind here. This will likely require
+                // support intervention, as the record is in state Live but does
+                // not have either a Pantry address or volume id.
+                return Err(saga_action_failed(Error::internal_error(
+                    s.to_string(),
+                )));
             }
 
             Ok(UserDataExport::NotLive) => {
