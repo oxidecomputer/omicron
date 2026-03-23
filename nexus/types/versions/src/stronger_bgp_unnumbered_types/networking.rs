@@ -8,7 +8,7 @@
 //!   * [`BgpPeer::addr`] is now [`RouterPeerType`] instead of
 //!     `Option<IpAddr>` (which permitted three distinct representations of
 //!     "unnumbered": `None`, `Some(0.0.0.0)`, and `Some(::)`).
-//!   * [`BgpPeer::router_lifetime`] moved from being a top-level field to being
+//!   * `BgpPeer::router_lifetime` moved from being a top-level field to being
 //!     nested inside the [`RouterPeerType::Unnumbered`] variant, and its type
 //!     is now [`RouterLifetimeConfig`] instead of `u16`, adding enforcement of
 //!     bounds.
