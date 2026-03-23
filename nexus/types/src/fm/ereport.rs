@@ -160,7 +160,7 @@ impl EreportData {
 #[serde(tag = "reporter")]
 pub enum Reporter {
     Sp { sp_type: SpType, slot: u16 },
-    HostOs { sled: SledUuid },
+    HostOs { sled: SledUuid, slot: Option<u16> },
 }
 
 impl fmt::Display for Reporter {
@@ -171,8 +171,11 @@ impl fmt::Display for Reporter {
             Self::Sp { sp_type: sp_type @ SpType::Sled, slot } => {
                 write!(f, "{sp_type} {slot:<2} (SP)")
             }
-            Self::HostOs { sled } => {
-                write!(f, "{} {sled:?} (OS)", SpType::Sled)
+            Self::HostOs { sled, slot: Some(slot) } => {
+                write!(f, "{} {slot:<2} (OS) ({sled})", SpType::Sled)
+            }
+            Self::HostOs { sled, slot: None } => {
+                write!(f, "{} ?? (OS) ({sled})", SpType::Sled)
             }
             Self::Sp { sp_type, slot } => {
                 write!(f, "{sp_type} {slot}")
