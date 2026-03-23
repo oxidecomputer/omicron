@@ -8,8 +8,10 @@
 //!   * [`BgpPeer::addr`] is now [`RouterPeerType`] instead of
 //!     `Option<IpAddr>` (which permitted three distinct representations of
 //!     "unnumbered": `None`, `Some(0.0.0.0)`, and `Some(::)`).
-//!   * [`BgpPeer::router_lifetime`] is now [`RouterLifetimeConfig`] instead of
-//!     `u16`, adding enforcement of bounds.
+//!   * [`BgpPeer::router_lifetime`] moved from being a top-level field to being
+//!     nested inside the [`RouterPeerType::Unnumbered`] variant, and its type
+//!     is now [`RouterLifetimeConfig`] instead of `u16`, adding enforcement of
+//!     bounds.
 //! * Remove `BgpPeer::interface_name` (omicron#10104).
 //! * Define new versions of types that transitively include [`BgpPeer`]:
 //!   * [`BgpPeerConfig`]
@@ -127,9 +129,9 @@ pub fn router_peer_type_try_from_old_representation(
             Ok(RouterPeerType::Unnumbered { router_lifetime })
         }
 
-        // Unexpected cases: If `value.peer` is `Some(UNSPECIFIED)`, we'll
-        // treat that as `unnumbered`, because `UNSPECIFIED` was previously
-        // used as the sentinel value for unnumbered peers. For any other
+        // Unexpected cases: If `ip` is `Some(UNSPECIFIED)`, we'll treat that as
+        // `unnumbered`, because `UNSPECIFIED` was previously used as the
+        // sentinel value for unnumbered peers in some contexts. For any other
         // error case, we want to reject this conversion - the peer IP isn't
         // valid.
         Some(Err(err)) => match err.err {

@@ -49,7 +49,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use uuid::Uuid;
 
-/// This is a wrapper around [`networking::BgpPeer`], with two additions:
+/// This is a wrapper around [`networking::BgpPeer`], with three additions:
 ///
 /// * [`BgpPeerFromDb::bgp_config_id`] is guaranteed to be an ID, unlike the
 ///   inner [`networking::BgpPeer::bgp_config`] which might be an ID or might be

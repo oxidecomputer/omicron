@@ -632,14 +632,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let ttl = peer.min_ttl;
 
                         // Determine if this is a numbered or unnumbered peer
-                        // (None or unspecified address = unnumbered)
-                        //
                         // TODO pass non-squashed IP to datastore methods
                         let peer_addr = peer
                             .addr
                             .ip_squashing_unnumbered_to_none();
 
-                        // Numbered peer - identified by address
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
@@ -802,6 +799,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                         match peer.addr {
+                            // Numbered peer - identified by address
                             RouterPeerType::Numbered { ip } => {
                                 // now that the peer passes the above validations, add it to the list for configuration
                                 let peer_config = BgpPeerConfig {
@@ -851,10 +849,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     },
                                 }
                             }
+                            // Unnumbered peer - identified by interface
                             RouterPeerType::Unnumbered { router_lifetime } => {
-                                // Unnumbered peer - identified by interface
-                                // For unnumbered peers, we use NoFiltering policies as the
-                                // communities/import/export tables are keyed by address
                                 let peer_config = UnnumberedBgpPeerConfig {
                                     name: format!("unnumbered-{}", port.port_name),
                                     interface: format!("tfport{}_0", port.port_name),
