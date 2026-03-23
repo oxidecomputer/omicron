@@ -179,9 +179,13 @@ Then use the local variables in the `.bind()` calls.
 
 ## Output format
 
+**IMPORTANT: Output the entire report inside a single fenced code block** using FOUR backticks (```` ```` ````) with no language tag, so that the Markdown is not rendered and can be copy-pasted into another tool. Do not render the Markdown directly. Four backticks are required because the report contains triple-backtick code sketches inside it — a triple-backtick outer fence would be closed by the first inner code block.
+
+**Use soft line wrapping for all prose text in the report.** Do not insert hard line breaks in the middle of sentences or paragraphs. Write each paragraph as a single long line and let the reader's tool wrap it. Hard line breaks are only appropriate inside fenced code blocks.
+
 Structure the report as follows:
 
-```
+````
 ## Type Safety Review
 
 ### Mode
@@ -202,7 +206,7 @@ Structure the report as follows:
 
 ### Summary
 X blocking issues, Y suggestions.
-```
+````
 
 If there are no findings at all, say so clearly and briefly.
 
