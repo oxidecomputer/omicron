@@ -1267,7 +1267,6 @@ async fn do_switch_port_settings_create(
         Some(id) => SwitchPortSettings::with_id(id, &params.identity),
         None => SwitchPortSettings::new(&params.identity),
     };
-    //let port_settings = SwitchPortSettings::new(&params.identity);
     let db_port_settings: SwitchPortSettings =
         diesel::insert_into(port_settings_dsl::switch_port_settings)
             .values(port_settings.clone())
@@ -1912,6 +1911,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerType;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::{collections::HashMap, str::FromStr};
@@ -1975,29 +1975,57 @@ mod test {
             bgp_peers: vec![BgpPeerConfig {
                 link_name: Name::from_str("phy0")
                     .expect("phy0 should be a valid link name"),
-                peers: vec![BgpPeer {
-                    bgp_config: NameOrId::Name(
-                        "test-bgp-config".parse().unwrap(),
-                    ),
-                    addr: RouterPeerType::Numbered {
-                        ip: "192.168.1.1".parse().unwrap(),
+                peers: vec![
+                    BgpPeer {
+                        bgp_config: bgp_config.identity.name.clone().into(),
+                        addr: RouterPeerType::Numbered {
+                            ip: "192.168.1.1".parse().unwrap(),
+                        },
+                        hold_time: 0,
+                        idle_hold_time: 0,
+                        delay_open: 0,
+                        connect_retry: 0,
+                        keepalive: 0,
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::Allow(vec![
+                            "fd00::/64".parse().unwrap(),
+                            "192.168.1.0/24".parse().unwrap(),
+                        ]),
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
                     },
-                    hold_time: 0,
-                    idle_hold_time: 0,
-                    delay_open: 0,
-                    connect_retry: 0,
-                    keepalive: 0,
-                    remote_asn: None,
-                    min_ttl: None,
-                    md5_auth_key: None,
-                    multi_exit_discriminator: None,
-                    communities: Vec::new(),
-                    local_pref: None,
-                    enforce_first_as: false,
-                    allowed_export: ImportExportPolicy::NoFiltering,
-                    allowed_import: ImportExportPolicy::NoFiltering,
-                    vlan_id: None,
-                }],
+                    BgpPeer {
+                        bgp_config: bgp_config.identity.name.clone().into(),
+                        addr: RouterPeerType::Unnumbered {
+                            router_lifetime: RouterLifetimeConfig::new(123)
+                                .unwrap(),
+                        },
+                        hold_time: 0,
+                        idle_hold_time: 0,
+                        delay_open: 0,
+                        connect_retry: 0,
+                        keepalive: 0,
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::Allow(vec![
+                            "fd00:1234::/64".parse().unwrap(),
+                            "192.168.3.0/24".parse().unwrap(),
+                        ]),
+                        vlan_id: None,
+                    },
+                ],
             }],
             addresses: vec![],
         };
@@ -2182,19 +2210,26 @@ mod test {
             }
         }
 
-        assert_eq!(settings.bgp_peers.len(), db_settings.bgp_peers.len());
-        let mut db_peers = HashMap::new();
+        assert_eq!(
+            settings.bgp_peers[0].peers.len(),
+            db_settings.bgp_peers.len()
+        );
 
-        for peer in db_settings.bgp_peers {
-            db_peers.insert(peer.interface_name.clone(), peer);
-        }
+        // Build a map of peer address -> peer so we can pair the db peers up
+        // with our settings in the loop below.
+        let db_peers = db_settings
+            .bgp_peers
+            .into_iter()
+            .map(|peer| (peer.inner.addr, peer))
+            .collect::<HashMap<_, _>>();
 
         for config in settings.bgp_peers {
-            let db_peer = db_peers
-                .get(&config.link_name)
-                .expect("requested peer should be present");
-
             for mut peer in config.peers {
+                let mut db_peer = db_peers
+                    .get(&peer.addr)
+                    .expect("requested peer should be present")
+                    .clone();
+
                 match peer.bgp_config {
                     NameOrId::Id(id) => {
                         assert_eq!(db_peer.bgp_config_id, id);
@@ -2220,6 +2255,27 @@ mod test {
                 // we can compare the rest of the struct at once, since
                 // `db_peer.inner.bgp_config` is always populated with an ID.
                 peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
+
+                // TODO-correctness `ImportExportPolicy::Allow(_)` should
+                // probably use `BTreeSet<_>` instead of `Vec<_>`; for now, sort
+                // both so our comparison below doesn't fail spuriously due to
+                // "same contents, different order".
+                //
+                // https://github.com/oxidecomputer/omicron/issues/10121
+                for policy in [
+                    &mut peer.allowed_import,
+                    &mut peer.allowed_export,
+                    &mut db_peer.inner.allowed_import,
+                    &mut db_peer.inner.allowed_export,
+                ] {
+                    match policy {
+                        ImportExportPolicy::NoFiltering => (),
+                        ImportExportPolicy::Allow(ip_nets) => {
+                            ip_nets.sort_unstable();
+                        }
+                    }
+                }
+
                 assert_eq!(peer, db_peer.inner);
             }
         }
