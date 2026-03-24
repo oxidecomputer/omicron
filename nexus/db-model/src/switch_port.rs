@@ -23,7 +23,7 @@ use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::{InvalidIpAddrError, PortFec};
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
@@ -846,7 +846,7 @@ pub struct SwitchPortAddressConfig {
     pub port_settings_id: Uuid,
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
-    pub address: IpNetwork,
+    address: IpNetwork,
     pub interface_name: Name,
     pub vlan_id: Option<SqlU16>,
 }
@@ -874,5 +874,15 @@ impl SwitchPortAddressConfig {
             interface_name,
             vlan_id: vlan_id.map(|x| x.into()),
         }
+    }
+
+    /// Return the address of this address config.
+    ///
+    /// Only fails if we've stored invalid data in the DB (i.e., an address that
+    /// contains an IP that we don't allow for uplink addresses).
+    pub fn address(&self) -> Result<UplinkAddress, InvalidIpAddrError> {
+        UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(
+            self.address.into(),
+        )
     }
 }

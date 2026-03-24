@@ -425,12 +425,6 @@ impl DataStore {
         opctx: &OpContext,
         name_or_id: &NameOrId,
     ) -> LookupResult<SwitchPortSettingsCombinedResult> {
-        #[derive(Debug)]
-        enum SwitchPortSettingsGetError {
-            NotFound(NameOrId),
-            InternalError(String),
-        }
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -729,7 +723,11 @@ impl DataStore {
                         .load_async::<SwitchPortAddressConfig>(&conn)
                         .await?;
 
-                result.addresses = switch_port_address_view(&conn, addresses).await?;
+                result.addresses = switch_port_address_view(
+                    &conn,
+                    addresses,
+                    err,
+                ).await?;
 
                 Ok(result)
             }
@@ -1241,6 +1239,32 @@ impl From<SwitchPortSettingsCreateError> for Error {
     }
 }
 
+#[derive(Debug)]
+enum SwitchPortSettingsGetError {
+    NotFound(NameOrId),
+    InternalError(String),
+}
+
+// Helper trait that lets functions accept either
+// `OptionalError<SwitchPortSettingsCreateError>` or
+// `OptionalError<SwitchPortSettingsGetError>` if the only error variant they
+// need to produce is `*::InternalError(reason)`.
+trait SwitchPortSettingsInternalError: std::fmt::Debug {
+    fn internal_error(reason: String) -> Self;
+}
+
+impl SwitchPortSettingsInternalError for SwitchPortSettingsCreateError {
+    fn internal_error(reason: String) -> Self {
+        Self::InternalError(reason)
+    }
+}
+
+impl SwitchPortSettingsInternalError for SwitchPortSettingsGetError {
+    fn internal_error(reason: String) -> Self {
+        Self::InternalError(reason)
+    }
+}
+
 async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
     id: Option<Uuid>,
@@ -1673,15 +1697,19 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    result.addresses = switch_port_address_view(conn, addresses).await?;
+    result.addresses = switch_port_address_view(conn, addresses, err).await?;
 
     Ok(result)
 }
 
-async fn switch_port_address_view(
+async fn switch_port_address_view<E>(
     conn: &Connection<DTraceConnection<PgConnection>>,
     addresses: Vec<SwitchPortAddressConfig>,
-) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error> {
+    err: OptionalError<E>,
+) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error>
+where
+    E: SwitchPortSettingsInternalError,
+{
     use nexus_db_schema::schema::{address_lot, address_lot_block};
 
     let mut result = vec![];
@@ -1698,12 +1726,25 @@ async fn switch_port_address_view(
             .first_async::<AddressLot>(conn)
             .await?;
 
+        // Converting the address back to an `UplinkAddress` should never fail;
+        // convert it to an internal error if it does.
+        let uplink_address = match address.address() {
+            Ok(uplink_address) => uplink_address,
+            Err(reason) => {
+                return Err(err.bail(E::internal_error(format!(
+                    "invalid IP address in SwitchPortAddressConfig \
+                     {address:?}: {}",
+                    InlineErrorChain::new(&reason),
+                ))));
+            }
+        };
+
         result.push(networking::SwitchPortAddressView {
             port_settings_id: address.port_settings_id,
             address_lot_id: lot.id(),
             address_lot_name: lot.name().clone(),
             address_lot_block_id: address.address_lot_block_id,
-            address: address.address.into(),
+            address: uplink_address,
             vlan_id: address.vlan_id.map(Into::into),
             interface_name: address.interface_name.into(),
         })
@@ -2243,19 +2284,17 @@ mod test {
 
         for config in settings.addresses {
             for address in config.addresses {
-                let expected_address =
-                    address.address.ip_net_squashing_addrconf_to_unspecified();
-
-                let db_address = match db_addresses.get(&expected_address) {
+                let db_address = match db_addresses.get(&address.address) {
                     Some(db_address) => db_address,
                     None => panic!(
-                        "expected {expected_address:?} to be present \
+                        "expected {:?} to be present \
                          in db_addresses: {:?}",
+                        address.address,
                         db_addresses.keys().collect::<Vec<_>>()
                     ),
                 };
 
-                assert_eq!(db_address.address, expected_address,);
+                assert_eq!(db_address.address, address.address);
                 assert_eq!(db_address.vlan_id, address.vlan_id);
 
                 match address.address_lot {

@@ -10,7 +10,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
 use omicron_common::address::MGD_PORT;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::{SwitchSlot, UplinkAddress};
 use std::{
     collections::HashMap,
     net::{Ipv6Addr, SocketAddrV6},
@@ -97,8 +97,10 @@ pub(crate) fn api_to_dpd_port_settings(
                 addrs: settings
                     .addresses
                     .iter()
-                    .filter(|a| !a.address.addr().is_unspecified())
-                    .map(|a| a.address.addr())
+                    .filter_map(|a| match a.address {
+                        UplinkAddress::AddrConf => None,
+                        UplinkAddress::Static { ip_net } => Some(ip_net.addr()),
+                    })
                     .collect(),
             },
         );
