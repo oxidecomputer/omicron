@@ -887,6 +887,10 @@ impl DataStore {
                             db_peer::addr
                                 .is_not_distinct_from(addr.ip_db_repr()),
                         )
+                        .filter(
+                            db_peer::interface_name
+                                .eq(interface_name.to_string()),
+                        )
                         .select(db_peer::allow_export_list_active)
                         .limit(1)
                         .first_async::<bool>(&conn)
@@ -972,6 +976,10 @@ impl DataStore {
                         .filter(
                             db_peer::addr
                                 .is_not_distinct_from(addr.ip_db_repr()),
+                        )
+                        .filter(
+                            db_peer::interface_name
+                                .eq(interface_name.to_string()),
                         )
                         .select(db_peer::allow_import_list_active)
                         .limit(1)
