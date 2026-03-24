@@ -354,7 +354,8 @@ impl DataStore {
                 )
                 .await
                 .map_err(|e| {
-                    e.internal_context("failed to insert ereporter restart")
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert ereporter restart")
                 })?;
             if new_restart {
                 slog::info!(
@@ -415,7 +416,7 @@ impl DataStore {
         slot_type: SpType,
         slot: SpMgsSlot,
         restart_id: EreporterRestartUuid,
-    ) -> CreateResult<bool> {
+    ) -> Result<bool, diesel::result::Error> {
         let inserted = Self::restart_insert_query(
             reporter_type,
             slot_type,
@@ -423,8 +424,7 @@ impl DataStore {
             restart_id,
         )
         .execute_async(conn)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        .await?;
         Ok(inserted != 0)
     }
 
@@ -1058,10 +1058,19 @@ mod tests {
                 restart_id_1,
             )
             .await;
-        result.expect_err(
-            "inserting the same restart_id at a different location \
-             should fail with a primary-key conflict",
-        );
+        match result {
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => {
+                // this the one that should happen
+            }
+            something_else => panic!(
+                "inserting the same restart_id at a different location \
+                 should fail with a primary-key conflict (but it returned \
+                 {something_else:?} instead)",
+            ),
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
