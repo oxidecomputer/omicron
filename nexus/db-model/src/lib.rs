@@ -23,8 +23,10 @@
 //!
 //! Consider the `vmm` table. The schema declares columns and SQL types:
 //!
-//! ```rust,ignore
+//! ```
+//! # use diesel::table;
 //! // in nexus-db-schema (nexus/db-schema/src/schema.rs)
+//! // (in the real file, `nexus_db_schema::enums` is just `crate::enums`)
 //! table! {
 //!     vmm (id) {
 //!         id -> Uuid,
@@ -36,15 +38,22 @@
 //!         sled_id -> Uuid,
 //!         propolis_ip -> Inet,
 //!         propolis_port -> Int4,
-//!         state -> crate::enums::VmmStateEnum,
-//!         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
+//!         state -> nexus_db_schema::enums::VmmStateEnum,
+//!         cpu_platform -> nexus_db_schema::enums::VmmCpuPlatformEnum,
 //!     }
 //! }
 //! ```
 //!
 //! The model struct provides the Rust representation of a row:
 //!
-//! ```rust,ignore
+//! ```
+//! # use nexus_db_schema::schema::vmm;
+//! # use nexus_db_model::{Generation, SqlU16, VmmState, VmmCpuPlatform};
+//! # use omicron_uuid_kinds::SledKind;
+//! # use chrono::{DateTime, Utc};
+//! # use uuid::Uuid;
+//! # use diesel::prelude::*;
+//! # use nexus_db_model::DbTypedUuid;
 //! // in nexus-db-model (nexus/db-model/src/vmm.rs)
 //! #[derive(Queryable, Selectable, Insertable)]
 //! #[diesel(table_name = vmm)]
