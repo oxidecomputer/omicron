@@ -22,11 +22,12 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::v1::instance::InstanceMetadata;
-use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
 use crate::v10;
 use crate::v18;
 use crate::v18::attached_subnet::AttachedSubnet;
+use crate::v29;
+use crate::v29::instance::VmmSpec;
 
 /// VPC firewall rule after object name resolution has been performed by Nexus.
 //
@@ -117,16 +118,16 @@ pub struct InstanceSledLocalConfig {
     pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
-impl From<v18::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v18: v18::instance::InstanceEnsureBody) -> Self {
+impl From<v29::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(old: v29::instance::InstanceEnsureBody) -> Self {
         Self {
-            vmm_spec: v18.vmm_spec,
-            local_config: v18.local_config.into(),
-            vmm_runtime: v18.vmm_runtime,
-            instance_id: v18.instance_id,
-            migration_id: v18.migration_id,
-            propolis_addr: v18.propolis_addr,
-            metadata: v18.metadata,
+            vmm_spec: old.vmm_spec,
+            local_config: old.local_config.into(),
+            vmm_runtime: old.vmm_runtime,
+            instance_id: old.instance_id,
+            migration_id: old.migration_id,
+            propolis_addr: old.propolis_addr,
+            metadata: old.metadata,
         }
     }
 }

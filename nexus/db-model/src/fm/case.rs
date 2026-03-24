@@ -58,6 +58,7 @@ impl CaseMetadata {
             de,
             comment,
             alerts_requested: _,
+            support_bundles_requested: _,
             ereports: _,
         } = case;
         Self {

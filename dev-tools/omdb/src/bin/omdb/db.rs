@@ -322,7 +322,7 @@ impl DbUrlOptions {
         Fut: Future<Output = anyhow::Result<T>>,
     {
         let datastore = self.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
         let result = f(opctx, datastore.clone()).await;
         datastore.terminate().await;
         result

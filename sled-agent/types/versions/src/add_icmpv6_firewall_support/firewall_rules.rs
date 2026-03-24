@@ -5,7 +5,7 @@
 //! Firewall rule types for version `ADD_ICMPV6_FIREWALL_SUPPORT`.
 
 use crate::v11;
-use crate::v29::instance::ResolvedVpcFirewallRule;
+use crate::v31::instance::ResolvedVpcFirewallRule;
 use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::Deserialize;

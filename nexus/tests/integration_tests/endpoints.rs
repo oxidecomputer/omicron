@@ -1257,7 +1257,7 @@ pub static DEMO_EXTERNAL_SUBNET_CREATE: LazyLock<
         description: String::from("an external subnet"),
     },
     allocator: external_subnet::ExternalSubnetAllocator::Auto {
-        prefix_len: 24,
+        prefix_length: 24,
         pool_selector: ip_pool::PoolSelector::default(),
     },
 });

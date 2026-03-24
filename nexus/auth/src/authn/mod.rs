@@ -34,6 +34,7 @@ pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
+pub use nexus_db_fixed_data::user_builtin::USER_OMDB;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
@@ -242,6 +243,11 @@ impl Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
     }
 
+    /// Returns an authenticated context for omdb
+    pub fn omdb() -> Context {
+        Context::context_for_builtin_user(USER_OMDB.id)
+    }
+
     fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
@@ -366,6 +372,7 @@ mod test {
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
@@ -413,6 +420,10 @@ mod test {
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
+
+        let authn = Context::omdb();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.built_in_user_id(), Some(USER_OMDB.id));
     }
 }
 

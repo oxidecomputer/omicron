@@ -455,7 +455,7 @@ pub fn insert_external_subnet_query(
         }
         ExternalSubnetAllocator::Auto {
             pool_selector: PoolSelector::Explicit { pool },
-            prefix_len,
+            prefix_length,
         } => {
             // We're given the pool itself. Select it as a constant, ensure it's
             // actually linked to the current Silo, and then push the CTE that
@@ -465,11 +465,14 @@ pub fn insert_external_subnet_query(
             builder.sql(", ");
             push_cte_to_ensure_pool_is_linked_to_silo(&mut builder, silo_id);
             builder.sql(", ");
-            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix_len);
+            push_cte_to_select_next_subnet_from_pool(
+                &mut builder,
+                *prefix_length,
+            );
         }
         ExternalSubnetAllocator::Auto {
             pool_selector: PoolSelector::Auto { ip_version },
-            prefix_len,
+            prefix_length,
         } => {
             // THis is the same as the above, but we're taking the pool by
             // looking up the default pool linked to the current silo for the
@@ -484,7 +487,10 @@ pub fn insert_external_subnet_query(
                 ip_version.map(Into::into),
             );
             builder.sql(", ");
-            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix_len);
+            push_cte_to_select_next_subnet_from_pool(
+                &mut builder,
+                *prefix_length,
+            );
         }
     }
     builder.sql(", ");
@@ -1435,7 +1441,7 @@ mod tests {
             pool_selector: PoolSelector::Explicit {
                 pool: NameOrId::Id(SUBNET_POOL_ID),
             },
-            prefix_len: 64,
+            prefix_length: 64,
         };
         let path = "tests/output/insert_external_subnet_from_explicit_pool.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;
@@ -1447,7 +1453,7 @@ mod tests {
             pool_selector: PoolSelector::Auto {
                 ip_version: Some(IpVersion::V6),
             },
-            prefix_len: 64,
+            prefix_length: 64,
         };
         let path = "tests/output/insert_external_subnet_from_ip_version.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;
@@ -1457,7 +1463,7 @@ mod tests {
     async fn expectorate_insert_external_subnet_from_default_pool_query() {
         let subnet = ExternalSubnetAllocator::Auto {
             pool_selector: PoolSelector::Auto { ip_version: None },
-            prefix_len: 64,
+            prefix_length: 64,
         };
         let path = "tests/output/insert_external_subnet_from_default_pool.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;

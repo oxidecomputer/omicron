@@ -104,24 +104,6 @@ pub struct Ereport {
 pub struct Reporter {
     pub reporter: EreporterType,
 
-    //
-    // The physical location of the reporting SP.
-    //
-    /// SP location: the type of SP slot (sled, switch, power shelf).
-    ///
-    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
-    /// is never NULL, which is enforced by the `reporter_identity_validity`
-    /// CHECK constraint. This is because SPs are indexed by their physical
-    /// location when requesting ereports through MGS.
-    pub sp_type: Option<SpType>,
-    /// SP location: the slot number.
-    ///
-    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
-    /// is never NULL, which is enforced by the `reporter_identity_validity`
-    /// CHECK constraint. This is because SPs are indexed by their physical
-    /// location when requesting ereports through MGS.
-    pub sp_slot: Option<SpMgsSlot>,
-
     /// For host OS ereports, the sled UUID of the sled-agent from which this
     /// ereport was received.
     ///
@@ -129,6 +111,23 @@ pub struct Reporter {
     /// EreporterType::Host`). This is enforced by the
     /// `reporter_identity_validity` CHECK constraint.
     pub sled_id: Option<DbTypedUuid<SledKind>>,
+
+    //
+    // The physical location of the reporter
+    //
+    /// Reporter location: the type of the physical slot (sled, switch, power
+    /// shelf).
+    pub slot_type: SpType,
+    /// Reporter location: the slot number.
+    ///
+    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
+    /// is never NULL, which is enforced by the `reporter_identity_validity`
+    /// CHECK constraint. This is because SPs are indexed by their physical
+    /// location when requesting ereports through MGS. For host OS ereports,
+    /// this may be NULL, as it is possible for a sled-agent to be part of the
+    /// control plane before its location is included in an inventory
+    /// collection.
+    pub slot: Option<SpMgsSlot>,
 }
 
 impl Ereport {
@@ -223,17 +222,17 @@ impl TryFrom<Ereport> for types::Ereport {
 impl From<types::Reporter> for Reporter {
     fn from(reporter: types::Reporter) -> Self {
         match reporter {
-            types::Reporter::HostOs { sled } => Self {
+            types::Reporter::HostOs { sled, slot } => Self {
                 reporter: EreporterType::Host,
                 sled_id: Some(sled.into()),
-                sp_type: None,
-                sp_slot: None,
+                slot_type: SpType::Sled,
+                slot: slot.map(SpMgsSlot::from),
             },
             types::Reporter::Sp { sp_type, slot } => Self {
                 reporter: EreporterType::Sp,
-                sp_type: Some(sp_type.into()),
-                sp_slot: Some(slot.into()),
                 sled_id: None,
+                slot_type: sp_type.into(),
+                slot: Some(slot.into()),
             },
         }
     }
@@ -245,35 +244,53 @@ impl TryFrom<Reporter> for types::Reporter {
         match reporter {
             Reporter {
                 reporter: EreporterType::Sp,
-                sp_type: Some(sp_type),
-                sp_slot: Some(slot),
+                slot_type,
+                slot: Some(slot),
                 ..
             } => Ok(Self::Sp {
-                sp_type: sp_type.into(),
+                sp_type: slot_type.into(),
                 slot: crate::SqlU16::from(slot).0,
             }),
             Reporter {
-                reporter: EreporterType::Sp, sp_type, sp_slot, ..
+                reporter: EreporterType::Sp, slot_type, slot, ..
             } => Err(Error::InternalError {
                 internal_message: format!(
                     "the 'reporter_identity_validity' CHECK constraint \
                      should enforce that ereports with reporter='sp' have \
-                     a non-NULL SP type and slot, but this ereport has \
-                     sp_type={sp_type:?} and sp_slot={sp_slot:?}",
+                     a non-NULL `slot`, but this ereport has \
+                     slot_type={slot_type:?} and slot={slot:?}",
                 ),
             }),
             Reporter {
                 reporter: EreporterType::Host,
                 sled_id: Some(id),
+                slot_type: SpType::Sled,
+                slot,
                 ..
-            } => Ok(Self::HostOs { sled: id.into() }),
+            } => Ok(Self::HostOs {
+                sled: id.into(),
+                slot: slot.map(|slot| crate::SqlU16::from(slot).0),
+            }),
             Reporter {
-                reporter: EreporterType::Host, sled_id: None, ..
+                reporter: EreporterType::Host,
+                slot_type: SpType::Sled,
+                sled_id: None,
+                ..
             } => Err(Error::internal_error(
                 "the 'reporter_identity_validity' CHECK constraint \
                      should enforce that ereports with reporter='host' \
                      have a non-NULL sled_id, but this ereport does not",
             )),
+            Reporter { reporter: EreporterType::Host, slot_type, .. } => {
+                Err(Error::InternalError {
+                    internal_message: format!(
+                        "the 'reporter_identity_validity' CHECK constraint \
+                        should  enforce that ereports with reporter='host' \
+                        have slot_type='sled', but this ereport has \
+                        slot_type={slot_type:?}",
+                    ),
+                })
+            }
         }
     }
 }

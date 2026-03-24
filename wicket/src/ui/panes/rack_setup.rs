@@ -37,6 +37,7 @@ use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -45,6 +46,8 @@ use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
+use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
@@ -867,15 +870,19 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
+                let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
+                let addr_description = match address {
+                    UplinkAddress::AddrConf => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::ADDR_CONF,
+                    ),
+                    UplinkAddress::Static { ip_net } => {
+                        Cow::Owned(ip_net.to_string())
+                    }
+                };
                 let mut items =
                     vec![Span::styled("  • Address       : ", label_style)];
-                if let Some(address) = a.address {
-                    items.push(Span::styled(address.to_string(), ok_style));
-                } else {
-                    items
-                        .push(Span::styled("link-local".to_string(), ok_style));
-                }
-                if let Some(vlan_id) = a.vlan_id {
+                items.push(Span::styled(addr_description, ok_style));
+                if let Some(vlan_id) = vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
@@ -914,8 +921,12 @@ fn rss_config_text<'a>(
                 } = p;
 
                 let addr_string = match addr {
-                    Some(a) => a.to_string(),
-                    None => "unnumbered".to_string(),
+                    UserSpecifiedRouterPeerAddr::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedRouterPeerAddr::UNNUMBERED_PEER,
+                    ),
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        Cow::Owned(ip.to_string())
+                    }
                 };
 
                 let mut lines = vec![
@@ -1002,7 +1013,7 @@ fn rss_config_text<'a>(
                             Span::styled(vlan_id.to_string(), ok_style),
                         ]);
                     }
-                    if *router_lifetime != 0 {
+                    if router_lifetime.as_u16() != 0 {
                         settings.extend([
                             Span::styled(" router_lifetime=", label_style),
                             Span::styled(
