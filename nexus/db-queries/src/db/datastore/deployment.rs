@@ -58,9 +58,11 @@ use nexus_db_model::BpPendingMgsUpdateHostPhase1;
 use nexus_db_model::BpPendingMgsUpdateRot;
 use nexus_db_model::BpPendingMgsUpdateRotBootloader;
 use nexus_db_model::BpPendingMgsUpdateSp;
+use nexus_db_model::BpSingleMeasurement;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
+use nexus_db_model::DbBpSledMeasurements;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::DebugLogBlueprintPlanning;
 use nexus_db_model::HwBaseboardId;
@@ -76,8 +78,11 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactMeasurements;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
@@ -267,6 +272,22 @@ impl DataStore {
                     .last_allocated_ip_subnet_offset
                     .into_u16()
                     .into(),
+
+                measurements: (&sled.measurements).into(),
+            })
+            .collect::<Vec<_>>();
+
+        let measurements = blueprint
+            .sleds
+            .iter()
+            .flat_map(|(sled_id, sled)| {
+                sled.measurements.iter().map(move |measurement| {
+                    BpSingleMeasurement::new(
+                        blueprint_id,
+                        *sled_id,
+                        measurement,
+                    )
+                })
             })
             .collect::<Vec<_>>();
 
@@ -398,6 +419,21 @@ impl DataStore {
                             .execute_async(&conn)
                             .await?;
                 }
+
+                // Insert all measurements for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_single_measurements::dsl
+                        as single_measurement;
+                    let _ = diesel::insert_into(
+                        single_measurement::bp_single_measurements,
+                    )
+                    .values(measurements)
+                    .execute_async(&conn)
+                    .await?;
+                }
+
 
                 // Insert all physical disks for this blueprint.
                 {
@@ -1159,6 +1195,50 @@ impl DataStore {
             bbs
         };
 
+        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
+            use nexus_db_schema::schema::bp_single_measurements::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_single_measurements,
+                    dsl::image_artifact_sha256,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpSingleMeasurement::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
+                    &*conn,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|(z, _)| z.image_artifact_sha256);
+                rows.extend(batch);
+            }
+            rows
+        };
+
         // ================================================================
         // STAGE 2: Check if blueprint exists
         //
@@ -1197,6 +1277,17 @@ impl DataStore {
         // corruption, not a torn read from concurrent deletion.
         // ================================================================
 
+        let mut omicron_measurements: BTreeMap<
+            SledUuid,
+            BTreeSet<BlueprintSingleMeasurement>,
+        > = BTreeMap::new();
+        for (m, artifact) in raw_measurements {
+            omicron_measurements
+                .entry(m.sled_id.into())
+                .or_default()
+                .insert(m.to_measurement(artifact));
+        }
+
         // Parse sled metadata into BlueprintSledConfig map
         let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> =
             BTreeMap::new();
@@ -1208,6 +1299,42 @@ impl DataStore {
                 LastAllocatedSubnetIpOffset::new(
                     *s.last_allocated_ip_subnet_offset,
                 );
+            let measurements = match (
+                omicron_measurements.remove(&s.sled_id.into()),
+                s.measurements,
+            ) {
+                // There were measurements in the database and we expect this
+                (Some(m), DbBpSledMeasurements::Artifacts) => {
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: BlueprintArtifactMeasurements::new(m)
+                            .ok_or(Error::internal_error(&format!(
+                                "sled {} has an empty measurement set",
+                                s.sled_id
+                            )))?,
+                    }
+                }
+                // There were no measurements, we expect this for both these cases
+                (None, DbBpSledMeasurements::InstallDataset) => {
+                    BlueprintMeasurements::InstallDataset
+                }
+                (None, DbBpSledMeasurements::Unknown) => {
+                    BlueprintMeasurements::Unknown
+                }
+                // The rest of these are inconsistent and we have a bug somewhere
+                (Some(_), DbBpSledMeasurements::InstallDataset)
+                | (Some(_), DbBpSledMeasurements::Unknown) => {
+                    return Err(Error::internal_error(&format!(
+                        "Found entries for sled {} when there should be none",
+                        s.sled_id
+                    )));
+                }
+                (None, DbBpSledMeasurements::Artifacts) => {
+                    return Err(Error::internal_error(&format!(
+                        "Missing measurements for sled {}",
+                        s.sled_id
+                    )));
+                }
+            };
             let config = BlueprintSledConfig {
                 state: s.sled_state.into(),
                 subnet,
@@ -1220,6 +1347,7 @@ impl DataStore {
                     .remove_mupdate_override
                     .map(|id| id.into()),
                 host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
+                measurements,
             };
             let old = sled_configs.insert(s.sled_id.into(), config);
             bail_unless!(
@@ -2897,110 +3025,8 @@ fn decode_target_insert_error(
 /// direct child of the previous current target. Enforcing the above has some
 /// subtleties (particularly around handling the "first blueprint with no
 /// parent" case). These are expanded on below through inline comments on the
-/// query we generate:
-///
-/// ```sql
-/// WITH
-///   -- Subquery to fetch the current target (i.e., the row with the max
-///   -- veresion in `bp_target`).
-///   current_target AS (
-///     SELECT
-///       version,
-///       blueprint_id
-///     FROM bp_target
-///     ORDER BY version DESC
-///     LIMIT 1
-///   ),
-///
-///   -- Error checking subquery: This uses similar tricks as elsewhere in
-///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
-///   -- in runtime errors in specific cases, allowing us to give accurate
-///   -- error messages.
-///   --
-///   -- These checks are not required for correct behavior by the insert
-///   -- below. If we removed them, the insert would insert 0 rows if
-///   -- these checks would have failed. But they make it easier to report
-///   -- specific problems to our caller.
-///   --
-///   -- The specific cases we check here are noted below.
-///   check_validity AS MATERIALIZED (
-///     SELECT CAST(IF(
-///       -- Return `no-such-blueprint` if the ID we're being told to
-///       -- set as the target doesn't exist in the blueprint table.
-///       (SELECT "id" FROM "blueprint" WHERE "id" = <new_target_id>) IS NULL,
-///       'no-such-blueprint',
-///       IF(
-///         -- Check for whether our new target's parent matches our current
-///         -- target. There are two cases here: The first is the common case
-///         -- (i.e., the new target has a parent: does it match the current
-///         -- target ID?). The second is the bootstrapping check: if we're
-///         -- trying to insert a new target that does not have a parent,
-///         -- we should not have a current target at all.
-///         --
-///         -- If either of these cases fails, we return `parent-not-target`.
-///         (
-///            SELECT "parent_blueprint_id" FROM "blueprint", current_target
-///            WHERE
-///              "id" = <new_target_id>
-///              AND current_target.blueprint_id = "parent_blueprint_id"
-///         ) IS NOT NULL
-///         OR
-///         (
-///            SELECT 1 FROM "blueprint"
-///            WHERE
-///              "id" = <new_target_id>
-///              AND "parent_blueprint_id" IS NULL
-///              AND NOT EXISTS (SELECT version FROM current_target)
-///         ) = 1,
-///         -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
-///         -- became too smart for our `CAST(... as UUID)` error checking
-///         -- gadget: it can infer that `<new_target_id>` must be a UUID, so
-///         -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
-///         -- as UUIDs _during typechecking_, which causes the query to always
-///         -- fail. We can defeat this by casting the UUID to text here, which
-///         -- will allow the 'parent-not-target' and 'no-such-blueprint'
-///         -- sentinels to survive type checking, making it to query execution
-///         -- where they will only be cast to UUIDs at runtime in the failure
-///         -- cases they're supposed to catch.
-///         CAST(<new_target_id> AS text),
-///         'parent-not-target'
-///       )
-///     ) AS UUID)
-///   ),
-///
-///   -- Determine the new version number to use: either 1 if this is the
-///   -- first blueprint being made the current target, or 1 higher than
-///   -- the previous target's version.
-///   --
-///   -- The final clauses of each of these WHERE clauses repeat the
-///   -- checks performed above in `check_validity`, and will cause this
-///   -- subquery to return no rows if we should not allow the new
-///   -- target to be set.
-///   new_target AS (
-///     SELECT 1 AS new_version FROM "blueprint"
-///       WHERE
-///         "id" = <new_target_id>
-///         AND "parent_blueprint_id" IS NULL
-///         AND NOT EXISTS (SELECT version FROM current_target)
-///     UNION
-///     SELECT current_target.version + 1 FROM current_target, "blueprint"
-///       WHERE
-///         "id" = <new_target_id>
-///         AND "parent_blueprint_id" IS NOT NULL
-///         AND "parent_blueprint_id" = current_target.blueprint_id
-///   )
-///
-///   -- Perform the actual insertion.
-///   INSERT INTO "bp_target"(
-///     "version","blueprint_id","enabled","time_made_target"
-///   )
-///   SELECT
-///     new_target.new_version,
-///     <new_target_id>,
-///     <new_target_enabled>,
-///     <new_target_time_made_target>
-///     FROM new_target
-/// ```
+/// query we generate. See `tests/output/insert_target_blueprint_query.sql`
+/// for the full generated SQL.
 fn insert_target_query(
     target_id: BlueprintUuid,
     enabled: bool,
@@ -3009,6 +3035,8 @@ fn insert_target_query(
     let mut builder = QueryBuilder::new();
     let target_id = *target_id.as_untyped_uuid();
 
+    // `current_target`: fetch the current target (row with max version
+    // in bp_target).
     builder.sql(
         "WITH \
         current_target AS ( \
@@ -3018,53 +3046,90 @@ fn insert_target_query(
           FROM bp_target \
           ORDER BY version DESC \
           LIMIT 1 \
-        ), \
-        check_validity AS MATERIALIZED ( \
+        ), ",
+    );
+
+    // `check_validity`: error-checking CTE. Uses the CAST(... AS UUID)
+    // trick with non-UUID sentinel values to produce runtime errors for
+    // specific failure cases. These checks aren't required for correct
+    // behavior by the insert below — if we removed them, the insert would
+    // simply insert 0 rows — but they make it easier to report specific
+    // problems to our caller.
+    //
+    // Cases checked:
+    //   - 'no-such-blueprint': the blueprint ID we're being told to set
+    //     as the target doesn't exist in the blueprint table.
+    //   - 'parent-not-target': checks whether the new target's parent
+    //     matches the current target. Two sub-cases: (1) common case —
+    //     the new target has a parent; does it match the current target
+    //     ID? (2) bootstrap — the new target has no parent; there must
+    //     be no current target at all. If either check fails, we return
+    //     'parent-not-target'.
+    builder
+        .sql(
+            "check_validity AS MATERIALIZED ( \
           SELECT \
             CAST( \
               IF( \
                 (SELECT id FROM blueprint WHERE id = ",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(") IS NULL, '")
-    .sql(NO_SUCH_BLUEPRINT_SENTINEL)
-    .sql(
-        "', \
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(") IS NULL, '")
+        .sql(NO_SUCH_BLUEPRINT_SENTINEL)
+        .sql(
+            "', \
                 IF( \
                   (SELECT parent_blueprint_id FROM blueprint, current_target \
                    WHERE id = ",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(
-        " \
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(
+            " \
                    AND current_target.blueprint_id = parent_blueprint_id \
                   ) IS NOT NULL \
                   OR \
                   (SELECT 1 FROM blueprint \
                    WHERE id = ",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(
-        " \
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(
+            " \
                    AND parent_blueprint_id IS NULL \
                    AND NOT EXISTS (SELECT version FROM current_target) \
-                  ) = 1, \
-                  CAST(",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(" AS text), '")
-    .sql(PARENT_NOT_TARGET_SENTINEL)
-    .sql(
-        "' \
+                  ) = 1, ",
+        );
+
+    // Workaround: sometime between CRDB v22.1.9 and v22.2.19, the type
+    // checker became too smart for the CAST(... AS UUID) error-checking
+    // gadget — it infers that the target_id must be a UUID and tries to
+    // parse the sentinel strings as UUIDs during type checking, causing
+    // the query to always fail. Casting the UUID to text here defeats
+    // this inference, allowing the sentinels to survive type checking and
+    // only be cast to UUIDs at runtime in the failure cases.
+    builder
+        .sql("CAST(")
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(" AS text), '")
+        .sql(PARENT_NOT_TARGET_SENTINEL)
+        .sql(
+            "' \
                 ) \
               ) AS UUID \
             ) \
-        ), \
-        new_target AS ( \
+        ), ",
+        );
+
+    // `new_target`: determine the new version number to use — either 1
+    // if this is the first blueprint being made the current target, or
+    // 1 higher than the previous target's version. The final clauses of
+    // each WHERE repeat the checks from `check_validity`, and will cause
+    // this subquery to return no rows if the new target should not be set.
+    builder.sql(
+        "new_target AS ( \
           SELECT 1 AS new_version FROM blueprint \
           WHERE id = ",
     )
@@ -3307,6 +3372,166 @@ mod tests {
         // on other tests to check blueprint deletion.
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_measurement_blueprint() {
+        const TEST_NAME: &str = "test_measurement_blueprint";
+        // Setup
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a cohesive representative collection/policy/blueprint
+        let (_, planning_input, blueprint1) =
+            representative(&logctx.log, TEST_NAME);
+        let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
+
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint1)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint1)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            assert!(s.measurements == BlueprintMeasurements::Unknown);
+        }
+
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("1.0.0");
+        const ARTIFACT_VERSION_2: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const MEASUREMENT_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([3; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([4; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
+
+        const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
+        const SYSTEM_HASH: ArtifactHash = ArtifactHash([6; 32]);
+
+        let tuf_repo = TufRepoDescription {
+            repo: TufRepoMeta {
+                hash: SYSTEM_HASH,
+                targets_role_version: 0,
+                valid_until: Utc::now(),
+                system_version: SYSTEM_VERSION,
+                file_name: String::new(),
+            },
+            artifacts: vec![
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement1".into(),
+                        version: ARTIFACT_VERSION_1,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_1,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement2".into(),
+                        version: ARTIFACT_VERSION_1,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_2,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement3".into(),
+                        version: ARTIFACT_VERSION_2,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_3,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+            ],
+        };
+
+        // Add rows to the tuf_artifact table to test version lookups.
+        {
+            // Add measurement artifacts.
+            datastore
+                .tuf_repo_insert(opctx, &tuf_repo)
+                .await
+                .expect("inserted TUF repo");
+        }
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            "test2",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        let mut measurements = BTreeSet::new();
+
+        for artifact in &tuf_repo.artifacts {
+            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
+                measurements.insert(BlueprintSingleMeasurement {
+                    version: BlueprintArtifactVersion::Available {
+                        version: artifact.id.version.clone(),
+                    },
+                    hash: artifact.hash,
+                });
+            }
+        }
+
+        assert_eq!(measurements.len(), 3);
+
+        let artifacts = BlueprintArtifactMeasurements::new(measurements)
+            .expect("this is non-zero");
+
+        for (s, _) in planning_input.all_sleds(SledFilter::InService) {
+            builder
+                .sled_set_measurements(
+                    s,
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: artifacts.clone(),
+                    },
+                )
+                .expect("set measurements");
+        }
+
+        let blueprint2 = builder.build(BlueprintSource::Test);
+        let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint2)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint2)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            match s.measurements {
+                BlueprintMeasurements::InstallDataset => {
+                    panic!("Failed to pickup measurements")
+                }
+                BlueprintMeasurements::Artifacts {
+                    artifacts: found_artifacts,
+                } => {
+                    assert_eq!(artifacts, found_artifacts);
+                }
+                BlueprintMeasurements::Unknown => {
+                    panic!("We should not be unknown")
+                }
+            }
+        }
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -4616,6 +4841,7 @@ mod tests {
                     blueprint_id
                 ),
                 query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+                query_count!(bp_single_measurements, blueprint_id),
                 query_count!(debug_log_blueprint_planning, blueprint_id),
             ] {
                 let count: i64 = result.unwrap();
@@ -4735,6 +4961,7 @@ mod tests {
             "bp_clickhouse_keeper_zone_id_to_node_id",
             "bp_clickhouse_server_zone_id_to_node_id",
             "debug_log_blueprint_planning",
+            "bp_single_measurements",
         ];
 
         // Check that all non-exception tables have at least one row

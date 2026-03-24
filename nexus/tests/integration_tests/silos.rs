@@ -950,24 +950,27 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 
     // In the built-in Silo, we expect the test-privileged and test-unprivileged
     // users.
+    let user_key = |u: &user::User| (u.id, u.display_name.clone(), u.silo_id);
     assert_eq!(
-        initial_silo_users,
+        initial_silo_users.iter().map(user_key).collect::<Vec<_>>(),
         vec![
-            user::User {
-                id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
-            user::User {
-                id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED
-                    .external_id
-                    .clone()
-                    .unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
+            (
+                USER_TEST_PRIVILEGED.id(),
+                USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
+            (
+                USER_TEST_UNPRIVILEGED.id(),
+                USER_TEST_UNPRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
         ]
     );
+    // Timestamps should be populated and sensible.
+    for u in &initial_silo_users {
+        assert!(u.time_created > chrono::DateTime::UNIX_EPOCH);
+        assert!(u.time_modified >= u.time_created);
+    }
 
     // Now create another user and make sure we can see them.  While we're at
     // it, use a small limit to check that pagination is really working.
@@ -988,26 +991,23 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .all_items;
     silo_users.sort_by(|u1, u2| u1.display_name.cmp(&u2.display_name));
     assert_eq!(
-        silo_users,
+        silo_users.iter().map(user_key).collect::<Vec<_>>(),
         vec![
-            user::User {
-                id: new_silo_user_id,
-                display_name: new_silo_user_external_id.into(),
-                silo_id: DEFAULT_SILO_ID,
-            },
-            user::User {
-                id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
-            user::User {
-                id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED
-                    .external_id
-                    .clone()
-                    .unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
+            (
+                new_silo_user_id,
+                new_silo_user_external_id.to_string(),
+                DEFAULT_SILO_ID,
+            ),
+            (
+                USER_TEST_PRIVILEGED.id(),
+                USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
+            (
+                USER_TEST_UNPRIVILEGED.id(),
+                USER_TEST_UNPRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
         ]
     );
 
@@ -1045,12 +1045,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .parsed_body()
             .unwrap();
     assert_eq!(
-        silo2_users.items,
-        vec![user::User {
-            id: new_silo_user_id,
-            display_name: new_silo_user_name,
-            silo_id: silo.identity.id,
-        }]
+        silo2_users.items.iter().map(user_key).collect::<Vec<_>>(),
+        vec![(new_silo_user_id, new_silo_user_name, silo.identity.id),]
     );
 
     // The "test-privileged" user also shouldn't see the user in this other

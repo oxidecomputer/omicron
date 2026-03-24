@@ -13,6 +13,7 @@ use libipcc::{IpccError, IpccHandle};
 use omicron_uuid_kinds::MupdateUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 
@@ -89,7 +90,10 @@ impl InstallinatorImageId {
         match ciborium::ser::into_writer(self, &mut out) {
             Ok(()) => out,
             Err(Error::Io(err)) => {
-                unreachable!("i/o error appending to Vec: {err}");
+                unreachable!(
+                    "i/o error appending to Vec: {}",
+                    InlineErrorChain::new(&err)
+                );
             }
             Err(Error::Value(err)) => {
                 unreachable!("failed to serialize an image ID: {err}");
@@ -107,9 +111,10 @@ impl InstallinatorImageId {
         // error string.
         match ciborium::de::from_reader(data) {
             Ok(value) => Ok(value),
-            Err(Error::Io(err)) => {
-                Err(format!("i/o error reading from slice: {err}"))
-            }
+            Err(Error::Io(err)) => Err(format!(
+                "i/o error reading from slice: {}",
+                InlineErrorChain::new(&err)
+            )),
             Err(Error::Syntax(offset)) => {
                 Err(format!("syntax error at offset {offset}"))
             }

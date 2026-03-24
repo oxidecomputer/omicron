@@ -64,8 +64,10 @@ nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-lockstep-client.workspace = true
 nexus-types.workspace = true
+nix = { workspace = true, features = ["signal"] }
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -82,10 +84,10 @@ range-requests.workspace = true
 rdb-types.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls", "stream"] }
+reqwest012 = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
-serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 sha3.workspace = true

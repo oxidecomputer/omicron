@@ -19,13 +19,15 @@ use crate::db::pagination::{paginated, paginated_multicolumn};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::dsl::{count_distinct, min};
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::{count, min};
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
 use nexus_types::fm::ereport as fm;
+use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -45,44 +47,6 @@ pub struct EreporterRestartBySerial {
     pub first_seen_at: DateTime<Utc>,
     pub reporter_kind: fm::Reporter,
     pub ereports: u32,
-}
-
-/// A set of filters for fetching ereports.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EreportFilters {
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or later.
-    ///
-    /// If `end_time` is also present, this value *must* be earlier than
-    /// `end_time`.
-    pub start_time: Option<DateTime<Utc>>,
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or before.
-    ///
-    /// If `start_time` is also present, this value *must* be later than
-    /// `start_time`.
-    pub end_time: Option<DateTime<Utc>>,
-    /// If this list is non-empty, include only ereports that were reported by
-    /// systems with the provided serial numbers.
-    pub only_serials: Vec<String>,
-    /// If this list is non-empty, include only ereports with the provided class
-    /// strings.
-    // TODO(eliza): globbing could be nice to add here eventually...
-    pub only_classes: Vec<String>,
-}
-
-impl EreportFilters {
-    fn check_time_range(&self) -> Result<(), Error> {
-        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
-            if start > end {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl DataStore {
@@ -131,7 +95,6 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        filters.check_time_range()?;
 
         let query = Self::ereport_fetch_matching_query(filters, pagparams);
         query
@@ -152,23 +115,23 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .select(Ereport::as_select());
 
-        if let Some(start) = filters.start_time {
+        if let Some(start) = filters.start_time() {
             query = query.filter(dsl::time_collected.ge(start));
         }
 
-        if let Some(end) = filters.end_time {
+        if let Some(end) = filters.end_time() {
             query = query.filter(dsl::time_collected.le(end));
         }
 
-        if !filters.only_serials.is_empty() {
+        if !filters.only_serials().is_empty() {
             query = query.filter(
-                dsl::serial_number.eq_any(filters.only_serials.clone()),
+                dsl::serial_number.eq_any(filters.only_serials().to_vec()),
             );
         }
 
-        if !filters.only_classes.is_empty() {
-            query =
-                query.filter(dsl::class.eq_any(filters.only_classes.clone()));
+        if !filters.only_classes().is_empty() {
+            query = query
+                .filter(dsl::class.eq_any(filters.only_classes().to_vec()));
         }
 
         query
@@ -234,15 +197,15 @@ impl DataStore {
             .group_by((
                 dsl::restart_id,
                 dsl::reporter,
-                dsl::sp_slot,
-                dsl::sp_type,
+                dsl::slot_type,
+                dsl::slot,
                 dsl::sled_id,
             ))
             .select((
                 dsl::restart_id,
                 model::Reporter::as_select(),
                 min(dsl::time_collected),
-                count_distinct(dsl::ena),
+                count(dsl::ena).aggregate_distinct(),
             ))
             .order_by(dsl::restart_id)
     }
@@ -273,7 +236,7 @@ impl DataStore {
                     .get_result_async(conn)
                     .await
             }
-            fm::Reporter::HostOs { sled } => {
+            fm::Reporter::HostOs { sled, .. } => {
                 Self::host_latest_ereport_id_query(sled)
                     .get_result_async(conn)
                     .await
@@ -295,9 +258,9 @@ impl DataStore {
     ) -> impl RunnableQuery<EreportIdTuple> {
         dsl::ereport
             .filter(
-                dsl::sp_type
+                dsl::slot_type
                     .eq(sp_type)
-                    .and(dsl::sp_slot.eq(slot))
+                    .and(dsl::slot.eq(slot))
                     .and(dsl::time_deleted.is_null()),
             )
             .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
@@ -455,13 +418,7 @@ mod tests {
     async fn explain_ereport_fetch_matching_only_serials() {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_serials",
-            EreportFilters {
-                only_serials: vec![
-                    "BRM6900420".to_string(),
-                    "BRM5555555".to_string(),
-                ],
-                ..Default::default()
-            },
+            EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
         )
         .await
     }
@@ -470,17 +427,12 @@ mod tests {
     async fn explain_ereport_fetch_matching_serials_and_classes() {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_serials_and_classes",
-            EreportFilters {
-                only_serials: vec![
-                    "BRM6900420".to_string(),
-                    "BRM5555555".to_string(),
-                ],
-                only_classes: vec![
-                    "my.cool.ereport".to_string(),
-                    "hw.frobulator.fault.frobulation_failed".to_string(),
-                ],
-                ..Default::default()
-            },
+            EreportFilters::new()
+                .with_serials(["BRM6900420", "BRM5555555"])
+                .with_classes([
+                    "my.cool.ereport",
+                    "hw.frobulator.fault.frobulation_failed",
+                ]),
         )
         .await
     }
@@ -489,10 +441,9 @@ mod tests {
     async fn explain_ereport_fetch_matching_only_time() {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_time",
-            EreportFilters {
-                end_time: Some(chrono::Utc::now()),
-                ..Default::default()
-            },
+            EreportFilters::new()
+                .with_end_time(chrono::Utc::now())
+                .expect("no start time set"),
         )
         .await
     }
@@ -501,14 +452,10 @@ mod tests {
     async fn explain_ereport_fetch_matching_time_and_serials() {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_time",
-            EreportFilters {
-                only_serials: vec![
-                    "BRM6900420".to_string(),
-                    "BRM5555555".to_string(),
-                ],
-                end_time: Some(chrono::Utc::now()),
-                ..Default::default()
-            },
+            EreportFilters::new()
+                .with_serials(["BRM6900420", "BRM5555555"])
+                .with_end_time(chrono::Utc::now())
+                .expect("no start time set"),
         )
         .await
     }
@@ -621,12 +568,11 @@ mod tests {
         let found_by_time_range = datastore
             .ereport_fetch_matching(
                 opctx,
-                &EreportFilters {
-                    start_time: Some(
+                &EreportFilters::new()
+                    .with_start_time(
                         ereport.time_collected - Duration::from_secs(600),
-                    ),
-                    ..Default::default()
-                },
+                    )
+                    .expect("no end time set"),
                 &pagparams,
             )
             .await
@@ -636,10 +582,7 @@ mod tests {
         let found_by_serial = datastore
             .ereport_fetch_matching(
                 opctx,
-                &EreportFilters {
-                    only_serials: vec!["my cool serial".to_string()],
-                    ..Default::default()
-                },
+                &EreportFilters::new().with_serials(["my cool serial"]),
                 &pagparams,
             )
             .await
@@ -649,10 +592,7 @@ mod tests {
         let found_by_class = datastore
             .ereport_fetch_matching(
                 opctx,
-                &EreportFilters {
-                    only_classes: vec!["my cool ereport".to_string()],
-                    ..Default::default()
-                },
+                &EreportFilters::new().with_classes(["my cool ereport"]),
                 &pagparams,
             )
             .await

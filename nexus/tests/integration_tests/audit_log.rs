@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use dropshot::{ResultsPage, test_util::ClientTestContext};
 use http::{Method, StatusCode, header};
 use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     DiskTest, create_console_session, create_default_ip_pools, create_disk,
@@ -216,6 +217,61 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     let log = objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(log.items.len(), 1);
     assert_eq!(e2.id, log.items[0].id);
+
+    // Test that timed-out audit log entries surface as Unknown in the API.
+    // Create an incomplete entry directly via the datastore, backdate it,
+    // time it out, then verify the API returns result = Unknown.
+    let nexus = &ctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(ctx.logctx.log.new(o!()), datastore.clone());
+
+    let params = nexus_db_model::AuditLogEntryInitParams {
+        request_id: "timeout-test-req".to_string(),
+        operation_id: "project_create".to_string(),
+        request_uri: "/v1/projects".to_string(),
+        source_ip: "1.1.1.1".parse().unwrap(),
+        user_agent: None,
+        actor: nexus_db_model::AuditLogActor::Unauthenticated,
+        auth_method: None,
+        credential_id: None,
+    };
+    let entry = datastore
+        .audit_log_entry_init(&opctx, params.into())
+        .await
+        .expect("init audit log entry");
+
+    let two_hours_ago = Utc::now() - TimeDelta::try_hours(2).unwrap();
+
+    // Backdate time_started so it's older than the cutoff
+    {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::audit_log;
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq(entry.id))
+            .set(audit_log::time_started.eq(two_hours_ago))
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let cutoff = Utc::now() - TimeDelta::try_hours(1).unwrap();
+    let timed_out = datastore
+        .audit_log_timeout_incomplete(&opctx, cutoff, 100)
+        .await
+        .expect("timeout incomplete entries");
+    assert_eq!(timed_out, 1);
+
+    let audit_log = fetch_log(client, two_hours_ago, None).await;
+    let found = audit_log
+        .items
+        .iter()
+        .find(|e| e.request_id == "timeout-test-req")
+        .expect("timed-out entry should appear in the API");
+    assert_eq!(found.result, AuditLogEntryResult::Unknown);
 }
 
 #[nexus_test]

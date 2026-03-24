@@ -37,6 +37,8 @@ pub struct BackgroundTasks {
     pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
+    pub task_audit_log_cleanup: Activator,
+    pub task_audit_log_timeout_incomplete: Activator,
     pub task_vpc_route_manager: Activator,
     pub task_saga_recovery: Activator,
     pub task_lookup_region_port: Activator,
@@ -51,12 +53,14 @@ pub struct BackgroundTasks {
     pub task_webhook_deliverator: Activator,
     pub task_sp_ereport_ingester: Activator,
     pub task_reconfigurator_config_loader: Activator,
+    pub task_fm_rendezvous: Activator,
     pub task_fm_sitrep_loader: Activator,
     pub task_fm_sitrep_gc: Activator,
     pub task_probe_distributor: Activator,
     pub task_multicast_reconciler: Activator,
     pub task_trust_quorum_manager: Activator,
     pub task_attached_subnet_manager: Activator,
+    pub task_session_cleanup: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

@@ -298,7 +298,7 @@ WITH
         (",
                 )
                 .param()
-                .sql(", DEFAULT, ")
+                .sql(", NOW(), ")
                 .param()
                 .sql(", ")
                 .param()

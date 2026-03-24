@@ -13,10 +13,10 @@ use uuid::Uuid;
 /// (which generally have no name or description)
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct AssetIdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
+    /// Unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /// timestamp when this resource was created
+    /// Timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
+    /// Timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }

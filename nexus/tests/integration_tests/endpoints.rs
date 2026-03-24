@@ -66,6 +66,8 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -155,7 +157,7 @@ pub static DEMO_PROBE_URL: LazyLock<String> = LazyLock::new(|| {
 pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(
     || {
         format!(
-            "/v1/system/hardware/switch-port/qsfp0/status?rack_id={}&switch_location=switch0",
+            "/v1/system/hardware/switch-port/qsfp0/status?rack_id={}&switch_slot=switch0",
             RACK_UUID
         )
     },
@@ -163,7 +165,7 @@ pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(
 pub static DEMO_SWITCH_PORT_LLDP_CONFIG_URL: LazyLock<String> = LazyLock::new(
     || {
         format!(
-            "/v1/system/hardware/switch-port/qsfp0/lldp/config?rack_id={}&switch_location=switch0",
+            "/v1/system/hardware/switch-port/qsfp0/lldp/config?rack_id={}&switch_slot=switch0",
             RACK_UUID
         )
     },
@@ -895,7 +897,7 @@ pub const DEMO_SWITCH_PORT_URL: &'static str =
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_slot={}",
             uuid::Uuid::new_v4(),
             "switch0",
         )
@@ -908,7 +910,7 @@ pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
 /* TODO requires dpd access
 pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "/v1/system/hardware/switch-port/qsfp7/status?rack_id={}&switch_location={}",
+        "/v1/system/hardware/switch-port/qsfp7/status?rack_id={}&switch_slot={}",
         uuid::Uuid::new_v4(),
         "switch0",
     )
@@ -929,7 +931,7 @@ pub static DEMO_LOOPBACK_CREATE: LazyLock<networking::LoopbackAddressCreate> =
     LazyLock::new(|| networking::LoopbackAddressCreate {
         address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
         rack_id: uuid::Uuid::new_v4(),
-        switch_location: "switch0".parse().unwrap(),
+        switch_slot: SwitchSlot::Switch0,
         address: "203.0.113.99".parse().unwrap(),
         mask: 24,
         anycast: false,
@@ -1023,14 +1025,14 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
         remote: "10.0.0.1".parse().unwrap(),
         detection_threshold: 3,
         required_rx: 1000000,
-        switch: "switch0".parse().unwrap(),
-        mode: omicron_common::api::external::BfdMode::MultiHop,
+        switch_slot: SwitchSlot::Switch0,
+        mode: BfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =
     LazyLock::new(|| networking::BfdSessionDisable {
         remote: "10.0.0.1".parse().unwrap(),
-        switch: "switch0".parse().unwrap(),
+        switch_slot: SwitchSlot::Switch0,
     });
 
 // Project Images
@@ -3100,6 +3102,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: "/v1/system/update/target-release",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/recovery-finish",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Put(

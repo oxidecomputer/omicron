@@ -1254,7 +1254,7 @@ impl MulticastGroupReconciler {
                 instance_vmm_data.get(&member.parent_id)
             {
                 let is_valid = matches!(
-                    instance.runtime_state.nexus_state.state(),
+                    instance.nexus_state.state(),
                     InstanceState::Creating
                         | InstanceState::Starting
                         | InstanceState::Running

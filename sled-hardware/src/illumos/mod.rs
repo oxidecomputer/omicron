@@ -808,7 +808,7 @@ fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
     Some(Baseboard::new_pc(serial_number, product))
 }
 
-async fn hardware_tracking_task(
+fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     nonsled_observed_disks: Vec<UnparsedDisk>,
@@ -918,13 +918,15 @@ impl HardwareManager {
         // device contract with the kernel to handle those disappearances.
         let log2 = log.clone();
         let tx2 = tx.clone();
-        std::thread::spawn(move || monitor_tofino(log2, tx2));
+        std::thread::spawn(move || {
+            monitor_tofino(log2, tx2);
+        });
 
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
         std::thread::spawn(move || {
-            hardware_tracking_task(log2, inner2, nonsled_observed_disks, tx2)
+            hardware_tracking_task(log2, inner2, nonsled_observed_disks, tx2);
         });
 
         Ok(Self { log, inner, tx })

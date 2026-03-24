@@ -40,6 +40,10 @@ tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+slog-error-chain.workspace = true
+
+[build-dependencies]
+git-stub-vcs.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

@@ -9,19 +9,20 @@ use dpd_client::types::{
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
-use omicron_common::{address::MGD_PORT, api::external::SwitchLocation};
+use omicron_common::address::MGD_PORT;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::{
     collections::HashMap,
     net::{Ipv6Addr, SocketAddrV6},
 };
 
 pub(crate) async fn build_mgd_clients(
-    mappings: HashMap<SwitchLocation, std::net::Ipv6Addr>,
+    mappings: HashMap<SwitchSlot, std::net::Ipv6Addr>,
     log: &slog::Logger,
     resolver: &internal_dns_resolver::Resolver,
-) -> HashMap<SwitchLocation, mg_admin_client::Client> {
-    let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> = vec![];
-    for (location, addr) in &mappings {
+) -> HashMap<SwitchSlot, mg_admin_client::Client> {
+    let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
+    for (switch_slot, addr) in &mappings {
         let port = match resolver.lookup_all_socket_v6(ServiceName::Mgd).await {
             Ok(addrs) => {
                 let port_map: HashMap<Ipv6Addr, u16> = addrs
@@ -43,7 +44,7 @@ pub(crate) async fn build_mgd_clients(
             format!("http://{}", socketaddr).as_str(),
             log.clone(),
         );
-        clients.push((*location, client));
+        clients.push((*switch_slot, client));
     }
     clients.into_iter().collect::<HashMap<_, _>>()
 }

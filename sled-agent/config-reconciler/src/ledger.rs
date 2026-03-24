@@ -7,8 +7,8 @@
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use omicron_common::api::external::Generation;
-use omicron_common::ledger;
-use omicron_common::ledger::Ledger;
+use omicron_ledger as ledger;
+use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
@@ -629,6 +629,7 @@ fn config_artifact_hashes(
         .filter_map(|zone| zone.image_source.artifact_hash())
         .chain(config.host_phase_2.slot_a.artifact_hash())
         .chain(config.host_phase_2.slot_b.artifact_hash())
+        .chain(config.measurements.iter().map(|x| x.hash))
 }
 
 async fn load_sled_config(

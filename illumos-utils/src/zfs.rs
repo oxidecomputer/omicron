@@ -20,6 +20,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use rustix::fd::AsRawFd;
+use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -46,8 +47,8 @@ pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
-#[derive(thiserror::Error, Debug)]
-#[error("Could not list datasets within zpool {name}: {err}")]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
+#[error("Could not list datasets within zpool {name}")]
 pub struct ListDatasetsError {
     name: String,
     #[source]
@@ -139,7 +140,7 @@ enum MountpointError {
 
 #[derive(thiserror::Error, Debug)]
 enum EnsureDatasetErrorRaw {
-    #[error("ZFS execution error: {0}")]
+    #[error("ZFS execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error("Unexpected output from ZFS commands: {0}")]
@@ -164,7 +165,7 @@ enum EnsureDatasetErrorRaw {
 
 /// Error returned by [`Zfs::ensure_dataset`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to ensure filesystem '{name}': {err}")]
+#[error("Failed to ensure filesystem '{name}'")]
 pub struct EnsureDatasetError {
     name: String,
     #[source]
@@ -172,11 +173,12 @@ pub struct EnsureDatasetError {
 }
 
 /// Error returned by [`Zfs::set_oxide_value`]
-#[derive(thiserror::Error, Debug)]
-#[error("Failed to set values '{values}' on filesystem {filesystem}: {err}")]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
+#[error("Failed to set values '{values}' on filesystem {filesystem}")]
 pub struct SetValueError {
     filesystem: String,
     values: String,
+    #[source]
     err: crate::ExecutionError,
 }
 
@@ -202,8 +204,8 @@ pub struct GetValueError {
     err: GetValueErrorRaw,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to list snapshots: {0}")]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
+#[error("Failed to list snapshots")]
 pub struct ListSnapshotsError(#[from] crate::ExecutionError);
 
 /// Error returned by [`Zfs::change_key`].
@@ -244,19 +246,21 @@ pub struct UnloadKeyError {
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}"
+    "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}'"
 )]
 pub struct CreateSnapshotError {
     filesystem: String,
     snap_name: String,
+    #[source]
     err: crate::ExecutionError,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to delete snapshot '{filesystem}@{snap_name}': {err}")]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
+#[error("Failed to delete snapshot '{filesystem}@{snap_name}'")]
 pub struct DestroySnapshotError {
     filesystem: String,
     snap_name: String,
+    #[source]
     err: crate::ExecutionError,
 }
 
@@ -1125,6 +1129,40 @@ pub struct DatasetVolumeDeleteArgs<'a> {
     pub raw: bool,
 }
 
+/// Error returned by [`Zfs::remove_reservation`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to remove reservation from '{name}': {err}")]
+pub struct RemoveReservationError {
+    name: String,
+    #[source]
+    err: RemoveReservationErrorInner,
+}
+
+impl RemoveReservationError {
+    pub fn get_value(name: String, err: GetValueError) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::GetValue(err),
+        }
+    }
+
+    pub fn set_value(name: String, err: SetValueError) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::SetValue(err),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum RemoveReservationErrorInner {
+    #[error(transparent)]
+    GetValue(#[from] GetValueError),
+
+    #[error(transparent)]
+    SetValue(#[from] SetValueError),
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -1190,11 +1228,9 @@ impl Zfs {
         //
         // If one or more dataset doesn't exist, we can still read stdout to
         // see about the ones that do exist.
-        let output = cmd.output().await.map_err(|err| {
-            anyhow!(
-                "Failed to get dataset properties for {datasets:?}: {err:?}"
-            )
-        })?;
+        let output = cmd.output().await.context(format!(
+            "Failed to get dataset properties for {datasets:?}"
+        ))?;
         let stdout = String::from_utf8(output.stdout)?;
 
         DatasetProperties::parse_many(&stdout)
@@ -2125,6 +2161,23 @@ impl Zfs {
                 }
             }
         }
+    }
+
+    /// Remove a dataset's reservation, if set
+    pub async fn remove_reservation(
+        name: &str,
+    ) -> Result<(), RemoveReservationError> {
+        let value = Zfs::get_value(name, "reservation").await.map_err(|e| {
+            RemoveReservationError::get_value(name.to_string(), e)
+        })?;
+
+        if value != "none" {
+            Zfs::set_value(name, "reservation", "none").await.map_err(|e| {
+                RemoveReservationError::set_value(name.to_string(), e)
+            })?;
+        }
+
+        Ok(())
     }
 }
 

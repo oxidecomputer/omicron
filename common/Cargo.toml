@@ -18,6 +18,7 @@ anyhow.workspace = true
 api_identity.workspace = true
 async-trait.workspace = true
 backoff.workspace = true
+backon.workspace = true
 camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
@@ -30,16 +31,15 @@ ipnetwork.workspace = true
 itertools.workspace = true
 lldp_protocol.workspace = true
 macaddr.workspace = true
-mg-admin-client.workspace = true
+omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "semver", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
-serde_human_bytes.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 slog.workspace = true
@@ -51,6 +51,8 @@ tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 parse-display.workspace = true
 progenitor-client.workspace = true
+progenitor-client010.workspace = true
+progenitor-extras.workspace = true
 omicron-workspace-hack.workspace = true
 regress.workspace = true
 tufaceous-artifact.workspace = true

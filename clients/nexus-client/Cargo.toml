@@ -18,7 +18,7 @@ omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 progenitor.workspace = true
 regress.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

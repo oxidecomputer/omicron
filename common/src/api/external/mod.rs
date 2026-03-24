@@ -11,8 +11,6 @@ mod error;
 pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
-pub use crate::api::internal::shared::SwitchLocation;
-pub use crate::api::internal::shared::rack_init::MaxPathConfig;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -37,7 +35,6 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -1023,15 +1020,15 @@ pub enum ResourceType {
 /// Identity-related metadata that's included in nearly all public API objects
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct IdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
+    /// Unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /// unique, mutable, user-controlled identifier for each resource
+    /// Unique, mutable, user-controlled identifier for each resource
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// timestamp when this resource was created
+    /// Timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
+    /// Timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }
 
@@ -1202,17 +1199,17 @@ pub struct Instance {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this Instance
+    /// ID for the project containing this instance
     pub project_id: Uuid,
 
-    /// number of CPUs allocated for this Instance
+    /// Number of CPUs allocated for this instance
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
+    /// Memory allocated for this instance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the instance
     pub hostname: String,
 
-    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
     pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
@@ -2844,46 +2841,6 @@ pub struct AddressLotBlock {
     pub last_address: IpAddr,
 }
 
-/// A loopback address is an address that is assigned to a rack switch but is
-/// not associated with any particular port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LoopbackAddress {
-    /// The id of the loopback address.
-    pub id: Uuid,
-
-    /// The address lot block this address came from.
-    pub address_lot_block_id: Uuid,
-
-    /// The id of the rack where this loopback address is assigned.
-    pub rack_id: Uuid,
-
-    /// Switch location where this loopback address is assigned.
-    pub switch_location: String,
-
-    /// The loopback IP address and prefix length.
-    pub address: oxnet::IpNet,
-}
-
-/// A switch port represents a physical external port on a rack switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPort {
-    /// The id of the switch port.
-    pub id: Uuid,
-
-    /// The rack this switch port belongs to.
-    pub rack_id: Uuid,
-
-    /// The switch location of this switch port.
-    pub switch_location: String,
-
-    /// The name of this switch port.
-    pub port_name: Name,
-
-    /// The primary settings group of this switch port. Will be `None` until
-    /// this switch port is configured.
-    pub port_settings_id: Option<Uuid>,
-}
-
 /// A switch port settings identity whose id may be used to view additional
 /// details.
 #[derive(
@@ -2976,38 +2933,6 @@ pub enum LinkFec {
     None,
     /// Reed-Solomon forward error correction.
     Rs,
-}
-
-impl From<crate::api::internal::shared::PortFec> for LinkFec {
-    fn from(x: crate::api::internal::shared::PortFec) -> LinkFec {
-        match x {
-            crate::api::internal::shared::PortFec::Firecode => Self::Firecode,
-            crate::api::internal::shared::PortFec::None => Self::None,
-            crate::api::internal::shared::PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-impl From<crate::api::internal::shared::PortSpeed> for LinkSpeed {
-    fn from(x: crate::api::internal::shared::PortSpeed) -> Self {
-        match x {
-            crate::api::internal::shared::PortSpeed::Speed0G => Self::Speed0G,
-            crate::api::internal::shared::PortSpeed::Speed1G => Self::Speed1G,
-            crate::api::internal::shared::PortSpeed::Speed10G => Self::Speed10G,
-            crate::api::internal::shared::PortSpeed::Speed25G => Self::Speed25G,
-            crate::api::internal::shared::PortSpeed::Speed40G => Self::Speed40G,
-            crate::api::internal::shared::PortSpeed::Speed50G => Self::Speed50G,
-            crate::api::internal::shared::PortSpeed::Speed100G => {
-                Self::Speed100G
-            }
-            crate::api::internal::shared::PortSpeed::Speed200G => {
-                Self::Speed200G
-            }
-            crate::api::internal::shared::PortSpeed::Speed400G => {
-                Self::Speed400G
-            }
-        }
-    }
 }
 
 /// A link configuration for a port settings object.
@@ -3203,46 +3128,6 @@ pub struct SwitchPortRouteConfig {
     pub rib_priority: Option<u8>,
 }
 
-/// A base BGP configuration.
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct BgpConfig {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// The autonomous system number of this BGP configuration.
-    pub asn: u32,
-
-    /// Optional virtual routing and forwarding identifier for this BGP
-    /// configuration.
-    pub vrf: Option<String>,
-
-    /// Maximum number of paths to use when multiple "best paths" exist
-    pub max_paths: MaxPathConfig,
-}
-
-/// Represents a BGP announce set by id. The id can be used with other API calls
-/// to view and manage the announce set.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpAnnounceSet {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-}
-
-/// A BGP announcement tied to an address lot block.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpAnnouncement {
-    /// The id of the set this announcement is a part of.
-    pub announce_set_id: Uuid,
-
-    /// The address block the IP network being announced is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP network being announced.
-    pub network: oxnet::IpNet,
-}
-
 /// An IP address configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortAddressConfig {
@@ -3285,180 +3170,6 @@ pub struct SwitchPortAddressView {
 
     /// The interface name this address belongs to.
     pub interface_name: Name,
-}
-
-/// The current state of a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum BgpPeerState {
-    /// Initial state. Refuse all incoming BGP connections. No resources
-    /// allocated to peer.
-    Idle,
-
-    /// Waiting for the TCP connection to be completed.
-    Connect,
-
-    /// Trying to acquire peer by listening for and accepting a TCP connection.
-    Active,
-
-    /// Waiting for open message from peer.
-    OpenSent,
-
-    /// Waiting for keepaliave or notification from peer.
-    OpenConfirm,
-
-    /// There is an ongoing Connection Collision that hasn't yet been resolved.
-    /// Two connections are maintained until one connection receives an Open or
-    /// is able to progress into Established.
-    ConnectionCollision,
-
-    /// Synchronizing with peer.
-    SessionSetup,
-
-    /// Session established. Able to exchange update, notification and keepalive
-    /// messages with peers.
-    Established,
-}
-
-impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
-    fn from(s: mg_admin_client::types::FsmStateKind) -> BgpPeerState {
-        use mg_admin_client::types::FsmStateKind;
-        match s {
-            FsmStateKind::Idle => BgpPeerState::Idle,
-            FsmStateKind::Connect => BgpPeerState::Connect,
-            FsmStateKind::Active => BgpPeerState::Active,
-            FsmStateKind::OpenSent => BgpPeerState::OpenSent,
-            FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
-            FsmStateKind::ConnectionCollision => {
-                BgpPeerState::ConnectionCollision
-            }
-            FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
-            FsmStateKind::Established => BgpPeerState::Established,
-        }
-    }
-}
-
-/// The current status of a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpPeerStatus {
-    /// IP address of the peer.
-    pub addr: IpAddr,
-
-    /// Interface name
-    pub peer_id: String,
-
-    /// Local autonomous system number.
-    pub local_asn: u32,
-
-    /// Remote autonomous system number.
-    pub remote_asn: u32,
-
-    /// State of the peer.
-    pub state: BgpPeerState,
-
-    /// Time of last state change.
-    pub state_duration_millis: u64,
-
-    /// Switch with the peer session.
-    pub switch: SwitchLocation,
-}
-
-/// Route exported to a peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpExported {
-    /// Identifier for the BGP peer.
-    pub peer_id: String,
-
-    /// Switch the route is exported from.
-    pub switch: SwitchLocation,
-
-    /// The destination network prefix.
-    pub prefix: oxnet::IpNet,
-}
-
-/// Opaque object representing BGP message history for a given BGP peer. The
-/// contents of this object are not yet stable.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
-
-impl BgpMessageHistory {
-    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
-        Self(arg)
-    }
-}
-
-impl JsonSchema for BgpMessageHistory {
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        let obj = schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject::default(),
-        );
-        generator.definitions_mut().insert(Self::schema_name(), obj.clone());
-        obj
-    }
-
-    fn schema_name() -> String {
-        "BgpMessageHistory".to_owned()
-    }
-}
-
-/// BGP message history for a particular switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SwitchBgpHistory {
-    /// Switch this message history is associated with.
-    pub switch: SwitchLocation,
-
-    /// Message history indexed by peer address.
-    pub history: HashMap<String, BgpMessageHistory>,
-}
-
-/// BGP message history for rack switches.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct AggregateBgpMessageHistory {
-    /// BGP history organized by switch.
-    switch_histories: Vec<SwitchBgpHistory>,
-}
-
-impl AggregateBgpMessageHistory {
-    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
-        Self { switch_histories }
-    }
-}
-
-/// A route imported from a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpImported {
-    /// The destination network prefix.
-    pub prefix: oxnet::IpNet,
-
-    /// The nexthop the prefix is reachable through.
-    pub nexthop: IpAddr,
-
-    /// BGP identifier of the originating router.
-    pub id: u32,
-
-    /// Switch the route is imported into.
-    pub switch: SwitchLocation,
-}
-
-/// BFD connection mode.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
 }
 
 /// Configuration of inbound ICMP allowed by API services.
@@ -3570,27 +3281,6 @@ pub struct Probe {
 
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
-}
-
-/// Define policy relating to the import and export of prefixes from a BGP
-/// peer.
-#[derive(
-    Default,
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    JsonSchema,
-    Eq,
-    PartialEq,
-    Hash,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum ImportExportPolicy {
-    /// Do not perform any filtering.
-    #[default]
-    NoFiltering,
-    Allow(Vec<oxnet::IpNet>),
 }
 
 /// Use instead of Option in API request body structs to get a field that can

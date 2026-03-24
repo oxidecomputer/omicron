@@ -273,6 +273,15 @@ task: "attached_subnet_manager"
     distributes attached subnets to sleds and switch
 
 
+task: "audit_log_cleanup"
+    hard-deletes completed audit log entries older than the retention period
+
+
+task: "audit_log_timeout_incomplete"
+    transitions stale incomplete audit log entries to timeout status so they
+    become visible in the audit log
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -336,6 +345,11 @@ task: "external_endpoints"
     reads config for silos and TLS certificates to determine the right set of
     HTTP endpoints, their HTTP server names, and which TLS certificates to use
     on each one
+
+
+task: "fm_rendezvous"
+    updates externally visible database tables to match the current fault
+    management sitrep
 
 
 task: "fm_sitrep_gc"
@@ -441,6 +455,10 @@ task: "service_firewall_rule_propagation"
 
 task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
+
+
+task: "session_cleanup"
+    hard-deletes expired console sessions based on absolute timeout
 
 
 task: "sp_ereport_ingester"
@@ -584,6 +602,22 @@ task: "attached_subnet_manager"
    no dendrite instances found
    no sleds found
 
+task: "audit_log_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    rows deleted:               0
+    cutoff:                     <REDACTED_TIMESTAMP>
+    max deleted per activation: 10000
+
+task: "audit_log_timeout_incomplete"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    timed_out:                    0
+    cutoff:                       <REDACTED_TIMESTAMP>
+    max_timed_out_per_activation: 1000
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -652,6 +686,12 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report loaded
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -767,7 +807,7 @@ task: "reconfigurator_config_watcher"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+    config updated: <CONFIG_UPDATED_REDACTED>
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -849,6 +889,14 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "session_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
@@ -1171,6 +1219,22 @@ task: "attached_subnet_manager"
    no dendrite instances found
    no sleds found
 
+task: "audit_log_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    rows deleted:               0
+    cutoff:                     <REDACTED_TIMESTAMP>
+    max deleted per activation: 10000
+
+task: "audit_log_timeout_incomplete"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    timed_out:                    0
+    cutoff:                       <REDACTED_TIMESTAMP>
+    max_timed_out_per_activation: 1000
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1239,6 +1303,12 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report loaded
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1354,7 +1424,7 @@ task: "reconfigurator_config_watcher"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+    config updated: <CONFIG_UPDATED_REDACTED>
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1436,6 +1506,14 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "session_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
@@ -1612,6 +1690,13 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1653,6 +1738,13 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -1744,6 +1836,13 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1785,6 +1884,13 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:

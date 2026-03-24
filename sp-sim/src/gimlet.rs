@@ -50,6 +50,7 @@ use gateway_messages::{MessageKind, version};
 use gateway_types::component::SpState;
 use omicron_common::disk::M2Slot;
 use slog::{Logger, debug, error, info, warn};
+use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -570,7 +571,7 @@ impl SerialConsoleTcpTask {
                         match try_conn {
                             Ok((conn, addr)) => break (conn, addr),
                             Err(err) => {
-                                warn!(self.log, "error accepting TCP connection: {}", err);
+                                warn!(self.log, "error accepting TCP connection"; InlineErrorChain::new(&err));
                                 continue;
                             }
                         }

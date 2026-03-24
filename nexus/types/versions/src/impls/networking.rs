@@ -19,3 +19,35 @@ impl From<IpNet> for latest::networking::AddressLotBlockCreate {
         }
     }
 }
+
+impl From<mg_admin_client::types::FsmStateKind>
+    for latest::networking::BgpPeerState
+{
+    fn from(s: mg_admin_client::types::FsmStateKind) -> Self {
+        use mg_admin_client::types::FsmStateKind;
+        match s {
+            FsmStateKind::Idle => Self::Idle,
+            FsmStateKind::Connect => Self::Connect,
+            FsmStateKind::Active => Self::Active,
+            FsmStateKind::OpenSent => Self::OpenSent,
+            FsmStateKind::OpenConfirm => Self::OpenConfirm,
+            FsmStateKind::ConnectionCollision => Self::ConnectionCollision,
+            FsmStateKind::SessionSetup => Self::SessionSetup,
+            FsmStateKind::Established => Self::Established,
+        }
+    }
+}
+
+impl latest::networking::BgpMessageHistory {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
+        Self(arg)
+    }
+}
+
+impl latest::networking::AggregateBgpMessageHistory {
+    pub fn new(
+        switch_histories: Vec<latest::networking::SwitchBgpHistory>,
+    ) -> Self {
+        Self { switch_histories }
+    }
+}

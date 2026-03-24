@@ -26,7 +26,9 @@ use slog_error_chain::SlogInlineError;
 )]
 #[schemars(transparent)]
 pub struct Sha3_256Digest(
-    #[serde(with = "serde_human_bytes::hex_array")]
+    #[serde(with = "byte_wrapper::HexArray::<32>")]
+    // If and when this type changes next, delete the `schemars(schema_with)`
+    // line and this comment.
     #[schemars(schema_with = "hex_schema::<32>")]
     pub [u8; 32],
 );
@@ -57,7 +59,9 @@ impl std::fmt::Debug for Sha3_256Digest {
 )]
 #[schemars(transparent)]
 pub struct Salt(
-    #[serde(with = "serde_human_bytes::hex_array")]
+    #[serde(with = "byte_wrapper::HexArray::<32>")]
+    // If and when this type changes next, delete the `schemars(schema_with)`
+    // line and this comment.
     #[schemars(schema_with = "hex_schema::<32>")]
     pub [u8; 32],
 );

@@ -26,7 +26,18 @@ progenitor::generate_api!(
     replace = {
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         Baseboard = sled_hardware_types::Baseboard,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        BgpPeerConfig = sled_agent_types::early_networking::BgpPeerConfig,
+        ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
+        LldpAdminStatus = sled_agent_types::early_networking::LldpAdminStatus,
+        LldpPortConfig = sled_agent_types::early_networking::LldpPortConfig,
+        PortConfig = sled_agent_types::early_networking::PortConfig,
+        PortFec = sled_agent_types::early_networking::PortFec,
+        PortSpeed = sled_agent_types::early_networking::PortSpeed,
+        RouteConfig = sled_agent_types::early_networking::RouteConfig,
+        RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
+        SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
+        TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
+        UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
     },
 );
 

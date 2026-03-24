@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
 use crate::db::model::InstanceNetworkInterface;
@@ -418,6 +419,33 @@ impl DataStore {
                 }
             }
         })
+        .and_then(|nic| {
+            // Verify that the created NIC has the requested IP address
+            // types. Note that our sql constraint ensures that at least
+            // one of ip and ipv6 is populated, so we should never reach
+            // this point if both address types failed to create.
+            // However, if the user requested a dual-stack NIC and only
+            // received a single address type, our sql constraint is
+            // satisfied, and we need the additional check here.
+            let wants_v4 = interface.ip_config.as_ipv4_create().is_some();
+            let wants_v6 = interface.ip_config.as_ipv6_create().is_some();
+            let missing_v4 = wants_v4 && nic.ipv4.is_none();
+            let missing_v6 = wants_v6 && nic.ipv6.is_none();
+            if missing_v4 || missing_v6 {
+                Err(TransactionError::CustomError(
+                    network_interface::InsertError::NoAvailableIpAddresses {
+                        name: interface.subnet.identity.name.to_string(),
+                        id: subnet_id,
+                        ip_versions:
+                            network_interface::MissingIpVersions::from_missing(
+                                missing_v4, missing_v6,
+                            ),
+                    },
+                ))
+            } else {
+                Ok(nic)
+            }
+        })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -508,71 +536,32 @@ impl DataStore {
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
+            // Treat "not found" as an error
+            .and_then(SoftDeleteResult::into_did_soft_delete_bool)
             .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Delete a `ServiceNetworkInterface` attached to a provided service.
     ///
-    /// To support idempotency, such as in saga operations, this method returns
-    /// an extra boolean. The meaning of return values are:
+    /// To support idempotency,  this method returns an extra boolean. The
+    /// meaning of return values are:
+    ///
     /// - `Ok(true)`: The record was deleted during this call
     /// - `Ok(false)`: The record was already deleted, such as by a previous
     /// call
     /// - `Err(_)`: Any other condition, including a non-existent record.
-    pub async fn service_delete_network_interface(
-        &self,
-        opctx: &OpContext,
-        service_id: Uuid,
-        network_interface_id: Uuid,
-    ) -> Result<bool, network_interface::DeleteError> {
-        // See the comment in `service_create_network_interface`. There's no
-        // obvious parent for a service network interface (as opposed to
-        // instance network interfaces, which require permissions on the
-        // instance). As a logical proxy, we check for listing children of the
-        // service IP pool.
-        //
-        // Note that the IP version here doesn't matter, both pools have the
-        // same permissions.
-        let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        opctx
-            .authorize(authz::Action::Delete, &authz_service_ip_pool)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-
-        let conn = self
-            .pool_connection_authorized(opctx)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        self.service_delete_network_interface_on_connection(
-            &conn,
-            service_id,
-            network_interface_id,
-        )
-        .await
-        .map_err(|txn_error| match txn_error {
-            TransactionError::CustomError(err) => err,
-            TransactionError::Database(err) => {
-                let query = network_interface::DeleteQuery::new(
-                    NetworkInterfaceKind::Service,
-                    service_id,
-                    network_interface_id,
-                );
-                network_interface::DeleteError::from_diesel(err, &query)
-            }
-        })
-    }
-
-    /// Variant of [Self::service_delete_network_interface] which may be called
-    /// from a transaction context.
-    pub async fn service_delete_network_interface_on_connection(
+    ///
+    /// Should only be called from a transaction context which has already
+    /// performed any necessary auth checks.
+    pub(crate) async fn service_delete_network_interface_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<bool, TransactionError<network_interface::DeleteError>> {
+    ) -> Result<
+        SoftDeleteResult,
+        TransactionError<network_interface::DeleteError>,
+    > {
         let query = network_interface::DeleteQuery::new(
             NetworkInterfaceKind::Service,
             service_id,
@@ -866,10 +855,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_runtime =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_runtime.propolis_id.is_some()
-                            || instance_runtime.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
@@ -953,10 +942,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_state =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_state.propolis_id.is_some()
-                            || instance_state.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
@@ -1138,13 +1127,14 @@ mod tests {
         assert_eq!(nics, service_nics);
 
         // Delete a few, and ensure we don't see them anymore.
+        let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
         let mut removed_nic_ids = BTreeSet::new();
         for (i, nic) in service_nics.iter().enumerate() {
             if i % 3 == 0 {
                 let id = nic.id();
                 datastore
-                    .service_delete_network_interface(
-                        &opctx,
+                    .service_delete_network_interface_on_connection(
+                        &conn,
                         nic.service_id,
                         id,
                     )

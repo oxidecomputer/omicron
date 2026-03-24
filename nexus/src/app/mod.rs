@@ -35,11 +35,11 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
@@ -120,6 +120,7 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::SetTargetReleaseIntent;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
@@ -221,7 +222,17 @@ pub struct Nexus {
     ///
     /// (This does not need to be in an `Arc` because `reqwest::Client` uses
     /// `Arc` internally.)
+    ///
+    /// Currently unused because all `new_with_client` call sites use
+    /// `reqwest012_client` for cross-repo dependencies that are still on
+    /// reqwest 0.12. This field will be used again once rev pins are updated.
+    #[allow(dead_code)]
     reqwest_client: reqwest::Client,
+
+    /// `reqwest012::Client` for cross-repo dependencies where the rev-pinned
+    /// dependency is still on reqwest 0.12. Remove once all rev pins are
+    /// updated.
+    reqwest012_client: reqwest012::Client,
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
@@ -423,7 +434,15 @@ impl Nexus {
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
+
+        // reqwest 0.12 client for cross-repo dependencies still on reqwest
+        // 0.12. Remove once all rev pins are updated.
+        let reqwest012_client = reqwest012::ClientBuilder::new()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
         // Client to the ClickHouse database.
         let timeseries_client = match &config.pkg.timeseries_db.address {
@@ -482,7 +501,10 @@ impl Nexus {
                 &external_resolver,
             );
             webhook::delivery_client(builder).map_err(|e| {
-                format!("failed to build webhook delivery client: {e}")
+                format!(
+                    "failed to build webhook delivery client: {}",
+                    InlineErrorChain::new(&e)
+                )
             })?
         };
 
@@ -522,6 +544,7 @@ impl Nexus {
             producer_server: std::sync::Mutex::new(None),
             populate_status,
             reqwest_client,
+            reqwest012_client,
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),
@@ -628,6 +651,16 @@ impl Nexus {
             // start the background tasks so that whatever can work will work.
             info!(task_log, "activating background tasks");
 
+            let console_session_absolute_timeout =
+                chrono::TimeDelta::try_minutes(
+                    task_config
+                        .pkg
+                        .console
+                        .session_absolute_timeout_minutes
+                        .into(),
+                )
+                .expect("session_absolute_timeout_minutes out of range");
+
             let driver = background_tasks_initializer.start(
                 &task_nexus.background_tasks,
                 BackgroundTasksData {
@@ -657,6 +690,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    console_session_absolute_timeout,
                 },
             );
 
@@ -1120,7 +1154,7 @@ impl Nexus {
 
     pub(crate) async fn dpd_clients(
         &self,
-    ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+    ) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
         let resolver = self.resolver();
         dpd_clients(resolver, &self.log).await
     }
@@ -1128,20 +1162,19 @@ impl Nexus {
     pub(crate) async fn lldpd_clients(
         &self,
         rack_id: Uuid,
-    ) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+    ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
         let resolver = self.resolver();
         lldpd_clients(resolver, rack_id, &self.log).await
     }
 
     pub(crate) async fn mg_clients(
         &self,
-    ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, String> {
         let resolver = self.resolver();
         let mappings =
             switch_zone_address_mappings(resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
-            vec![];
-        for (location, addr) in &mappings {
+        let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
+        for (switch_slot, addr) in &mappings {
             let port = MGD_PORT;
             let socketaddr =
                 std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
@@ -1149,7 +1182,7 @@ impl Nexus {
                 format!("http://{}", socketaddr).as_str(),
                 self.log.clone(),
             );
-            clients.push((*location, client));
+            clients.push((*switch_slot, client));
         }
         Ok(clients.into_iter().collect::<HashMap<_, _>>())
     }
@@ -1212,11 +1245,11 @@ pub enum Unimpl {
 
 /// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
 /// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
+/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
     let dpd_socketaddrs = match resolver
         .lookup_all_socket_v6(ServiceName::Dendrite)
         .await
@@ -1247,8 +1280,7 @@ pub(crate) async fn dpd_clients(
         })
         .collect();
 
-    let mut mappings: HashMap<SwitchLocation, dpd_client::Client> =
-        HashMap::new();
+    let mut mappings: HashMap<SwitchSlot, dpd_client::Client> = HashMap::new();
 
     for (addr, client) in clients {
         let switch_slot = match client.switch_identifiers().await {
@@ -1265,8 +1297,8 @@ pub(crate) async fn dpd_clients(
         };
 
         let location = match switch_slot {
-            0 => SwitchLocation::Switch0,
-            1 => SwitchLocation::Switch1,
+            0 => SwitchSlot::Switch0,
+            1 => SwitchSlot::Switch1,
             _ => {
                 warn!(log, "unexpected value for switch slot: {switch_slot}");
                 continue;
@@ -1286,16 +1318,16 @@ pub(crate) async fn dpd_clients(
 //
 /// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
 /// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
+/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     _rack_id: Uuid,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
     let log = log.new(o!( "component" => "LldpdClient"));
     let port = lldpd_client::default_port();
-    let clients: HashMap<SwitchLocation, lldpd_client::Client> = mappings
+    let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
         .map(|(location, addr)| {
             let lldpd_client = lldpd_client::Client::new(
@@ -1309,7 +1341,7 @@ pub(crate) async fn lldpd_clients(
 }
 
 /// Look up Dendrite addresses in DNS then determine the switch location of
-/// any addresses we're able to resolve the SwitchLocation for. If a switch
+/// any addresses we're able to resolve the SwitchSlot for. If a switch
 /// zone is down, the resolution process will fail and the entry will be
 /// missing from the result.
 ///
@@ -1319,7 +1351,7 @@ pub(crate) async fn lldpd_clients(
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
     let switch_zone_addresses = match resolver
         .lookup_all_ipv6(ServiceName::Dendrite)
         .await
@@ -1348,14 +1380,14 @@ async fn switch_zone_address_mappings(
 /// combination.
 ///
 /// We return whatever we're able to successfully resolve. In the event of
-/// a communication timeout or other failure with MGS, the SwitchLocation -> Ipv6Addr
+/// a communication timeout or other failure with MGS, the SwitchSlot -> Ipv6Addr
 /// mapping will be missing from the returned HashMap. Callers will need to inspect
 /// the contents to ensure what they expect to be there is actually there.
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
     resolver: &internal_dns_resolver::Resolver,
-) -> HashMap<SwitchLocation, Ipv6Addr> {
+) -> HashMap<SwitchSlot, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
@@ -1408,10 +1440,10 @@ async fn map_switch_zone_addrs(
 
         match switch_slot {
             0 => {
-                switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
+                switch_zone_addrs.insert(SwitchSlot::Switch0, addr);
             }
             1 => {
-                switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
+                switch_zone_addrs.insert(SwitchSlot::Switch1, addr);
             }
             _ => {
                 warn!(

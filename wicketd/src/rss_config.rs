@@ -12,7 +12,6 @@ use anyhow::bail;
 use bootstrap_agent_lockstep_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_lockstep_client::types::Certificate;
 use bootstrap_agent_lockstep_client::types::Name;
-use bootstrap_agent_lockstep_client::types::PortConfig as BaPortConfig;
 use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
 use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
 use bootstrap_agent_lockstep_client::types::UserId;
@@ -23,8 +22,12 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::external::SwitchLocation;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
@@ -47,6 +50,7 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
@@ -620,7 +624,7 @@ fn validate_rack_network_config(
         return Err(anyhow!("Must have at least one port configured"));
     }
 
-    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
+    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range.
     let infra_ip_range = match (config.infra_ip_first, config.infra_ip_last) {
         (IpAddr::V4(first), IpAddr::V4(last)) => Ipv4Range::new(first, last)
             .map_err(|s: String| {
@@ -637,22 +641,42 @@ fn validate_rack_network_config(
         )),
     }?;
 
-    // TODO this implies a single contiguous range for port IPs which is over
-    // constraining
-    // iterate through each port config
     for (_, _, port_config) in config.iter_uplinks() {
+        // Check that `infra_ip_{first...last}` contains every `uplink_ip`.
+        //
+        // TODO this implies a single contiguous range for port IPs which is
+        // over constraining
         for addr in &port_config.addresses {
-            if addr.addr().is_unspecified() {
-                continue;
-            }
-            // ... and check that it contains `uplink_ip`.
-            if addr.addr() < infra_ip_range.first_address()
-                || addr.addr() > infra_ip_range.last_address()
+            let addr: IpAddr = match addr.address {
+                UplinkAddress::AddrConf => continue,
+                UplinkAddress::Static { ip_net } => ip_net.addr(),
+            };
+            if addr < infra_ip_range.first_address()
+                || addr > infra_ip_range.last_address()
             {
                 bail!(
-                    "`uplink_cidr`'s IP address must be in the range defined by \
-                `infra_ip_first` and `infra_ip_last`"
+                    "`uplink_cidr` IP address {addr} is not covered by the \
+                     range defined by `infra_ip_first` ({}) and \
+                     `infra_ip_last` ({})",
+                    infra_ip_range.first_address(),
+                    infra_ip_range.last_address(),
                 );
+            }
+        }
+
+        // Check that router_lifetime is only specified for unnumbered peers
+        for peer in &port_config.bgp_peers {
+            match peer.addr {
+                UserSpecifiedRouterPeerAddr::Unnumbered => (),
+                UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                    if peer.router_lifetime != RouterLifetimeConfig::default() {
+                        bail!(
+                            "numbered BGP peer {ip} specifies a \
+                             router_lifetime, but router_lifetime is only \
+                             supported for unnumbered BGP peers"
+                        );
+                    }
+                }
             }
         }
     }
@@ -740,49 +764,21 @@ pub fn validate_rack_subnet(
     Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
 }
 
-/// Builds a `BaPortConfig` from a `UserSpecifiedPortConfig`.
+/// Builds a [`PortConfig`] from a [`UserSpecifiedPortConfig`].
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
-    switch: SwitchLocation,
+    switch: SwitchSlot,
     port: &str,
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> BaPortConfig {
-    use bootstrap_agent_lockstep_client::types::BgpPeerConfig as BaBgpPeerConfig;
-    use bootstrap_agent_lockstep_client::types::LldpAdminStatus as BaLldpAdminStatus;
-    use bootstrap_agent_lockstep_client::types::LldpPortConfig as BaLldpPortConfig;
-    use bootstrap_agent_lockstep_client::types::PortFec as BaPortFec;
-    use bootstrap_agent_lockstep_client::types::PortSpeed as BaPortSpeed;
-    use bootstrap_agent_lockstep_client::types::RouteConfig as BaRouteConfig;
-    use bootstrap_agent_lockstep_client::types::RouterLifetimeConfig as BaRouterLifetimeConfig;
-    use bootstrap_agent_lockstep_client::types::SwitchLocation as BaSwitchLocation;
-    use bootstrap_agent_lockstep_client::types::TxEqConfig as BaTxEqConfig;
-    use bootstrap_agent_lockstep_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
-    use omicron_common::api::internal::shared::LldpAdminStatus;
-    use omicron_common::api::internal::shared::PortFec;
-    use omicron_common::api::internal::shared::PortSpeed;
+) -> PortConfig {
+    use sled_agent_types::early_networking::BgpPeerConfig;
 
-    BaPortConfig {
+    PortConfig {
         port: port.to_owned(),
-        routes: config
-            .routes
-            .iter()
-            .map(|r| BaRouteConfig {
-                destination: r.destination,
-                nexthop: r.nexthop,
-                vlan_id: r.vlan_id,
-                rib_priority: r.rib_priority,
-            })
-            .collect(),
-        addresses: config
-            .addresses
-            .iter()
-            .map(|a| BaUplinkAddressConfig {
-                address: a.address,
-                vlan_id: a.vlan_id,
-            })
-            .collect(),
+        routes: config.routes.clone(),
+        addresses: config.addresses.iter().copied().map(From::from).collect(),
         bgp_peers: config
             .bgp_peers
             .iter()
@@ -806,10 +802,19 @@ fn build_port_config(
                     key
                 });
 
-                BaBgpPeerConfig {
-                    addr: p
-                        .addr
-                        .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+                let addr = match p.addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => {
+                        RouterPeerType::Unnumbered {
+                            router_lifetime: p.router_lifetime,
+                        }
+                    }
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        RouterPeerType::Numbered { ip }
+                    }
+                };
+
+                BgpPeerConfig {
+                    addr,
                     asn: p.asn,
                     port: p.port.clone(),
                     hold_time: p.hold_time,
@@ -827,52 +832,15 @@ fn build_port_config(
                     allowed_export: p.allowed_export.clone().into(),
                     allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
-                    router_lifetime: BaRouterLifetimeConfig(p.router_lifetime),
                 }
             })
             .collect(),
-        switch: match switch {
-            SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
-            SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
-        },
-        uplink_port_speed: match config.uplink_port_speed {
-            PortSpeed::Speed0G => BaPortSpeed::Speed0G,
-            PortSpeed::Speed1G => BaPortSpeed::Speed1G,
-            PortSpeed::Speed10G => BaPortSpeed::Speed10G,
-            PortSpeed::Speed25G => BaPortSpeed::Speed25G,
-            PortSpeed::Speed40G => BaPortSpeed::Speed40G,
-            PortSpeed::Speed50G => BaPortSpeed::Speed50G,
-            PortSpeed::Speed100G => BaPortSpeed::Speed100G,
-            PortSpeed::Speed200G => BaPortSpeed::Speed200G,
-            PortSpeed::Speed400G => BaPortSpeed::Speed400G,
-        },
-        uplink_port_fec: config.uplink_port_fec.map(|fec| match fec {
-            PortFec::Firecode => BaPortFec::Firecode,
-            PortFec::None => BaPortFec::None,
-            PortFec::Rs => BaPortFec::Rs,
-        }),
+        switch,
+        uplink_port_speed: config.uplink_port_speed,
+        uplink_port_fec: config.uplink_port_fec,
         autoneg: config.autoneg,
-        lldp: config.lldp.as_ref().map(|c| BaLldpPortConfig {
-            status: match c.status {
-                LldpAdminStatus::Enabled => BaLldpAdminStatus::Enabled,
-                LldpAdminStatus::Disabled => BaLldpAdminStatus::Disabled,
-                LldpAdminStatus::TxOnly => BaLldpAdminStatus::TxOnly,
-                LldpAdminStatus::RxOnly => BaLldpAdminStatus::RxOnly,
-            },
-            chassis_id: c.chassis_id.clone(),
-            port_id: c.port_id.clone(),
-            system_name: c.system_name.clone(),
-            system_description: c.system_description.clone(),
-            port_description: c.port_description.clone(),
-            management_addrs: c.management_addrs.clone(),
-        }),
-        tx_eq: config.tx_eq.as_ref().map(|c| BaTxEqConfig {
-            pre1: c.pre1,
-            pre2: c.pre2,
-            main: c.main,
-            post2: c.post2,
-            post1: c.post1,
-        }),
+        lldp: config.lldp.clone(),
+        tx_eq: config.tx_eq,
     }
 }
 
@@ -924,6 +892,94 @@ mod tests {
     use wicket_common::example::ExampleRackSetupData;
 
     use super::*;
+
+    #[test]
+    fn test_router_lifetime_unnumbered_only() {
+        // Default should be okay and have at least one BGP peer.
+        let example = ExampleRackSetupData::non_empty();
+        let bgp_auth_keys = {
+            let mut m = BTreeMap::new();
+            for id in example.bgp_auth_keys {
+                m.insert(
+                    id,
+                    Some(BgpAuthKey::TcpMd5 { key: "dummy".to_owned() }),
+                );
+            }
+            m
+        };
+        let rack_network_config = example.put_insensitive.rack_network_config;
+        validate_rack_network_config(&rack_network_config, &bgp_auth_keys)
+            .expect("base config is valid");
+        assert!(
+            !rack_network_config
+                .switch0
+                .first_key_value()
+                .expect("at least one switch0 port")
+                .1
+                .bgp_peers
+                .is_empty()
+        );
+
+        // Combine unnumbered with a non-default router_lifetime - fine.
+        let mut valid_router_lifetime = rack_network_config.clone();
+        {
+            let peer = valid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.addr = UserSpecifiedRouterPeerAddr::Unnumbered;
+            peer.router_lifetime = RouterLifetimeConfig::new(1234).unwrap();
+        }
+        validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
+            .expect("unnumbered with non-zero router_lifetime is ok");
+
+        // Keep non-default router_lifetime but change to a numbered peer -
+        // should fail with a reasonable error.
+        let mut invalid_router_lifetime = valid_router_lifetime.clone();
+        {
+            let peer = invalid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.addr = UserSpecifiedRouterPeerAddr::Numbered(
+                "1.2.3.4".parse().unwrap(),
+            );
+        }
+        let err = validate_rack_network_config(
+            &invalid_router_lifetime,
+            &bgp_auth_keys,
+        )
+        .expect_err("numbered with non-zero router_lifetime is not ok");
+        assert_eq!(
+            format!("{err:#}"),
+            "numbered BGP peer 1.2.3.4 specifies a router_lifetime, but \
+             router_lifetime is only supported for unnumbered BGP peers"
+        );
+
+        // Keep numbered peer but switch router_lifetime back to default - fine.
+        let mut valid_router_lifetime = invalid_router_lifetime.clone();
+        {
+            let peer = valid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.router_lifetime = RouterLifetimeConfig::default()
+        }
+        validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
+            .expect("numbered with zero router_lifetime is ok");
+    }
 
     #[test]
     fn test_bgp_auth_key_states() {

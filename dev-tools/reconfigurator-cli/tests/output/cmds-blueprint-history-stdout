@@ -73,6 +73,13 @@ to:   blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
++   unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -196,6 +203,13 @@ to:   blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
++   unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -315,6 +329,13 @@ to:   blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
++   unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -456,6 +477,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -600,6 +628,13 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3 -> 4):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -762,6 +797,13 @@ to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------

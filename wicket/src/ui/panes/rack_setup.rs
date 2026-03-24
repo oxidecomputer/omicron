@@ -20,9 +20,6 @@ use crate::ui::widgets::PopupScrollOffset;
 use itertools::Itertools;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -35,6 +32,12 @@ use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -43,6 +46,8 @@ use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
+use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
@@ -791,12 +796,17 @@ fn rss_config_text<'a>(
                 tx_eq,
             } = uplink;
 
+            let switch_description = match switch {
+                SwitchSlot::Switch0 => "0",
+                SwitchSlot::Switch1 => "1",
+            };
+
             let mut items = vec![
                 vec![
                     Span::styled("  • Port          : ", label_style),
                     Span::styled(port.to_string(), ok_style),
                     Span::styled(" on switch ", label_style),
-                    Span::styled(switch.to_string(), ok_style),
+                    Span::styled(switch_description, ok_style),
                 ],
                 vec![
                     Span::styled("  • Speed         : ", label_style),
@@ -860,15 +870,19 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
+                let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
+                let addr_description = match address {
+                    UplinkAddress::AddrConf => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::ADDR_CONF,
+                    ),
+                    UplinkAddress::Static { ip_net } => {
+                        Cow::Owned(ip_net.to_string())
+                    }
+                };
                 let mut items =
                     vec![Span::styled("  • Address       : ", label_style)];
-                if let Some(address) = a.address {
-                    items.push(Span::styled(address.to_string(), ok_style));
-                } else {
-                    items
-                        .push(Span::styled("link-local".to_string(), ok_style));
-                }
-                if let Some(vlan_id) = a.vlan_id {
+                items.push(Span::styled(addr_description, ok_style));
+                if let Some(vlan_id) = vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
@@ -907,8 +921,12 @@ fn rss_config_text<'a>(
                 } = p;
 
                 let addr_string = match addr {
-                    Some(a) => a.to_string(),
-                    None => "unnumbered".to_string(),
+                    UserSpecifiedRouterPeerAddr::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedRouterPeerAddr::UNNUMBERED_PEER,
+                    ),
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        Cow::Owned(ip.to_string())
+                    }
                 };
 
                 let mut lines = vec![
@@ -995,7 +1013,7 @@ fn rss_config_text<'a>(
                             Span::styled(vlan_id.to_string(), ok_style),
                         ]);
                     }
-                    if *router_lifetime != 0 {
+                    if router_lifetime.as_u16() != 0 {
                         settings.extend([
                             Span::styled(" router_lifetime=", label_style),
                             Span::styled(
@@ -1125,11 +1143,18 @@ fn rss_config_text<'a>(
                     management_addrs,
                 } = lp;
 
+                let status_description = match status {
+                    LldpAdminStatus::Enabled => "enabled",
+                    LldpAdminStatus::Disabled => "disabled",
+                    LldpAdminStatus::RxOnly => "rx only",
+                    LldpAdminStatus::TxOnly => "tx only",
+                };
+
                 let mut lldp = vec![
                     vec![Span::styled("  • LLDP port settings: ", label_style)],
                     vec![
                         Span::styled("    • Admin status      : ", label_style),
-                        Span::styled(status.to_string(), ok_style),
+                        Span::styled(status_description, ok_style),
                     ],
                 ];
 

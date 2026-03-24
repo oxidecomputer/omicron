@@ -32,6 +32,8 @@ use crate::db::raw_query_builder::SelectableSql;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::count;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
@@ -917,7 +919,7 @@ impl DataStore {
         external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
-            .select(diesel::dsl::count_distinct(external_ip::ip))
+            .select(count(external_ip::ip).aggregate_distinct())
             .first_async::<i64>(conn)
             .await
     }
@@ -2114,55 +2116,16 @@ fn extract_uuid_cast_sentinel(msg: &str) -> Option<&str> {
 // Oxide internal usage XOR linked to customer silos. It also checks that the
 // pool and silo still exist when the query is run.
 //
-// The full query is:
-//
-// ```sql
-// WITH
-//   -- Select the IP Pool by ID, used to ensure it still exists when we run
-//   -- this query. Also select the reservation type, and fail if the pool is
-//   -- currently reserved for Oxide. Include `pool_type` and `ip_version` for
-//   -- denormalization into `ip_pool_resource`, which allows for a partial
-//   -- index we can constrain pool defaults on.
-//   ip_pool AS (
-//      SELECT
-//        CAST(IF(reservation_type != 'external_silos', 'bad-link-type', $1) AS UUID) AS id,
-//        pool_type,
-//        ip_version
-//      FROM ip_pool
-//      WHERE id = $2 AND time_deleted IS NULL
-//   ),
-//   -- Select the Silo by ID, used to ensure it still exists when we run this
-//   -- query
-//   silo AS (SELECT id FROM silo WHERE id = $3 AND time_deleted IS NULL)
-// INSERT
-// INTO
-//   ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default, pool_type, ip_version)
-// SELECT
-//   -- If the pool exists, take its ID as a string. If it does not exist, take
-//   -- the string `'ip-pool-deleted'`. Attempt to cast the result to a UUID.
-//   -- This is the "true or cast error" trick we use in many places.
-//   CAST(COALESCE(CAST(ip.id AS STRING), 'ip-pool-deleted') AS UUID),
-//   -- The resource type, always 'silo' here.
-//   $4,
-//   -- If the silo exists, take its ID as a string. If it does not exist, take
-//   -- the string `'silo-deleted'`. Attempt to cast the result to a UUID.
-//   -- This is the "true or cast error" trick we use in many places.
-//   CAST(COALESCE(CAST(s.id AS STRING), 'silo-deleted') AS UUID),
-//   $5,
-//   -- Denormalized from ip_pool for the partial index constraint on defaults.
-//   ip.pool_type,
-//   ip.ip_version
-// FROM
-//   (SELECT 1) AS dummy
-//   LEFT JOIN ip_pool AS ip ON true
-//   LEFT JOIN silo AS s ON true
-// RETURNING
-//  *
-// ```
+// See `tests/output/ip_pool_external_silo_link.sql` for the full generated SQL.
 fn link_ip_pool_to_external_silo_query(
     ip_pool_resource: &IncompleteIpPoolResource,
 ) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
     let mut builder = QueryBuilder::new();
+    // `ip_pool` CTE: select the pool by ID, ensuring it still exists.
+    // Fail with a 'bad-link-type' sentinel (via CAST-to-UUID trick) if
+    // the pool is reserved for Oxide rather than external silos.
+    // Also selects pool_type and ip_version for denormalization into
+    // ip_pool_resource (needed for a partial index constraint on defaults).
     builder
         .sql("WITH ip_pool AS (SELECT CAST(IF(reservation_type != ")
         .param()
@@ -2177,16 +2140,22 @@ fn link_ip_pool_to_external_silo_query(
         .sql(") AS UUID) AS id, pool_type, ip_version FROM ip_pool WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
-        .sql(
-            " \
-            AND time_deleted IS NULL), \
-            silo AS (SELECT id FROM silo WHERE id = ",
-        )
+        .sql(" AND time_deleted IS NULL), ");
+
+    // `silo` CTE: select the silo by ID, ensuring it still exists.
+    builder
+        .sql("silo AS (SELECT id FROM silo WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.resource_id)
+        .sql(" AND time_deleted IS NULL) ");
+
+    // Use COALESCE(CAST(id AS STRING), '<sentinel>') to detect missing
+    // pool/silo: if the CTE returned no rows the LEFT JOIN produces NULL,
+    // COALESCE substitutes the sentinel, and CAST-to-UUID fails at runtime
+    // with a recognizable error message.
+    builder
         .sql(
-            " AND time_deleted IS NULL) \
-            INSERT INTO ip_pool_resource (\
+            "INSERT INTO ip_pool_resource (\
                 ip_pool_id, \
                 resource_type, \
                 resource_id, \

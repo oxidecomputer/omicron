@@ -452,13 +452,13 @@ mod test {
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
         let alert_id = AlertUuid::new_v4();
+        let alert = db::model::Alert::new(
+            alert_id,
+            db::model::AlertClass::TestQuuxBar,
+            serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
+        );
         datastore
-            .alert_create(
-                &opctx,
-                alert_id,
-                db::model::AlertClass::TestQuuxBar,
-                serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
-            )
+            .alert_create(&opctx, alert)
             .await
             .expect("creating the event should work");
 

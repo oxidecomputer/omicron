@@ -282,11 +282,11 @@ networking_bgp_status                    GET      /v1/system/networking/bgp-stat
 networking_inbound_icmp_update           PUT      /v1/system/networking/inbound-icmp
 networking_inbound_icmp_view             GET      /v1/system/networking/inbound-icmp
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
-networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
+networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address
 networking_switch_port_lldp_config_update POST     /v1/system/hardware/switch-port/{port}/lldp/config
 networking_switch_port_lldp_config_view  GET      /v1/system/hardware/switch-port/{port}/lldp/config
-networking_switch_port_lldp_neighbors    GET      /v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors
+networking_switch_port_lldp_neighbors    GET      /v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors
 networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
@@ -344,6 +344,7 @@ system_subnet_pool_view                  GET      /v1/system/subnet-pools/{pool}
 
 API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH
+system_update_recovery_finish            PUT      /v1/system/update/recovery-finish
 system_update_repository_list            GET      /v1/system/update/repositories
 system_update_repository_upload          PUT      /v1/system/update/repositories
 system_update_repository_view            GET      /v1/system/update/repositories/{system_version}

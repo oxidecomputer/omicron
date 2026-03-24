@@ -85,20 +85,19 @@ pub fn rack_initialize_request_test_config() -> RackInitializeRequest {
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
-    use std::net::Ipv6Addr;
-
+    use super::*;
+    use crate::early_networking::RackNetworkConfig;
+    use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_common::address::{
         AZ_PREFIX, IpRange, RACK_PREFIX, SLED_PREFIX,
     };
     use omicron_common::api::external::AllowedSourceIps;
-    use omicron_common::api::internal::shared::RackNetworkConfig;
-
-    use super::*;
-    use anyhow::Context;
     use oxnet::Ipv6Net;
+    use slog_error_chain::InlineErrorChain;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     #[test]
     fn parse_rack_initialization() {
@@ -231,8 +230,14 @@ mod tests {
         // The stock non-Gimlet config has no TLS certificates.
         let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
-        let cfg = rack_initialize_request_from_file(&path)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+        let cfg =
+            rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
+                panic!(
+                    "failed to parse {:?}: {}",
+                    &path,
+                    InlineErrorChain::new(&e)
+                )
+            });
         assert!(cfg.external_certificates.is_empty());
 
         // Now let's create a configuration that does have an adjacent

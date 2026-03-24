@@ -40,11 +40,9 @@ use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
 use oxnet::IpNet;
-use propolis_api_types::ErrorCode as PropolisErrorCode;
+use propolis_api_types::instance::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
-use propolis_client::instance_spec::{
-    ComponentV0, InstanceSpec, InstanceSpecV0, SpecKey,
-};
+use propolis_client::instance_spec::{Component, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
@@ -53,6 +51,7 @@ use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
@@ -70,23 +69,23 @@ pub enum Error {
     #[error("Failed to wait for service: {0}")]
     Timeout(String),
 
-    #[error("Failed to create VNIC: {0}")]
+    #[error("Failed to create VNIC")]
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
-    #[error("Failure from Propolis Client: {0}")]
+    #[error("Failure from Propolis Client")]
     Propolis(#[from] PropolisClientError),
 
     // TODO: Remove this error; prefer to retry notifications.
-    #[error("Notifying Nexus failed: {0}")]
-    Notification(nexus_client::Error<nexus_client::types::Error>),
+    #[error("Notifying Nexus failed")]
+    Notification(#[source] nexus_client::Error<nexus_client::types::Error>),
 
     // TODO: This error type could become more specific
-    #[error("Error performing a state transition: {0}")]
-    Transition(omicron_common::api::external::Error),
+    #[error("Error performing a state transition")]
+    Transition(#[source] omicron_common::api::external::Error),
 
     // TODO: Add more specific errors
-    #[error("Failure during migration: {0}")]
-    Migration(anyhow::Error),
+    #[error("Failure during migration")]
+    Migration(#[source] anyhow::Error),
 
     #[error("requested NIC {0} has no virtio network backend in Propolis spec")]
     NicNotInPropolisSpec(Uuid),
@@ -103,7 +102,7 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("serde_json failure: {0}")]
+    #[error("serde_json failure")]
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error(transparent)]
@@ -113,7 +112,7 @@ pub enum Error {
     #[error("Invalid hostname: {0}")]
     InvalidHostname(&'static str),
 
-    #[error("Error resolving DNS name: {0}")]
+    #[error("Error resolving DNS name")]
     ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Propolis job with ID {0} is registered but not running")]
@@ -417,7 +416,7 @@ impl InstanceMonitorRunner {
 
             // Update the state generation for the next poll.
             if let InstanceMonitorUpdate::State(ref state) = update {
-                generation = state.r#gen + 1;
+                generation = state.gen_ + 1;
             }
 
             // Now that we have the response from Propolis' HTTP server, we
@@ -444,7 +443,7 @@ impl InstanceMonitorRunner {
             .client
             .instance_state_monitor()
             .body(propolis_client::types::InstanceStateMonitorRequest {
-                r#gen: generation,
+                gen_: generation,
             })
             .send()
             .await;
@@ -600,19 +599,6 @@ struct InstanceRunner {
 
     // Subnets attached to this instance.
     attached_subnets: IdOrdMap<AttachedSubnet>,
-}
-
-/// Translate a `propolis-client` `InstanceSpecV0` into the newer
-/// `InstanceSpec`.
-///
-/// This can be done losslessly, and probably should be an `impl From` or
-/// inherent method in `propolis-client`, but Propolis itself converts between
-/// these types a little less directly. It hadn't occurred to me that this is
-/// useful for clients as well.
-pub(crate) fn spec_v0_to_v1(orig_spec: InstanceSpecV0) -> InstanceSpec {
-    let InstanceSpecV0 { board, components } = orig_spec;
-
-    InstanceSpec { board, components, smbios: None }
 }
 
 impl InstanceRunner {
@@ -828,7 +814,7 @@ impl InstanceRunner {
                                     self.log,
                                     "Error handling request";
                                     "request" => request_variant,
-                                    "err" => ?err,
+                                    InlineErrorChain::new(&err),
                                 );
                             }
                         }
@@ -975,8 +961,7 @@ impl InstanceRunner {
                             | nexus_client::Error::UnexpectedResponse(_)
                             | nexus_client::Error::InvalidUpgrade(_)
                             | nexus_client::Error::ResponseBodyError(_)
-                            | nexus_client::Error::PreHookError(_)
-                            | nexus_client::Error::PostHookError(_) => {
+                            | nexus_client::Error::Custom(_) => {
                                 BackoffError::permanent(Error::Notification(
                                     err,
                                 ))
@@ -1011,7 +996,7 @@ impl InstanceRunner {
             |err: Error, delay| {
                 warn!(self.log,
                       "Failed to publish instance state to Nexus: {}",
-                      err.to_string();
+                      InlineErrorChain::new(&err).to_string();
                       "instance_id" => %self.instance_id(),
                       "propolis_id" => %self.propolis_id,
                       "retry_after" => ?delay);
@@ -1022,7 +1007,7 @@ impl InstanceRunner {
         if let Err(e) = result {
             error!(
                 self.log,
-                "Failed to publish state to Nexus, will not retry: {:?}", e;
+                "Failed to publish state to Nexus, will not retry: {}", InlineErrorChain::new(&e);
                 "instance_id" => %self.instance_id(),
                 "propolis_id" => %self.propolis_id,
             );
@@ -1240,9 +1225,7 @@ impl InstanceRunner {
         } else {
             propolis_client::types::InstanceEnsureRequest {
                 properties: self.properties.clone(),
-                init: InstanceInitializationMethod::Spec {
-                    spec: spec_v0_to_v1(spec.0),
-                },
+                init: InstanceInitializationMethod::Spec { spec: spec.0 },
             }
         };
 
@@ -1281,7 +1264,7 @@ impl InstanceRunner {
                 return Err(Error::NicNotInPropolisSpec(nic.id));
             };
 
-            let ComponentV0::VirtioNetworkBackend(be) = backend else {
+            let Component::VirtioNetworkBackend(be) = backend else {
                 return Err(Error::NicNotInPropolisSpec(nic.id));
             };
 
@@ -2353,7 +2336,7 @@ impl InstanceRunner {
         let setup = match self.setup_propolis_zone().await {
             Ok(setup) => setup,
             Err(e) => {
-                error!(&self.log, "failed to set up Propolis zone"; "error" => ?e);
+                error!(&self.log, "failed to set up Propolis zone"; InlineErrorChain::new(&e));
                 return Err(e);
             }
         };
@@ -2366,7 +2349,7 @@ impl InstanceRunner {
             )
             .await
         {
-            error!(&self.log, "failed to create Propolis VM"; "error" => ?e);
+            error!(&self.log, "failed to create Propolis VM"; InlineErrorChain::new(&e));
             return Err(e);
         }
 
@@ -2625,8 +2608,6 @@ impl InstanceRunner {
             ),
         }
 
-        // We use a custom client builder here because the default progenitor
-        // one has a timeout of 15s but we want to be able to wait indefinitely.
         let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", &self.propolis_addr),
@@ -2675,7 +2656,7 @@ impl InstanceRunner {
                     warn!(
                         self.log,
                         "Error handling request to terminate instance";
-                        "err" => ?err,
+                        InlineErrorChain::new(&err),
                     );
                 }
 
@@ -2943,6 +2924,7 @@ mod tests {
     };
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
+    use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
@@ -3133,8 +3115,8 @@ mod tests {
     fn fake_instance_initial_state(
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
-        use propolis_client::instance_spec::{Board, InstanceSpecV0};
-        let spec = VmmSpec(InstanceSpecV0 {
+        use propolis_client::instance_spec::{Board, InstanceSpec};
+        let spec = VmmSpec(InstanceSpec {
             board: Board {
                 cpus: 1,
                 memory_mb: 1024,
@@ -3143,6 +3125,7 @@ mod tests {
                 cpuid: None,
             },
             components: Default::default(),
+            smbios: None,
         });
 
         let external_ips = Some(
@@ -3884,7 +3867,7 @@ mod tests {
             .send(InstanceMonitorMessage {
                 update: InstanceMonitorUpdate::State(
                     InstanceStateMonitorResponse {
-                        r#gen: 5,
+                        gen_: 5,
                         migration: InstanceMigrateStatusResponse {
                             migration_in: None,
                             migration_out: None,
