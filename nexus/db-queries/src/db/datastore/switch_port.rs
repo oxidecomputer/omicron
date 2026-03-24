@@ -658,7 +658,13 @@ impl DataStore {
                             allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
                                 .filter(allow_import_dsl::port_settings_id.eq(id))
                                 .filter(allow_import_dsl::interface_name.eq(p.interface_name.clone()))
-                                .filter(allow_import_dsl::addr.eq(lookup_addr))
+                                .filter(
+                                    // Use `is_not_distinct_from` instead of
+                                    // `eq` to compare NULL/None.
+                                    allow_import_dsl::addr.is_not_distinct_from(
+                                        peer_type.ip_db_repr(),
+                                    ),
+                                )
                                 .select(SwitchPortBgpPeerConfigAllowImport::as_select())
                                 .load_async::<SwitchPortBgpPeerConfigAllowImport>(&conn)
                                 .await?;
@@ -1506,13 +1512,14 @@ async fn do_switch_port_settings_create(
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
-                    .clone()
-                    .into_iter()
-                    .map(|x| SwitchPortBgpPeerConfigAllowImport {
-                        port_settings_id: id,
-                        interface_name: peer_config.link_name.clone().into(),
-                        addr: db_addr,
-                        prefix: x.into(),
+                    .iter()
+                    .map(|&x| {
+                        SwitchPortBgpPeerConfigAllowImport::new(
+                            id,
+                            peer_config.link_name.clone().into(),
+                            p.addr,
+                            x,
+                        )
                     })
                     .collect();
 
