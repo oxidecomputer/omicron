@@ -4459,6 +4459,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Create loopback address
     #[endpoint {
         operation_id = "networking_loopback_address_create",
         method = POST,
@@ -4557,6 +4558,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List loopback addresses
     #[endpoint {
         operation_id = "networking_loopback_address_list",
         method = GET,
@@ -4628,6 +4630,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Create switch port settings
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
         method = POST,
