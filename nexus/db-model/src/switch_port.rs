@@ -23,12 +23,14 @@ use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::{ImportExportPolicy, UplinkAddress};
-use sled_agent_types::early_networking::{InvalidIpAddrError, PortFec};
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkIpNetError;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -880,7 +882,7 @@ impl SwitchPortAddressConfig {
     ///
     /// Only fails if we've stored invalid data in the DB (i.e., an address that
     /// contains an IP that we don't allow for uplink addresses).
-    pub fn address(&self) -> Result<UplinkAddress, InvalidIpAddrError> {
+    pub fn address(&self) -> Result<UplinkAddress, UplinkIpNetError> {
         UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(
             self.address.into(),
         )

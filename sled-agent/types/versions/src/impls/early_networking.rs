@@ -252,7 +252,7 @@ impl UplinkAddress {
     /// using stronger types.
     pub fn try_from_ip_net_treating_unspecified_as_addrconf(
         ip_net: IpNet,
-    ) -> Result<Self, InvalidIpAddrError> {
+    ) -> Result<Self, UplinkIpNetError> {
         match UplinkIpNet::try_from(ip_net) {
             Ok(ip_net) => Ok(Self::Static { ip_net }),
             Err(err) => match err.err {
@@ -261,7 +261,7 @@ impl UplinkAddress {
                 | InvalidIpAddrError::MulticastAddress
                 | InvalidIpAddrError::Ipv4Broadcast
                 | InvalidIpAddrError::Ipv6UnicastLinkLocal
-                | InvalidIpAddrError::Ipv4MappedIpv6 => Err(err.err),
+                | InvalidIpAddrError::Ipv4MappedIpv6 => Err(err),
             },
         }
     }
