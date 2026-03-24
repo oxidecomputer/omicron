@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Firewall rule types for version `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
+//! Firewall rule types for version `ADD_ICMPV6_FIREWALL_SUPPORT`.
 
-use crate::v9;
-use crate::v10::instance::ResolvedVpcFirewallRule;
+use crate::v11;
+use crate::v31::instance::ResolvedVpcFirewallRule;
 use omicron_common::api::external;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Update firewall rules for a VPC
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -17,21 +18,17 @@ pub struct VpcFirewallRulesEnsureBody {
     pub rules: Vec<ResolvedVpcFirewallRule>,
 }
 
-impl TryFrom<v9::firewall_rules::VpcFirewallRulesEnsureBody>
+impl From<v11::firewall_rules::VpcFirewallRulesEnsureBody>
     for VpcFirewallRulesEnsureBody
 {
-    type Error = external::Error;
-
-    fn try_from(
-        v9: v9::firewall_rules::VpcFirewallRulesEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            vni: v9.vni,
-            rules: v9
+    fn from(v11: v11::firewall_rules::VpcFirewallRulesEnsureBody) -> Self {
+        Self {
+            vni: v11.vni,
+            rules: v11
                 .rules
                 .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-        })
+                .map(ResolvedVpcFirewallRule::from)
+                .collect(),
+        }
     }
 }

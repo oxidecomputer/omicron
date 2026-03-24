@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026032300.0.0"
+    "version": "2026032400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -30667,6 +30667,29 @@
                 "type": "string",
                 "enum": [
                   "icmp"
+                ]
+              },
+              "value": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VpcFirewallIcmpFilter"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp6"
                 ]
               },
               "value": {
