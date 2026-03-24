@@ -119,7 +119,7 @@ pub struct LoopbackAddress {
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
     pub rack_id: Uuid,
-    pub address: IpNetwork,
+    address: IpNetwork,
     pub anycast: bool,
     pub switch_slot: DbSwitchSlot,
 }
@@ -146,21 +146,26 @@ impl LoopbackAddress {
             anycast,
         }
     }
+
+    /// Return the address of this `LoopbackAddress`.
+    ///
+    /// Only fails if we've stored invalid data in the DB (i.e., an address that
+    /// contains an IP that we don't allow for loopback addresses).
+    pub fn address(&self) -> Result<LoopbackAddressIpNet, UplinkIpNetError> {
+        LoopbackAddressIpNet::try_from(IpNet::from(self.address))
+    }
 }
 
 impl TryFrom<LoopbackAddress> for networking_types::LoopbackAddress {
     type Error = UplinkIpNetError;
 
     fn try_from(value: LoopbackAddress) -> Result<Self, Self::Error> {
-        let address =
-            LoopbackAddressIpNet::try_from(IpNet::from(value.address))?;
-
         Ok(Self {
             id: value.identity().id,
             address_lot_block_id: value.address_lot_block_id,
             rack_id: value.rack_id,
             switch_slot: value.switch_slot.into(),
-            address,
+            address: value.address()?,
         })
     }
 }
