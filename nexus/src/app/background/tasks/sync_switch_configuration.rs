@@ -67,7 +67,6 @@ use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
-use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
@@ -1110,9 +1109,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         .addresses
                         .iter()
                         .map(|a| {
-                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
                              Ok(UplinkAddressConfig {
-                                 address,
+                                 address: a.address,
                                  vlan_id: a.vlan_id
                              })
                         })
@@ -1771,11 +1769,10 @@ fn uplinks(
             .addresses
             .iter()
             .map(|a| {
-                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-                 Ok(UplinkAddressConfig {
-                     address,
-                     vlan_id: a.vlan_id
-                 })
+                Ok(UplinkAddressConfig {
+                    address: a.address,
+                    vlan_id: a.vlan_id,
+                })
             })
             .collect::<Result<_, InvalidIpAddrError>>()
         {

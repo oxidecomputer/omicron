@@ -4,16 +4,18 @@
 
 //! Networking types for the `STRONGER_UPLINK_ADDRESS_TYPES` version.
 //!
-//! * Change the type of the [`Address::address`] and
-//!   [`LoopbackAddress::address`] fields from [`IpNet`] to [`UplinkAddress`],
-//!   which rejects various invalid addresses (multicast addresses, unspecified
-//!   addresses, etc.).
+//! * Change the type of the [`Address::address`],
+//!   [`LoopbackAddress::address`], and [`SwitchPortAddressView::address`]
+//!   fields from [`IpNet`] to [`UplinkAddress`], which rejects various invalid
+//!   addresses (multicast addresses, unspecified addresses, etc.).
 //! * In [`LoopbackAddressCreate`], replace the pair of fields `address`
 //!   (`IpAddr`) and `mask` (`u8`) with a single `address` field of type
 //!   [`LoopbackAddressIpNet`]. This enforces valid prefix lengths and rejects
 //!   invalid IPs.
-//! * Define new versions of types that transitively include [`Address`]:
+//! * Define new versions of types that transitively include the above updated
+//!   types:
 //!   * [`AddressConfig`]
+//!   * [`SwitchPortSettings`]
 //!   * [`SwitchPortSettingsCreate`]
 
 use crate::v2025_11_20_00;
@@ -23,7 +25,10 @@ use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
 use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
 use crate::v2026_03_06_01;
 use crate::v2026_04_16_00;
+use crate::v2026_04_16_00::networking::BgpPeer;
 use crate::v2026_04_16_00::networking::BgpPeerConfig;
+use omicron_common::api::external;
+use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
@@ -274,5 +279,105 @@ impl TryFrom<v2026_03_06_01::networking::LoopbackAddressCreate>
             address,
             anycast: value.anycast,
         })
+    }
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressView {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot this address is drawn from.
+    pub address_lot_id: Uuid,
+
+    /// The name of the address lot this address is drawn from.
+    pub address_lot_name: Name,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix, or indicator that this is an `addrconf`
+    /// address.
+    pub address: UplinkAddress,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
+
+    /// The interface name this address belongs to.
+    pub interface_name: Name,
+}
+
+impl From<SwitchPortAddressView>
+    for v2025_11_20_00::networking::SwitchPortAddressView
+{
+    fn from(value: SwitchPortAddressView) -> Self {
+        Self {
+            port_settings_id: value.port_settings_id,
+            address_lot_id: value.address_lot_id,
+            address_lot_name: value.address_lot_name,
+            address_lot_block_id: value.address_lot_block_id,
+            // Previous API version represented addrconf addresses as
+            // UNSPECIFIED.
+            address: value.address.ip_net_squashing_addrconf_to_unspecified(),
+            vlan_id: value.vlan_id,
+            interface_name: value.interface_name,
+        }
+    }
+}
+
+/// This structure contains all port settings information in one place. It's a
+/// convenience data structure for getting a complete view of a particular
+/// port's settings.
+// TODO: several fields below embed `external::*` types directly from
+// `omicron-common`, which means their serialized shape is not truly frozen.
+// Once `omicron-common-versions` exists, replace these with version-local
+// copies of the types to ensure the initial version's wire format is
+// immutable.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettings {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// Switch port settings included from other switch port settings groups.
+    pub groups: Vec<external::SwitchPortSettingsGroups>,
+
+    /// Layer 1 physical port settings.
+    pub port: external::SwitchPortConfig,
+
+    /// Layer 2 link settings.
+    pub links: Vec<external::SwitchPortLinkConfig>,
+
+    /// Layer 3 interface settings.
+    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+
+    /// Vlan interface settings.
+    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+
+    /// IP route settings.
+    pub routes: Vec<external::SwitchPortRouteConfig>,
+
+    /// BGP peer settings.
+    pub bgp_peers: Vec<BgpPeer>,
+
+    /// Layer 3 IP address settings.
+    pub addresses: Vec<SwitchPortAddressView>,
+}
+
+impl From<SwitchPortSettings>
+    for v2026_04_16_00::networking::SwitchPortSettings
+{
+    fn from(value: SwitchPortSettings) -> Self {
+        Self {
+            identity: value.identity,
+            groups: value.groups,
+            port: value.port,
+            links: value.links,
+            interfaces: value.interfaces,
+            vlan_interfaces: value.vlan_interfaces,
+            routes: value.routes,
+            bgp_peers: value.bgp_peers,
+            addresses: value.addresses.into_iter().map(From::from).collect(),
+        }
     }
 }

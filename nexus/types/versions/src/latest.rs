@@ -263,7 +263,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
-    pub use crate::v2025_11_20_00::networking::SwitchPortAddressView;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchPortGeometry;
@@ -292,13 +291,14 @@ pub mod networking {
     pub use crate::v2026_04_16_00::networking::BgpPeer;
     pub use crate::v2026_04_16_00::networking::BgpPeerConfig;
     pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
-    pub use crate::v2026_04_16_00::networking::SwitchPortSettings;
 
     pub use crate::v2026_04_20_00::networking::Address;
     pub use crate::v2026_04_20_00::networking::AddressConfig;
     pub use crate::v2026_04_20_00::networking::LoopbackAddress;
     pub use crate::v2026_04_20_00::networking::LoopbackAddressCreate;
     pub use crate::v2026_04_20_00::networking::LoopbackAddressIpNet;
+    pub use crate::v2026_04_20_00::networking::SwitchPortAddressView;
+    pub use crate::v2026_04_20_00::networking::SwitchPortSettings;
     pub use crate::v2026_04_20_00::networking::SwitchPortSettingsCreate;
 }
 

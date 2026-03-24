@@ -4773,12 +4773,32 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        versions = VERSION_STRONGER_UPLINK_ADDRESS_TYPES..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    /// Get information about switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
+    }]
+    async fn networking_switch_port_settings_view_v2026_04_16_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_04_16_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -4794,9 +4814,12 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_view(rqctx, path_params)
-            .await
-            .map(|response| response.map(From::from))
+        Self::networking_switch_port_settings_view_v2026_04_16_00(
+            rqctx,
+            path_params,
+        )
+        .await
+        .map(|response| response.map(From::from))
     }
 
     /// Get information about switch port (old version with required BgpPeer.addr)

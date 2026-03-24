@@ -30,6 +30,7 @@ use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -1020,7 +1021,7 @@ pub struct SwitchPortAddressConfig {
     pub port_settings_id: Uuid,
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
-    pub address: IpNetwork,
+    address: IpNetwork,
     pub interface_name: Name,
     pub vlan_id: Option<SqlU16>,
 }
@@ -1049,12 +1050,21 @@ impl SwitchPortAddressConfig {
             vlan_id: vlan_id.map(|x| x.into()),
         }
     }
+
+    /// Return the address of this address config.
+    ///
+    /// Only fails if we've stored invalid data in the DB (i.e., an address that
+    /// contains an IP that we don't allow for uplink addresses).
+    pub fn address(&self) -> Result<UplinkAddress, InvalidIpAddrError> {
+        UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(
+            self.address.into(),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sled_agent_types::early_networking::InvalidIpAddrError;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerIpAddr;
     use sled_agent_types::early_networking::RouterPeerType;

@@ -240,7 +240,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &created.addresses[0];
-    assert_eq!(addr0.address, IpNet::from_str("203.0.113.10/24").unwrap());
+    assert_eq!(
+        addr0.address,
+        UplinkAddress::Static { ip_net: "203.0.113.10/24".parse().unwrap() }
+    );
 
     // Get the port settings back
     let roundtrip: SwitchPortSettings = NexusRequest::object_get(
@@ -282,7 +285,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &roundtrip.addresses[0];
-    assert_eq!(addr0.address, IpNet::from_str("203.0.113.10/24").unwrap());
+    assert_eq!(
+        addr0.address,
+        UplinkAddress::Static { ip_net: "203.0.113.10/24".parse().unwrap() }
+    );
 
     // Delete port settings
     NexusRequest::object_delete(
@@ -625,7 +631,10 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let addr = &created.addresses[0];
-    assert_eq!(addr.address, IpNet::from_str("1701::d/64").unwrap());
+    assert_eq!(
+        addr.address,
+        UplinkAddress::Static { ip_net: "1701::d/64".parse().unwrap() }
+    );
 
     let route = &created.routes[0];
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
