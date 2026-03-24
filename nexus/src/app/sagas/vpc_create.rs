@@ -563,38 +563,46 @@ async fn svc_create_gateway(
         .await
         .map_err(saga_action_failed)?;
 
-    match osagactx.datastore().ip_pools_fetch_default(&opctx).await {
-        Ok((authz_ip_pool, _db_ip_pool)) => {
-            // Attach the default IP pool to the default gateway.
-            // Failure of this saga takes out the gateway with a cascading delete and
-            // thus this ip pool.
-            osagactx
-                .datastore()
-                .internet_gateway_attach_ip_pool(
-                    &opctx,
-                    &authz_igw,
-                    InternetGatewayIpPool::new(
-                        Uuid::new_v4(),
-                        authz_ip_pool.id(),
-                        authz_igw.id(),
-                        IdentityMetadataCreateParams {
-                            name: "default".parse().unwrap(),
-                            description:
-                                "Automatically attached default IP pool".into(),
-                        },
-                    ),
-                )
-                .await
-                .map_err(saga_action_failed)?;
-        }
-        Err(e) => {
-            warn!(
-                opctx.log,
-                "Default ip pool lookup failed: {e}. \
-                Default gateway has no ip pool association",
+    // Attach all default unicast pools for the silo to the default gateway,
+    // one per IP version.
+    let default_pools = osagactx
+        .datastore()
+        .ip_pools_fetch_all_unicast_defaults(&opctx)
+        .await
+        .map_err(saga_action_failed)?;
+
+    for (authz_ip_pool, name, version) in [
+        (default_pools.v4, "default-v4", "IPv4"),
+        (default_pools.v6, "default-v6", "IPv6"),
+    ] {
+        let Some((authz_ip_pool, _)) = authz_ip_pool else {
+            debug!(
+                osagactx.log(),
+                "No default {version} IP pool for silo, skipping \
+                attachment to default internet gateway";
+                "internet_gateway_id" => %authz_igw.id(),
             );
-        }
-    };
+            continue;
+        };
+        osagactx
+            .datastore()
+            .internet_gateway_attach_ip_pool(
+                &opctx,
+                &authz_igw,
+                InternetGatewayIpPool::new(
+                    Uuid::new_v4(),
+                    authz_ip_pool.id(),
+                    authz_igw.id(),
+                    IdentityMetadataCreateParams {
+                        name: name.parse().unwrap(),
+                        description: "Automatically attached default IP pool"
+                            .into(),
+                    },
+                ),
+            )
+            .await
+            .map_err(saga_action_failed)?;
+    }
 
     Ok(authz_igw)
 }
