@@ -10,7 +10,7 @@ WITH
         LEFT JOIN omicron.public.fm_sitrep_history AS h ON h.sitrep_id = s.id
       WHERE
         h.sitrep_id IS NULL
-        AND s.id >= $1
+        AND s.id > $1
         AND (
             (s.parent_sitrep_id IS NULL AND (SELECT sitrep_id FROM current_sitrep_id) IS NOT NULL)
             OR s.parent_sitrep_id != (SELECT sitrep_id FROM current_sitrep_id)

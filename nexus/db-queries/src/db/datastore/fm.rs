@@ -998,13 +998,6 @@ impl DataStore {
 
                             match next_marker {
                                 Some(m) => {
-                                    // The next query uses `>= marker`.
-                                    // If the max sitrep_id from this
-                                    // batch was not orphaned (and thus
-                                    // not deleted), it will appear again
-                                    // in the next batch, be checked
-                                    // against fm_sitrep again, and again
-                                    // be kept. This is harmless.
                                     marker = SitrepUuid::from_untyped_uuid(m);
                                 }
                                 None => break,
@@ -1058,7 +1051,7 @@ impl DataStore {
                     ON h.sitrep_id = s.id \
                 WHERE \
                     h.sitrep_id IS NULL \
-                AND s.id >= ",
+                AND s.id > ",
         );
         builder.param().bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
         builder.sql(
@@ -1117,7 +1110,7 @@ impl DataStore {
         builder
             .sql(" WHERE ")
             .sql(col)
-            .sql(" >= ")
+            .sql(" > ")
             .param()
             .bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
         builder.sql(" ORDER BY ");
@@ -2421,6 +2414,115 @@ mod tests {
             iterations >= 3,
             "with batch_size=2 and {num_ghost_sitreps} sitreps, \
              should need at least 3 iterations, got {iterations}"
+        );
+
+        // Verify all rows are gone.
+        let cases_after: i64 = case_dsl::fm_case
+            .filter(
+                case_dsl::sitrep_id.eq_any(
+                    ghost_sitrep_ids
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(cases_after, 0, "all ghost cases should be deleted");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Regression test: with batch_size=1, the old `>=` marker would
+    /// infinite-loop on a non-orphaned sitrep_id. With `>`, the loop
+    /// must terminate.
+    #[tokio::test]
+    async fn test_gc_deeply_orphaned_batch_size_one() {
+        let logctx =
+            dev::test_setup_log("test_gc_deeply_orphaned_batch_size_one");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert an initial sitrep so the system isn't empty.
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1)
+            .await
+            .expect("inserting initial sitrep should succeed");
+
+        // Insert deeply-orphaned cases across 3 distinct sitrep_ids.
+        let num_ghost_sitreps = 3;
+        let mut ghost_sitrep_ids = Vec::new();
+        for _ in 0..num_ghost_sitreps {
+            let ghost_sitrep_id = SitrepUuid::new_v4();
+            ghost_sitrep_ids.push(ghost_sitrep_id);
+            diesel::insert_into(case_dsl::fm_case)
+                .values(model::fm::CaseMetadata {
+                    id: CaseUuid::new_v4().into(),
+                    sitrep_id: ghost_sitrep_id.into(),
+                    de: nexus_types::fm::DiagnosisEngineKind::PowerShelf
+                        .into(),
+                    created_sitrep_id: ghost_sitrep_id.into(),
+                    closed_sitrep_id: None,
+                    comment: "deeply orphaned".to_string(),
+                })
+                .execute_async(&*conn)
+                .await
+                .expect("inserting deeply orphaned case");
+        }
+
+        // Run the deeply-orphaned batch query with batch_size=1.
+        // This would infinite-loop with the old `>=` marker.
+        let batch_size = std::num::NonZeroU32::new(1).unwrap();
+        let mut total_deleted = 0usize;
+        let mut marker = SitrepUuid::nil();
+        let mut iterations = 0;
+
+        loop {
+            let result = DataStore::deeply_orphaned_batch_query(
+                SitrepChildTable::Case,
+                marker,
+                batch_size,
+            )
+            .get_result_async::<(i64, Option<Uuid>)>(&*conn)
+            .await
+            .expect("batch query should succeed");
+
+            let (rows_deleted, next_marker) = result;
+            total_deleted += rows_deleted as usize;
+            iterations += 1;
+
+            match next_marker {
+                Some(m) => marker = SitrepUuid::from_untyped_uuid(m),
+                None => break,
+            }
+        }
+
+        assert_eq!(
+            total_deleted, num_ghost_sitreps,
+            "should have deleted all {num_ghost_sitreps} deeply orphaned cases"
+        );
+        assert_eq!(
+            iterations,
+            num_ghost_sitreps + 1,
+            "with batch_size=1 and {num_ghost_sitreps} ghost sitreps, \
+             should need exactly {n} iterations (one per ghost + one \
+             final empty batch)",
+            n = num_ghost_sitreps + 1,
         );
 
         // Verify all rows are gone.

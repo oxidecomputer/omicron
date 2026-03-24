@@ -6,7 +6,7 @@ WITH
       FROM
         omicron.public.fm_ereport_in_case
       WHERE
-        sitrep_id >= $1
+        sitrep_id > $1
       ORDER BY
         sitrep_id
       LIMIT
