@@ -513,7 +513,7 @@ pub async fn create_external_subnet_in_pool(
     pool_name: &str,
     project_name: &str,
     subnet_name: &str,
-    prefix_len: u8,
+    prefix_length: u8,
 ) -> ExternalSubnet {
     let params = external_subnet::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -521,7 +521,7 @@ pub async fn create_external_subnet_in_pool(
             description: format!("external subnet {subnet_name}"),
         },
         allocator: external_subnet::ExternalSubnetAllocator::Auto {
-            prefix_len,
+            prefix_length,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: pool_name.parse::<Name>().unwrap().into(),
             },
