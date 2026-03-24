@@ -4,10 +4,19 @@
 
 //! Primary control plane interface for database read and write operations
 //!
-//! # Method naming conventions
+//! ## Method naming conventions
 //!
-//! Many methods in this module have a public entry point that acquires a
-//! database connection from the pool, paired with a private `_on_conn` (or
+//! Almost all database queries in this crate are defined as methods on
+//! [`DataStore`], so everything is called as `datastore.method()` rather than
+//! being namespaced in a module. Because of this, methods follow a naming
+//! convention with the resource/object name _first_, followed by the verb:
+//! `disk_list` rather than `list_disks`, `instance_fetch` rather than
+//! `fetch_instance`, and so on. This reads less like natural English but makes
+//! it easy to find all operations on a given resource by searching for the
+//! prefix.
+//!
+//! Many methods also have a public entry point that acquires a database
+//! connection from the pool, paired with a private `_on_conn` (or
 //! `_on_connection`) helper that takes an explicit connection parameter. The
 //! helper exists so that multiple queries can share the same connection without
 //! re-acquiring one from the pool for each step of a multi-query operation.

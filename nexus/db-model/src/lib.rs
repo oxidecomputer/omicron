@@ -14,66 +14,90 @@
 //! Rust types. `nexus_db_queries` then uses both to build and execute
 //! queries in its `DataStore` methods.
 //!
-//! # How the mapping works
+//! ## How the mapping works
+//!
+//! See also the [Diesel getting started guide][diesel-guide] and the
+//! [`diesel::Queryable`] and [`diesel::Selectable`] derive docs.
+//!
+//! [diesel-guide]: https://diesel.rs/guides/getting-started.html
 //!
 //! Consider the `vmm` table. The schema declares columns and SQL types:
 //!
-//! ```text
-//! // in nexus-db-schema
+//! ```rust,ignore
+//! // in nexus-db-schema (nexus/db-schema/src/schema.rs)
 //! table! {
 //!     vmm (id) {
 //!         id -> Uuid,
-//!         sled_id -> Uuid,
+//!         time_created -> Timestamptz,
+//!         time_deleted -> Nullable<Timestamptz>,
+//!         instance_id -> Uuid,
+//!         time_state_updated -> Timestamptz,
 //!         state_generation -> Int8,
-//!         state -> VmmStateEnum,
-//!         ...
+//!         sled_id -> Uuid,
+//!         propolis_ip -> Inet,
+//!         propolis_port -> Int4,
+//!         state -> crate::enums::VmmStateEnum,
+//!         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
 //!     }
 //! }
 //! ```
 //!
 //! The model struct provides the Rust representation of a row:
 //!
-//! ```text
-//! // in nexus-db-model
-//! #[derive(Queryable, Insertable, Selectable)]
+//! ```rust,ignore
+//! // in nexus-db-model (nexus/db-model/src/vmm.rs)
+//! #[derive(Queryable, Selectable, Insertable)]
 //! #[diesel(table_name = vmm)]
 //! pub struct Vmm {
 //!     pub id: Uuid,
-//!     pub sled_id: DbTypedUuid<SledKind>,
+//!     pub time_created: DateTime<Utc>,
+//!     pub time_deleted: Option<DateTime<Utc>>,
+//!     pub instance_id: Uuid,
+//!     pub time_state_updated: DateTime<Utc>,
 //!     #[diesel(column_name = state_generation)]
 //!     pub generation: Generation,
+//!     pub sled_id: DbTypedUuid<SledKind>,
+//!     pub propolis_ip: ipnetwork::IpNetwork,
+//!     pub propolis_port: SqlU16,
 //!     pub state: VmmState,
-//!     ...
+//!     pub cpu_platform: VmmCpuPlatform,
 //! }
 //! ```
 //!
 //! A few things to note:
 //!
-//! - **Type translation.** Each field's Rust type must implement Diesel's
-//!   [`FromSql`](diesel::deserialize::FromSql) and
-//!   [`ToSql`](diesel::serialize::ToSql) traits for the corresponding column's
-//!   SQL type. Diesel provides these impls for common types (`Uuid`,
-//!   `DateTime<Utc>`, `String`, etc.); this crate defines wrapper types like
-//!   [`DbTypedUuid`] for domain-specific conversions
-//!   (e.g. distinguishing a sled UUID from any other UUID).
-//! - **Column renaming.** Field names must match column names by default, but
-//!   `#[diesel(column_name = ...)]` allows the Rust name to differ (e.g.
-//!   `generation` for the `state_generation` column).
-//! - **Positional mapping.** [`diesel::Queryable`] maps SQL result columns to
-//!   struct fields by position, not by name. If the field order doesn't match
-//!   the column order in the query, fields will silently receive wrong values.
-//!   Deriving [`diesel::Selectable`] mitigates this by generating an explicit
-//!   column list, so the result columns are always in the order `Queryable`
-//!   expects. **Always derive both.**
+//! ### Type translation
 //!
-//! # Field ordering convention
+//! Each field's Rust type must implement Diesel's
+//! [`FromSql`](diesel::deserialize::FromSql) and
+//! [`ToSql`](diesel::serialize::ToSql) traits for the corresponding column's
+//! SQL type. Diesel provides these impls for common types (`Uuid`,
+//! `DateTime<Utc>`, `String`, etc.); this crate defines wrapper types like
+//! [`DbTypedUuid`] for domain-specific conversions
+//! (e.g. distinguishing a sled UUID from any other UUID).
+//!
+//! ### Column renaming
+//!
+//! Field names must match column names by default, but
+//! `#[diesel(column_name = ...)]` allows the Rust name to differ (e.g.
+//! `generation` for the `state_generation` column).
+//!
+//! ### Positional mapping
+//!
+//! [`diesel::Queryable`] maps SQL result columns to struct fields by position,
+//! not by name. If the field order doesn't match the column order in the query,
+//! fields will silently receive wrong values. Deriving [`diesel::Selectable`]
+//! mitigates this by generating an explicit column list, so the result columns
+//! are always in the order `Queryable` expects. **Always derive both.**
+//!
+//! ## Field ordering convention
 //!
 //! Fields in `Queryable`/`Insertable` structs should be ordered to match the
 //! column order in `dbinit.sql`. This keeps the Rust types easy to
 //! cross-reference with the schema definition and prevents subtle bugs if a
 //! query ever omits `Selectable`.
 //!
-//! # Representing enums
+//! ## Representing enums
 //!
 //! For types that map to database enum columns, see the [`impl_enum_type!`]
 //! and [`impl_enum_wrapper!`] macros defined below. For string-backed enums,
