@@ -51,6 +51,15 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 first_address: "1.2.3.0".parse().unwrap(),
                 last_address: "1.2.3.255".parse().unwrap(),
             },
+            // TODO-correctness Below we try to create an `addrconf` uplink
+            // address; currently, this requires us to specify an address lot
+            // block containing the internal sentinel value `::`.
+            //
+            // https://github.com/oxidecomputer/omicron/issues/10103
+            AddressLotBlockCreate {
+                first_address: "::".parse().unwrap(),
+                last_address: "::".parse().unwrap(),
+            },
         ],
     };
 
@@ -191,13 +200,20 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     // addresses
     settings.addresses.push(AddressConfig {
         link_name: link0_name.clone(),
-        addresses: vec![Address {
-            address: UplinkAddress::Static {
-                ip_net: "203.0.113.10/24".parse().unwrap(),
+        addresses: vec![
+            Address {
+                address: UplinkAddress::Static {
+                    ip_net: "203.0.113.10/24".parse().unwrap(),
+                },
+                vlan_id: None,
+                address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
             },
-            vlan_id: None,
-            address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
-        }],
+            Address {
+                address: UplinkAddress::AddrConf,
+                vlan_id: Some(123),
+                address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
+            },
+        ],
     });
 
     let created: SwitchPortSettings = NexusRequest::objects_post(
@@ -214,7 +230,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     assert_eq!(created.links.len(), 2);
     assert_eq!(created.routes.len(), 1);
-    assert_eq!(created.addresses.len(), 1);
+    assert_eq!(created.addresses.len(), 2);
 
     let link0 = &created.links[0];
     assert_eq!(&link0.link_name.to_string(), "phy0");
@@ -244,6 +260,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         addr0.address,
         UplinkAddress::Static { ip_net: "203.0.113.10/24".parse().unwrap() }
     );
+    assert_eq!(addr0.vlan_id, None);
+
+    let addr1 = &created.addresses[1];
+    assert_eq!(addr1.address, UplinkAddress::AddrConf);
+    assert_eq!(addr1.vlan_id, Some(123));
 
     // Get the port settings back
     let roundtrip: SwitchPortSettings = NexusRequest::object_get(
@@ -259,7 +280,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     assert_eq!(roundtrip.links.len(), 2);
     assert_eq!(roundtrip.routes.len(), 1);
-    assert_eq!(roundtrip.addresses.len(), 1);
+    assert_eq!(roundtrip.addresses.len(), 2);
 
     let link0 = &roundtrip.links[0];
     assert_eq!(&link0.link_name.to_string(), "phy0");
@@ -289,6 +310,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         addr0.address,
         UplinkAddress::Static { ip_net: "203.0.113.10/24".parse().unwrap() }
     );
+    assert_eq!(addr0.vlan_id, None);
+
+    let addr1 = &roundtrip.addresses[1];
+    assert_eq!(addr1.address, UplinkAddress::AddrConf);
+    assert_eq!(addr1.vlan_id, Some(123));
 
     // Delete port settings
     NexusRequest::object_delete(
