@@ -629,20 +629,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
-                        let ttl = peer.min_ttl;
-
-                        // Determine if this is a numbered or unnumbered peer
-                        // TODO pass non-squashed IP to datastore methods
-                        let peer_addr = peer
-                            .addr
-                            .ip_squashing_unnumbered_to_none();
-
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
                             port_settings_id,
                             interface_name,
-                            peer_addr,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -666,7 +658,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port_settings_id,
                             interface_name,
-                            peer_addr,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -734,7 +726,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port_settings_id,
                             interface_name,
-                            peer_addr,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -813,7 +805,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     resolution: BGP_SESSION_RESOLUTION,
                                     passive: false,
                                     remote_asn: peer.remote_asn,
-                                    min_ttl: ttl,
+                                    min_ttl: peer.min_ttl,
                                     md5_auth_key: peer.md5_auth_key.clone(),
                                     multi_exit_discriminator: peer.multi_exit_discriminator,
                                     local_pref: peer.local_pref,
@@ -862,7 +854,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     resolution: BGP_SESSION_RESOLUTION,
                                     passive: false,
                                     remote_asn: peer.remote_asn,
-                                    min_ttl: ttl,
+                                    min_ttl: peer.min_ttl,
                                     md5_auth_key: peer.md5_auth_key.clone(),
                                     multi_exit_discriminator: peer.multi_exit_discriminator,
                                     local_pref: peer.local_pref,
@@ -1184,24 +1176,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
-                        // For unnumbered peers, pass None
-                        //
-                        // TODO-cleanup Push `RouterPeerAddress` down to all the
-                        // datastore methods below instead of an `Option`.
-                        let peer_addr_for_lookup = match peer.addr {
-                            RouterPeerType::Unnumbered { .. } => None,
-                            RouterPeerType::Numbered { ip } => {
-                                Some(IpAddr::from(ip))
-                            }
-                        };
-
                         peer.communities = match self
                             .datastore
                             .communities_for_peer(
                                 opctx,
                                 port.port_settings_id.unwrap(),
                                 &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                                peer_addr_for_lookup,
+                                peer.addr,
                             ).await {
                                 Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
                                 Err(e) => {
@@ -1219,7 +1200,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port.port_settings_id.unwrap(),
                             &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer_addr_for_lookup,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -1243,7 +1224,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port.port_settings_id.unwrap(),
                             &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer_addr_for_lookup,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
