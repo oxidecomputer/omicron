@@ -456,7 +456,9 @@ pub enum MaxPathConfigError {
 ///
 /// This value is used in IPv6 Router Advertisements to indicate how long
 /// the router should be considered valid by neighbors.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize,
+)]
 pub struct RouterLifetimeConfig(u16);
 
 impl RouterLifetimeConfig {

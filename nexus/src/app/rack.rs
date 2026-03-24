@@ -42,18 +42,18 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
-use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -552,9 +552,11 @@ impl super::Nexus {
                 .iter()
                 .map(|a| networking::Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: a.address.unwrap_or_else(|| {
-                        IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
-                    }),
+                    // TODO-cleanup Extend stronger types out to the external
+                    // API (omicron#9832).
+                    address: a
+                        .address
+                        .ip_net_squashing_addrconf_to_unspecified(),
                     vlan_id: a.vlan_id,
                 })
                 .collect();
@@ -586,32 +588,44 @@ impl super::Nexus {
             let peers: Vec<networking::BgpPeer> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| networking::BgpPeer {
-                    bgp_config: NameOrId::Name(
-                        format!("as{}", r.asn).parse().unwrap(),
-                    ),
-                    interface_name: link_name.clone(),
-                    addr: if r.addr.is_unspecified() {
-                        None
-                    } else {
-                        Some(r.addr)
-                    },
-                    hold_time: r.hold_time() as u32,
-                    idle_hold_time: r.idle_hold_time() as u32,
-                    delay_open: r.delay_open() as u32,
-                    connect_retry: r.connect_retry() as u32,
-                    keepalive: r.keepalive() as u32,
-                    remote_asn: r.remote_asn,
-                    min_ttl: r.min_ttl,
-                    md5_auth_key: r.md5_auth_key.clone(),
-                    multi_exit_discriminator: r.multi_exit_discriminator,
-                    local_pref: r.local_pref,
-                    enforce_first_as: r.enforce_first_as,
-                    communities: r.communities.clone(),
-                    allowed_import: r.allowed_import.clone(),
-                    allowed_export: r.allowed_export.clone(),
-                    vlan_id: r.vlan_id,
-                    router_lifetime: r.router_lifetime.as_u16(),
+                .map(|r| {
+                    // TODO-cleanup Extend stronger types out to the external
+                    // API (omicron#9832).
+                    //
+                    // For now, squash unnumbered back to None, and fill in a
+                    // default router_lifetime for numbered.
+                    let (addr, router_lifetime) = match r.addr {
+                        RouterPeerType::Unnumbered { router_lifetime } => {
+                            (None, router_lifetime.as_u16())
+                        }
+                        RouterPeerType::Numbered { ip } => (
+                            Some(ip.into()),
+                            RouterLifetimeConfig::default().as_u16(),
+                        ),
+                    };
+                    networking::BgpPeer {
+                        bgp_config: NameOrId::Name(
+                            format!("as{}", r.asn).parse().unwrap(),
+                        ),
+                        interface_name: link_name.clone(),
+                        addr,
+                        hold_time: r.hold_time() as u32,
+                        idle_hold_time: r.idle_hold_time() as u32,
+                        delay_open: r.delay_open() as u32,
+                        connect_retry: r.connect_retry() as u32,
+                        keepalive: r.keepalive() as u32,
+                        remote_asn: r.remote_asn,
+                        min_ttl: r.min_ttl,
+                        md5_auth_key: r.md5_auth_key.clone(),
+                        multi_exit_discriminator: r.multi_exit_discriminator,
+                        local_pref: r.local_pref,
+                        enforce_first_as: r.enforce_first_as,
+                        communities: r.communities.clone(),
+                        allowed_import: r.allowed_import.clone(),
+                        allowed_export: r.allowed_export.clone(),
+                        vlan_id: r.vlan_id,
+                        router_lifetime,
+                    }
                 })
                 .collect();
 
