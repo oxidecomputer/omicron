@@ -457,7 +457,7 @@ impl Simulatable for SimInstance {
                     current.migration_in.map(|m| m.migration_id),
                 ),
                 last_response: InstanceStateMonitorResponse {
-                    r#gen: 1,
+                    gen_: 1,
                     state: PropolisInstanceState::Starting,
                     migration: PropolisMigrateResponse {
                         migration_in: None,

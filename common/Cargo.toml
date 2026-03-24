@@ -40,7 +40,6 @@ reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "semver", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
-serde_human_bytes.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 slog.workspace = true

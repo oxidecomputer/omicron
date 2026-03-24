@@ -20,10 +20,11 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22, v24,
-    v25, v26,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
+    v24, v25, v26, v30,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -37,6 +38,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (30, STRONGER_BGP_UNNUMBERED_TYPES),
+    (29, ADD_VSOCK_COMPONENT),
     (28, MODIFY_SERVICES_IN_INVENTORY),
     (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
@@ -431,13 +434,28 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_ATTACHED_SUBNETS..
+        versions = VERSION_ADD_VSOCK_COMPONENT..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions =
+            VERSION_ADD_ATTACHED_SUBNETS..VERSION_ADD_VSOCK_COMPONENT
+    }]
+    async fn vmm_register_v18(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v18::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -451,7 +469,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v17::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v18(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -744,12 +762,33 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
-        versions = VERSION_BGP_V6..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = VERSION_BGP_V6..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn uplink_ensure_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::uplink::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::uplink_ensure(
+            rqctx,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
 
     #[endpoint {
         method = POST,
@@ -760,7 +799,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v1::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::uplink_ensure(rqctx, body.map(From::from)).await
+        Self::uplink_ensure_v20(rqctx, body.map(From::from)).await
     }
 
     /// This API endpoint is only reading the local sled agent's view of the
@@ -846,7 +885,20 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v26(

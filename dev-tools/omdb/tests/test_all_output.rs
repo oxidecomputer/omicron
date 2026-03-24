@@ -337,6 +337,10 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
 
+    // The `reconfigurator_config_watcher` task's output depends on
+    // whether it has had time to complete an activation.
+    redactor.field("config updated:", r"\w+");
+
     // The `tuf_artifact_replication` task's output depends on how
     // many sleds happened to register with Nexus before its first
     // execution. These redactions work around the issue described in

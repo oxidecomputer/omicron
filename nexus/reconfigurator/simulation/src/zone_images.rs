@@ -55,17 +55,25 @@ impl SimTufRepoDescription {
         }
     }
 
-    /// Generates a simulated [`ManifestBootInventory`] for measurements or an error.
+    /// Generates a simulated [`ManifestBootInventory`] for measurements or an
+    /// error.
     pub fn to_measurement_boot_inventory(
         &self,
     ) -> Result<ManifestBootInventory, String> {
         match &self.source {
-            Ok(source) => Ok(source.to_measurement_boot_inventory()),
+            Ok(source) => source.to_measurement_boot_inventory(),
             Err(error) => {
                 Err(format!("reconfigurator-sim simulated error: {error}"))
             }
         }
     }
+}
+
+// Internal enum to allow simulated measurement manifest errors.
+#[derive(Clone, Debug)]
+enum MeasurementManifestSource {
+    Standard(OmicronInstallManifestSource),
+    Error(String),
 }
 
 /// The reconfigurator simulator's notion of a TUF repository where there wasn't
@@ -74,10 +82,10 @@ impl SimTufRepoDescription {
 pub struct SimTufRepoSource {
     description: TufRepoDescription,
     zone_manifest_source: OmicronInstallManifestSource,
-    measurement_manifest_source: OmicronInstallManifestSource,
+    measurement_manifest_source: MeasurementManifestSource,
     message: String,
-    known_artifact_id_names: BTreeSet<String>,
-    error_artifact_id_names: BTreeSet<String>,
+    known_zone_names: BTreeSet<String>,
+    error_zone_names: BTreeSet<String>,
 }
 
 impl SimTufRepoSource {
@@ -123,10 +131,12 @@ impl SimTufRepoSource {
         Ok(Self {
             description,
             zone_manifest_source,
-            measurement_manifest_source,
+            measurement_manifest_source: MeasurementManifestSource::Standard(
+                measurement_manifest_source,
+            ),
             message,
-            known_artifact_id_names: known,
-            error_artifact_id_names: BTreeSet::new(),
+            known_zone_names: known,
+            error_zone_names: BTreeSet::new(),
         })
     }
 
@@ -145,21 +155,35 @@ impl SimTufRepoSource {
         let (known, unknown): (Vec<_>, Vec<_>) = artifact_id_names
             .into_iter()
             .map(|zone_name| zone_name.as_ref().to_owned())
-            .partition(|zone_name| {
-                self.known_artifact_id_names.contains(zone_name)
-            });
+            .partition(|zone_name| self.known_zone_names.contains(zone_name));
         if !unknown.is_empty() {
             return Err(UnknownZoneNamesError::new(
                 unknown,
-                self.known_artifact_id_names.clone(),
+                self.known_zone_names.clone(),
             ));
         }
-        self.error_artifact_id_names.extend(known);
+        self.error_zone_names.extend(known);
         Ok(())
     }
 
-    /// Generates a simulated [`ManifestBootInventory`] from the measurement manifest.
-    pub fn to_measurement_boot_inventory(&self) -> ManifestBootInventory {
+    /// Simulate an error in the measurement manifest.
+    pub fn simulate_measurement_error(&mut self, message: impl Into<String>) {
+        self.measurement_manifest_source =
+            MeasurementManifestSource::Error(message.into());
+    }
+
+    /// Generates a simulated [`ManifestBootInventory`] from the measurement
+    /// manifest, or returns the simulated error if
+    /// [`Self::simulate_measurement_error()`] has been called.
+    pub fn to_measurement_boot_inventory(
+        &self,
+    ) -> Result<ManifestBootInventory, String> {
+        let source = match &self.measurement_manifest_source {
+            MeasurementManifestSource::Standard(source) => *source,
+            MeasurementManifestSource::Error(message) => {
+                return Err(message.clone());
+            }
+        };
         let artifacts = self
             .description
             .artifacts
@@ -173,28 +197,16 @@ impl SimTufRepoSource {
 
                 let file_name = artifact.id.name.to_string();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
-                let status =
-                    if self.error_artifact_id_names.contains(&artifact.id.name)
-                    {
-                        Err("reconfigurator-sim: simulated error \
-                             validating zone image"
-                            .to_owned())
-                    } else {
-                        Ok(())
-                    };
                 Some(ZoneArtifactInventory {
                     file_name,
                     path,
                     expected_size: artifact.size,
                     expected_hash: artifact.hash,
-                    status,
+                    status: Ok(()),
                 })
             })
             .collect();
-        ManifestBootInventory {
-            source: self.measurement_manifest_source,
-            artifacts,
-        }
+        Ok(ManifestBootInventory { source, artifacts })
     }
 
     /// Generates a simulated [`ManifestBootInventory`] from the zone manifest.
@@ -217,8 +229,7 @@ impl SimTufRepoSource {
                     .to_owned();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
                 let status =
-                    if self.error_artifact_id_names.contains(&artifact.id.name)
-                    {
+                    if self.error_zone_names.contains(&artifact.id.name) {
                         Err("reconfigurator-sim: simulated error \
                              validating zone image"
                             .to_owned())
@@ -246,12 +257,8 @@ impl SimTufRepoSource {
             " (system version {}",
             self.description.repo.system_version
         );
-        if !self.error_artifact_id_names.is_empty() {
-            swrite!(
-                message,
-                ", {} zone errors",
-                self.error_artifact_id_names.len()
-            );
+        if !self.error_zone_names.is_empty() {
+            swrite!(message, ", {} zone errors", self.error_zone_names.len());
         }
         message.push(')');
 

@@ -16,12 +16,14 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::BgpPeerConfig;
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
+use sled_agent_types::early_networking::RouterPeerIpAddrError;
+use sled_agent_types::early_networking::RouterPeerType;
 use slog_error_chain::InlineErrorChain;
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 #[derive(
@@ -172,24 +174,52 @@ pub struct BgpPeerView {
 pub enum BgpPeerConfigDataError {
     #[error("database contains illegal router lifetime value")]
     RouterLifetime(#[source] RouterLifetimeConfigError),
+    #[error("database contains illegal router peer address")]
+    Address(#[source] RouterPeerIpAddrError),
 }
 
 impl TryFrom<BgpPeerView> for BgpPeerConfig {
     type Error = BgpPeerConfigDataError;
 
     fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
-        // For unnumbered peers (addr is None), use UNSPECIFIED
-        let addr = match value.addr {
-            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            Some(addr) => addr.ip(),
-        };
-
-        // TODO-correctness We should have db constraints to ensure these can't
+        // TODO-correctness We should have db constraints to ensure this can't
         // fail.
         let router_lifetime =
             RouterLifetimeConfig::new(value.router_lifetime.0)
                 .map_err(BgpPeerConfigDataError::RouterLifetime)?;
-        let min_ttl = value.min_ttl.map(|val| val.0);
+
+        // Convert weaker database representation IP address back to a
+        // strongly-typed `RouterPeerType`.
+        let addr = match value
+            .addr
+            .map(|addr| RouterPeerIpAddr::try_from(addr.ip()))
+        {
+            Some(Ok(ip)) => RouterPeerType::Numbered { ip },
+
+            // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
+            // `::`) to be converted to `RouterPeerType::Unnumbered`. Should we
+            // add db constraints to squish that down to one (probably NULL)?
+            Some(Err(RouterPeerIpAddrError {
+                err: InvalidIpAddrError::UnspecifiedAddress,
+                ..
+            }))
+            | None => RouterPeerType::Unnumbered { router_lifetime },
+
+            // We should never see any other kind of invalid address as a peer -
+            // those will fail if we try to send them to maghemite anyway. Bail
+            // out as early as we can.
+            Some(Err(
+                err @ RouterPeerIpAddrError {
+                    err:
+                        InvalidIpAddrError::LoopbackAddress
+                        | InvalidIpAddrError::MulticastAddress
+                        | InvalidIpAddrError::Ipv4Broadcast
+                        | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                        | InvalidIpAddrError::Ipv4MappedIpv6,
+                    ..
+                },
+            )) => return Err(BgpPeerConfigDataError::Address(err)),
+        };
 
         Ok(Self {
             asn: *value.asn,
@@ -203,7 +233,7 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             enforce_first_as: value.enforce_first_as,
             local_pref: value.local_pref.map(|x| x.into()),
             md5_auth_key: value.md5_auth_key,
-            min_ttl,
+            min_ttl: value.min_ttl.map(|val| val.0),
             multi_exit_discriminator: value
                 .multi_exit_discriminator
                 .map(|x| x.into()),
@@ -212,7 +242,6 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             allowed_export: ImportExportPolicy::NoFiltering,
             allowed_import: ImportExportPolicy::NoFiltering,
             vlan_id: value.vlan_id.map(|x| x.0),
-            router_lifetime,
         })
     }
 }

@@ -73,6 +73,7 @@ pub struct PlanningReport {
     pub zone_updates: PlanningZoneUpdatesStepReport,
     pub nexus_generation_bump: PlanningNexusGenerationBumpReport,
     pub cockroachdb_settings: PlanningCockroachdbSettingsStepReport,
+    pub measurement_updates: PlanningMeasurementUpdatesStepReport,
 }
 
 impl PlanningReport {
@@ -87,6 +88,7 @@ impl PlanningReport {
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
             cockroachdb_settings: PlanningCockroachdbSettingsStepReport::new(),
+            measurement_updates: PlanningMeasurementUpdatesStepReport::new(),
         }
     }
 
@@ -99,6 +101,8 @@ impl PlanningReport {
             && self.zone_updates.is_empty()
             && self.nexus_generation_bump.is_empty()
             && self.cockroachdb_settings.is_empty()
+            // This is equivalent to empty i.e. nothing more to do
+            && self.measurement_updates.all_sleds_updated()
     }
 }
 
@@ -117,6 +121,7 @@ impl fmt::Display for PlanningReport {
                 zone_updates,
                 nexus_generation_bump,
                 cockroachdb_settings,
+                measurement_updates,
             } = self;
             writeln!(f, "planning report:")?;
             if *planner_config != PlannerConfig::default() {
@@ -130,6 +135,7 @@ impl fmt::Display for PlanningReport {
             zone_updates.fmt(f)?;
             nexus_generation_bump.fmt(f)?;
             cockroachdb_settings.fmt(f)?;
+            measurement_updates.fmt(f)?;
         }
         Ok(())
     }
@@ -220,6 +226,7 @@ pub struct PlanningNoopImageSourceConverted {
     pub num_dataset: usize,
     pub host_phase_2_slot_a_eligible: bool,
     pub host_phase_2_slot_b_eligible: bool,
+    pub measurement_eligible: bool,
 }
 
 #[derive(
@@ -240,9 +247,14 @@ pub struct PlanningNoopImageSourceStepReport {
     pub sled_zones_all_already_artifact: BTreeSet<SledUuid>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
     pub sled_host_phase_2_both_already_artifact: BTreeSet<SledUuid>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub sled_measurements_already_artifact: BTreeSet<SledUuid>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
+    pub skipped_sled_measurements:
+        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledMeasurementsReason>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub converted: BTreeMap<SledUuid, PlanningNoopImageSourceConverted>,
 }
@@ -255,7 +267,9 @@ impl PlanningNoopImageSourceStepReport {
             sled_zones_all_already_artifact: BTreeSet::new(),
             skipped_sled_host_phase_2: BTreeMap::new(),
             sled_host_phase_2_both_already_artifact: BTreeSet::new(),
+            sled_measurements_already_artifact: BTreeSet::new(),
             skipped_zones: BTreeMap::new(),
+            skipped_sled_measurements: BTreeMap::new(),
             converted: BTreeMap::new(),
         }
     }
@@ -265,6 +279,7 @@ impl PlanningNoopImageSourceStepReport {
             && self.skipped_sled_zones.is_empty()
             && self.skipped_sled_host_phase_2.is_empty()
             && self.skipped_zones.is_empty()
+            && self.skipped_sled_measurements.is_empty()
             && self.converted.is_empty()
     }
 
@@ -279,6 +294,10 @@ impl PlanningNoopImageSourceStepReport {
         self.sled_host_phase_2_both_already_artifact.insert(sled_id);
     }
 
+    pub fn sled_measurements_already_artifact(&mut self, sled_id: SledUuid) {
+        self.sled_measurements_already_artifact.insert(sled_id);
+    }
+
     pub fn converted(
         &mut self,
         sled_id: SledUuid,
@@ -286,6 +305,7 @@ impl PlanningNoopImageSourceStepReport {
         num_dataset: usize,
         host_phase_2_slot_a_eligible: bool,
         host_phase_2_slot_b_eligible: bool,
+        measurement_eligible: bool,
     ) {
         self.converted.insert(
             sled_id,
@@ -294,6 +314,7 @@ impl PlanningNoopImageSourceStepReport {
                 num_dataset,
                 host_phase_2_slot_a_eligible,
                 host_phase_2_slot_b_eligible,
+                measurement_eligible,
             },
         );
     }
@@ -310,8 +331,10 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             // system.
             sled_zones_all_already_artifact: _,
             sled_host_phase_2_both_already_artifact: _,
+            sled_measurements_already_artifact: _,
             skipped_zones: _,
             converted,
+            skipped_sled_measurements,
         } = self;
 
         if *no_target_release {
@@ -333,7 +356,12 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 "* skipping noop host phase 2 desired contents check on sled {sled_id}: {reason}"
             )?;
         }
-
+        for (sled_id, reason) in skipped_sled_measurements.iter() {
+            writeln!(
+                f,
+                "* skipping noop measurement desired contents check on sled {sled_id}: {reason}"
+            )?;
+        }
         for (
             sled_id,
             PlanningNoopImageSourceConverted {
@@ -341,6 +369,7 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 num_dataset,
                 host_phase_2_slot_a_eligible,
                 host_phase_2_slot_b_eligible,
+                measurement_eligible,
             },
         ) in converted.iter()
         {
@@ -361,6 +390,12 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 writeln!(
                     f,
                     "* noop converting host phase 2 slot B to Artifact on sled {sled_id}"
+                )?;
+            }
+            if *measurement_eligible {
+                writeln!(
+                    f,
+                    "* noop converting current measurements to Artifact on sled {sled_id}"
                 )?;
             }
         }
@@ -415,6 +450,29 @@ pub enum PlanningNoopImageSourceSkipSledHostPhase2Reason {
 impl fmt::Display for PlanningNoopImageSourceSkipSledHostPhase2Reason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::SledNotInInventory => {
+                write!(f, "sled not present in latest inventory collection")
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum PlanningNoopImageSourceSkipSledMeasurementsReason {
+    BothSlotsAlreadyArtifact,
+    SledNotInInventory,
+}
+
+impl fmt::Display for PlanningNoopImageSourceSkipSledMeasurementsReason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BothSlotsAlreadyArtifact => {
+                write!(f, "both measurement sets are already from artifacts")
+            }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
@@ -718,6 +776,86 @@ impl IdOrdItem for BlockedMgsUpdate {
         &*self.baseboard_id
     }
     id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum PlanningMeasurementUpdatesStepReport {
+    Modified { count: usize },
+    BlockedAddUpdate,
+    EmptyMeasurements,
+    NoSledAgentInInventory { sled_id: SledUuid },
+    NoSledConfig { sled_id: SledUuid },
+    StillInstallDataset { sled_id: SledUuid },
+    WaitingOnInventory,
+    MatchesInventory,
+}
+
+impl PlanningMeasurementUpdatesStepReport {
+    pub fn new() -> Self {
+        PlanningMeasurementUpdatesStepReport::Modified { count: 0 }
+    }
+
+    pub fn all_sleds_updated(&self) -> bool {
+        match self {
+            // This is only returned once we have checked that our planned
+            // measurements match our inventory
+            PlanningMeasurementUpdatesStepReport::MatchesInventory => true,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for PlanningMeasurementUpdatesStepReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Skip displaying anything if there's nothing to do
+        if !self.all_sleds_updated() {
+            writeln!(f, "Measurement updates:")?;
+            match self {
+                PlanningMeasurementUpdatesStepReport::BlockedAddUpdate => {
+                    writeln!(f, "Waiting on zone add/update blockers")?;
+                }
+                PlanningMeasurementUpdatesStepReport::Modified { count } => {
+                    writeln!(f, "{count} modifications")?;
+                }
+                PlanningMeasurementUpdatesStepReport::EmptyMeasurements => {
+                    writeln!(
+                        f,
+                        "attempted to plan with a empty measurement set"
+                    )?;
+                }
+                PlanningMeasurementUpdatesStepReport::NoSledAgentInInventory { sled_id }=> {
+                    writeln!(
+                        f,
+                        "missing sled agent inventory for sled {sled_id}")?;
+                }
+                PlanningMeasurementUpdatesStepReport::NoSledConfig { sled_id } => {
+                    writeln!(
+                        f,
+                        "No reconciled sled config for sled {sled_id}")?;
+                }
+                PlanningMeasurementUpdatesStepReport::StillInstallDataset { sled_id } => {
+                    writeln!(
+                        f,
+                        "Sled {sled_id} still using install dataset measurements")?;
+                }
+                PlanningMeasurementUpdatesStepReport::WaitingOnInventory => {
+                    writeln!(
+                        f,
+                        "Waiting on measurements to match in inventory")?;
+                }
+                PlanningMeasurementUpdatesStepReport::MatchesInventory => {
+                    writeln!(
+                        f,
+                        "Matches inventory")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(
@@ -1397,6 +1535,9 @@ pub enum ZoneUpdatesWaitingOn {
 
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
+
+    /// Waiting on measurements
+    Measurements,
 }
 
 impl ZoneUpdatesWaitingOn {
@@ -1411,6 +1552,7 @@ impl ZoneUpdatesWaitingOn {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::ZoneAddBlockers => "zone add blockers",
+            Self::Measurements => "reference measurement changes",
         }
     }
 }

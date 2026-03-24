@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026031200.0.0"
+    "version": "2026031400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -24683,6 +24683,10 @@
             "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
+          "has_any_source_member": {
+            "description": "True if any member joined without specifying source IPs (any-source).\n\nWhen true, at least one member receives traffic from any source rather than filtering to specific sources.",
+            "type": "boolean"
+          },
           "id": {
             "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -24698,13 +24702,6 @@
             "type": "string",
             "format": "ip"
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. None means no VLAN tagging on egress.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
           "name": {
             "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -24714,7 +24711,7 @@
             ]
           },
           "source_ips": {
-            "description": "Union of all member source IP addresses (computed, read-only).\n\nThis field shows the combined source IPs across all group members. Individual members may subscribe to different sources; this union reflects all sources that any member is subscribed to. Empty array means no members have source filtering enabled.",
+            "description": "Deduplicated union of source IPs specified by members.\n\nContains only sources from members that joined with explicit `source_ips`. Members using any-source multicast (empty `source_ips`) do not contribute, so a non-empty value does not imply all members use source filtering. For SSM addresses (232/8, ff3x::/32), this is always non-empty.",
             "type": "array",
             "items": {
               "type": "string",
@@ -24738,6 +24735,7 @@
         },
         "required": [
           "description",
+          "has_any_source_member",
           "id",
           "ip_pool_id",
           "multicast_ip",

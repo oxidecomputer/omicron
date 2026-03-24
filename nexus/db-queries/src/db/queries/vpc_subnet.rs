@@ -31,50 +31,7 @@ use uuid::Uuid;
 /// record to make sure it's what they expected, though that's usually a fraught
 /// endeavor.
 ///
-/// Here is the entire query:
-///
-/// ```sql
-/// WITH
-/// -- This CTE generates a casting error if any live records, other than _this_
-/// -- record, have overlapping IP blocks of either family.
-/// overlap AS MATERIALIZED (
-///     SELECT
-///         -- NOTE: This cast always fails, we just use _how_ it fails to
-///         -- learn which IP block overlaps. The filter `id != <id>` below
-///         -- means we're explicitly ignoring an existing, identical record.
-///         -- So this cast is only run if there is another record in the same
-///         -- VPC with an overlapping subnet, which is exactly the error case
-///         -- we're trying to cacth.
-///         CAST(
-///             IF(
-///                (<ipv4_block> && ipv4_block),
-///                'ipv4',
-///                'ipv6'
-///             )
-///             AS BOOL
-///         )
-///     FROM
-///         vpc_subnet
-///     WHERE
-///         vpc_id = <vpc_id> AND
-///         time_deleted IS NULL AND
-///         id != <id> AND
-///         (
-///             (ipv4_block && <ipv4_block>) OR
-///             (ipv6_block && <ipv6_block>)
-///         )
-/// )
-/// INSERT INTO
-///     vpc_subnet
-/// VALUES (
-///     <input data>
-/// )
-/// ON CONFLICT (id)
-/// -- We use this "no-op" update to allow us to return the actual row from the
-/// -- DB, either the existing or inserted one.
-/// DO UPDATE SET id = id
-/// RETURNING *;
-/// ```
+/// See `tests/output/insert_vpc_subnet_query.sql` for the full generated SQL.
 #[derive(Clone, Debug)]
 pub struct InsertVpcSubnetQuery {
     /// The subnet to insert
@@ -104,6 +61,12 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
+        // The `overlap` CTE selects any live records in the same VPC with
+        // overlapping IP blocks. It generates a casting error if any overlap
+        // is found: CAST(IF(<ipv4 overlaps>, 'ipv4', 'ipv6') AS BOOL) always
+        // fails, but *how* it fails tells us which IP family overlapped.
+        // The `id != <id>` filter ignores the existing identical record, so
+        // that re-inserting the same row (idempotency) doesn't flag as overlap.
         out.push_sql("WITH overlap AS MATERIALIZED (SELECT CAST(IF((");
         out.push_identifier(dsl::ipv4_block::NAME)?;
         out.push_sql(" && ");
@@ -173,6 +136,9 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, _>(
             &self.subnet.custom_router_id,
         )?;
+        // ON CONFLICT: perform a no-op update (set id = id) so that
+        // RETURNING * gives back the actual DB row whether it was newly
+        // inserted or already existed. This is what makes the query idempotent.
         out.push_sql(") ON CONFLICT (");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(") DO UPDATE SET ");
@@ -296,10 +262,30 @@ mod test {
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::VpcSubnet;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use std::convert::TryInto;
+
+    #[tokio::test]
+    async fn expectorate_insert_vpc_subnet_query() {
+        let ipv4_block = "172.30.0.0/24".parse().unwrap();
+        let ipv6_block = "fd12:3456:7890::/64".parse().unwrap();
+        let name = "a-name".to_string().try_into().unwrap();
+        let description = "some description".to_string();
+        let identity = IdentityMetadataCreateParams { name, description };
+        let vpc_id = "d402369d-c9ec-c5ad-9138-9fbee732d53e".parse().unwrap();
+        let subnet_id = "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
+        let row =
+            VpcSubnet::new(subnet_id, vpc_id, identity, ipv4_block, ipv6_block);
+        let query = InsertVpcSubnetQuery::new(row);
+        expectorate_query_contents(
+            &query,
+            "tests/output/insert_vpc_subnet_query.sql",
+        )
+        .await;
+    }
 
     #[tokio::test]
     async fn explain_insert_query() {

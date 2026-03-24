@@ -692,6 +692,8 @@ Commands:
           bumps the blueprint's Nexus generation
   noop
           make a new blueprint from an existing one without any changes
+  set-measurements
+          Set a sled's measurements to either `unknown` or `install-dataset`
   help
           Print this message or the help of the given subcommand(s)
 

@@ -385,6 +385,7 @@ impl DataStore {
                         comment,
                         ereports,
                         alerts_requested,
+                        support_bundles_requested: iddqd::IdOrdMap::new(),
                     }
                 }));
             }
@@ -1552,6 +1553,7 @@ mod tests {
                 de,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: _,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -1770,6 +1772,7 @@ mod tests {
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: iddqd::IdOrdMap::new(),
                 comment: "my cool case".to_string(),
             }
         };
@@ -1801,7 +1804,8 @@ mod tests {
                 closed_sitrep_id: None,
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
-                alerts_requested: Default::default(),
+                alerts_requested,
+                support_bundles_requested: iddqd::IdOrdMap::new(),
                 comment: "break in case of emergency".to_string(),
             }
         };
@@ -1925,8 +1929,8 @@ mod tests {
             .await
             .expect("failed to count alert requests before deletion");
         assert_eq!(
-            alert_requests_before, 2,
-            "two alert requests should exist before deletion"
+            alert_requests_before, 3,
+            "three alert requests should exist before deletion"
         );
 
         // Now delete the sitrep

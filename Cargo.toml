@@ -93,6 +93,7 @@ members = [
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
+    "nexus/fm",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -271,6 +272,7 @@ default-members = [
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
+    "nexus/fm",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -421,6 +423,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
+byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }
 bytes = "1.10.1"
 camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"
@@ -601,6 +604,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
+nexus-fm = { path = "nexus/fm" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-lockstep-api = { path = "nexus/lockstep-api" }
@@ -701,10 +705,11 @@ progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -747,7 +752,6 @@ semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
-serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.145"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -1043,8 +1047,6 @@ opt-level = 3
 # drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
-# dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }
-# dropshot-api-manager-types = { path = "../dropshot-api-manager/crates/dropshot-api-manager-types" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }

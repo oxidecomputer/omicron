@@ -65,17 +65,24 @@ pub mod early_networking {
     pub use crate::v1::early_networking::TxEqConfig;
 
     pub use crate::v20::early_networking::BgpConfig;
-    pub use crate::v20::early_networking::BgpPeerConfig;
     pub use crate::v20::early_networking::MaxPathConfig;
     pub use crate::v20::early_networking::MaxPathConfigError;
-    pub use crate::v20::early_networking::PortConfig;
-    pub use crate::v20::early_networking::RackNetworkConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
-    pub use crate::v20::early_networking::UplinkAddressConfig;
 
-    pub use crate::v26::early_networking::EarlyNetworkConfigBody;
-    pub use crate::v26::early_networking::WriteNetworkConfigRequest;
+    pub use crate::v30::early_networking::BgpPeerConfig;
+    pub use crate::v30::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v30::early_networking::InvalidIpAddrError;
+    pub use crate::v30::early_networking::PortConfig;
+    pub use crate::v30::early_networking::RackNetworkConfig;
+    pub use crate::v30::early_networking::RouterPeerIpAddr;
+    pub use crate::v30::early_networking::RouterPeerIpAddrError;
+    pub use crate::v30::early_networking::RouterPeerType;
+    pub use crate::v30::early_networking::UplinkAddress;
+    pub use crate::v30::early_networking::UplinkAddressConfig;
+    pub use crate::v30::early_networking::UplinkIpNet;
+    pub use crate::v30::early_networking::UplinkIpNetError;
+    pub use crate::v30::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
@@ -92,7 +99,6 @@ pub mod instance {
     pub use crate::v1::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
-    pub use crate::v1::instance::VmmSpec;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
@@ -100,8 +106,10 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v18::instance::InstanceEnsureBody;
     pub use crate::v18::instance::InstanceSledLocalConfig;
+
+    pub use crate::v29::instance::InstanceEnsureBody;
+    pub use crate::v29::instance::VmmSpec;
 
     pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 }
@@ -175,9 +183,10 @@ pub mod rack_init {
     pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
 
     pub use crate::v20::rack_init::BootstrapAddressDiscovery;
-    pub use crate::v20::rack_init::RackInitializeRequest;
-    pub use crate::v20::rack_init::RackInitializeRequestParams;
     pub use crate::v20::rack_init::RackInitializeRequestParseError;
+
+    pub use crate::v30::rack_init::RackInitializeRequest;
+    pub use crate::v30::rack_init::RackInitializeRequestParams;
 }
 
 pub mod rot {
@@ -220,8 +229,8 @@ pub mod trust_quorum {
 }
 
 pub mod uplink {
-    pub use crate::v20::uplink::HostPortConfig;
-    pub use crate::v20::uplink::SwitchPorts;
+    pub use crate::v30::uplink::HostPortConfig;
+    pub use crate::v30::uplink::SwitchPorts;
 }
 
 pub mod zone_bundle {

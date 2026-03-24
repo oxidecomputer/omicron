@@ -1,0 +1,40 @@
+# Load an example system.
+load-example --nsleds 2 --ndisks-per-sled 3
+
+sled-list
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the first TUF repository.
+set target-release repo-1.0.0.zip
+
+# On 1 sled, update the install dataset.
+sled-update-install-dataset serial0 --to-target-release
+
+# On the other sled, simulate an error with the measurement manifest 
+sled-update-install-dataset serial1 --to-target-release --with-measurement-manifest-error
+
+# Generate an inventory and run a blueprint planning step.
+inventory-generate
+blueprint-plan latest latest
+
+# We expect to see all sleds successfully show measurements in the artifact
+# state, including the sled with the measurement manifest error.
+blueprint-diff latest
+
+# Now set the blueprints to use the install dataset
+blueprint-edit latest set-measurements serial0 install-dataset
+blueprint-edit latest set-measurements serial1 install-dataset
+
+# And reset the install dataset
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release --with-measurement-manifest-error
+
+# This time we expect that sled1 should have blocked at a missing
+# measurement manifest because we are expecting one
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
