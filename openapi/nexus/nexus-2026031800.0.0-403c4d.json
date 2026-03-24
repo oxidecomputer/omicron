@@ -17362,7 +17362,7 @@
       },
       "BgpMessageHistory": {},
       "BgpPeer": {
-        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters.",
+        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer. The `bgp_config` parameter is a reference to global BGP parameters.",
         "type": "object",
         "properties": {
           "addr": {
@@ -17407,7 +17407,7 @@
             }
           },
           "connect_retry": {
-            "description": "How long to to wait between TCP connection retries (seconds).",
+            "description": "How long to wait between TCP connection retries (seconds).",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
