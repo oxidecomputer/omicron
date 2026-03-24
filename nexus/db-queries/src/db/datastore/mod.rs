@@ -3,6 +3,19 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Primary control plane interface for database read and write operations
+//!
+//! # Method naming conventions
+//!
+//! Many methods in this module have a public entry point that acquires a
+//! database connection from the pool, paired with a private `_on_conn` (or
+//! `_on_connection`) helper that takes an explicit connection parameter. The
+//! helper exists so that multiple queries can share the same connection without
+//! re-acquiring one from the pool for each step of a multi-query operation.
+//!
+//! A related convention is `_in_txn` (or `_in_transaction`), for helpers that
+//! run inside an explicit database transaction. These typically take an
+//! [`OptionalError`](nexus_db_errors::OptionalError) so they can bail
+//! out of the entire transaction on application-level errors.
 
 // TODO-scalability review all queries for use of indexes (may need
 // "time_deleted IS NOT NULL" conditions) Figure out how to automate this.
