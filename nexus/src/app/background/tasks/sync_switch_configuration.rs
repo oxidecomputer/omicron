@@ -57,7 +57,6 @@ use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
 use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::MaxPathConfig;
@@ -478,7 +477,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
                 // calculate and apply switch zone SMF changes
                 //
-                let uplinks = uplinks(&changes, &log);
+                let uplinks = uplinks(&changes);
 
                 // yeet the messages
                 for (switch_slot, config) in &uplinks {
@@ -1105,30 +1104,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
-                    let addresses = match info
+                    let addresses = info
                         .addresses
                         .iter()
-                        .map(|a| {
-                             Ok(UplinkAddressConfig {
-                                 address: a.address,
-                                 vlan_id: a.vlan_id
-                             })
+                        .map(|a| UplinkAddressConfig {
+                            address: a.address,
+                            vlan_id: a.vlan_id
                         })
-                        .collect::<Result<_, InvalidIpAddrError>>()
-                    {
-                        Ok(addresses) => addresses,
-                        Err(err) => {
-                            error!(
-                                log,
-                                "failed to convert database uplink addresses \
-                                 to API uplink addresses";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                InlineErrorChain::new(&err),
-                            );
-                            continue;
-                        }
-                    };
+                        .collect();
 
                     let mut port_config = PortConfig {
                         addresses,
@@ -1723,7 +1706,6 @@ async fn switch_loopback_addresses(
 
 fn uplinks(
     changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
-    log: &slog::Logger,
 ) -> HashMap<SwitchSlot, Vec<HostPortConfig>> {
     let mut uplinks: HashMap<SwitchSlot, Vec<HostPortConfig>> = HashMap::new();
     for (switch_slot, port, change) in changes {
@@ -1765,30 +1747,14 @@ fn uplinks(
             None
         };
 
-        let addrs = match config
+        let addrs = config
             .addresses
             .iter()
-            .map(|a| {
-                Ok(UplinkAddressConfig {
-                    address: a.address,
-                    vlan_id: a.vlan_id,
-                })
+            .map(|a| UplinkAddressConfig {
+                address: a.address,
+                vlan_id: a.vlan_id,
             })
-            .collect::<Result<_, InvalidIpAddrError>>()
-        {
-            Ok(addresses) => addresses,
-            Err(err) => {
-                error!(
-                    log,
-                    "failed to convert database uplink addresses to \
-                     API uplink addresses";
-                    "switch_slot" => ?switch_slot,
-                    "port" => &port.port_name.to_string(),
-                    InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
+            .collect();
 
         let config = HostPortConfig {
             port: port.port_name.to_string(),
