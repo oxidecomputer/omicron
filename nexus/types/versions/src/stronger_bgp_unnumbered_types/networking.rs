@@ -488,6 +488,11 @@ mod tests {
                 "fe80::1".parse().unwrap(),
                 InvalidIpAddrError::Ipv6UnicastLinkLocal,
             ),
+            (
+                "IPv4-mapped IPv6",
+                "::ffff:192.168.0.1".parse().unwrap(),
+                InvalidIpAddrError::Ipv4MappedIpv6,
+            )
         ];
 
         for (label, ip, expected_err) in ip_error_cases {

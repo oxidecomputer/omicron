@@ -455,6 +455,12 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .iter()
         .find(|p| p.addr.is_unnumbered())
         .expect("Roundtrip should have an unnumbered peer");
+    assert_eq!(
+        roundtrip_unnumbered.addr,
+        RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+        }
+    );
     assert_eq!(roundtrip_unnumbered.remote_asn, Some(65000));
     assert_eq!(roundtrip_unnumbered.communities, vec![65000]);
 
