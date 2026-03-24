@@ -123,8 +123,9 @@ impl SitrepGc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
-    use nexus_db_queries::db::datastore::fm::InsertSitrepError;
+    use nexus_db_queries::db::model;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::fm;
     use omicron_common::api::external::Error;
@@ -162,7 +163,7 @@ mod tests {
         // Now, create some orphaned sitreps which also have no parent.
         let mut orphans = BTreeSet::new();
         for i in 1..5 {
-            insert_orphan(&datastore, &opctx, &mut orphans, None, 1, i).await;
+            insert_orphan(&datastore, &mut orphans, None, 1, i).await;
         }
 
         // Next, create a new sitrep which descends from sitrep 1.
@@ -186,7 +187,6 @@ mod tests {
         for i in 1..4 {
             insert_orphan(
                 &datastore,
-                &opctx,
                 &mut orphans,
                 Some(sitrep1.metadata.id),
                 2,
@@ -250,44 +250,40 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Creates an orphaned sitrep by directly inserting a metadata row
+    /// into `fm_sitrep`, bypassing `fm_sitrep_insert`.
+    ///
+    /// Since `fm_sitrep_insert` is transactional, a failed CAS rolls
+    /// back the entire transaction (including the metadata row), so it
+    /// can no longer be used to create orphans in tests. Instead, we
+    /// insert the metadata row directly.
     async fn insert_orphan(
         datastore: &DataStore,
-        opctx: &OpContext,
         orphans: &mut BTreeSet<SitrepUuid>,
         parent_sitrep_id: Option<SitrepUuid>,
         v: usize,
         i: usize,
     ) {
-        let sitrep = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: format!("test sitrep v{i}; orphan {i}"),
-                time_created: Utc::now(),
-                parent_sitrep_id,
-            },
-            // We could populate the orphan sitreps with cases and ereports
-            // here, but there's a unit test
-            // `test_sitrep_delete_deletes_cases()` in the
-            // `nexus_db_queries::db::datastore::fm` module which ensures that
-            // deleting a sitrep removes all the other records associated with
-            // it, so it should be safe to trust that this works properly.
-            cases: Default::default(),
-        };
-        match datastore.fm_sitrep_insert(&opctx, sitrep).await {
-            Ok(_) => {
-                panic!("inserting sitrep v{v} orphan {i} should not succeed")
-            }
-            Err(InsertSitrepError::ParentNotCurrent(id)) => {
-                orphans.insert(id);
-            }
-            Err(InsertSitrepError::Other(e)) => {
-                panic!(
-                    "expected inserting sitrep v{v} orphan {i} to fail because \
-                     its parent is out of date, but saw an unexpected error: {e}"
-                );
-            }
-        }
+        use nexus_db_schema::schema::fm_sitrep::dsl;
+
+        let id = SitrepUuid::new_v4();
+        let metadata = model::SitrepMetadata::from(fm::SitrepMetadata {
+            id,
+            inv_collection_id: CollectionUuid::new_v4(),
+            creator_id: OmicronZoneUuid::new_v4(),
+            comment: format!("test sitrep v{v}; orphan {i}"),
+            time_created: Utc::now(),
+            parent_sitrep_id,
+        });
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .expect("failed to get connection");
+        diesel::insert_into(dsl::fm_sitrep)
+            .values(metadata)
+            .execute_async(&*conn)
+            .await
+            .expect("failed to insert orphan sitrep metadata");
+        orphans.insert(id);
     }
 }
