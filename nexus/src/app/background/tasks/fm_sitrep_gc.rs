@@ -163,7 +163,7 @@ mod tests {
         // Now, create some orphaned sitreps which also have no parent.
         let mut orphans = BTreeSet::new();
         for i in 1..5 {
-            insert_orphan(&datastore, &opctx, &mut orphans, None, 1, i).await;
+            insert_orphan(&datastore, &mut orphans, None, 1, i).await;
         }
 
         // Next, create a new sitrep which descends from sitrep 1.
@@ -187,7 +187,6 @@ mod tests {
         for i in 1..4 {
             insert_orphan(
                 &datastore,
-                &opctx,
                 &mut orphans,
                 Some(sitrep1.metadata.id),
                 2,
@@ -260,7 +259,6 @@ mod tests {
     /// insert the metadata row directly.
     async fn insert_orphan(
         datastore: &DataStore,
-        _opctx: &OpContext,
         orphans: &mut BTreeSet<SitrepUuid>,
         parent_sitrep_id: Option<SitrepUuid>,
         v: usize,
