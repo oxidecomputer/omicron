@@ -89,7 +89,10 @@ impl TryFrom<external::VpcFirewallRuleFilter> for VpcFirewallRuleFilter {
                         external::VpcFirewallRuleProtocol::Icmp6(_) => {
                             Err(Error::invalid_value(
                                 "vpc_firewall_rule_protocol",
-                                format!("unrecognized protocol: {p}"),
+                                format!(
+                                    "unrecognized protocol: {}",
+                                    p.to_api_string()
+                                ),
                             ))
                         }
                     })

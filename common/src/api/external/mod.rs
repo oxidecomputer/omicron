@@ -1882,10 +1882,30 @@ pub enum VpcFirewallRuleProtocol {
     // Other(u16),
 }
 
-impl FromStr for VpcFirewallRuleProtocol {
-    type Err = Error;
+impl VpcFirewallRuleProtocol {
+    /// Returns a string representation of this protocol filter suitable for
+    /// use as an API string or in the database.
+    ///
+    /// This is the inverse of `from_api_string`.
+    pub fn to_api_string(&self) -> String {
+        match self {
+            VpcFirewallRuleProtocol::Tcp => "tcp".to_string(),
+            VpcFirewallRuleProtocol::Udp => "udp".to_string(),
+            VpcFirewallRuleProtocol::Icmp(None) => "icmp".to_string(),
+            VpcFirewallRuleProtocol::Icmp(Some(v)) => {
+                format!("icmp:{}", v.to_api_string())
+            }
+            VpcFirewallRuleProtocol::Icmp6(None) => "icmp6".to_string(),
+            VpcFirewallRuleProtocol::Icmp6(Some(v)) => {
+                format!("icmp6:{}", v.to_api_string())
+            }
+        }
+    }
 
-    fn from_str(proto: &str) -> Result<Self, Self::Err> {
+    /// Parses a protocol filter from the API string format.
+    ///
+    /// This is the inverse of `to_api_string`.
+    pub fn from_api_string(proto: &str) -> Result<Self, Error> {
         let (ty_str, content_str) = match proto.split_once(':') {
             None => (proto, None),
             Some((lhs, rhs)) => (lhs, Some(rhs)),
@@ -1897,15 +1917,15 @@ impl FromStr for VpcFirewallRuleProtocol {
             (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
                 Ok(Self::Icmp(None))
             }
-            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
-                Ok(Self::Icmp(Some(rhs.parse()?)))
-            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => Ok(
+                Self::Icmp(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
+            ),
             (lhs, None) if lhs.eq_ignore_ascii_case("icmp6") => {
                 Ok(Self::Icmp6(None))
             }
-            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => {
-                Ok(Self::Icmp6(Some(rhs.parse()?)))
-            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => Ok(
+                Self::Icmp6(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
+            ),
             (lhs, None) => Err(Error::invalid_value(
                 "vpc_firewall_rule_protocol",
                 format!("unrecognized protocol: {lhs}"),
@@ -1920,47 +1940,28 @@ impl FromStr for VpcFirewallRuleProtocol {
     }
 }
 
-impl TryFrom<String> for VpcFirewallRuleProtocol {
-    type Error = <VpcFirewallRuleProtocol as FromStr>::Err;
-
-    fn try_from(proto: String) -> Result<Self, Self::Error> {
-        proto.parse()
-    }
-}
-
-impl Display for VpcFirewallRuleProtocol {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        match self {
-            VpcFirewallRuleProtocol::Tcp => write!(f, "tcp"),
-            VpcFirewallRuleProtocol::Udp => write!(f, "udp"),
-            VpcFirewallRuleProtocol::Icmp(None) => write!(f, "icmp"),
-            VpcFirewallRuleProtocol::Icmp(Some(v)) => write!(f, "icmp:{v}"),
-            VpcFirewallRuleProtocol::Icmp6(None) => write!(f, "icmp6"),
-            VpcFirewallRuleProtocol::Icmp6(Some(v)) => write!(f, "icmp6:{v}"),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallIcmpFilter {
     pub icmp_type: u8,
     pub code: Option<IcmpParamRange>,
 }
 
-impl Display for VpcFirewallIcmpFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        write!(f, "{}", self.icmp_type)?;
-        if let Some(code) = self.code {
-            write!(f, ",{code}")?;
+impl VpcFirewallIcmpFilter {
+    /// Returns a string representation of this ICMP filter suitable for use
+    /// as part of an API string or in the database.
+    ///
+    /// This is the inverse of `from_api_string`.
+    pub fn to_api_string(&self) -> String {
+        match self.code {
+            None => self.icmp_type.to_string(),
+            Some(code) => format!("{},{code}", self.icmp_type),
         }
-        Ok(())
     }
-}
 
-impl FromStr for VpcFirewallIcmpFilter {
-    type Err = Error;
-
-    fn from_str(filter: &str) -> Result<Self, Self::Err> {
+    /// Parses an ICMP filter from the API string format.
+    ///
+    /// This is the inverse of `to_api_string`.
+    pub fn from_api_string(filter: &str) -> Result<Self, Error> {
         let (ty_str, code_str) = match filter.split_once(',') {
             None => (filter, None),
             Some((lhs, rhs)) => (lhs, Some(rhs)),
@@ -3934,72 +3935,78 @@ mod test {
     }
 
     #[test]
-    fn test_firewall_rule_proto_filter_parse() {
-        assert_eq!(VpcFirewallRuleProtocol::Tcp, "tcp".parse().unwrap());
-        assert_eq!(VpcFirewallRuleProtocol::Udp, "udp".parse().unwrap());
+    fn test_firewall_rule_proto_filter_from_api_string() {
+        assert_eq!(
+            VpcFirewallRuleProtocol::Tcp,
+            VpcFirewallRuleProtocol::from_api_string("tcp").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Udp,
+            VpcFirewallRuleProtocol::from_api_string("udp").unwrap()
+        );
 
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(None),
-            "icmp".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp").unwrap()
         );
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 4,
                 code: None
             })),
-            "icmp:4".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp:4").unwrap()
         );
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
                 code: Some(0.into())
             })),
-            "icmp:60,0".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp:60,0").unwrap()
         );
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
                 code: Some((0..=10).try_into().unwrap())
             })),
-            "icmp:60,0-10".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp:60,0-10").unwrap()
         );
         assert_eq!(
-            "icmp:".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:"),
             Err(Error::invalid_value(
                 "icmp_type",
                 "\"\" unparsable for type: cannot parse integer from empty string"
             ))
         );
         assert_eq!(
-            "icmp:20-30".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:20-30"),
             Err(Error::invalid_value(
                 "icmp_type",
                 "\"20-30\" unparsable for type: invalid digit found in string"
             ))
         );
         assert_eq!(
-            "icmp:10,".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:10,"),
             Err(Error::invalid_value(
                 "code",
                 "\"\" unparsable for type: cannot parse integer from empty string"
             ))
         );
         assert_eq!(
-            "icmp:257,".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:257,"),
             Err(Error::invalid_value(
                 "icmp_type",
                 "\"257\" unparsable for type: number too large to fit in target type"
             ))
         );
         assert_eq!(
-            "icmp:0,1000-1001".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:0,1000-1001"),
             Err(Error::invalid_value(
                 "code",
                 "\"1000\" unparsable for type: number too large to fit in target type"
             ))
         );
         assert_eq!(
-            "icmp:0,30-".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:0,30-"),
             Err(Error::invalid_value("code", "range has no end value"))
         );
     }
