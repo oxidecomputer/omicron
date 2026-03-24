@@ -1579,8 +1579,7 @@ async fn do_switch_port_settings_create(
             return Err(err.bail(
                 SwitchPortSettingsCreateError::InternalError(format!(
                     "unexpectedly missing peer {} (addr: {:?})",
-                    p.bgp_config_id,
-                    p.addr,
+                    p.bgp_config_id, p.addr,
                 )),
             ));
         };
