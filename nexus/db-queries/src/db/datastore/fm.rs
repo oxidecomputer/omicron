@@ -943,7 +943,7 @@ impl DataStore {
                     // Step 1: Delete orphaned fm_sitrep metadata rows.
                     let mut sitreps_deleted = 0usize;
                     {
-                        let mut marker = Uuid::nil();
+                        let mut marker = SitrepUuid::nil();
                         loop {
                             let result =
                                 Self::delete_orphaned_sitrep_metadata_query(
@@ -957,7 +957,9 @@ impl DataStore {
                             sitreps_deleted += deleted as usize;
 
                             match next_marker {
-                                Some(m) => marker = m,
+                                Some(m) => {
+                                    marker = SitrepUuid::from_untyped_uuid(m)
+                                }
                                 None => break,
                             }
                         }
@@ -981,7 +983,7 @@ impl DataStore {
                         ),
                         (SitrepChildTable::Case, &mut cases_deleted),
                     ] {
-                        let mut marker = Uuid::nil();
+                        let mut marker = SitrepUuid::nil();
                         loop {
                             let result = Self::deeply_orphaned_batch_query(
                                 table,
@@ -1003,7 +1005,7 @@ impl DataStore {
                                     // in the next batch, be checked
                                     // against fm_sitrep again, and again
                                     // be kept. This is harmless.
-                                    marker = m;
+                                    marker = SitrepUuid::from_untyped_uuid(m);
                                 }
                                 None => break,
                             }
@@ -1037,7 +1039,7 @@ impl DataStore {
     /// rows in a single paginated batch (sitreps not in history whose
     /// parent is not current). Returns (rows_deleted, next_marker).
     fn delete_orphaned_sitrep_metadata_query(
-        marker: Uuid,
+        marker: SitrepUuid,
         batch_size: std::num::NonZeroU32,
     ) -> TypedSqlQuery<(sql_types::Int8, sql_types::Nullable<sql_types::Uuid>)>
     {
@@ -1058,7 +1060,7 @@ impl DataStore {
                     h.sitrep_id IS NULL \
                 AND s.id >= ",
         );
-        builder.param().bind::<sql_types::Uuid, _>(marker);
+        builder.param().bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
         builder.sql(
             " AND (\
                     (\
@@ -1099,7 +1101,7 @@ impl DataStore {
     ///    when there are no more pages
     fn deeply_orphaned_batch_query(
         table: SitrepChildTable,
-        marker: Uuid,
+        marker: SitrepUuid,
         batch_size: std::num::NonZeroU32,
     ) -> TypedSqlQuery<(sql_types::Int8, sql_types::Nullable<sql_types::Uuid>)>
     {
@@ -1117,7 +1119,7 @@ impl DataStore {
             .sql(col)
             .sql(" >= ")
             .param()
-            .bind::<sql_types::Uuid, _>(marker);
+            .bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
         builder.sql(" ORDER BY ");
         builder.sql(col);
         builder
@@ -1262,7 +1264,7 @@ mod tests {
     async fn expectorate_deeply_orphaned_batch_query() {
         let query = DataStore::deeply_orphaned_batch_query(
             SitrepChildTable::CaseEreport,
-            Uuid::nil(),
+            SitrepUuid::nil(),
             SQL_BATCH_SIZE,
         );
         expectorate_query_contents(
@@ -1281,7 +1283,7 @@ mod tests {
 
         let query = DataStore::deeply_orphaned_batch_query(
             SitrepChildTable::CaseEreport,
-            Uuid::nil(),
+            SitrepUuid::nil(),
             SQL_BATCH_SIZE,
         );
         let explanation = query
@@ -1302,7 +1304,7 @@ mod tests {
     #[tokio::test]
     async fn expectorate_delete_orphaned_sitrep_metadata() {
         let query = DataStore::delete_orphaned_sitrep_metadata_query(
-            Uuid::nil(),
+            SitrepUuid::nil(),
             SQL_BATCH_SIZE,
         );
         expectorate_query_contents(
@@ -1322,7 +1324,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         let query = DataStore::delete_orphaned_sitrep_metadata_query(
-            Uuid::nil(),
+            SitrepUuid::nil(),
             SQL_BATCH_SIZE,
         );
         let explanation = query
@@ -2388,7 +2390,7 @@ mod tests {
         // batch size (2) to force pagination across multiple batches.
         let batch_size = std::num::NonZeroU32::new(2).unwrap();
         let mut total_deleted = 0usize;
-        let mut marker = Uuid::nil();
+        let mut marker = SitrepUuid::nil();
         let mut iterations = 0;
 
         loop {
@@ -2406,7 +2408,7 @@ mod tests {
             iterations += 1;
 
             match next_marker {
-                Some(m) => marker = m,
+                Some(m) => marker = SitrepUuid::from_untyped_uuid(m),
                 None => break,
             }
         }
