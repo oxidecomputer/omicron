@@ -11,6 +11,7 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::model::Ereport;
 use crate::db::model::EreporterRestart;
+use crate::db::model::EreporterType;
 use crate::db::model::Generation;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
@@ -332,11 +333,41 @@ impl DataStore {
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
+        restart_id: EreporterRestartUuid,
         reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = fm::EreportData>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
+
+        // First, record the reporter's restart ID in the restart ID ordering
+        // table, if we haven't seen it before.
+        if let Some(slot) = reporter.slot() {
+            let reporter_type = EreporterType::for_reporter(&reporter);
+            let new_restart = self
+                .ereporter_restart_insert_on_conn(
+                    &conn,
+                    reporter_type,
+                    reporter.slot_type().into(),
+                    slot.into(),
+                    restart_id,
+                )
+                .await
+                .map_err(|e| {
+                    e.internal_context("failed to insert ereporter restart")
+                })?;
+            if new_restart {
+                slog::info!(
+                    &opctx.log,
+                    "recognized a new restart of ereport reporter {reporter}";
+                    "reporter_type" => ?reporter_type,
+                    "slot_type" => %reporter.slot_type(),
+                    "slot" => slot,
+                    "restart_id" => %restart_id,
+                );
+            }
+        }
+
         let ereports = ereports
             .into_iter()
             .map(|data| Ereport::new(data, reporter))
@@ -349,7 +380,10 @@ impl DataStore {
             .await
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to insert ereports")
+                    .internal_context(format!(
+                        "failed to insert ereports from {reporter} (at \
+                         restart {restart_id})"
+                    ))
             })?;
         let latest = self
             .latest_ereport_id_on_conn(&conn, reporter)
@@ -374,26 +408,23 @@ impl DataStore {
     ///
     /// This method returns `true` if the restart ID was not previously
     /// recorded, and `false` if it was already known.
-    pub async fn ereporter_restart_insert(
+    async fn ereporter_restart_insert_on_conn(
         &self,
-        opctx: &OpContext,
-        reporter_type: nexus_db_model::EreporterType,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        reporter_type: EreporterType,
         slot_type: SpType,
         slot: SpMgsSlot,
         restart_id: EreporterRestartUuid,
     ) -> CreateResult<bool> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        let query = Self::restart_insert_query(
+        let inserted = Self::restart_insert_query(
             reporter_type,
             slot_type,
             slot.into(),
             restart_id,
-        );
-        let inserted = query
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        )
+        .execute_async(conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(inserted != 0)
     }
 
@@ -752,10 +783,8 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let id = fm::EreportId {
-            restart_id: EreporterRestartUuid::new_v4(),
-            ena: ereport_types::Ena(2),
-        };
+        let restart_id = EreporterRestartUuid::new_v4();
+        let id = fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport = fm::EreportData {
             id,
             time_collected: Utc::now(),
@@ -768,6 +797,7 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
@@ -853,6 +883,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_ereporter_restart_insert");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let slot_type = SpType::Sled;
         let slot = SpMgsSlot::from(SqlU16::new(1));
@@ -880,8 +911,8 @@ mod tests {
 
         // Insert the first restart: should get generation 0.
         datastore
-            .ereporter_restart_insert(
-                opctx,
+            .ereporter_restart_insert_on_conn(
+                &conn,
                 EreporterType::Sp,
                 slot_type,
                 slot,
@@ -907,8 +938,8 @@ mod tests {
         // Insert a second, different restart ID at the same location:
         // should get generation 1.
         datastore
-            .ereporter_restart_insert(
-                opctx,
+            .ereporter_restart_insert_on_conn(
+                &conn,
                 EreporterType::Sp,
                 slot_type,
                 slot,
@@ -938,8 +969,8 @@ mod tests {
         // location should be idempotent (do nothing). ---
 
         datastore
-            .ereporter_restart_insert(
-                opctx,
+            .ereporter_restart_insert_on_conn(
+                &conn,
                 EreporterType::Sp,
                 slot_type,
                 slot,
@@ -973,8 +1004,8 @@ mod tests {
         // independent generation counts. ---
 
         datastore
-            .ereporter_restart_insert(
-                opctx,
+            .ereporter_restart_insert_on_conn(
+                &conn,
                 EreporterType::Host,
                 slot_type,
                 slot,
@@ -1019,8 +1050,8 @@ mod tests {
 
         let different_slot = SpMgsSlot::from(SqlU16::new(2));
         let result = datastore
-            .ereporter_restart_insert(
-                opctx,
+            .ereporter_restart_insert_on_conn(
+                &conn,
                 EreporterType::Sp,
                 slot_type,
                 different_slot,

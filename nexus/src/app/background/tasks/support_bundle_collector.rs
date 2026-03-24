@@ -591,7 +591,7 @@ mod test {
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        datastore.ereports_insert(&opctx,sp_restart_id,  Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
@@ -625,13 +625,15 @@ mod test {
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
+        let sp2_restart_id = EreporterRestartUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
+                sp2_restart_id,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![EreportData {
                     id: EreportId {
-                        restart_id: EreporterRestartUuid::new_v4(),
+                        restart_id: sp2_restart_id,
                         ena: ereport_types::Ena(1),
                     },
                     time_collected: chrono::Utc::now(),
@@ -649,6 +651,7 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -682,13 +685,15 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
+        let host2_restart_id = EreporterRestartUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
+                host2_restart_id,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
-                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
+                        id: EreportId { restart_id, ena:  ereport_types::Ena(1) },
                         time_collected: chrono::Utc::now(),
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),

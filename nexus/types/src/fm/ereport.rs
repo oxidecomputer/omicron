@@ -176,6 +176,18 @@ impl Reporter {
             Self::HostOs { .. } => SpType::Sled,
         }
     }
+
+    /// Returns the slot number occupied by this reporter, if it is known.
+    ///
+    /// This will always be `Some` for SP reporters. For host OS reporters, this
+    /// may be `None` if inventory data has not yet been collected that contains
+    /// a given sled.
+    pub fn slot(&self) -> Option<u16> {
+        match self {
+            Self::Sp { slot, .. } => Some(*slot),
+            Self::HostOs { slot, .. } => *slot,
+        }
+    }
 }
 
 impl fmt::Display for Reporter {
