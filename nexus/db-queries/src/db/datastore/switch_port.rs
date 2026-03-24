@@ -1577,8 +1577,9 @@ async fn do_switch_port_settings_create(
         let Some(peer) = peer_by_addr.get(&lookup_addr) else {
             return Err(err.bail(
                 SwitchPortSettingsCreateError::InternalError(format!(
-                    "unexpectedly missing peer {}",
-                    p.bgp_config_id
+                    "unexpectedly missing peer {} (addr: {:?})",
+                    p.bgp_config_id,
+                    p.addr,
                 )),
             ));
         };
