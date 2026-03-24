@@ -3677,7 +3677,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     port_settings_id UUID,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
-    addr INET,
+    -- We represent unnumbered peers as `NULL`; formerly we used a sentinel
+    -- value of `0.0.0.0` in some tables (although not this one). To ensure we
+    -- don't mix those up, add check constraints that reject unspecified IPs.
+    --
+    -- The Rust logic for valid peer addresses is considerably more involved; it
+    -- rejects other classes of addresses like multicast addresses, loopback
+    -- addresses, etc. We don't attempt to enforce that here and rely on
+    -- application-level checks for those requirements.
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     hold_time INT8,
     idle_hold_time INT8,
     delay_open INT8,
@@ -3693,9 +3701,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
     id UUID NOT NULL,
-    -- TODO-correctness This should have a CHECK constraint that enforces the
-    -- upper bound we enforce on the Rust side.
-    router_lifetime INT4 NOT NULL DEFAULT 0,
+    -- Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
+    router_lifetime INT4 NOT NULL CHECK (router_lifetime >= 0 AND router_lifetime <= 9000),
+
+    -- router_lifetime is only meaningful to set for unnumbered peers; ensure
+    -- it's left at 0 for numbered peers
+    CONSTRAINT router_lifetime_only_for_unnumbered_peers CHECK (
+        router_lifetime = 0 OR addr IS NULL
+    ),
 
     PRIMARY KEY (id)
 );
