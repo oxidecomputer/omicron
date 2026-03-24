@@ -1124,7 +1124,7 @@ pub fn decode_insert_external_subnet_error(
                 Error::internal_error(&format!(
                     "Silo appears to have been deleted between \
                     looking it up and running the query to insert \
-                    the new External Subnet in it. silo_id = {silo_id}",
+                    the new external subnet in it. silo_id = {silo_id}",
                 ))
             } else if is_bool_parse_error(
                 msg,
@@ -1138,10 +1138,10 @@ pub fn decode_insert_external_subnet_error(
                 } = subnet
                 else {
                     return Error::internal_error(&format!(
-                        "Query to insert External Subnet failed \
-                        because an explicitly requested Silo was not \
+                        "Query to insert external subnet failed \
+                        because an explicitly requested silo was not \
                         linked, but the parameters for the query \
-                        do not have an explicit Silo by name or ID. \
+                        do not have an explicit silo by name or ID. \
                         This is a programmer error. \
                         selector = {subnet:#?}"
                     ));
@@ -1182,24 +1182,24 @@ pub fn decode_insert_external_subnet_error(
 fn report_exhaustion(subnet: &ExternalSubnetAllocator) -> Error {
     match subnet {
         ExternalSubnetAllocator::Explicit { .. } => Error::internal_error(
-            "Inserted 0 rows during the External Subnet \
+            "Inserted 0 rows during the external subnet \
                 insert query, which should only happen when \
                 we're doing an automatic allocation from a \
                 pool or IP version. This is a programmer bug.",
         ),
-        ExternalSubnetAllocator::Auto { pool_selector, .. } => {
+        ExternalSubnetAllocator::Auto { pool_selector, prefix_length } => {
             let msg = match pool_selector {
                 PoolSelector::Explicit { pool } => match pool {
                     NameOrId::Id(id) => {
                         format!(
-                            "All subnets are used in the \
-                                Subnet Pool with ID '{id}'"
+                            "Could not allocate a /{prefix_length} subnet \
+                                from the subnet pool with ID '{id}'"
                         )
                     }
                     NameOrId::Name(name) => {
                         format!(
-                            "All subnets are used in the \
-                                Subnet Pool with name '{name}'"
+                            "Could not allocate a /{prefix_length} subnet \
+                                from the subnet pool with name '{name}'"
                         )
                     }
                 },
@@ -1208,8 +1208,9 @@ fn report_exhaustion(subnet: &ExternalSubnetAllocator) -> Error {
                         .map(|v| format!("IP{v} "))
                         .unwrap_or_else(String::new);
                     format!(
-                        "All subnets are used in the default \
-                        {version}Subnet Pool for the current Silo"
+                        "Could not allocate a /{prefix_length} subnet \
+                        from the default {version}subnet pool \
+                        for the current silo"
                     )
                 }
             };
@@ -1275,13 +1276,13 @@ const NO_LINKED_POOL_CONTAINS_REQUESTED_SUBNET_SENTINEL: &str =
     "no-linked-pool";
 pub const NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG: &'static str = "\
 The requested IP subnet is not contained in \
-    any Subnet Pool available in the current Silo.";
+    any subnet pool available in the current silo.";
 
 // Error sentinel emitted when requesting an explicit subnet, and it overlaps
 // an existing subnet that's already allocated.
 const SUBNET_OVERLAPS_EXISTING_SENTINEL: &str = "overlap-existing";
 pub const SUBNET_OVERLAPS_EXISTING_ERR_MSG: &'static str =
-    "The requested IP subnet overlaps with an existing External Subnet";
+    "The requested IP subnet overlaps with an existing external subnet";
 
 // Error sentinel emitted when we try to insert a subnet into a project that
 // has now been deleted.
@@ -1306,14 +1307,14 @@ const REQUESTED_POOL_NOT_LINKED_TO_SILO_SENTINEL: &str = "pool-not-linked";
 // Error emitted when there are no default pools for the silo.
 const NO_LINKED_DEFAULT_POOL: &str = "no-linked-default";
 pub const NO_LINKED_DEFAULT_POOL_ERR_MSG: &str = "\
-Must specify a Subnet Pool, as there is no linked default pool for the \
-        current Silo";
+Must specify a subnet pool, as there is no linked default pool for the \
+        current silo";
 
 // Error emitted when there are multiple default pools for the silo.
 const MULTIPLE_LINKED_DEFAULT_POOLS: &str = "multiple-linked-defaults";
 pub const MULTIPLE_LINKED_DEFAULT_POOLS_ERR_MSG: &str = "\
 Must specify an IP version when there is more than one default \
-        Subnet Pool for the Silo";
+        subnet pool for the silo";
 
 #[cfg(test)]
 mod tests {
