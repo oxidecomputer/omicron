@@ -1787,8 +1787,8 @@ where
             Ok(uplink_address) => uplink_address,
             Err(reason) => {
                 return Err(err.bail(E::internal_error(format!(
-                    "invalid IP address in SwitchPortAddressConfig \
-                     {address:?}: {}",
+                    "invalid IP address in SwitchPortAddressConfig {}: {}",
+                    address.port_settings_id,
                     InlineErrorChain::new(&reason),
                 ))));
             }
