@@ -2479,8 +2479,7 @@ mod tests {
                 .values(model::fm::CaseMetadata {
                     id: CaseUuid::new_v4().into(),
                     sitrep_id: ghost_sitrep_id.into(),
-                    de: nexus_types::fm::DiagnosisEngineKind::PowerShelf
-                        .into(),
+                    de: nexus_types::fm::DiagnosisEngineKind::PowerShelf.into(),
                     created_sitrep_id: ghost_sitrep_id.into(),
                     closed_sitrep_id: None,
                     comment: "deeply orphaned".to_string(),
