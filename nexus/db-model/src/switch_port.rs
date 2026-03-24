@@ -23,12 +23,12 @@ use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::{InvalidIpAddrError, PortFec};
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::{ImportExportPolicy, UplinkAddress};
+use sled_agent_types::early_networking::{InvalidIpAddrError, PortFec};
 use std::net::IpAddr;
 use uuid::Uuid;
 
