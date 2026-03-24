@@ -188,8 +188,9 @@ Then use the local variables in the `.bind()` calls.
 **Why it matters:** A `Vec` does not enforce uniqueness. Callers can silently produce duplicates; consumers must defensively deduplicate. Every place that iterates or looks up in the collection must be written to tolerate (or guard against) duplicates. The invariant lives in documentation, not the type.
 
 **Fix direction:**
-- When uniqueness matters, consider `BTreeSet<T>` or `BTreeMap<K, V>`.  If using a map and the key is contained in the value, considered `iddqd::IdOrdMap<T>`.  `IdOrdMap` enforces the identity between the key and the value's own identifier field at the type level, removing a class of key/value mismatch bugs.
-- When the caller must preserve insertion order *and* guarantee uniqueness, consider `IdOrdMap`.
+- When a collection of values is keyed by an identifier field that lives inside the value (e.g., `BTreeMap<XxxUuid, Xxx>` where `Xxx` has an `id: XxxUuid` field), **use `iddqd::IdOrdMap<T>`**. Do not recommend `BTreeMap` in this case even if it seems lower-friction — `IdOrdMap` eliminates the key/value mismatch invariant entirely at the type level and is the correct tool. "Lower friction" is not a reason to leave a type-safety gap.
+- When uniqueness matters but there is no associated identifier field, use `BTreeSet<T>`.
+- When insertion order must also be preserved, use `iddqd::IdOrdMap<T>` (for keyed values) or `IndexSet` from the `indexmap` crate (for plain values).
 
 ---
 
