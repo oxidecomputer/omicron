@@ -834,9 +834,6 @@ impl DataStore {
     }
 
     /// Look up communities for a BGP peer.
-    ///
-    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`
-    /// (the function will query using the sentinel value 0.0.0.0/32).
     pub async fn communities_for_peer(
         &self,
         opctx: &OpContext,
@@ -866,8 +863,6 @@ impl DataStore {
     }
 
     /// Look up allowed exports for a BGP peer.
-    ///
-    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`.
     pub async fn allow_export_for_peer(
         &self,
         opctx: &OpContext,
@@ -963,8 +958,6 @@ impl DataStore {
     }
 
     /// Look up allowed imports for a BGP peer.
-    ///
-    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`.
     pub async fn allow_import_for_peer(
         &self,
         opctx: &OpContext,
