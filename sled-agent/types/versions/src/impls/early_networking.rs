@@ -21,6 +21,7 @@ use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use crate::latest::early_networking::UplinkIpNet;
 use crate::latest::early_networking::UplinkIpNetError;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
@@ -134,6 +135,12 @@ impl std::fmt::Display for UplinkIpNet {
 impl std::fmt::Display for RouterPeerIpAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl From<RouterPeerIpAddr> for IpNetwork {
+    fn from(value: RouterPeerIpAddr) -> Self {
+        Self::from(IpAddr::from(value))
     }
 }
 

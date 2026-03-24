@@ -43,6 +43,7 @@ impl_typed_uuid_kinds! {
         Alert = {},
         AlertReceiver = {},
         AntiAffinityGroup = {},
+        BgpPeerConfigCommunity = {},
         Blueprint = {},
         BuiltInUser = {},
         Case = {},

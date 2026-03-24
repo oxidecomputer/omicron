@@ -19,7 +19,7 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use diesel::{
     CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
-    PgConnection, QueryDsl, SelectableHelper,
+    PgConnection, PgExpressionMethods, QueryDsl, SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
@@ -27,9 +27,9 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, DbSwitchSlot, SqlU16,
-    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
-    SwitchPortBgpPeerConfigCommunity,
+    AddressLot, BgpConfig, DbSwitchSlot, RouterPeerTypeDbRepresentation,
+    SqlU16, SwitchPortBgpPeerConfigAllowExport,
+    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::external_api::networking::router_peer_type_try_from_old_representation;
@@ -640,6 +640,12 @@ impl DataStore {
                         .await?;
 
                 for p in peers.iter() {
+                    let peer_type = p.peer_type().map_err(|e| {
+                        err.bail(SwitchPortSettingsGetError::InternalError(
+                            InlineErrorChain::new(&e).to_string(),
+                        ))
+                    })?;
+
                     // For unnumbered peers (addr is None), use the sentinel
                     // value (UNSPECIFIED address) for lookups since that's how
                     // they're stored.
@@ -689,7 +695,11 @@ impl DataStore {
                         bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities
                             .filter(bgp_communities_dsl::port_settings_id.eq(id))
                             .filter(bgp_communities_dsl::interface_name.eq(p.interface_name.clone()))
-                            .filter(bgp_communities_dsl::addr.eq(lookup_addr))
+                            .filter(bgp_communities_dsl::addr
+                                // Use `is_not_distinct_from` instead of `eq`
+                                // to compare NULL/None.
+                                .is_not_distinct_from(peer_type.ip_db_repr()),
+                            )
                             .select(SwitchPortBgpPeerConfigCommunity::as_select())
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
@@ -1535,13 +1545,14 @@ async fn do_switch_port_settings_create(
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigCommunity> = p
                     .communities
-                    .clone()
-                    .into_iter()
-                    .map(|x| SwitchPortBgpPeerConfigCommunity {
-                        port_settings_id: id,
-                        interface_name: peer_config.link_name.clone().into(),
-                        addr: db_addr,
-                        community: x.into(),
+                    .iter()
+                    .map(|&x| {
+                        SwitchPortBgpPeerConfigCommunity::new(
+                            id,
+                            peer_config.link_name.clone().into(),
+                            p.addr,
+                            x,
+                        )
                     })
                     .collect();
 

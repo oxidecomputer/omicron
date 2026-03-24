@@ -18,6 +18,7 @@ daft.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 indent_write.workspace = true
+ipnetwork.workspace = true
 omicron-common.workspace = true
 omicron-ledger.workspace = true
 omicron-passwords.workspace = true

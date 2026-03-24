@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::typed_uuid::DbTypedUuid;
 use crate::{Name, SqlU8, SqlU16};
 use crate::{SqlU32, impl_enum_type};
 use chrono::{DateTime, Utc};
@@ -22,15 +23,39 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_uuid_kinds::BgpPeerConfigCommunityKind;
+use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
+use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Extension trait on [`RouterPeerType`] for converting it to and from the way
+/// we represent peer addresses in the database.
+pub trait RouterPeerTypeDbRepresentation {
+    /// Get the database representation of the address of this peer.
+    ///
+    /// For numbered peers, returns `Some(ip)` (corresponding to a non-NULL
+    /// `INET`); for unnumbered peers, returns `None` (corresponding to NULL).
+    fn ip_db_repr(&self) -> Option<IpNetwork>;
+}
+
+impl RouterPeerTypeDbRepresentation for RouterPeerType {
+    fn ip_db_repr(&self) -> Option<IpNetwork> {
+        match self {
+            Self::Unnumbered { .. } => None,
+            Self::Numbered { ip } => Some((*ip).into()),
+        }
+    }
+}
 
 impl_enum_type!(
     SwitchPortGeometryEnum:
@@ -699,6 +724,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
+    // TODO-john make this private
     pub addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
@@ -715,7 +741,68 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
+    // TODO-john make this private
     pub router_lifetime: SqlU16,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SwitchPortBgpPeerConfigInvalidData {
+    #[error(
+        "database inconsistency: \
+        invalid peer address in BGP peer config {port_settings_id}"
+    )]
+    PeerAddress {
+        port_settings_id: Uuid,
+        #[source]
+        err: RouterPeerIpAddrError,
+    },
+    #[error(
+        "database inconsistency: \
+        invalid router lifetime in BGP peer config {port_settings_id}"
+    )]
+    RouterLifetime {
+        port_settings_id: Uuid,
+        #[source]
+        err: RouterLifetimeConfigError,
+    },
+}
+
+impl SwitchPortBgpPeerConfig {
+    /// Return the [`RouterPeerType`] (numbered or unnumbered, with additional
+    /// details specific to each type) of this peer.
+    ///
+    /// Only fails if invalid data has been stored in the database.
+    pub fn peer_type(
+        &self,
+    ) -> Result<RouterPeerType, SwitchPortBgpPeerConfigInvalidData> {
+        // We only expect NULL (corresponding to unnumbered, in which case we
+        // expect a valid `router_lifetime` too) or `Some(ip)` where `ip` is a
+        // valid router peer IP.
+        match self.addr {
+            Some(db_ip) => {
+                let ip =
+                    RouterPeerIpAddr::try_from(db_ip.ip()).map_err(|err| {
+                        SwitchPortBgpPeerConfigInvalidData::PeerAddress {
+                            port_settings_id: self.port_settings_id,
+                            err,
+                        }
+                    })?;
+                Ok(RouterPeerType::Numbered { ip })
+            }
+            None => {
+                let router_lifetime = RouterLifetimeConfig::new(
+                    *self.router_lifetime,
+                )
+                .map_err(|err| {
+                    SwitchPortBgpPeerConfigInvalidData::RouterLifetime {
+                        port_settings_id: self.port_settings_id,
+                        err,
+                    }
+                })?;
+                Ok(RouterPeerType::Unnumbered { router_lifetime })
+            }
+        }
+    }
 }
 
 #[derive(
@@ -732,8 +819,26 @@ pub struct SwitchPortBgpPeerConfig {
 pub struct SwitchPortBgpPeerConfigCommunity {
     pub port_settings_id: Uuid,
     pub interface_name: Name,
-    pub addr: IpNetwork,
+    addr: Option<IpNetwork>,
     pub community: SqlU32,
+    pub id: DbTypedUuid<BgpPeerConfigCommunityKind>,
+}
+
+impl SwitchPortBgpPeerConfigCommunity {
+    pub fn new(
+        port_settings_id: Uuid,
+        interface_name: Name,
+        addr: RouterPeerType,
+        community: u32,
+    ) -> Self {
+        Self {
+            port_settings_id,
+            interface_name,
+            addr: addr.ip_db_repr(),
+            community: community.into(),
+            id: TypedUuid::new_v4().into(),
+        }
+    }
 }
 
 #[derive(
@@ -775,6 +880,7 @@ pub struct SwitchPortBgpPeerConfigAllowImport {
     /// Interface peer is reachable on
     pub interface_name: Name,
     /// Peer Address
+    // TODO-john make this private
     pub addr: IpNetwork,
     /// Allowed Prefix
     pub prefix: IpNetwork,

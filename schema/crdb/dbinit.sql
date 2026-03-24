@@ -3723,11 +3723,28 @@ CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_port_settings_id
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
     interface_name TEXT NOT NULL,
-    addr INET NOT NULL,
+    -- We represent unnumbered peers as `NULL`; formerly we used a sentinel
+    -- value of `0.0.0.0`. To ensure we don't mix those up, add check
+    -- constraints that reject unspecified IPs.
+    --
+    -- The Rust logic for valid peer addresses is considerably more involved; it
+    -- rejects other classes of addresses like multicast addresses, loopback
+    -- addresses, etc. We don't attempt to enforce that here and rely on
+    -- application-level checks for those requirements.
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     community INT8 NOT NULL,
-
-    PRIMARY KEY (port_settings_id, interface_name, addr, community)
+    id UUID NOT NULL PRIMARY KEY
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_communities_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, addr, community)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (those without an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_communities_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, community)
+    WHERE addr IS NULL;
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_import (
     port_settings_id UUID NOT NULL,

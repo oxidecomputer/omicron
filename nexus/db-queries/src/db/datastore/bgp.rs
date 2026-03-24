@@ -8,13 +8,16 @@ use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::{
+    ExpressionMethods, PgExpressionMethods, QueryDsl, SelectableHelper,
+};
 use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
+    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
+    SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -843,14 +846,11 @@ impl DataStore {
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
             .filter(dsl::interface_name.eq(interface_name.to_string()))
-            .filter(dsl::addr.eq(db_addr))
+            // Use `is_not_distinct_from` instead of `eq` to compare NULL/None.
+            .filter(dsl::addr.is_not_distinct_from(addr.ip_db_repr()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -1061,6 +1061,7 @@ mod tests {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
+    use sled_agent_types::early_networking::RouterLifetimeConfig;
 
     #[tokio::test]
     async fn test_delete_bgp_config_and_announce_set_by_name() {
@@ -1125,6 +1126,102 @@ mod tests {
             )
             .await
             .expect("delete announce set by name");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_communities_for_peer() {
+        let logctx = dev::test_setup_log("test_communities_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: one numbered, one unnumbered.
+        let numbered_ip: IpAddr = "192.168.1.1".parse().unwrap();
+        let numbered =
+            RouterPeerType::Numbered { ip: numbered_ip.try_into().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let rows = [
+            // insert communities 100, 200 for the numbered peer
+            (numbered, 100),
+            (numbered, 200),
+            // insert communities 300, 400 for the unnumbered peer
+            (unnumbered, 300),
+            (unnumbered, 400),
+        ]
+        .into_iter()
+        .map(|(peer, community)| {
+            SwitchPortBgpPeerConfigCommunity::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                community,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_communities,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert community rows");
+        }
+
+        // Look up communities for the numbered peer.
+        let numbered_communities = datastore
+            .communities_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer communities");
+
+        let mut numbered_vals: Vec<u32> =
+            numbered_communities.into_iter().map(|c| c.community.0).collect();
+        numbered_vals.sort_unstable();
+        assert_eq!(numbered_vals, &[100, 200]);
+
+        // Look up communities for the unnumbered peer.
+        let unnumbered_communities = datastore
+            .communities_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer communities");
+
+        let mut unnumbered_vals: Vec<u32> =
+            unnumbered_communities.into_iter().map(|c| c.community.0).collect();
+        unnumbered_vals.sort_unstable();
+        assert_eq!(unnumbered_vals, &[300, 400]);
+
+        // A different numbered IP returns nothing.
+        let other_ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let other =
+            RouterPeerType::Numbered { ip: other_ip.try_into().unwrap() };
+        let empty = datastore
+            .communities_for_peer(&opctx, port_settings_id, &iface_ext, other)
+            .await
+            .expect("lookup other peer communities");
+        assert!(empty.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
