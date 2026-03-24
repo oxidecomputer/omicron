@@ -22,6 +22,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::support_bundle::SupportBundleCreateParams;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -74,9 +75,7 @@ impl DataStore {
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
-        reason_for_creation: &'static str,
-        this_nexus_id: OmicronZoneUuid,
-        user_comment: Option<String>,
+        params: SupportBundleCreateParams,
     ) -> CreateResult<SupportBundle> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -90,7 +89,7 @@ impl DataStore {
         self.transaction_retry_wrapper("support_bundle_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let user_comment = user_comment.clone();
+                let user_comment = params.user_comment.clone();
 
                 async move {
                     use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
@@ -127,10 +126,10 @@ impl DataStore {
                     // expunged Nexus" anyway.
 
                     let bundle = SupportBundle::new(
-                        reason_for_creation,
+                        params.reason,
                         dataset.pool_id(),
                         dataset.id(),
-                        this_nexus_id,
+                        params.nexus_id,
                         user_comment,
                     );
 
@@ -849,7 +848,14 @@ mod test {
         this_nexus_id: OmicronZoneUuid,
     ) {
         let err = datastore
-            .support_bundle_create(&opctx, "for tests", this_nexus_id, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for tests",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                },
+            )
             .await
             .expect_err("Shouldn't provision bundle without datasets");
         let Error::InsufficientCapacity { message } = err else {
@@ -895,15 +901,36 @@ mod test {
         // Create two bundles on "nexus A", one bundle on "nexus B"
 
         let bundle_a1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_a,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         let bundle_a2 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_a,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         let bundle_b1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_b, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_b,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -1019,9 +1046,11 @@ mod test {
                 datastore
                     .support_bundle_create(
                         &opctx,
-                        "for the test",
-                        this_nexus_id,
-                        None,
+                        SupportBundleCreateParams {
+                            reason: "for the test",
+                            nexus_id: this_nexus_id,
+                            user_comment: None,
+                        },
                     )
                     .await
                     .expect("Should be able to create bundle"),
@@ -1068,7 +1097,14 @@ mod test {
             .await
             .expect("Should be able to destroy this bundle");
         datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -1089,7 +1125,14 @@ mod test {
         // Create the bundle, then observe it through the "getter" APIs
 
         let mut bundle = datastore
-            .support_bundle_create(&opctx, reason, this_nexus_id, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason,
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.reason_for_creation, reason);
@@ -1253,7 +1296,14 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1358,7 +1408,14 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id, None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1459,7 +1516,14 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0], None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_ids[0],
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -1580,7 +1644,14 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0], None)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_ids[0],
+                    user_comment: None,
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -1660,9 +1731,11 @@ mod test {
             let bundle = datastore
                 .support_bundle_create(
                     &opctx,
-                    "Bundle for time ordering test",
-                    this_nexus_id,
-                    None,
+                    SupportBundleCreateParams {
+                        reason: "Bundle for time ordering test",
+                        nexus_id: this_nexus_id,
+                        user_comment: None,
+                    },
                 )
                 .await
                 .expect("Should be able to create bundle");

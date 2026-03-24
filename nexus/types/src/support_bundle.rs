@@ -9,11 +9,22 @@
 
 use crate::fm::ereport::EreportFilters;
 use itertools::Itertools;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+
+/// Parameters for creating a support bundle.
+pub struct SupportBundleCreateParams {
+    /// Why this bundle is being created.
+    pub reason: &'static str,
+    /// The Nexus instance responsible for collection.
+    pub nexus_id: OmicronZoneUuid,
+    /// Optional user-provided comment.
+    pub user_comment: Option<String>,
+}
 
 /// Describes the category of support bundle data.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
