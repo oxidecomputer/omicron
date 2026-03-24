@@ -727,8 +727,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
-    // TODO-john make this private
-    pub addr: Option<IpNetwork>,
+    addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
     pub delay_open: SqlU32,
@@ -744,8 +743,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
-    // TODO-john make this private
-    pub router_lifetime: SqlU16,
+    router_lifetime: SqlU16,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -805,6 +803,15 @@ impl SwitchPortBgpPeerConfig {
                 Ok(RouterPeerType::Unnumbered { router_lifetime })
             }
         }
+    }
+
+    /// Get the raw, database representation of this peer's IP address.
+    ///
+    /// This should only be used in database queries that need the database
+    /// representation. Other code (Nexus, etc.) should work with the
+    /// [`RouterPeerType`] returned by [`SwitchPortBgpPeerConfig::peer_type()`].
+    pub fn raw_ip_in_db_repr(&self) -> Option<IpNetwork> {
+        self.addr
     }
 }
 

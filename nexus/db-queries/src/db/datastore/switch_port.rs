@@ -32,7 +32,6 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
-use nexus_types::external_api::networking::router_peer_type_try_from_old_representation;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -42,11 +41,9 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
 use uuid::Uuid;
 
 /// This is a wrapper around [`networking::BgpPeer`], with three additions:
@@ -100,7 +97,10 @@ struct BgpPeerFromDbBuilder<'a> {
 }
 
 impl BgpPeerFromDbBuilder<'_> {
-    fn build(self) -> Result<BgpPeerFromDb, String> {
+    fn build<E>(self) -> Result<BgpPeerFromDb, E>
+    where
+        E: SwitchPortSettingsInternalError,
+    {
         let Self {
             peer_config: p,
             communities,
@@ -108,21 +108,9 @@ impl BgpPeerFromDbBuilder<'_> {
             allowed_export,
         } = self;
 
-        // This will fail if we have a non-NULL but invalid address in the DB,
-        // or if we have an unnumbered address with a too-large
-        // `router_lifetime`. We should have CHECK constraints to prevent both
-        // of these, but don't today.
-        let addr = router_peer_type_try_from_old_representation(
-            p.addr.map(|a| a.ip()),
-            *p.router_lifetime,
-        )
-        .map_err(|err| {
-            format!(
-                "invalid database contents for BGP peer {} ({:?}): {}",
-                p.bgp_config_id,
-                p.addr,
-                InlineErrorChain::new(&err),
-            )
+        // This only fails if we have invalid data in the database.
+        let addr = p.peer_type().map_err(|err| {
+            E::internal_error(InlineErrorChain::new(&err).to_string())
         })?;
 
         Ok(BgpPeerFromDb {
@@ -709,7 +697,7 @@ impl DataStore {
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
 
-                    let peer_result = BgpPeerFromDbBuilder {
+                    let peer = BgpPeerFromDbBuilder {
                         peer_config: p,
                         communities: communities
                             .into_iter()
@@ -717,19 +705,9 @@ impl DataStore {
                             .collect(),
                         allowed_import,
                         allowed_export,
-                    }.build();
-                    let peer = match peer_result {
-                        Ok(peer) => peer,
-                        Err(message) => {
-                            return Err(
-                                err.bail(
-                                    SwitchPortSettingsGetError::InternalError(
-                                        message,
-                                    )
-                                )
-                            );
-                        }
-                    };
+                    }
+                    .build()
+                    .map_err(|e| err.bail(e))?;
                     result.bgp_peers.push(peer);
                 }
 
@@ -1461,15 +1439,15 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    let mut peer_by_addr: BTreeMap<IpAddr, &networking::BgpPeer> =
+    // Map to look up peers by the db representation of their address.
+    let mut peer_by_addr: BTreeMap<Option<IpNetwork>, &networking::BgpPeer> =
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
     for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
             // Track peers for policy lookup.
-            peer_by_addr
-                .insert(p.addr.ip_squashing_unnumbered_to_sentinel(), &p);
+            peer_by_addr.insert(p.addr.ip_db_repr(), &p);
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1581,36 +1559,26 @@ async fn do_switch_port_settings_create(
             .await?;
 
     for p in db_bgp_peers.into_iter() {
-        // Lookup policies and communities for peers. `peer_by_addr` is keyed by
-        // a non-optional `IpAddr`, where unnumbered peers are mapped to a
-        // sentinel value.
-        let lookup_addr = p
-            .addr
-            .map(|a| a.ip())
-            .unwrap_or(RouterPeerType::UNNUMBERED_SENTINEL);
-        let Some(peer) = peer_by_addr.get(&lookup_addr) else {
+        // Lookup policies and communities for peers.
+        let Some(peer) = peer_by_addr.get(&p.raw_ip_in_db_repr()) else {
             return Err(err.bail(
                 SwitchPortSettingsCreateError::InternalError(format!(
-                    "unexpectedly missing peer {} (addr: {:?})",
-                    p.bgp_config_id, p.addr,
+                    "unexpectedly missing peer {:?} on interface {} \
+                     (port settings {})",
+                    p.raw_ip_in_db_repr(),
+                    p.interface_name,
+                    p.port_settings_id,
                 )),
             ));
         };
-        let peer_result = BgpPeerFromDbBuilder {
+        let peer = BgpPeerFromDbBuilder {
             peer_config: &p,
             communities: peer.communities.clone(),
             allowed_import: peer.allowed_import.clone(),
             allowed_export: peer.allowed_export.clone(),
         }
-        .build();
-        let peer = match peer_result {
-            Ok(peer) => peer,
-            Err(message) => {
-                return Err(err.bail(
-                    SwitchPortSettingsCreateError::InternalError(message),
-                ));
-            }
-        };
+        .build()
+        .map_err(|e| err.bail(e))?;
         result.bgp_peers.push(peer);
     }
 
