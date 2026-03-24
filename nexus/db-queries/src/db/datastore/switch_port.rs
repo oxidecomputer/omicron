@@ -1991,7 +1991,7 @@ mod test {
                         min_ttl: None,
                         md5_auth_key: None,
                         multi_exit_discriminator: None,
-                        communities: Vec::new(),
+                        communities: vec![1, 2, 3, 4],
                         local_pref: None,
                         enforce_first_as: false,
                         allowed_export: ImportExportPolicy::Allow(vec![
@@ -2016,7 +2016,7 @@ mod test {
                         min_ttl: None,
                         md5_auth_key: None,
                         multi_exit_discriminator: None,
-                        communities: Vec::new(),
+                        communities: vec![5, 8, 7, 6],
                         local_pref: None,
                         enforce_first_as: false,
                         allowed_export: ImportExportPolicy::NoFiltering,
@@ -2275,6 +2275,15 @@ mod test {
                             ip_nets.sort_unstable();
                         }
                     }
+                }
+
+                // TODO-correctness same issue with ordering `communities` -
+                // this should probably be a set instead of a vec too
+                // https://github.com/oxidecomputer/omicron/issues/10138
+                for communities in
+                    [&mut peer.communities, &mut db_peer.inner.communities]
+                {
+                    communities.sort_unstable();
                 }
 
                 assert_eq!(peer, db_peer.inner);
