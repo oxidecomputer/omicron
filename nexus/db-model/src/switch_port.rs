@@ -23,6 +23,7 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_uuid_kinds::BgpPeerConfigAllowExportKind;
 use omicron_uuid_kinds::BgpPeerConfigAllowImportKind;
 use omicron_uuid_kinds::BgpPeerConfigCommunityKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -860,9 +861,27 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
     /// Interface peer is reachable on
     pub interface_name: Name,
     /// Peer Address
-    pub addr: IpNetwork,
+    addr: Option<IpNetwork>,
     /// Allowed Prefix
     pub prefix: IpNetwork,
+    pub id: DbTypedUuid<BgpPeerConfigAllowExportKind>,
+}
+
+impl SwitchPortBgpPeerConfigAllowExport {
+    pub fn new(
+        port_settings_id: Uuid,
+        interface_name: Name,
+        addr: RouterPeerType,
+        prefix: IpNet,
+    ) -> Self {
+        Self {
+            port_settings_id,
+            interface_name,
+            addr: addr.ip_db_repr(),
+            prefix: prefix.into(),
+            id: TypedUuid::new_v4().into(),
+        }
+    }
 }
 
 #[derive(

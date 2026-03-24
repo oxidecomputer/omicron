@@ -646,13 +646,6 @@ impl DataStore {
                         ))
                     })?;
 
-                    // For unnumbered peers (addr is None), use the sentinel
-                    // value (UNSPECIFIED address) for lookups since that's how
-                    // they're stored.
-                    let lookup_addr: IpNetwork = p.addr.unwrap_or_else(|| {
-                        IpNetwork::from(RouterPeerType::UNNUMBERED_SENTINEL)
-                    });
-
                     let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
                         let db_list: Vec<SwitchPortBgpPeerConfigAllowImport> =
                             allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
@@ -683,7 +676,13 @@ impl DataStore {
                             allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export
                                 .filter(allow_export_dsl::port_settings_id.eq(id))
                                 .filter(allow_export_dsl::interface_name.eq(p.interface_name.clone()))
-                                .filter(allow_export_dsl::addr.eq(lookup_addr))
+                                .filter(
+                                    // Use `is_not_distinct_from` instead of
+                                    // `eq` to compare NULL/None.
+                                    allow_export_dsl::addr.is_not_distinct_from(
+                                        peer_type.ip_db_repr(),
+                                    ),
+                                )
                                 .select(SwitchPortBgpPeerConfigAllowExport::as_select())
                                 .load_async::<SwitchPortBgpPeerConfigAllowExport>(&conn)
                                 .await?;
@@ -1504,11 +1503,6 @@ async fn do_switch_port_settings_create(
                 }
             };
 
-            // Convert peer addresses (which may be unnumbered) into our db
-            // representation (replacing unnumbered with a sentinel value).
-            let db_addr =
-                IpNetwork::from(p.addr.ip_squashing_unnumbered_to_sentinel());
-
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
@@ -1532,13 +1526,14 @@ async fn do_switch_port_settings_create(
             if let ImportExportPolicy::Allow(list) = &p.allowed_export {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowExport> = list
-                    .clone()
-                    .into_iter()
-                    .map(|x| SwitchPortBgpPeerConfigAllowExport {
-                        port_settings_id: id,
-                        interface_name: peer_config.link_name.clone().into(),
-                        addr: db_addr,
-                        prefix: x.into(),
+                    .iter()
+                    .map(|&x| {
+                        SwitchPortBgpPeerConfigAllowExport::new(
+                            id,
+                            peer_config.link_name.clone().into(),
+                            p.addr,
+                            x,
+                        )
                     })
                     .collect();
 

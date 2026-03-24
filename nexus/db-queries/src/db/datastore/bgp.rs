@@ -30,7 +30,6 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use std::net::IpAddr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -875,54 +874,42 @@ impl DataStore {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value for the
-        // allow_export table (which has non-nullable addr)
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_allow_export_for_peer")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Query the main peer config table. For unnumbered peers,
-                    // addr is NULL; for numbered peers, addr matches.
-                    let active = match addr {
-                        RouterPeerType::Numbered { ip } => {
-                            let addr = IpNetwork::from(IpAddr::from(ip));
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.eq(addr))
-                                .select(db_peer::allow_export_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                        RouterPeerType::Unnumbered { .. } => {
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.is_null())
-                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
-                                .select(db_peer::allow_export_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                    };
+                    // Query the main peer config table.
+                    let active = peer_dsl::switch_port_settings_bgp_peer_config
+                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::addr
+                                .is_not_distinct_from(addr.ip_db_repr()),
+                        )
+                        .select(db_peer::allow_export_list_active)
+                        .limit(1)
+                        .first_async::<bool>(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg =
+                                "failed to lookup export settings for peer";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
 
-                    let active = active.map_err(|e| {
-                        let msg = "failed to lookup export settings for peer";
-                        error!(opctx.log, "{msg}"; "error" => ?e);
-
-                        match e {
-                            diesel::result::Error::NotFound => {
-                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
-                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                            },
-                            _ => err.bail(Error::internal_error(msg)),
-                        }
-                    })?;
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    let not_found_msg = format!(
+                                        "peer with {:?} not found for port \
+                                         settings {port_settings_id}",
+                                        addr
+                                    );
+                                    err.bail(Error::non_resourcetype_not_found(
+                                        not_found_msg,
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
 
                     if !active {
                         return Ok(None);
@@ -930,16 +917,19 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_export
-                        .filter(
-                            db_allow::port_settings_id.eq(port_settings_id),
-                        )
-                        .filter(
-                            db_allow::interface_name
-                                .eq(interface_name.to_string()),
-                        )
-                        .filter(db_allow::addr.eq(db_addr))
-                        .load_async(&conn)
-                        .await?;
+                            .filter(
+                                db_allow::port_settings_id.eq(port_settings_id),
+                            )
+                            .filter(
+                                db_allow::interface_name
+                                    .eq(interface_name.to_string()),
+                            )
+                            .filter(
+                                db_allow::addr
+                                    .is_not_distinct_from(addr.ip_db_repr()),
+                            )
+                            .load_async(&conn)
+                            .await?;
 
                     Ok(Some(list))
                 }
@@ -1056,6 +1046,7 @@ mod tests {
     use oxnet::IpNet;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
+    use std::net::IpAddr;
 
     #[tokio::test]
     async fn test_delete_bgp_config_and_announce_set_by_name() {
@@ -1452,11 +1443,13 @@ mod tests {
             (unnumbered, expected_unnumbered_prefixes[1]),
         ]
         .into_iter()
-        .map(|(peer, prefix)| SwitchPortBgpPeerConfigAllowExport {
-            port_settings_id,
-            interface_name: iface_db.clone(),
-            addr: peer.ip_squashing_unnumbered_to_sentinel().into(),
-            prefix: prefix.into(),
+        .map(|(peer, prefix)| {
+            SwitchPortBgpPeerConfigAllowExport::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                prefix,
+            )
         })
         .collect::<Vec<_>>();
 

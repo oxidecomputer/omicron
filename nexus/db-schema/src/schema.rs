@@ -285,11 +285,12 @@ table! {
 }
 
 table! {
-    switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, addr, prefix) {
+    switch_port_settings_bgp_peer_config_allow_export (id) {
         port_settings_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         prefix -> Inet,
+        id -> Uuid,
     }
 }
 
