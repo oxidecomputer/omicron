@@ -32,13 +32,17 @@ use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
 use semver::Version;
 use std::sync::Arc;
 use std::time::Duration;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
-use tufaceous_lib::assemble::ManifestTweak;
+use tufaceous::edit::RepositoryEditor;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::Artifacts;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
 
 use crate::integration_tests::updates::TestTrustRoot;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn get_set_target_release() -> Result<()> {
     let ctx =
         nexus_test_utils::ControlPlaneBuilder::new("get_set_target_release")
@@ -95,7 +99,7 @@ async fn get_set_target_release() -> Result<()> {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
         let response: update::TufRepoUpload = trust_root
-            .assemble_repo(&logctx.log, &[])
+            .assemble_repo(RepositoryEditor::fake(system_version.clone())?)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
@@ -124,19 +128,11 @@ async fn get_set_target_release() -> Result<()> {
     // Fake completing an update to 1.0.0.
     install_target_blueprint_with_update_complete(&ctx, &version_1_0_0).await?;
 
-    // Adding a repo with non-semver artifact versions should be ok, too.
     {
         let before = Utc::now();
         let system_version = Version::new(2, 0, 0);
-        let tweaks = &[
-            ManifestTweak::SystemVersion(system_version.clone()),
-            ManifestTweak::ArtifactVersion {
-                kind: KnownArtifactKind::SwitchRotBootloader,
-                version: ArtifactVersion::new("non-semver-2").unwrap(),
-            },
-        ];
         let response: update::TufRepoUpload = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(RepositoryEditor::fake(system_version.clone())?)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
@@ -223,32 +219,28 @@ pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
         .with_context(|| {
             format!("getting TUF repo with version {system_version}")
         })?;
-    let tuf_repo_artifacts =
-        datastore.tuf_list_repo_artifacts(&opctx, tuf_repo.id()).await?;
+    let tuf_repo_artifacts = Artifacts::new(
+        datastore
+            .tuf_list_repo_artifacts(&opctx, tuf_repo.id())
+            .await?
+            .into_iter()
+            .map(Artifact::from),
+    );
 
     // Get the hashes of host phase 2 and some zone. (We don't have to match up
     // particular zone kinds; we can use one zone artifact for all zones. This
     // seems a little fishy, but we rely on the planner to do the right thing.)
     let host_phase_2_artifact_hash = tuf_repo_artifacts
-        .iter()
-        .find_map(|a| {
-            if a.kind == ArtifactKind::HOST_PHASE_2.as_str() {
-                Some(a.sha256)
-            } else {
-                None
-            }
-        })
-        .context("no host phase 2 artifact in TUF repo")?;
+        .get(KnownArtifactTags::OsPhase2(OsPhase2Tags {
+            os_variant: OsVariant::Host,
+        }))
+        .context("no host phase 2 artifact in TUF repo")?
+        .hash;
     let zone_artifact_hash = tuf_repo_artifacts
-        .iter()
-        .find_map(|a| {
-            if a.kind == KnownArtifactKind::Zone.to_string() {
-                Some(a.sha256)
-            } else {
-                None
-            }
-        })
-        .context("no zone artifact in TUF repo")?;
+        .filter_tags(|tags| matches!(tags, KnownArtifactTags::Zone(_)))
+        .next()
+        .context("no zone artifact in TUF repo")?
+        .hash;
 
     // Get the current blueprint.
     let target_id =
@@ -277,13 +269,13 @@ pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
         sled.host_phase_2.slot_a =
             BlueprintHostPhase2DesiredContents::Artifact {
                 version: bp_artifact_version.clone(),
-                hash: *host_phase_2_artifact_hash,
+                hash: host_phase_2_artifact_hash,
             };
 
         for mut zone in sled.zones.iter_mut() {
             zone.image_source = BlueprintZoneImageSource::Artifact {
                 version: bp_artifact_version.clone(),
-                hash: *zone_artifact_hash,
+                hash: zone_artifact_hash,
             };
         }
     }

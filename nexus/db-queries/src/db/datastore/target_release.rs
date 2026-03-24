@@ -281,16 +281,16 @@ mod test {
     use nexus_auth::context::OpContext;
     use nexus_db_model::TargetRelease;
     use nexus_db_model::TufRepo;
-    use omicron_common::api::external::{
-        TufArtifactMeta, TufRepoDescription, TufRepoMeta,
-    };
-    use omicron_common::update::ArtifactId;
+    use omicron_common::update::TufRepoDescription;
     use omicron_test_utils::dev;
     use semver::Version;
     use sha2::Digest;
     use sha2::Sha256;
     use slog_error_chain::InlineErrorChain;
-    use tufaceous_artifact::{ArtifactHash, ArtifactKind, ArtifactVersion};
+    use std::collections::BTreeMap;
+    use tufaceous_artifact::{
+        Artifact, ArtifactHash, ArtifactVersion, Artifacts,
+    };
 
     async fn insert_tuf_repo(
         opctx: &OpContext,
@@ -305,24 +305,16 @@ mod test {
             .tuf_repo_insert(
                 opctx,
                 &TufRepoDescription {
-                    repo: TufRepoMeta {
+                    artifacts: Artifacts::new([Artifact {
+                        target_name: String::new(),
+                        version: artifact_version,
+                        tags: BTreeMap::new(),
                         hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: version.clone(),
-                        file_name: String::new(),
-                    },
-                    artifacts: vec![TufArtifactMeta {
-                        id: ArtifactId {
-                            name: String::new(),
-                            version: artifact_version,
-                            kind: ArtifactKind::from_static("empty"),
-                        },
-                        hash,
-                        size: 0,
-                        board: None,
-                        sign: None,
-                    }],
+                        length: 0,
+                    }]),
+                    system_version: version.clone(),
+                    hash: None,
+                    file_name: None,
                 },
             )
             .await

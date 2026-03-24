@@ -6,15 +6,15 @@ use nexus_types::deployment::BlueprintArtifactMeasurements;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::TargetReleaseDescription;
-use omicron_common::api::external::TufRepoDescription;
+use omicron_common::update::TufRepoDescription;
 use std::collections::BTreeSet;
 use thiserror::Error;
-use tufaceous_artifact::{ArtifactHash, ArtifactKind};
+use tufaceous_artifact::KnownArtifactTags;
 
 #[derive(Debug, Error)]
 pub(crate) enum MeasurementPlanError {
     #[error("TUF repo {0} contained no measurements")]
-    EmptyMeasurementSet(ArtifactHash),
+    EmptyMeasurementSet(semver::Version),
     #[error("Attempted to plan measurements on an initial blueprint")]
     PlanningInitial,
     #[error("Found initial blueprint when there should be a TUF repo")]
@@ -26,18 +26,12 @@ fn build_measurement_set(
 ) -> BTreeSet<BlueprintSingleMeasurement> {
     artifacts
         .artifacts
-        .iter()
-        .filter_map(|artifact| {
-            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
-                Some(BlueprintSingleMeasurement {
-                    version: BlueprintArtifactVersion::Available {
-                        version: artifact.id.version.clone(),
-                    },
-                    hash: artifact.hash,
-                })
-            } else {
-                None
-            }
+        .get_all(KnownArtifactTags::MeasurementCorpus)
+        .map(|artifact| BlueprintSingleMeasurement {
+            version: BlueprintArtifactVersion::Available {
+                version: artifact.version.clone(),
+            },
+            hash: artifact.hash,
         })
         .collect()
 }
@@ -58,11 +52,13 @@ pub(crate) fn plan_measurement_updates(
             TargetReleaseDescription::TufRepo(c),
             TargetReleaseDescription::Initial,
         ) => {
-            let artifacts =
-                BlueprintArtifactMeasurements::new(build_measurement_set(&c))
-                    .ok_or(MeasurementPlanError::EmptyMeasurementSet(
-                    c.repo.hash,
-                ))?;
+            let current = build_measurement_set(&c);
+            let artifacts = BlueprintArtifactMeasurements::new(current)
+                .ok_or_else(|| {
+                    MeasurementPlanError::EmptyMeasurementSet(
+                        c.system_version.clone(),
+                    )
+                })?;
 
             Ok(artifacts)
         }
@@ -74,13 +70,13 @@ pub(crate) fn plan_measurement_updates(
             let current = build_measurement_set(&c);
             if current.is_empty() {
                 return Err(MeasurementPlanError::EmptyMeasurementSet(
-                    c.repo.hash,
+                    c.system_version.clone(),
                 ));
             }
             let previous = build_measurement_set(&p);
             if previous.is_empty() {
                 return Err(MeasurementPlanError::EmptyMeasurementSet(
-                    p.repo.hash,
+                    p.system_version.clone(),
                 ));
             }
             let artifacts = BlueprintArtifactMeasurements::new(

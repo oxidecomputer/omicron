@@ -4,16 +4,16 @@
 
 use std::str::FromStr;
 
-use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
+use crate::{ByteCount, Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
 use diesel::sql_types::{Jsonb, Text};
 use diesel::{deserialize::FromSql, serialize::ToSql};
+use iddqd::{IdHashItem, id_upcast};
 use nexus_db_schema::schema::{
-    tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
+    tuf_artifact, tuf_artifact_tag, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
 use nexus_types::external_api::update as update_types;
-use nexus_types::external_api::update::TufSignedRootRole;
-use omicron_common::{api::external, update::ArtifactId};
+use omicron_common::api::external;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
@@ -24,9 +24,8 @@ use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use tufaceous_artifact::{
-    ArtifactHash as ExternalArtifactHash, ArtifactKind, ArtifactVersion,
+    Artifact, ArtifactHash as ExternalArtifactHash, ArtifactVersion,
 };
-use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
 /// contains.
@@ -36,42 +35,115 @@ pub struct TufRepoDescription {
     pub repo: TufRepo,
 
     /// The artifacts.
-    pub artifacts: Vec<TufArtifact>,
+    pub artifacts: Vec<TufArtifactDescription>,
 }
 
 impl TufRepoDescription {
     /// Creates a new `TufRepoDescription` from an
-    /// [`external::TufRepoDescription`].
-    ///
-    /// This is not implemented as a `From` impl because we insert new fields
-    /// as part of the process, which `From` doesn't necessarily communicate
-    /// and can be surprising.
-    pub fn from_external(
-        description: external::TufRepoDescription,
+    /// [`omicron_common::update::TufRepoDescription`].
+    pub fn from_common(
+        description: omicron_common::update::TufRepoDescription,
         generation_added: external::Generation,
-    ) -> Self {
-        Self {
-            repo: TufRepo::from_external(description.repo),
+    ) -> Result<Self, external::ByteCountRangeError> {
+        Ok(Self {
+            repo: TufRepo {
+                id: TypedUuid::new_v4().into(),
+                time_created: Utc::now(),
+                time_pruned: None,
+                sha256: description.hash.map(Into::into),
+                system_version: description.system_version.into(),
+                file_name: description.file_name,
+            },
             artifacts: description
                 .artifacts
                 .into_iter()
                 .map(|artifact| {
-                    TufArtifact::from_external(artifact, generation_added)
+                    TufArtifactDescription::from_artifact(
+                        artifact,
+                        generation_added,
+                    )
                 })
-                .collect(),
-        }
+                .collect::<Result<_, _>>()?,
+        })
     }
+}
 
-    pub fn into_external(self) -> external::TufRepoDescription {
-        external::TufRepoDescription {
-            repo: self.repo.into_external(),
-            artifacts: self
+impl From<TufRepoDescription> for omicron_common::update::TufRepoDescription {
+    fn from(description: TufRepoDescription) -> Self {
+        Self {
+            artifacts: description
                 .artifacts
                 .into_iter()
-                .map(TufArtifact::into_external)
+                .map(Into::into)
                 .collect(),
+            system_version: description.repo.system_version.into(),
+            hash: description.repo.sha256.map(Into::into),
+            file_name: description.repo.file_name,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TufArtifactDescription {
+    pub artifact: TufArtifact,
+    pub tags: Vec<TufArtifactTag>,
+}
+
+impl TufArtifactDescription {
+    pub fn from_artifact(
+        artifact: Artifact,
+        generation_added: external::Generation,
+    ) -> Result<Self, external::ByteCountRangeError> {
+        let id = TypedUuid::new_v4().into();
+        Ok(Self {
+            artifact: TufArtifact {
+                id,
+                version: artifact.version.into(),
+                time_created: Utc::now(),
+                sha256: artifact.hash.into(),
+                artifact_size: ByteCount(artifact.length.try_into()?),
+                generation_added: generation_added.into(),
+            },
+            tags: artifact
+                .tags
+                .into_iter()
+                .map(|(key, value)| TufArtifactTag {
+                    tuf_artifact_id: id,
+                    key,
+                    value,
+                })
+                .collect(),
+        })
+    }
+}
+
+impl From<TufArtifactDescription> for Artifact {
+    fn from(description: TufArtifactDescription) -> Self {
+        Artifact {
+            // `target_name` is only used in conjunction with a loaded
+            // `tufaceous::Repository`.
+            target_name: String::new(),
+
+            version: description.artifact.version.into(),
+            tags: description
+                .tags
+                .into_iter()
+                .map(|tag| (tag.key, tag.value))
+                .collect(),
+            hash: description.artifact.sha256.0,
+            length: description.artifact.artifact_size.0.to_bytes(),
+        }
+    }
+}
+
+impl IdHashItem for TufArtifactDescription {
+    type Key<'a> = &'a DbTypedUuid<TufArtifactKind>;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.artifact.id
+    }
+
+    id_upcast!();
 }
 
 /// A record representing an uploaded TUF repository.
@@ -85,75 +157,22 @@ pub struct TufRepo {
     pub time_pruned: Option<DateTime<Utc>>,
     // XXX: We're overloading ArtifactHash here to also mean the hash of the
     // repository zip itself.
-    pub sha256: ArtifactHash,
-    pub targets_role_version: i64,
-    pub valid_until: DateTime<Utc>,
+    pub sha256: Option<ArtifactHash>,
     pub system_version: SemverVersion,
-    pub file_name: String,
+    pub file_name: Option<String>,
 }
 
 impl TufRepo {
-    /// Creates a new `TufRepo` ready for insertion.
-    pub fn new(
-        sha256: ArtifactHash,
-        targets_role_version: u64,
-        valid_until: DateTime<Utc>,
-        system_version: SemverVersion,
-        file_name: String,
-    ) -> Self {
-        Self {
-            id: TypedUuid::new_v4().into(),
-            time_created: Utc::now(),
-            time_pruned: None,
-            sha256,
-            targets_role_version: targets_role_version as i64,
-            valid_until,
-            system_version,
-            file_name,
-        }
-    }
-
-    /// Creates a new `TufRepo` ready for insertion from an external
-    /// `TufRepoMeta`.
-    ///
-    /// This is not implemented as a `From` impl because we insert new fields
-    /// as part of the process, which `From` doesn't necessarily communicate
-    /// and can be surprising.
-    pub fn from_external(repo: external::TufRepoMeta) -> Self {
-        Self::new(
-            repo.hash.into(),
-            repo.targets_role_version,
-            repo.valid_until,
-            repo.system_version.into(),
-            repo.file_name,
-        )
-    }
-
-    pub fn into_external(self) -> external::TufRepoMeta {
-        external::TufRepoMeta {
-            hash: self.sha256.into(),
-            targets_role_version: self.targets_role_version as u64,
-            valid_until: self.valid_until,
-            system_version: self.system_version.into(),
-            file_name: self.file_name,
-        }
-    }
-
     /// Returns the repository's ID.
     pub fn id(&self) -> TypedUuid<TufRepoKind> {
         self.id.into()
-    }
-
-    /// Returns the targets role version.
-    pub fn targets_role_version(&self) -> u64 {
-        self.targets_role_version as u64
     }
 }
 
 impl From<TufRepo> for update_types::TufRepo {
     fn from(repo: TufRepo) -> update_types::TufRepo {
         update_types::TufRepo {
-            hash: repo.sha256.into(),
+            hash: repo.sha256.map(|sha256| sha256.into()),
             system_version: repo.system_version.into(),
             file_name: repo.file_name,
             time_created: repo.time_created,
@@ -165,90 +184,17 @@ impl From<TufRepo> for update_types::TufRepo {
 #[diesel(table_name = tuf_artifact)]
 pub struct TufArtifact {
     pub id: DbTypedUuid<TufArtifactKind>,
-    pub name: String,
     pub version: DbArtifactVersion,
-    pub kind: String,
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
-    artifact_size: i64,
+    pub artifact_size: ByteCount,
     pub generation_added: Generation,
-    pub sign: Option<Vec<u8>>,
-    pub board: Option<String>,
 }
 
 impl TufArtifact {
-    /// Creates a new `TufArtifact` ready for insertion.
-    pub fn new(
-        artifact_id: ArtifactId,
-        sha256: ArtifactHash,
-        artifact_size: u64,
-        generation_added: external::Generation,
-        board: Option<String>,
-        sign: Option<Vec<u8>>,
-    ) -> Self {
-        Self {
-            id: TypedUuid::new_v4().into(),
-            name: artifact_id.name,
-            version: artifact_id.version.into(),
-            kind: artifact_id.kind.as_str().to_owned(),
-            time_created: Utc::now(),
-            sha256,
-            artifact_size: artifact_size as i64,
-            generation_added: generation_added.into(),
-            board,
-            sign,
-        }
-    }
-
-    /// Creates a new `TufArtifact` ready for insertion from an external
-    /// `TufArtifactMeta`.
-    ///
-    /// This is not implemented as a `From` impl because we insert new fields
-    /// as part of the process, which `From` doesn't necessarily communicate
-    /// and can be surprising.
-    pub fn from_external(
-        artifact: external::TufArtifactMeta,
-        generation_added: external::Generation,
-    ) -> Self {
-        Self::new(
-            artifact.id,
-            artifact.hash.into(),
-            artifact.size,
-            generation_added,
-            artifact.board,
-            artifact.sign,
-        )
-    }
-
-    /// Converts self into [`external::TufArtifactMeta`].
-    pub fn into_external(self) -> external::TufArtifactMeta {
-        external::TufArtifactMeta {
-            id: ArtifactId {
-                name: self.name,
-                version: self.version.into(),
-                kind: ArtifactKind::new(self.kind),
-            },
-            hash: self.sha256.into(),
-            size: self.artifact_size as u64,
-            board: self.board,
-            sign: self.sign,
-        }
-    }
-
     /// Returns the artifact's ID.
     pub fn id(&self) -> TypedUuid<TufArtifactKind> {
         self.id.into()
-    }
-
-    /// Returns the artifact's name, version, and kind, which is unique across
-    /// all artifacts.
-    pub fn nvk(&self) -> (&str, &ArtifactVersion, &str) {
-        (&self.name, &self.version, &self.kind)
-    }
-
-    /// Returns the artifact length in bytes.
-    pub fn artifact_size(&self) -> u64 {
-        self.artifact_size as u64
     }
 }
 
@@ -300,8 +246,16 @@ impl FromSql<Text, diesel::pg::Pg> for DbArtifactVersion {
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = tuf_repo_artifact)]
 pub struct TufRepoArtifact {
-    pub tuf_repo_id: Uuid,
-    pub tuf_artifact_id: Uuid,
+    pub tuf_repo_id: DbTypedUuid<TufRepoKind>,
+    pub tuf_artifact_id: DbTypedUuid<TufArtifactKind>,
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = tuf_artifact_tag)]
+pub struct TufArtifactTag {
+    pub tuf_artifact_id: DbTypedUuid<TufArtifactKind>,
+    pub key: String,
+    pub value: String,
 }
 
 /// A wrapper around omicron-common's [`ArtifactHash`](ExternalArtifactHash),
@@ -365,7 +319,7 @@ pub struct TufTrustRoot {
 }
 
 impl TufTrustRoot {
-    pub fn new(root_role: TufSignedRootRole) -> TufTrustRoot {
+    pub fn new(root_role: update_types::TufSignedRootRole) -> TufTrustRoot {
         TufTrustRoot {
             id: TufTrustRootUuid::new_v4().into(),
             time_created: Utc::now(),
@@ -391,7 +345,7 @@ impl From<TufTrustRoot> for update_types::UpdatesTrustRoot {
 
 #[derive(Debug, Clone, AsExpression, FromSqlRow)]
 #[diesel(sql_type = Jsonb)]
-pub struct DbTufSignedRootRole(pub TufSignedRootRole);
+pub struct DbTufSignedRootRole(pub update_types::TufSignedRootRole);
 
 impl ToSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
     fn to_sql<'a>(

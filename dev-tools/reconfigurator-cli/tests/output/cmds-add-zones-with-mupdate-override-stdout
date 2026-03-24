@@ -11,45 +11,10 @@ loaded example system with:
 
 > # Create a TUF repository from a fake manifest. We're going to use this
 > # repository to test out the minimum release generation flow.
-> tuf-assemble ../../update-common/manifests/fake.toml
-INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
-INFO artifacts assembled and archived to `repo-1.0.0.zip`, component: OmicronRepoAssembler
+> generate-fake-repo 1.0.0
 created repo-1.0.0.zip for system version 1.0.0
 
 > set target-release repo-1.0.0.zip
-INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
-INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
-INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
-INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
-INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
-INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
-INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
-INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
-INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
-INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
-INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
-INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
-INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
-INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
-INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
-INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
-INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 18c9c774bfe4bb086e869509dcccacee8476fd87670692b765aee216f2c7f003, length: 805
-INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: bf1bc1da5059f76182c3007c3049941f8898abede2f3765b106c6e7f7c42d44c, length: 740
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: 16717c0caa420c7811666e720936c7ca913cd59a4d376331cc79a90544e5e2e8, length: 526
 set target release based on repo-1.0.0.zip
 
 

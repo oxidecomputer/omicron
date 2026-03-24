@@ -22,6 +22,7 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use semver::Version;
 use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -29,8 +30,10 @@ use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
-use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
-use update_common::artifacts::UpdatePlan;
+use tufaceous::{Repository, edit::RepositoryEditor};
+use tufaceous_artifact::{
+    InstallinatorArtifact, InstallinatorArtifactKind, KnownArtifactTags,
+};
 use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
@@ -58,95 +61,29 @@ static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
     "oximeter.tar.gz",
 ];
 
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_updates() {
     let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     wicketd_testctx
         .wicketd_client
         .put_repository(zip_bytes)
         .await
         .expect("bytes read and archived");
-
-    // List out the artifacts in the repository.
-    let response = wicketd_testctx
-        .wicketd_client
-        .get_artifacts_and_event_reports()
-        .await
-        .expect("get_artifacts_and_event_reports succeeded")
-        .into_inner();
-
-    // We should have an artifact for every known artifact kind (except
-    // `Zone`), as well as the installinator document...
-    let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
-        .filter(|k| !matches!(k, KnownArtifactKind::Zone))
-        .map(ArtifactKind::from)
-        .collect();
-
-    // ... and installable artifacts that replace the top level host,
-    // trampoline, and RoT with their inner parts (phase1/phase2 for OS images
-    // and A/B images for the RoT) during import.
-    let mut expected_installable_kinds = expected_kinds.clone();
-    for remove in [
-        KnownArtifactKind::Host,
-        KnownArtifactKind::Trampoline,
-        KnownArtifactKind::GimletRot,
-        KnownArtifactKind::PscRot,
-        KnownArtifactKind::SwitchRot,
-    ] {
-        assert!(expected_installable_kinds.remove(&remove.into()));
-    }
-    for add in [
-        ArtifactKind::GIMLET_HOST_PHASE_1,
-        ArtifactKind::COSMO_HOST_PHASE_1,
-        ArtifactKind::HOST_PHASE_2,
-        ArtifactKind::GIMLET_TRAMPOLINE_PHASE_1,
-        ArtifactKind::COSMO_TRAMPOLINE_PHASE_1,
-        ArtifactKind::TRAMPOLINE_PHASE_2,
-        ArtifactKind::GIMLET_ROT_IMAGE_A,
-        ArtifactKind::GIMLET_ROT_IMAGE_B,
-        ArtifactKind::PSC_ROT_IMAGE_A,
-        ArtifactKind::PSC_ROT_IMAGE_B,
-        ArtifactKind::SWITCH_ROT_IMAGE_A,
-        ArtifactKind::SWITCH_ROT_IMAGE_B,
-    ] {
-        assert!(expected_installable_kinds.insert(add));
-    }
-
-    // Ensure that this is a sensible result.
-    let mut kinds = BTreeSet::new();
-    let mut installable_kinds = BTreeSet::new();
-    for artifact in response.artifacts {
-        kinds.insert(artifact.artifact_id.kind);
-        for installable in artifact.installable {
-            installable_kinds.insert(installable.kind.parse().unwrap());
-        }
-    }
-    assert_eq!(expected_kinds, kinds, "all expected kinds present");
-    assert_eq!(
-        expected_installable_kinds, installable_kinds,
-        "all expected installable kinds present"
-    );
 
     let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
 
@@ -298,9 +235,7 @@ async fn test_updates() {
     wicketd_testctx.teardown().await;
 }
 
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_installinator_fetch() {
     let gateway = gateway_setup::test_setup(
         "test_installinator_fetch_no_installinator_document",
@@ -308,92 +243,71 @@ async fn test_installinator_fetch() {
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
-    let log = wicketd_testctx.log();
 
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    // Test ingestion of an artifact with non-semver versions. This ensures that
-    // wicketd for v14 and above can handle non-semver versions.
-    //
-    // --allow-non-semver can be removed once customer systems are updated to
-    // v14 and above.
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake-non-semver.toml",
-        "--allow-non-semver",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     wicketd_testctx
         .wicketd_client
         .put_repository(zip_bytes)
         .await
         .expect("bytes read and archived");
 
-    let update_plan = wicketd_testctx
+    let repo = wicketd_testctx
         .server
         .artifact_store
-        .current_plan()
+        .current_repository()
         .expect("we just uploaded a repository, so there should be a plan");
 
-    installinator_fetch_impl(&wicketd_testctx, &temp_dir, &update_plan).await;
+    installinator_fetch_impl(&wicketd_testctx, &repo).await;
 
     wicketd_testctx.teardown().await;
 }
 
 async fn installinator_fetch_impl(
     wicketd_testctx: &WicketdTestContext,
-    temp_dir: &Utf8TempDir,
-    update_plan: &UpdatePlan,
+    repo: &Repository,
 ) {
     let log = wicketd_testctx.log();
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
 
-    // Are the host phase 2 and control plane artifacts available when looked up
-    // by hash?
-    let host_phase_2_id = ArtifactHashId {
-        kind: ArtifactKind::HOST_PHASE_2,
-        hash: update_plan.host_phase_2_hash,
-    };
+    let mut expected_ids = BTreeSet::new();
+    for artifact in repo.artifacts() {
+        let Some(kind) =
+            artifact.known_tags().and_then(|tags| tags.to_installinator())
+        else {
+            continue;
+        };
+        if kind == InstallinatorArtifactKind::MeasurementCorpus {
+            // is this correct?
+            continue;
+        }
+        let file_name =
+            Utf8Path::new(&artifact.target_name).file_name().unwrap().into();
+        let artifact =
+            InstallinatorArtifact { kind, sha256: artifact.hash, file_name };
+        expected_ids.insert(artifact.downgrade());
+    }
+
+    let installinator_doc_hash = repo
+        .artifacts()
+        .get(KnownArtifactTags::InstallinatorDocument)
+        .unwrap()
+        .hash;
     assert!(
         wicketd_testctx
             .server
             .artifact_store
-            .contains_by_hash(&host_phase_2_id),
-        "host phase 2 ID found by hash"
-    );
-
-    let control_plane_id = ArtifactHashId {
-        kind: KnownArtifactKind::ControlPlane.into(),
-        hash: update_plan.control_plane_hash,
-    };
-    assert!(
-        wicketd_testctx
-            .server
-            .artifact_store
-            .contains_by_hash(&control_plane_id),
-        "control plane ID found by hash"
-    );
-
-    let installinator_doc_hash = update_plan
-        .installinator_doc_hash
-        .expect("expected installinator document to be present");
-    let installinator_doc_id = ArtifactHashId {
-        kind: KnownArtifactKind::InstallinatorDocument.into(),
-        hash: installinator_doc_hash,
-    };
-    assert!(
-        wicketd_testctx
-            .server
-            .artifact_store
-            .contains_by_hash(&installinator_doc_id),
+            .contains_installinator_artifact(installinator_doc_hash),
         "installinator document ID found by hash"
     );
 
@@ -493,12 +407,7 @@ async fn installinator_fetch_impl(
         serde_json::from_slice::<MupdateOverrideInfo>(&a_override_bytes)
             .expect("mupdate override file successfully deserialized");
 
-    assert_eq!(
-        a_override_info.hash_ids,
-        btreeset! {
-            host_phase_2_id, control_plane_id,
-        }
-    );
+    assert_eq!(a_override_info.hash_ids, expected_ids);
 
     // Ensure that the B path also had the same file written out.
     let b_override_path =
@@ -643,9 +552,7 @@ async fn installinator_fetch_impl(
     recv_handle.await.expect("recv_handle succeeded");
 }
 
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_update_races() {
     let gateway = gateway_setup::test_setup(
         "test_artifact_upload_while_updating",
@@ -653,24 +560,19 @@ async fn test_update_races() {
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
-    let log = wicketd_testctx.log();
 
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     wicketd_testctx
         .wicketd_client
         .put_repository(zip_bytes.clone())

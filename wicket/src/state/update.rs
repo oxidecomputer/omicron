@@ -11,10 +11,7 @@ use wicket_common::update_events::{
 };
 
 use crate::helpers::{get_update_simulated_result, get_update_test_error};
-use crate::{
-    events::{ArtifactData, EventReportMap},
-    ui::defaults::style,
-};
+use crate::{events::EventReportMap, ui::defaults::style};
 
 use super::{ALL_COMPONENT_IDS, ComponentId, ParsableComponentId};
 use semver::Version;
@@ -22,24 +19,14 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
-
-// Represents a version and the signature (optional) associated
-// with a particular artifact. This allows for multiple versions
-// with different versions to be present in the repo. Note
-// sign is currently only used for RoT artifacts
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactVersions {
-    pub version: ArtifactVersion,
-    pub sign: Option<Vec<u8>>,
-}
+use tufaceous_artifact::{ArtifactId, ArtifactVersion, KnownArtifactTags};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, UpdateItem>,
     pub system_version: Option<Version>,
-    pub artifacts: Vec<ArtifactData>,
-    pub artifact_versions: BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
+    pub artifacts: Vec<ArtifactId>,
+    pub artifact_versions: BTreeMap<KnownArtifactTags, Vec<ArtifactVersion>>,
     // The update item currently selected is recorded in
     // state.rack_state.selected.
     pub status_view_displayed: bool,
@@ -115,20 +102,18 @@ impl RackUpdateState {
         &mut self,
         logger: &Logger,
         system_version: Option<Version>,
-        artifacts: Vec<ArtifactData>,
+        artifacts: Vec<ArtifactId>,
         reports: EventReportMap,
     ) {
         self.system_version = system_version;
         self.artifacts = artifacts;
         self.artifact_versions.clear();
-        for a in &mut self.artifacts {
-            if let Some(known) = a.id.kind.to_known() {
-                self.artifact_versions.entry(known).or_default().push(
-                    ArtifactVersions {
-                        version: a.id.version.clone(),
-                        sign: a.sign.clone(),
-                    },
-                );
+        for a in &self.artifacts {
+            if let Some(known) = a.known_tags() {
+                self.artifact_versions
+                    .entry(known)
+                    .or_default()
+                    .push(a.version.clone());
             }
         }
 

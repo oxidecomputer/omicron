@@ -19,7 +19,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::Vni;
 use omicron_common::disk::M2Slot;
 use omicron_common::snake_case_result;
@@ -46,9 +45,13 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::Artifacts;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::SpTags;
 use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -550,20 +553,16 @@ impl TufRepoVersion {
         new: &TargetReleaseDescription,
         artifact_hash: ArtifactHash,
     ) -> TufRepoVersion {
-        let matching_artifact = |a: &TufArtifactMeta| a.hash == artifact_hash;
+        let matching_artifact = |a: &Artifact| a.hash == artifact_hash;
 
         if let Some(new) = new.tuf_repo() {
             if new.artifacts.iter().any(matching_artifact) {
-                return TufRepoVersion::Version(
-                    new.repo.system_version.clone(),
-                );
+                return TufRepoVersion::Version(new.system_version.clone());
             }
         }
         if let Some(old) = old.tuf_repo() {
             if old.artifacts.iter().any(matching_artifact) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
+                return TufRepoVersion::Version(old.system_version.clone());
             }
         }
 
@@ -906,50 +905,43 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
             return TufRepoVersion::Unknown;
         };
 
-        // TODO-cleanup This is really fragile! The RoT and bootloader kinds
-        // here aren't `KnownArtifactKind`s, so if we add more
-        // `ArtifactKind` constants we have to remember to update these
-        // lists. Maybe we fix this as a part of
-        // https://github.com/oxidecomputer/tufaceous/issues/37?
-        let matching_kinds = match which {
-            CabooseWhich::SpSlot0 | CabooseWhich::SpSlot1 => [
-                ArtifactKind::from_known(KnownArtifactKind::GimletSp),
-                ArtifactKind::from_known(KnownArtifactKind::PscSp),
-                ArtifactKind::from_known(KnownArtifactKind::SwitchSp),
-            ],
-            CabooseWhich::RotSlotA => [
-                ArtifactKind::GIMLET_ROT_IMAGE_A,
-                ArtifactKind::PSC_ROT_IMAGE_A,
-                ArtifactKind::SWITCH_ROT_IMAGE_A,
-            ],
-            CabooseWhich::RotSlotB => [
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                ArtifactKind::PSC_ROT_IMAGE_B,
-                ArtifactKind::SWITCH_ROT_IMAGE_B,
-            ],
-            CabooseWhich::Stage0 | CabooseWhich::Stage0Next => [
-                ArtifactKind::GIMLET_ROT_STAGE0,
-                ArtifactKind::PSC_ROT_STAGE0,
-                ArtifactKind::SWITCH_ROT_STAGE0,
-            ],
+        let matching_kind: KnownArtifactTags = match which {
+            CabooseWhich::SpSlot0 | CabooseWhich::SpSlot1 => {
+                SpTags { sp_board: caboose.board.clone() }.into()
+            }
+            CabooseWhich::RotSlotA => RotTags {
+                rot_board: caboose.board.clone(),
+                rot_slot: tufaceous_artifact::RotSlot::A,
+                rot_sign: tufaceous_artifact::Sign(caboose.sign.clone()),
+            }
+            .into(),
+            CabooseWhich::RotSlotB => RotTags {
+                rot_board: caboose.board.clone(),
+                rot_slot: tufaceous_artifact::RotSlot::B,
+                rot_sign: tufaceous_artifact::Sign(caboose.sign.clone()),
+            }
+            .into(),
+            CabooseWhich::Stage0 | CabooseWhich::Stage0Next => {
+                RotBootloaderTags {
+                    rot_board: caboose.board.clone(),
+                    rot_sign: tufaceous_artifact::Sign(caboose.sign.clone()),
+                }
+                .into()
+            }
         };
-        let matching_caboose = |a: &TufArtifactMeta| {
-            Some(&caboose.board) == a.board.as_ref()
-                && caboose.version == a.id.version.to_string()
-                && matching_kinds.contains(&a.id.kind)
+        let has_matching_caboose = |artifacts: &Artifacts| {
+            artifacts
+                .get(matching_kind.clone())
+                .is_ok_and(|a| caboose.version == a.version.as_str())
         };
         if let Some(new) = self.new.tuf_repo() {
-            if new.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    new.repo.system_version.clone(),
-                );
+            if has_matching_caboose(&new.artifacts) {
+                return TufRepoVersion::Version(new.system_version.clone());
             }
         }
         if let Some(old) = self.old.tuf_repo() {
-            if old.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
+            if has_matching_caboose(&old.artifacts) {
+                return TufRepoVersion::Version(old.system_version.clone());
             }
         }
 
@@ -1087,17 +1079,13 @@ impl UpdateStatus {
 
         if let Some(new) = new.tuf_repo() {
             if new.artifacts.iter().any(|meta| meta.hash == hash) {
-                return TufRepoVersion::Version(
-                    new.repo.system_version.clone(),
-                );
+                return TufRepoVersion::Version(new.system_version.clone());
             }
         }
 
         if let Some(old) = old.tuf_repo() {
             if old.artifacts.iter().any(|meta| meta.hash == hash) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
+                return TufRepoVersion::Version(old.system_version.clone());
             }
         }
 

@@ -35,7 +35,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -71,6 +70,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
@@ -1967,10 +1967,10 @@ pub enum BlueprintZoneImageSource {
 }
 
 impl BlueprintZoneImageSource {
-    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+    pub fn from_available_artifact(artifact: &Artifact) -> Self {
         BlueprintZoneImageSource::Artifact {
             version: BlueprintArtifactVersion::Available {
-                version: artifact.id.version.clone(),
+                version: artifact.version.clone(),
             },
             hash: artifact.hash,
         }
@@ -2118,10 +2118,14 @@ impl BlueprintArtifactMeasurements {
 
 impl Display for BlueprintArtifactMeasurements {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for m in self.iter() {
-            writeln!(f, "{m}")?;
+        write!(f, "[")?;
+        for (i, m) in self.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{m}")?;
         }
-        Ok(())
+        write!(f, "]")
     }
 }
 
@@ -2211,13 +2215,13 @@ impl Display for BlueprintMeasurements {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unknown => {
-                writeln!(f, "(unknown)")?;
+                write!(f, "(unknown)")?;
             }
             Self::InstallDataset => {
-                writeln!(f, "(install dataset)")?;
+                write!(f, "(install dataset)")?;
             }
             Self::Artifacts { artifacts } => {
-                writeln!(f, "{artifacts}")?;
+                write!(f, "{artifacts}")?;
             }
         }
         Ok(())
