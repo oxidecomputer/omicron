@@ -1414,4 +1414,159 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    #[tokio::test]
+    async fn test_allow_export_for_peer() {
+        let logctx = dev::test_setup_log("test_allow_export_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: two numbered (one with exports, one without), one
+        // unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let numbered_no_filtering =
+            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let expected_numbered_prefixes: Vec<IpNet> = vec![
+            "192.168.1.0/24".parse().unwrap(),
+            "fd00:1234::/64".parse().unwrap(),
+        ];
+        let expected_unnumbered_prefixes: Vec<IpNet> = vec![
+            "192.168.2.0/24".parse().unwrap(),
+            "fd00:4567::/64".parse().unwrap(),
+        ];
+        let rows = [
+            // insert rows for the numbered peer
+            (numbered, expected_numbered_prefixes[0]),
+            (numbered, expected_numbered_prefixes[1]),
+            // insert rows for the unnumbered peer
+            (unnumbered, expected_unnumbered_prefixes[0]),
+            (unnumbered, expected_unnumbered_prefixes[1]),
+        ]
+        .into_iter()
+        .map(|(peer, prefix)| SwitchPortBgpPeerConfigAllowExport {
+            port_settings_id,
+            interface_name: iface_db.clone(),
+            addr: peer.ip_squashing_unnumbered_to_sentinel().into(),
+            prefix: prefix.into(),
+        })
+        .collect::<Vec<_>>();
+
+        // allow_export lookups only work if there's a parent BGP peer config
+        // with `allow_export_list_active` set to true; insert that first.
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            let bgp_config_id = Uuid::new_v4();
+            diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
+                .values(vec![
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered,
+                            Vec::new(),
+                            expected_numbered_prefixes.clone(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered_no_filtering,
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            unnumbered,
+                            Vec::new(),
+                            expected_unnumbered_prefixes.clone(),
+                        ),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .expect("insert rows");
+        }
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_allow_export,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert rows");
+        }
+
+        // Look up prefixes for the numbered peer.
+        let mut numbered_prefixes = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer")
+            .expect("peer has allowed exports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        numbered_prefixes.sort_unstable();
+        assert_eq!(numbered_prefixes, expected_numbered_prefixes);
+
+        // Look up prefixes for the unnumbered peer.
+        let mut unnumbered_prefixes = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer")
+            .expect("peer has allowed exports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        unnumbered_prefixes.sort_unstable();
+        assert_eq!(unnumbered_prefixes, expected_unnumbered_prefixes);
+
+        // A peer without filter returns None.
+        let empty = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered_no_filtering,
+            )
+            .await
+            .expect("lookup other peer");
+        assert!(empty.is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
