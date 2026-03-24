@@ -3454,8 +3454,10 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
-        orphaned_sitreps_found,
         orphaned_sitreps_deleted,
+        orphaned_cases_deleted,
+        orphaned_case_ereports_deleted,
+        orphaned_alert_requests_deleted,
         errors,
     } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
         Err(error) => {
@@ -3468,11 +3470,18 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
-    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
-    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const SITREPS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const CASES_DELETED: &str = "orphaned cases deleted:";
+    pub const EREPORTS_DELETED: &str = "orphaned case ereports deleted:";
+    pub const ALERTS_DELETED: &str = "orphaned alert requests deleted:";
     pub const ERRORS: &str = "errors:";
-    pub const WIDTH: usize =
-        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
+    pub const WIDTH: usize = const_max_len(&[
+        ERRORS,
+        SITREPS_DELETED,
+        CASES_DELETED,
+        EREPORTS_DELETED,
+        ALERTS_DELETED,
+    ]) + 1;
     pub const NUM_WIDTH: usize = 4;
     if !errors.is_empty() {
         println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
@@ -3481,9 +3490,15 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         }
     }
 
-    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
     println!(
-        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+        "    {SITREPS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+    );
+    println!("    {CASES_DELETED:<WIDTH$}{orphaned_cases_deleted:>NUM_WIDTH$}");
+    println!(
+        "    {EREPORTS_DELETED:<WIDTH$}{orphaned_case_ereports_deleted:>NUM_WIDTH$}"
+    );
+    println!(
+        "    {ALERTS_DELETED:<WIDTH$}{orphaned_alert_requests_deleted:>NUM_WIDTH$}"
     );
 }
 
