@@ -17,8 +17,8 @@ use slog::{Logger, o};
 use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
-    NETWORK_KEY, SwitchLinkSpeed,
+    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, NETWORK_KEY,
+    SwitchLinkSpeed,
 };
 use uuid::Uuid;
 
@@ -42,7 +42,7 @@ use nexus_db_queries::{
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
-use omicron_common::OMICRON_DPD_TAG;
+use omicron_common::{OMICRON_DPD_TAG, api::external::Error};
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::{DataPageParams, Name},
@@ -234,10 +234,7 @@ impl SwitchPortSettingsManager {
     async fn db_loopback_addresses(
         &mut self,
         opctx: &OpContext,
-    ) -> Result<
-        HashSet<(SwitchSlot, IpAddr)>,
-        omicron_common::api::external::Error,
-    > {
+    ) -> Result<HashSet<(SwitchSlot, IpAddr)>, Error> {
         let values = self
             .datastore
             .loopback_address_list(opctx, &DataPageParams::max_page())
@@ -245,9 +242,22 @@ impl SwitchPortSettingsManager {
 
         let mut set: HashSet<(SwitchSlot, IpAddr)> = HashSet::new();
 
-        // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
-            set.insert((SwitchSlot::from(*switch_slot), address.ip()));
+        // TODO: are we doing anything special with anycast addresses at the
+        // moment?
+        for loopback_addr in values.iter() {
+            let switch_slot = SwitchSlot::from(loopback_addr.switch_slot);
+            let ip = loopback_addr
+                .address()
+                .map_err(|err| {
+                    Error::internal_error(format!(
+                        "unexpectedly failed to convert db loopback \
+                         address {} IP: {}",
+                        loopback_addr.id(),
+                        InlineErrorChain::new(&err)
+                    ))
+                })?
+                .addr();
+            set.insert((switch_slot, ip));
         }
 
         Ok(set)
@@ -256,7 +266,7 @@ impl SwitchPortSettingsManager {
     async fn bfd_peer_configs_from_db(
         &mut self,
         opctx: &OpContext,
-    ) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
+    ) -> Result<Vec<BfdPeerConfig>, Error> {
         let db_data = self
             .datastore
             .bfd_session_list(opctx, &DataPageParams::max_page())
@@ -271,14 +281,12 @@ impl SwitchPortSettingsManager {
                     .detection_threshold
                     .0
                     .try_into()
-                    .map_err(|_| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: detection threshold \
+                    .map_err(|_| Error::InternalError {
+                        internal_message: format!(
+                            "db_bfd_peer_configs: detection threshold \
                                  overflow: {}",
-                                spec.detection_threshold.0,
-                            ),
-                        }
+                            spec.detection_threshold.0,
+                        ),
                     })?,
                 required_rx: spec.required_rx.0.into(),
                 mode: spec.mode.into(),

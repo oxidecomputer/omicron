@@ -9,6 +9,7 @@ use sled_agent_types_versions::latest::early_networking::UplinkAddress;
 use sled_agent_types_versions::latest::early_networking::UplinkIpNet;
 use sled_agent_types_versions::latest::early_networking::UplinkIpNetError;
 use std::fmt;
+use std::net::IpAddr;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
     fn from(ipnet: IpNet) -> Self {
@@ -77,6 +78,12 @@ impl latest::networking::SwitchPortSettingsCreate {
 impl fmt::Display for latest::networking::LoopbackAddressIpNet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl latest::networking::LoopbackAddressIpNet {
+    pub const fn addr(&self) -> IpAddr {
+        self.0.addr()
     }
 }
 

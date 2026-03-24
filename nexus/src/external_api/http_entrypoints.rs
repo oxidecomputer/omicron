@@ -3997,14 +3997,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let params = new_loopback_address.into_inner();
             let result = nexus.loopback_address_create(&opctx, params).await?;
             let result_id = result.identity.id;
-            let result_addr = result.address;
             let addr = networking::LoopbackAddress::try_from(result).map_err(
                 |err| {
                     // If we successfully created the address, we should not
                     // fail to convert it back to an API type.
                     HttpError::for_internal_error(format!(
                         "unexpectedly failed to convert db loopback address \
-                         {result_id} ({result_addr}) back to API type: {}",
+                         {result_id} back to API type: {}",
                         InlineErrorChain::new(&err),
                     ))
                 },
@@ -4061,13 +4060,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|row| {
                     let id = row.identity.id;
-                    let address = row.address;
                     networking::LoopbackAddress::try_from(row).map_err(|err| {
                         // Failure to convert means we've got invalid data
                         // stored in the db; this should be impossible.
                         HttpError::for_internal_error(format!(
                             "unexpectedly failed to convert db loopback \
-                             address {id} ({address}) back to API type: {}",
+                             address {id} back to API type: {}",
                             InlineErrorChain::new(&err),
                         ))
                     })
