@@ -523,7 +523,18 @@ impl DataStore {
                     diesel::insert_into(sitrep_dsl::fm_sitrep)
                         .values(metadata)
                         .execute_async(&conn)
-                        .await?;
+                        .await
+                        .map_err(|e| {
+                            err.bail(InsertSitrepError::Other(
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(
+                                    "failed to insert sitrep metadata record",
+                                ),
+                            ))
+                        })?;
 
                     // Insert case ereport assignments.
                     if !case_ereports.is_empty() {
@@ -532,7 +543,18 @@ impl DataStore {
                         )
                         .values(case_ereports)
                         .execute_async(&conn)
-                        .await?;
+                        .await
+                        .map_err(|e| {
+                            err.bail(InsertSitrepError::Other(
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(
+                                    "failed to insert case ereport assignments",
+                                ),
+                            ))
+                        })?;
                     }
 
                     // Insert alert requests.
@@ -540,7 +562,18 @@ impl DataStore {
                         diesel::insert_into(alert_req_dsl::fm_alert_request)
                             .values(alerts_requested)
                             .execute_async(&conn)
-                            .await?;
+                            .await
+                            .map_err(|e| {
+                                err.bail(InsertSitrepError::Other(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context(
+                                        "failed to insert alert requests",
+                                    ),
+                                ))
+                            })?;
                     }
 
                     // Insert case metadata records.
@@ -548,7 +581,18 @@ impl DataStore {
                         diesel::insert_into(case_dsl::fm_case)
                             .values(cases)
                             .execute_async(&conn)
-                            .await?;
+                            .await
+                            .map_err(|e| {
+                                err.bail(InsertSitrepError::Other(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context(
+                                        "failed to insert case records",
+                                    ),
+                                ))
+                            })?;
                     }
 
                     // Now, try to make the sitrep current.
@@ -564,7 +608,15 @@ impl DataStore {
                                 sitrep_id,
                             ))
                         }
-                        other => other,
+                        other => err.bail(InsertSitrepError::Other(
+                            public_error_from_diesel(
+                                other,
+                                ErrorHandler::Server,
+                            )
+                            .internal_context(
+                                "failed to insert new sitrep version",
+                            ),
+                        )),
                     })?;
 
                     Ok(())
