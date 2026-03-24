@@ -143,7 +143,8 @@ pub fn router_peer_type_try_from_old_representation(
             InvalidIpAddrError::LoopbackAddress
             | InvalidIpAddrError::MulticastAddress
             | InvalidIpAddrError::Ipv4Broadcast
-            | InvalidIpAddrError::Ipv6UnicastLinkLocal => Err(err.into()),
+            | InvalidIpAddrError::Ipv6UnicastLinkLocal
+            | InvalidIpAddrError::Ipv4MappedIpv6 => Err(err.into()),
         },
     }
 }
