@@ -1325,6 +1325,11 @@ mod tests {
             .await
             .expect("Failed to explain query - is it valid SQL?");
         eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
