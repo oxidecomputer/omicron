@@ -1,33 +1,40 @@
 INSERT
 INTO
-  omicron.public.ereporter_restart (id, generation, reporter_type, slot_type, slot, time_first_seen)
+  ereporter_restart (id, generation, reporter_type, slot_type, slot, time_first_seen)
 SELECT
   $1,
   COALESCE(
     (
       SELECT
-        max(generation)
-      FROM
-        omicron.public.ereporter_restart
-      WHERE
-        reporter_type = $2 AND slot_type = $3 AND slot = $4
-      LIMIT
-        1
-    )
-    + 1,
-    0
-  ),
-  $5,
-  $6,
-  $7,
-  now()
-WHERE
-  NOT
-    EXISTS(
-      SELECT
-        1
+        max(ereporter_restart.generation)
       FROM
         ereporter_restart
       WHERE
-        id = $8 AND reporter_type = $9 AND slot_type = $10 AND slot = $11
+        (ereporter_restart.reporter_type = $2 AND ereporter_restart.slot_type = $3)
+        AND ereporter_restart.slot = $4
+      LIMIT
+        $5
+    )
+    + $6,
+    $7
+  ),
+  $8,
+  $9,
+  $10,
+  current_timestamp()
+WHERE
+  NOT
+    (
+      EXISTS(
+        SELECT
+          $11
+        FROM
+          ereporter_restart
+        WHERE
+          (
+            (ereporter_restart.id = $12 AND ereporter_restart.reporter_type = $13)
+            AND ereporter_restart.slot_type = $14
+          )
+          AND ereporter_restart.slot = $15
+      )
     )

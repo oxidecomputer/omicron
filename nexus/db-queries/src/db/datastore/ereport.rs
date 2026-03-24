@@ -8,6 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::model::Ereport;
 use crate::db::model::EreporterRestart;
 use crate::db::model::Generation;
@@ -18,15 +19,16 @@ use crate::db::model::SqlU32;
 use crate::db::model::ereport as model;
 use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
-use crate::db::raw_query_builder::QueryBuilder;
-use crate::db::raw_query_builder::TypedSqlQuery;
+
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
-use diesel::dsl::{count, min};
+use diesel::dsl::{count, exists, max, min, not, select};
 use diesel::prelude::*;
 use diesel::sql_types;
+use diesel::sql_types::Int8;
+use diesel::sql_types::Nullable;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -395,73 +397,77 @@ impl DataStore {
         Ok(inserted != 0)
     }
 
+    /// Query for inserting a new reporter restart record into the
+    /// `ereporter_restart` table.
+    ///
+    /// The SQL this generates can be found in
+    /// `tests/output/ereporter_restart_insert.sql`.
     fn restart_insert_query(
         reporter_type: nexus_db_model::EreporterType,
         slot_type: SpType,
         slot: SqlU16,
         restart_id: EreporterRestartUuid,
-    ) -> TypedSqlQuery<sql_types::BigInt> {
-        let mut builder = QueryBuilder::new();
-        builder
-            .sql(
-                "INSERT INTO omicron.public.ereporter_restart ( \
-                    id, \
-                    generation, \
-                    reporter_type, \
-                    slot_type, \
-                    slot, \
-                    time_first_seen \
-                ) SELECT  ",
-            )
-            .param()
-            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
-            .sql(
-                ", COALESCE( \
-                    ( \
-                        SELECT MAX(generation) \
-                        FROM omicron.public.ereporter_restart \
-                        WHERE reporter_type = ",
-            )
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql("      AND slot_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql("      AND slot = ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(
-                "      LIMIT 1\
-                    ) + 1, 0 \
-                ), ",
-            )
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql(", ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql(", ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(", NOW() ")
-            // This is the idempotency bit...
-            .sql(
-                "WHERE NOT EXISTS ( \
-                    SELECT 1 FROM ereporter_restart WHERE id = ",
-            )
-            .param()
-            .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
-            .sql(" AND reporter_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql(" AND slot_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql(" AND slot = ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(")");
-        builder.query()
+    ) -> impl RunnableQueryNoReturn {
+        define_sql_function! {
+            fn coalesce(x: Nullable<Int8>, y: Int8) -> Int8;
+        }
+
+        let restart_id = restart_id.into_untyped_uuid();
+
+        // Subquery to compute the next generation number for this
+        // `(reporter_type, slot_type, slot)` tuple, by selecting the maximum
+        // existing generation and incrementing it. If there are no existing
+        // restarts for this location, COALESCE nulls to 0 to insert the first
+        // generation.
+        let next_generation = coalesce(
+            restart_dsl::ereporter_restart
+                .filter(restart_dsl::reporter_type.eq(reporter_type))
+                .filter(restart_dsl::slot_type.eq(slot_type))
+                .filter(restart_dsl::slot.eq(slot))
+                .select(max(restart_dsl::generation))
+                .limit(1)
+                .single_value()
+                + 1,
+            0,
+        );
+
+        // Idempotency check: only insert if no row with this restart ID at this
+        // location already exists. Note that we *could* just do an `ON CONFLICT
+        // ... DO NOTHING` clause instead. However, I thought it was nice to
+        // treat conflicts where we are attempting to insert a known restart ID
+        // in a *different* location as an error, since that's obviously wrong,
+        // while trying to insert the same restart ID in the *same* location
+        // should just be idempotent.
+        let already_exists = restart_dsl::ereporter_restart
+            .filter(restart_dsl::id.eq(restart_id))
+            .filter(restart_dsl::reporter_type.eq(reporter_type))
+            .filter(restart_dsl::slot_type.eq(slot_type))
+            .filter(restart_dsl::slot.eq(slot))
+            .select(1.into_sql::<sql_types::Integer>());
+
+        // SELECT the values to insert, but only if the restart ID has
+        // not already been recorded at this location.
+        let selection = select((
+            restart_id.into_sql::<sql_types::Uuid>(),
+            next_generation,
+            reporter_type
+                .into_sql::<nexus_db_schema::enums::EreporterTypeEnum>(),
+            slot_type.into_sql::<nexus_db_schema::enums::SpTypeEnum>(),
+            slot.into_sql::<sql_types::Int4>(),
+            diesel::dsl::now.into_sql::<sql_types::Timestamptz>(),
+        ))
+        .filter(not(exists(already_exists)));
+
+        diesel::insert_into(restart_dsl::ereporter_restart)
+            .values(selection)
+            .into_columns((
+                restart_dsl::id,
+                restart_dsl::generation,
+                restart_dsl::reporter_type,
+                restart_dsl::slot_type,
+                restart_dsl::slot,
+                restart_dsl::time_first_seen,
+            ))
     }
 }
 
