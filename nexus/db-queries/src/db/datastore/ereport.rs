@@ -404,25 +404,7 @@ impl DataStore {
         let mut builder = QueryBuilder::new();
         builder
             .sql(
-                "WITH previous AS ( \
-                    SELECT generation \
-                    FROM omicron.public.ereporter_restart \
-                    WHERE reporter_type = ",
-            )
-            .param()
-            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
-            .sql(" AND slot_type = ")
-            .param()
-            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
-            .sql(" AND slot = ")
-            .param()
-            .bind::<sql_types::Int4, _>(slot)
-            .sql(
-                "
-                    ORDER BY generation DESC \
-                    LIMIT 1 \
-                )
-                INSERT INTO omicron.public.ereporter_restart ( \
+                "INSERT INTO omicron.public.ereporter_restart ( \
                     id, \
                     generation, \
                     reporter_type, \
@@ -433,7 +415,26 @@ impl DataStore {
             )
             .param()
             .bind::<sql_types::Uuid, _>(restart_id.into_untyped_uuid())
-            .sql(", COALESCE((SELECT generation FROM previous) + 1, 0), ")
+            .sql(
+                ", COALESCE( \
+                    ( \
+                        SELECT MAX(generation) \
+                        FROM omicron.public.ereporter_restart \
+                        WHERE reporter_type = ",
+            )
+            .param()
+            .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
+            .sql("      AND slot_type = ")
+            .param()
+            .bind::<nexus_db_schema::enums::SpTypeEnum, _>(slot_type)
+            .sql("      AND slot = ")
+            .param()
+            .bind::<sql_types::Int4, _>(slot)
+            .sql(
+                "      LIMIT 1\
+                    ) + 1, 0 \
+                ), ",
+            )
             .param()
             .bind::<nexus_db_schema::enums::EreporterTypeEnum, _>(reporter_type)
             .sql(", ")
