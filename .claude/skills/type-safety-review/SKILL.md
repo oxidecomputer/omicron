@@ -177,6 +177,22 @@ Then use the local variables in the `.bind()` calls.
 
 ---
 
+### 9. `Vec` when uniqueness matters
+
+**What to look for:**
+- `Vec<T>` fields or return types where duplicates are semantically invalid (e.g., a list of sled IDs, a set of allowed roles, a collection of unique resource identifiers)
+- Code that deduplicates a `Vec` manually (`.dedup()`, `.sort(); .dedup()`, or a loop that checks `contains()` before inserting)
+- `Vec` used as the value of a map where the entries are themselves keyed by an identifier field
+- Comments or documentation saying "elements must be unique" or "no duplicates allowed"
+
+**Why it matters:** A `Vec` does not enforce uniqueness. Callers can silently produce duplicates; consumers must defensively deduplicate. Every place that iterates or looks up in the collection must be written to tolerate (or guard against) duplicates. The invariant lives in documentation, not the type.
+
+**Fix direction:**
+- When uniqueness matters, consider `BTreeSet<T>` or `BTreeMap<K, V>`.  If using a map and the key is contained in the value, considered `iddqd::IdOrdMap<T>`.  `IdOrdMap` enforces the identity between the key and the value's own identifier field at the type level, removing a class of key/value mismatch bugs.
+- When the caller must preserve insertion order *and* guarantee uniqueness, consider `IdOrdMap`.
+
+---
+
 ## Output format
 
 **IMPORTANT: Output the entire report inside a single fenced code block** using FOUR backticks (```` ```` ````) with no language tag, so that the Markdown is not rendered and can be copy-pasted into another tool. Do not render the Markdown directly. Four backticks are required because the report contains triple-backtick code sketches inside it — a triple-backtick outer fence would be closed by the first inner code block.

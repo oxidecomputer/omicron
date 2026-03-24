@@ -461,6 +461,73 @@ sql_query("INSERT INTO reconfigurator_config \
 
 ---
 
+## Category 9: `Vec` when uniqueness matters
+
+### Example: Collection of sled IDs
+
+**Before:**
+```rust
+pub struct Policy {
+    // Must not contain duplicates.
+    pub sleds: Vec<SledUuid>,
+}
+
+fn add_sled(policy: &mut Policy, sled_id: SledUuid) {
+    if !policy.sleds.contains(&sled_id) {  // O(n) and easy to forget
+        policy.sleds.push(sled_id);
+    }
+}
+```
+
+**After:**
+```rust
+pub struct Policy {
+    pub sleds: BTreeSet<SledUuid>,
+}
+
+fn add_sled(policy: &mut Policy, sled_id: SledUuid) {
+    policy.sleds.insert(sled_id);  // uniqueness is automatic
+}
+```
+
+**Why this matters:** Any code that builds or extends the `Vec` must remember to deduplicate. Any code that iterates or searches the `Vec` must be written to tolerate duplicates. Changing the type to `BTreeSet` makes the compiler enforce the invariant everywhere.
+
+---
+
+### Example: Map keyed by identifier field
+
+**Before:**
+```rust
+// The key must match zone.id — this is checked by convention, not the compiler.
+pub zones: BTreeMap<OmicronZoneUuid, OmicronZoneConfig>,
+
+// Insertion is error-prone:
+zones.insert(zone.id, zone);   // fine
+zones.insert(other_id, zone);  // compiles, wrong at runtime
+```
+
+**After (using `iddqd::IdOrdMap`):**
+```rust
+use iddqd::IdOrdMap;
+
+pub zones: IdOrdMap<OmicronZoneConfig>,
+// OmicronZoneConfig must impl IdOrd, which provides the key (zone.id).
+// The map owns both key and value as one unit.
+
+// Insertion no longer takes a separate key:
+zones.insert_unique(zone)?;  // key is derived from zone.id automatically
+```
+
+**Why this matters:** `BTreeMap<Id, Value>` has an implicit invariant that `key == value.id`. `IdOrdMap` eliminates that invariant entirely: the key *is* the value's identifier, enforced by the type. There is no way to insert a value under the wrong key.
+
+**Red flags to spot:**
+- `BTreeMap<XxxUuid, SomeStruct>` where `SomeStruct` has a field of type `XxxUuid`
+- Comments like "key must equal value.id" or "keyed by the zone's own id"
+- Manual `map.insert(thing.id, thing)` patterns
+- `Vec<T>` with a comment saying "no duplicates" or followed by `.sort(); .dedup()`
+
+---
+
 ## Calibration notes
 
 **Not every instance of these patterns is a problem.** Context matters:
