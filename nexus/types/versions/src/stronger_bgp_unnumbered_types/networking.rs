@@ -39,8 +39,8 @@ use sled_agent_types::early_networking::RouterPeerType;
 use std::net::IpAddr;
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
-/// that will be advertised to the peer identified by `addr`. The `bgp_config`
-/// parameter is a reference to global BGP parameters.
+/// that will be advertised to the peer. The `bgp_config` parameter is a
+/// reference to global BGP parameters.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpPeer {
     /// The global BGP configuration used for establishing a session with this
@@ -62,7 +62,7 @@ pub struct BgpPeer {
     /// session (seconds).
     pub delay_open: u32,
 
-    /// How long to to wait between TCP connection retries (seconds).
+    /// How long to wait between TCP connection retries (seconds).
     pub connect_retry: u32,
 
     /// How often to send keepalive requests (seconds).
@@ -114,7 +114,8 @@ pub enum BgpPeerConversionError {
 /// [`RouterPeerType::Unnumbered`], and converts other `Some(ip)` values to
 /// [`RouterPeerType::Numbered`] (discarding `router_lifetime`, as it only
 /// applies to unnumbered peers). Fails if given an invalid IP (e.g., a loopback
-/// or multicast address) or if `router_lifetime` is an invalid
+/// or multicast address) or if given an IP that maps to
+/// [`RouterPeerType::Unnumbered`] and `router_lifetime` is an invalid
 /// [`RouterLifetimeConfig`].
 pub fn router_peer_type_try_from_old_representation(
     ip: Option<IpAddr>,

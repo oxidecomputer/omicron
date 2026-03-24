@@ -109,8 +109,9 @@ impl BgpPeerFromDbBuilder<'_> {
         } = self;
 
         // This will fail if we have a non-NULL but invalid address in the DB,
-        // or if we have a too-large `router_lifetime`. We should have CHECK
-        // constraints to prevent both of these, but don't today.
+        // or if we have an unnumbered address with a too-large
+        // `router_lifetime`. We should have CHECK constraints to prevent both
+        // of these, but don't today.
         let addr = router_peer_type_try_from_old_representation(
             p.addr.map(|a| a.ip()),
             *p.router_lifetime,

@@ -334,7 +334,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 allowed_import: ImportExportPolicy::NoFiltering,
                 vlan_id: None,
             },
-            // Unnumbered peer - identified by interface only
+            // Unnumbered peer - identified by link from parent `BgpPeerConfig`
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 addr: RouterPeerType::Unnumbered {
