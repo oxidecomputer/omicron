@@ -19,9 +19,12 @@ use futures::FutureExt;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::support_bundle::BundleData;
+use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -150,6 +153,15 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
+                    Self::support_bundle_data_selection_insert(
+                        &conn,
+                        bundle.id.into(),
+                        // TODO(#10062): The data selection should be passed in
+                        // rather than hardcoded here.
+                        BundleDataSelection::all(),
+                    )
+                    .await?;
+
                     Ok(bundle)
                 }
             })
@@ -166,6 +178,50 @@ impl DataStore {
                     }
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Returns the [`BundleDataSelection`] for a support bundle.
+    ///
+    /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
+    pub async fn support_bundle_data_selection_get(
+        &self,
+        opctx: &OpContext,
+        authz_bundle: &authz::SupportBundle,
+    ) -> Result<nexus_types::support_bundle::BundleDataSelection, Error> {
+        opctx.authorize(authz::Action::Read, authz_bundle).await?;
+        let bundle_id: SupportBundleUuid = authz_bundle.id();
+
+        use crate::db::model::BundleDataSelection as DbBundleDataSelection;
+        use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let bundle_uuid = bundle_id.into_untyped_uuid();
+
+        flags_dsl::support_bundle_data_selection_flags
+            .filter(flags_dsl::bundle_id.eq(bundle_uuid))
+            .left_join(
+                host_info_dsl::support_bundle_data_selection_host_info
+                    .on(host_info_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+            )
+            .left_join(
+                ereports_dsl::support_bundle_data_selection_ereports
+                    .on(ereports_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+            )
+            .select(DbBundleDataSelection::as_select())
+            .first_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to query data selection for bundle",
+                    )
+            })?
+            .try_into()
+            .map_err(|e: Error| {
+                e.internal_context("failed to convert data selection")
             })
     }
 
@@ -316,6 +372,15 @@ impl DataStore {
                             ))
                             .execute_async(conn)
                             .await?;
+                    let bundle_uuids_to_delete: Vec<Uuid> = bundles_to_delete
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect();
+                    Self::support_bundle_data_selection_delete(
+                        conn,
+                        bundle_uuids_to_delete,
+                    )
+                    .await?;
                     // For bundles that are in the process of being destroyed,
                     // the dataset expungement speeds up the process.
                     let bundles_deleted_missing_datasets =
@@ -506,10 +571,100 @@ impl DataStore {
         Ok(())
     }
 
+    /// Decompose a [`BundleDataSelection`] into per-variant child table rows
+    /// and insert them for the given bundle.
+    ///
+    /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
+    async fn support_bundle_data_selection_insert(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        bundle_id: SupportBundleUuid,
+        data_selection: BundleDataSelection,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::db::model::{DataSelectionFlags, Ereports, HostInfo};
+        use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_types::support_bundle::BundleDataCategory;
+
+        // Always insert a flags row.
+        diesel::insert_into(flags_dsl::support_bundle_data_selection_flags)
+            .values(DataSelectionFlags {
+                bundle_id: bundle_id.into(),
+                include_reconfigurator: data_selection
+                    .contains(BundleDataCategory::Reconfigurator),
+                include_sled_cubby_info: data_selection
+                    .contains(BundleDataCategory::SledCubbyInfo),
+                include_sp_dumps: data_selection
+                    .contains(BundleDataCategory::SpDumps),
+            })
+            .execute_async(conn)
+            .await?;
+
+        // Insert payload tables for variants that carry data.
+        for data in data_selection {
+            match data {
+                BundleData::Reconfigurator
+                | BundleData::SledCubbyInfo
+                | BundleData::SpDumps => {
+                    // Handled by flags row above.
+                }
+                BundleData::HostInfo(sleds) => {
+                    diesel::insert_into(
+                        host_info_dsl::support_bundle_data_selection_host_info,
+                    )
+                    .values(HostInfo::new(bundle_id, sleds))
+                    .execute_async(conn)
+                    .await?;
+                }
+                BundleData::Ereports(filters) => {
+                    diesel::insert_into(
+                        ereports_dsl::support_bundle_data_selection_ereports,
+                    )
+                    .values(Ereports::new(bundle_id, filters))
+                    .execute_async(conn)
+                    .await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Delete all data selection rows associated with the given bundle IDs.
+    ///
+    /// Both callers run this within a transaction alongside the bundle row
+    /// delete, since the data selection tables have no ON DELETE CASCADE.
+    async fn support_bundle_data_selection_delete(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        bundle_ids: Vec<Uuid>,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+
+        diesel::delete(flags_dsl::support_bundle_data_selection_flags)
+            .filter(flags_dsl::bundle_id.eq_any(bundle_ids.clone()))
+            .execute_async(conn)
+            .await?;
+        diesel::delete(host_info_dsl::support_bundle_data_selection_host_info)
+            .filter(host_info_dsl::bundle_id.eq_any(bundle_ids.clone()))
+            .execute_async(conn)
+            .await?;
+        diesel::delete(ereports_dsl::support_bundle_data_selection_ereports)
+            .filter(ereports_dsl::bundle_id.eq_any(bundle_ids))
+            .execute_async(conn)
+            .await?;
+        Ok(())
+    }
+
     /// Deletes a support bundle.
     ///
     /// This should only be invoked after all storage for the support bundle has
     /// been cleared.
+    ///
+    /// Returns `Ok(())` if the bundle was deleted or did not exist
+    /// (idempotent). Returns an error if the bundle exists but is not in the
+    /// `Destroying` or `Failed` state.
     pub async fn support_bundle_delete(
         &self,
         opctx: &OpContext,
@@ -520,18 +675,55 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let id = authz_bundle.id().into_untyped_uuid();
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        diesel::delete(dsl::support_bundle)
-            .filter(
-                dsl::state
-                    .eq(SupportBundleState::Destroying)
-                    .or(dsl::state.eq(SupportBundleState::Failed)),
-            )
-            .filter(dsl::id.eq(id))
-            .execute_async(&*conn)
+        self.transaction_retry_wrapper("support_bundle_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Check the bundle's current state before deleting
+                    // anything.
+                    let bundle = dsl::support_bundle
+                        .filter(dsl::id.eq(id))
+                        .select(SupportBundle::as_select())
+                        .first_async(&conn)
+                        .await
+                        .optional()?;
+
+                    let Some(bundle) = bundle else {
+                        // Already gone — nothing to do.
+                        return Ok(());
+                    };
+
+                    match bundle.state {
+                        SupportBundleState::Destroying
+                        | SupportBundleState::Failed => {}
+                        state => {
+                            return Err(err.bail(Error::invalid_request(
+                                format!(
+                                    "cannot delete support bundle in \
+                                     state {state:?}"
+                                ),
+                            )));
+                        }
+                    }
+
+                    Self::support_bundle_data_selection_delete(&conn, vec![id])
+                        .await?;
+                    diesel::delete(dsl::support_bundle)
+                        .filter(dsl::id.eq(id))
+                        .execute_async(&conn)
+                        .await?;
+                    Ok(())
+                }
+            })
             .await
-            .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
 
         Ok(())
     }
@@ -1027,7 +1219,21 @@ mod test {
 
         // Delete the bundle, observe that it's gone
 
+        // Verify data selection exists before delete
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to query data selection");
+        // TODO(#10062): Once support_bundle_create takes a BundleDataSelection
+        // parameter, this should assert that the selection we read back is
+        // exactly equal to what we passed in.
+        assert_ne!(
+            selection,
+            BundleDataSelection::new(),
+            "Data selection should exist before delete"
+        );
+
         datastore
             .support_bundle_delete(&opctx, &authz_bundle)
             .await
@@ -1037,6 +1243,14 @@ mod test {
             .await
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
+
+        // Verify data selection rows were also cleaned up. The bundle has
+        // been deleted, so querying its data selection should fail with
+        // not-found.
+        datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect_err("Data selection should not exist after bundle delete");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1329,6 +1543,13 @@ mod test {
             .await
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
+
+        // Verify data selection rows were also cleaned up.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect_err("Data selection should not exist after bundle delete");
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -28,6 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(248, "fm-support-bundle-request"),
         KnownVersion::new(247, "remove-tuf-base-url"),
         KnownVersion::new(246, "ereport-marked-seen"),
         KnownVersion::new(245, "rename-default-igw-ip-pool"),
