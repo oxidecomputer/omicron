@@ -395,7 +395,7 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        Ok(Sitrep { metadata, cases })
+        Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
     }
 
     async fn fm_sitrep_cases_list_on_conn(

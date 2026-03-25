@@ -901,7 +901,11 @@ pub struct SitrepGcStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum FmRendezvousStatus {
     NoSitrep,
-    Executed { sitrep_id: SitrepUuid, alerts: FmAlertStats },
+    Executed {
+        sitrep_id: SitrepUuid,
+        alerts: FmAlertStats,
+        marking: EreportMarkingStats,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

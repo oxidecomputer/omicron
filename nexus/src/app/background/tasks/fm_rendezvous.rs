@@ -16,6 +16,7 @@ use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepVersion;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmAlertStats as AlertStats;
+use nexus_types::internal_api::background::FmEreportMarkingStats as EreportMarkingStats;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use omicron_common::api::external::Error;
 use serde_json::json;
@@ -68,8 +69,9 @@ impl FmRendezvous {
         // TODO(eliza): as we start doing other things (i.e. requesting support
         // bundles, updating problems), consider spawning these in their own tasks...
         let alerts = self.create_requested_alerts(&sitrep, opctx).await;
-
-        Status::Executed { sitrep_id: sitrep.1.id(), alerts }
+        let marking = self.mark_ereports_seen(&sitrep, opctx).await;
+        
+        Status::Executed { sitrep_id: sitrep.1.id(), alerts, marking }
     }
 
     async fn create_requested_alerts(
@@ -181,8 +183,48 @@ impl FmRendezvous {
         &self,
         sitrep: &Arc<(SitrepVersion, Sitrep)>,
         opctx: &OpContext,
-    ) -> AlertStats {
-        todo!("eliza draw the rest of the owl")
+    ) -> EreportMarkingStats {
+        // TODO(eliza): make configurable?
+        let batch = 100;
+
+        let (_, ref sitrep) = **sitrep;
+        let mut status = EreportMarkingStats::default();
+        status.total_ereports_seen = sitrep.ereports_by_id.len();
+
+        let mut ereport_ids = sitrep
+            .ereports_by_id
+            .iter()
+            .filter_map(|ereport| {
+                if ereport.marked_seen_in.is_none() {
+                    Some(*ereport.id())
+                } else {
+                    None
+                }
+            })
+            .peekable();
+        while ereport_ids.peek().is_some() {
+            match self
+                .datastore
+                .ereports_mark_seen(
+                    opctx,
+                    sitrep.id(),
+                    ereport_ids.by_ref().take(batch),
+                )
+                .await
+            {
+                Ok(n_marked) => status.ereports_marked_seen += n_marked,
+                Err(err) => {
+                    slog::error!(
+                        opctx.log,
+                        "failed to mark some ereports as seen";
+                        &err
+                    );
+                    status.errors.push(InlineErrorChain::new(&err).to_string());
+                }
+            }
+        }
+
+        status
     }
 }
 

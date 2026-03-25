@@ -42,8 +42,8 @@ pub struct Sitrep {
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
     pub cases: IdOrdMap<Case>,
-    // A map of all ereports associated with cases in this sitrep.
-    // pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
+    /// A map of all ereports associated with cases in this sitrep.
+    pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please
