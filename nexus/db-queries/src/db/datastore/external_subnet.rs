@@ -286,33 +286,41 @@ impl DataStore {
         )
         .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| match &e {
+        .map_err(|e| match e {
             DieselError::DatabaseError(
                 DatabaseErrorKind::UniqueViolation,
-                info,
+                ref info,
             ) if info.constraint_name() == Some("single_default_per_silo") => {
                 Error::invalid_request(
-                    "Each silo can only have one default subnet pool \
-                    for each IP version.",
+                    "Silo already has a default subnet pool for this \
+                    IP version. Link the pool as non-default, then \
+                    make it the default, which will demote the \
+                    existing one.",
                 )
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::UniqueViolation,
-                info,
-            ) if info.constraint_name()
-                == Some("subnet_pool_silo_link_pkey") =>
-            {
-                Error::conflict("Subnet pool is already linked to silo")
-            }
+                _,
+            ) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::SubnetPoolSiloLink,
+                    &format!(
+                        "subnet_pool_id: {}, silo_id: {}",
+                        authz_pool.id(),
+                        authz_silo.id(),
+                    ),
+                ),
+            ),
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
-                info,
+                ref info,
             ) if info.message().contains("\"silo_id\"") => {
                 Error::not_found_by_id(ResourceType::Silo, &authz_silo.id())
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
-                info,
+                ref info,
             ) if info.message().contains("\"subnet_pool_id\"") => {
                 Error::not_found_by_id(
                     ResourceType::SubnetPool,
@@ -374,6 +382,9 @@ impl DataStore {
     }
 
     /// Update the link between a Subnet Pool and Silo.
+    ///
+    /// When setting `is_default` to true, any existing default link for the
+    /// same silo and IP version is demoted first, matching IP pool behavior.
     pub async fn update_subnet_pool_silo_link(
         &self,
         opctx: &OpContext,
@@ -384,35 +395,83 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
         use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
-        diesel::update(
-            dsl::subnet_pool_silo_link
-                .filter(
-                    dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
-                )
-                .filter(dsl::silo_id.eq(authz_silo.id())),
-        )
-        .set(dsl::is_default.eq(is_default))
-        .returning(SubnetPoolSiloLink::as_returning())
-        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            DieselError::NotFound => LookupType::ByCompositeId(format!(
-                "subnet_pool_id: {}, silo_id: {}",
-                authz_pool.id(),
-                authz_silo.id(),
-            ))
-            .into_not_found(ResourceType::SubnetPoolSiloLink),
-            DieselError::DatabaseError(
-                DatabaseErrorKind::UniqueViolation,
-                ref info,
-            ) if info.constraint_name() == Some("single_default_per_silo") => {
-                Error::invalid_request(
-                    "Each silo can only have one default subnet pool \
-                    for each IP version.",
-                )
-            }
-            e => public_error_from_diesel(e, ErrorHandler::Server),
-        })
+        let pool_id = to_db_typed_uuid(authz_pool.id());
+        let silo_id = authz_silo.id();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        if !is_default {
+            // Simple case: just unset the default flag.
+            return diesel::update(
+                dsl::subnet_pool_silo_link
+                    .filter(dsl::subnet_pool_id.eq(pool_id))
+                    .filter(dsl::silo_id.eq(silo_id)),
+            )
+            .set(dsl::is_default.eq(false))
+            .returning(SubnetPoolSiloLink::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "subnet_pool_id: {}, silo_id: {}",
+                    authz_pool.id(),
+                    silo_id,
+                ))
+                .into_not_found(ResourceType::SubnetPoolSiloLink),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            });
+        }
+
+        // Setting as default: demote any existing default for the same
+        // (silo, ip_version), then promote this one.
+        self.transaction_retry_wrapper("update_subnet_pool_silo_link")
+            .transaction(&conn, |conn| {
+                async move {
+                    // Get this link's ip_version.
+                    let link = dsl::subnet_pool_silo_link
+                        .filter(dsl::subnet_pool_id.eq(pool_id))
+                        .filter(dsl::silo_id.eq(silo_id))
+                        .select(SubnetPoolSiloLink::as_select())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    // Already default — no-op.
+                    if link.is_default {
+                        return Ok(link);
+                    }
+
+                    // Demote any existing default for same (silo, version).
+                    diesel::update(
+                        dsl::subnet_pool_silo_link
+                            .filter(dsl::silo_id.eq(silo_id))
+                            .filter(dsl::ip_version.eq(link.ip_version))
+                            .filter(dsl::is_default.eq(true)),
+                    )
+                    .set(dsl::is_default.eq(false))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Promote this one.
+                    diesel::update(
+                        dsl::subnet_pool_silo_link
+                            .filter(dsl::subnet_pool_id.eq(pool_id))
+                            .filter(dsl::silo_id.eq(silo_id)),
+                    )
+                    .set(dsl::is_default.eq(true))
+                    .returning(SubnetPoolSiloLink::as_returning())
+                    .get_result_async(&conn)
+                    .await
+                }
+            })
+            .await
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "subnet_pool_id: {}, silo_id: {}",
+                    authz_pool.id(),
+                    silo_id,
+                ))
+                .into_not_found(ResourceType::SubnetPoolSiloLink),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// List silos linked to a subnet pool.
@@ -1390,6 +1449,7 @@ mod tests {
     use crate::db::queries::external_subnet::NO_LINKED_DEFAULT_POOL_ERR_MSG;
     use crate::db::queries::external_subnet::NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG;
     use crate::db::queries::external_subnet::SUBNET_OVERLAPS_EXISTING_ERR_MSG;
+    use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl as _;
     use chrono::Utc;
     use diesel::ExpressionMethods as _;
@@ -1739,15 +1799,9 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("able to link pool to silo");
-        let Error::Conflict { message } = &err else {
-            panic!("Expected invalid request, found: {err:#?}");
-        };
-        assert_eq!(
-            message.external_message(),
-            "Subnet pool is already linked to silo"
-        );
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
-        // We should not be able to link another default of the same IP version.
+        // Linking another default of the same IP version should fail.
         let params = SubnetPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-new-pool".parse().unwrap(),
@@ -1767,14 +1821,16 @@ mod tests {
         let err = datastore
             .link_subnet_pool_to_silo(opctx, &new_authz_pool, &authz_silo, true)
             .await
-            .expect_err("able to link pool to silo");
+            .expect_err("linking second default should fail");
         let Error::InvalidRequest { message } = &err else {
             panic!("Expected invalid request, found: {err:#?}");
         };
         assert_eq!(
             message.external_message(),
-            "Each silo can only have one default subnet pool \
-            for each IP version."
+            "Silo already has a default subnet pool for this \
+            IP version. Link the pool as non-default, then \
+            make it the default, which will demote the \
+            existing one."
         );
 
         // Now unlink the first, and we should be able to link the second as a
@@ -1807,6 +1863,31 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
             .await
             .expect("able to link second non-defult pool to silo");
+
+        // We can also change the default via update, which demotes the
+        // current default. Right now new_authz_pool is default and
+        // authz_pool is non-default; promote authz_pool.
+        let link = datastore
+            .update_subnet_pool_silo_link(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("update to default should demote the other");
+        assert!(link.is_default);
+
+        // Verify the old default was actually demoted.
+        let demoted_links = datastore
+            .list_silos_linked_to_subnet_pool(
+                opctx,
+                &new_authz_pool,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: 100.try_into().unwrap(),
+                },
+            )
+            .await
+            .expect("should list links for demoted pool");
+        assert_eq!(demoted_links.len(), 1);
+        assert!(!demoted_links[0].is_default);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3934,9 +4015,7 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("Should fail linking the second time");
-        let Error::Conflict { .. } = &err else {
-            panic!("Expected Conflict, found {err:#?}");
-        };
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         db.terminate().await;
         logctx.cleanup_successful();
