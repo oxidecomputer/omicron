@@ -1590,6 +1590,7 @@ table! {
 
         assigned_nexus -> Nullable<Uuid>,
         user_comment -> Nullable<Text>,
+        fm_case_id -> Nullable<Uuid>,
     }
 }
 
@@ -3182,6 +3183,71 @@ table! {
         payload -> Jsonb,
     }
 }
+
+// FM support bundle requests, stored per-sitrep like alert requests.
+table! {
+    fm_support_bundle_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+    }
+}
+
+// Per-variant data selection tables for fm_support_bundle_request.
+// Each table corresponds to a BundleData variant. Row existence means
+// "include this category in the bundle."
+
+// BundleData::Reconfigurator (unit variant, no filter columns)
+table! {
+    fm_support_bundle_data_reconfigurator (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+    }
+}
+
+// BundleData::SledCubbyInfo (unit variant, no filter columns)
+table! {
+    fm_support_bundle_data_sled_cubby_info (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+    }
+}
+
+// BundleData::SpDumps (unit variant, no filter columns)
+table! {
+    fm_support_bundle_data_sp_dumps (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+    }
+}
+
+// BundleData::HostInfo(SledSelection)
+table! {
+    fm_support_bundle_data_host_info (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        all_sleds -> Bool,
+        sled_ids -> Array<Uuid>,
+    }
+}
+
+// BundleData::Ereports(EreportFilters)
+table! {
+    fm_support_bundle_data_ereports (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
+        only_serials -> Array<Text>,
+        only_classes -> Array<Text>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    support_bundle,
+    fm_support_bundle_request,
+);
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

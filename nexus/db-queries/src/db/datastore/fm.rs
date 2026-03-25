@@ -38,8 +38,15 @@ use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
+use nexus_db_schema::schema::fm_support_bundle_data_ereports::dsl as sbdata_ereports_dsl;
+use nexus_db_schema::schema::fm_support_bundle_data_host_info::dsl as sbdata_host_info_dsl;
+use nexus_db_schema::schema::fm_support_bundle_data_reconfigurator::dsl as sbdata_reconfigurator_dsl;
+use nexus_db_schema::schema::fm_support_bundle_data_sled_cubby_info::dsl as sbdata_cubby_info_dsl;
+use nexus_db_schema::schema::fm_support_bundle_data_sp_dumps::dsl as sbdata_sp_dumps_dsl;
+use nexus_db_schema::schema::fm_support_bundle_request::dsl as sbreq_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -50,6 +57,8 @@ use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SupportBundleKind;
+use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -285,62 +294,15 @@ impl DataStore {
             map
         };
 
-        // Next, fetch all the alert requests belonging to cases in this sitrep.
-        // We do this in one big batched query that's paginated by case ID,
-        // rather than by querying alert requests per case, since this will
-        // generally result in fewer queries overall (most cases will have less
-        // than SQL_BATCH_SIZE alerts in them).
-        let mut alert_requests = {
-            let mut by_case = HashMap::<
-                CaseUuid,
-                iddqd::IdOrdMap<fm::case::AlertRequest>,
-            >::new();
+        let mut alert_requests =
+            self.fm_sitrep_read_alert_requests(id, conn).await?;
 
-            let mut paginator: Paginator<DbTypedUuid<AlertKind>> =
-                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    alert_req_dsl::fm_alert_request,
-                    alert_req_dsl::id,
-                    &p.current_pagparams(),
-                )
-                .filter(alert_req_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-                .select(model::fm::AlertRequest::as_select())
-                .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to load case alert requests assignments",
-                        )
-                })?;
-
-                paginator = p.found_batch(&batch, &|alert_req| alert_req.id);
-                for alert_req in batch {
-                    let case_id = alert_req.case_id.into();
-                    let id: AlertUuid = alert_req.id.into();
-                    by_case
-                        .entry(case_id)
-                        .or_default()
-                        .insert_unique(alert_req.into())
-                        .map_err(|_| {
-                            let internal_message = format!(
-                                "encountered multiple alert requests for case \
-                                 {case_id} with the same alert UUID {id}. \
-                                 this should really not be possible, as the \
-                                 alert UUID is a primary key!",
-                            );
-                            Error::InternalError { internal_message }
-                        })?;
-                }
-            }
-
-            by_case
-        };
+        let mut support_bundle_requests =
+            self.fm_sitrep_read_support_bundle_requests(id, conn).await?;
 
         // Next, load the case metadata entries and marry them to the sets of
-        // ereports and alert requests for to those cases that we loaded in the
-        // previous steps.
+        // ereports, alert requests, and support bundle requests for those
+        // cases that we loaded in the previous steps.
         let cases = {
             let mut cases = iddqd::IdOrdMap::new();
             let mut paginator =
@@ -378,6 +340,8 @@ impl DataStore {
                         .unwrap_or_default();
                     let alerts_requested =
                         alert_requests.remove(&id).unwrap_or_default();
+                    let support_bundles_requested =
+                        support_bundle_requests.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         created_sitrep_id: created_sitrep_id.into(),
@@ -386,7 +350,7 @@ impl DataStore {
                         comment,
                         ereports,
                         alerts_requested,
-                        support_bundles_requested: iddqd::IdOrdMap::new(),
+                        support_bundles_requested,
                     }
                 }));
             }
@@ -406,6 +370,258 @@ impl DataStore {
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
         Ok(Sitrep { metadata, cases })
+    }
+
+    /// Fetch all alert requests belonging to cases in the given sitrep.
+    ///
+    /// We do this in one big batched query paginated by alert ID, rather than
+    /// by querying alert requests per case, since this will generally result
+    /// in fewer queries overall (most cases will have fewer than
+    /// SQL_BATCH_SIZE alerts in them).
+    async fn fm_sitrep_read_alert_requests(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::AlertRequest>>, Error>
+    {
+        let mut by_case =
+            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::AlertRequest>>::new();
+
+        let mut paginator: Paginator<DbTypedUuid<AlertKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                alert_req_dsl::fm_alert_request,
+                alert_req_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(alert_req_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::AlertRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load case alert requests assignments",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|alert_req| alert_req.id);
+            for alert_req in batch {
+                let case_id = alert_req.case_id.into();
+                let id: AlertUuid = alert_req.id.into();
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(alert_req.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple alert requests for case \
+                             {case_id} with the same alert UUID {id}. \
+                             this should really not be possible, as the \
+                             alert UUID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
+    }
+
+    /// Fetch all support bundle requests belonging to cases in the given
+    /// sitrep, including their per-variant data selection tables.
+    async fn fm_sitrep_read_support_bundle_requests(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::SupportBundleRequest>>,
+        Error,
+    > {
+        // First, load the request rows.
+        let mut requests_by_id = HashMap::<
+            SupportBundleUuid,
+            (CaseUuid, fm::case::SupportBundleRequest),
+        >::new();
+
+        let mut paginator: Paginator<DbTypedUuid<SupportBundleKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                sbreq_dsl::fm_support_bundle_request,
+                sbreq_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(sbreq_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::SupportBundleRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load case support bundle requests",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|sb_req| sb_req.id);
+            for sb_req in batch {
+                let case_id: CaseUuid = sb_req.case_id.into();
+                let req_id: SupportBundleUuid = sb_req.id.into();
+                let app_req = fm::case::SupportBundleRequest {
+                    id: req_id,
+                    requested_sitrep_id: sb_req.requested_sitrep_id.into(),
+                    // data_selection is reconstructed from per-variant
+                    // tables below.
+                    data_selection: BundleDataSelection::new(),
+                };
+                if requests_by_id.insert(req_id, (case_id, app_req)).is_some() {
+                    let internal_message = format!(
+                        "encountered multiple support bundle \
+                         requests for case {case_id} with the same \
+                         bundle UUID {req_id}. this should really not \
+                         be possible, as the bundle UUID is a \
+                         primary key!",
+                    );
+                    return Err(Error::InternalError { internal_message });
+                }
+            }
+        }
+
+        // Reconstruct data_selection from per-variant tables, inserting
+        // directly into the requests loaded above.
+        Self::load_sbdata_into_support_bundle_requests(
+            id,
+            conn,
+            &mut requests_by_id,
+        )
+        .await?;
+
+        // Group requests by case.
+        let mut by_case = HashMap::<
+            CaseUuid,
+            iddqd::IdOrdMap<fm::case::SupportBundleRequest>,
+        >::new();
+        for (req_id, (case_id, req)) in requests_by_id {
+            by_case.entry(case_id).or_default().insert_unique(req).map_err(
+                |_| Error::InternalError {
+                    internal_message: format!(
+                        "duplicate support bundle request {req_id} \
+                         for case {case_id}",
+                    ),
+                },
+            )?;
+        }
+
+        Ok(by_case)
+    }
+
+    /// Load per-variant data selection rows for a sitrep and insert them
+    /// into the corresponding support bundle requests.
+    async fn load_sbdata_into_support_bundle_requests(
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        requests_by_id: &mut HashMap<
+            SupportBundleUuid,
+            (CaseUuid, fm::case::SupportBundleRequest),
+        >,
+    ) -> Result<(), Error> {
+        let sitrep_uuid = id.into_untyped_uuid();
+
+        sbdata_reconfigurator_dsl::fm_support_bundle_data_reconfigurator
+            .filter(sbdata_reconfigurator_dsl::sitrep_id.eq(sitrep_uuid))
+            .select(model::fm::SbdataReconfigurator::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load sb_req_reconfigurator rows",
+                    )
+            })?
+            .into_iter()
+            .for_each(|row| {
+                if let Some((_, req)) =
+                    requests_by_id.get_mut(&row.request_id.into())
+                {
+                    req.data_selection.insert(row.into());
+                }
+            });
+
+        sbdata_cubby_info_dsl::fm_support_bundle_data_sled_cubby_info
+            .filter(sbdata_cubby_info_dsl::sitrep_id.eq(sitrep_uuid))
+            .select(model::fm::SbdataSledCubbyInfo::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load sb_req_sled_cubby_info rows",
+                    )
+            })?
+            .into_iter()
+            .for_each(|row| {
+                if let Some((_, req)) =
+                    requests_by_id.get_mut(&row.request_id.into())
+                {
+                    req.data_selection.insert(row.into());
+                }
+            });
+
+        sbdata_sp_dumps_dsl::fm_support_bundle_data_sp_dumps
+            .filter(sbdata_sp_dumps_dsl::sitrep_id.eq(sitrep_uuid))
+            .select(model::fm::SbdataSpDumps::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load sb_req_sp_dumps rows")
+            })?
+            .into_iter()
+            .for_each(|row| {
+                if let Some((_, req)) =
+                    requests_by_id.get_mut(&row.request_id.into())
+                {
+                    req.data_selection.insert(row.into());
+                }
+            });
+
+        sbdata_host_info_dsl::fm_support_bundle_data_host_info
+            .filter(sbdata_host_info_dsl::sitrep_id.eq(sitrep_uuid))
+            .select(model::fm::SbdataHostInfo::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load sb_req_host_info rows")
+            })?
+            .into_iter()
+            .for_each(|row| {
+                let req_id: SupportBundleUuid = row.request_id.into();
+                if let Some((_, req)) = requests_by_id.get_mut(&req_id) {
+                    req.data_selection.insert(row.into());
+                }
+            });
+
+        sbdata_ereports_dsl::fm_support_bundle_data_ereports
+            .filter(sbdata_ereports_dsl::sitrep_id.eq(sitrep_uuid))
+            .select(model::fm::SbdataEreports::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load sb_req_ereports rows")
+            })?
+            .into_iter()
+            .try_for_each(|row| -> Result<(), Error> {
+                let req_id: SupportBundleUuid = row.request_id.into();
+                if let Some((_, req)) = requests_by_id.get_mut(&req_id) {
+                    req.data_selection.insert(row.try_into()?);
+                }
+                Ok(())
+            })?;
+
+        Ok(())
     }
 
     async fn fm_sitrep_cases_list_on_conn(
@@ -507,13 +723,21 @@ impl DataStore {
         // perform.
         //
         // The ordering of inserts among case child records (ereports, alert
-        // requests) and case metadata doesn't matter: there are no foreign key
-        // constraints between these tables, and garbage collection is keyed on
-        // sitrep_id (which is inserted first above). If we crash partway
-        // through, orphaned child records will be cleaned up when the orphaned
-        // sitrep is garbage collected.
+        // requests, support bundle requests) and case metadata doesn't matter:
+        // there are no foreign key constraints between these tables, and
+        // garbage collection is keyed on sitrep_id (which is inserted first
+        // above). If we crash partway through, orphaned child records will be
+        // cleaned up when the orphaned sitrep is garbage collected.
+        //
+        // Note: per-variant data selection rows are inserted after their parent
+        // `fm_support_bundle_request` rows. If a crash occurs between the two,
+        // the request will be missing its per-variant rows and will read back
+        // with an empty `BundleDataSelection`. This is acceptable: the next
+        // sitrep will carry the correct data forward.
         let mut cases = Vec::with_capacity(sitrep.cases.len());
         let mut alerts_requested = Vec::new();
+        let mut support_bundles_requested = Vec::new();
+        let mut sbdata_selections = Vec::new();
         let mut case_ereports = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
@@ -528,6 +752,16 @@ impl DataStore {
                     )
                 },
             ));
+            for req in case.support_bundles_requested {
+                let req_id = req.id;
+                let data_selection = req.data_selection.clone();
+                support_bundles_requested.push(
+                    model::fm::SupportBundleRequest::from_sitrep(
+                        sitrep_id, case_id, req,
+                    ),
+                );
+                sbdata_selections.push((req_id, data_selection));
+            }
         }
 
         if !case_ereports.is_empty() {
@@ -553,6 +787,27 @@ impl DataStore {
                         .internal_context("failed to insert alert requests")
                 })?;
         }
+
+        if !support_bundles_requested.is_empty() {
+            diesel::insert_into(sbreq_dsl::fm_support_bundle_request)
+                .values(support_bundles_requested)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert support bundle requests",
+                        )
+                })?;
+        }
+
+        // Insert per-variant data selection rows.
+        Self::insert_support_bundle_data_selection_rows(
+            &*conn,
+            sitrep_id,
+            &sbdata_selections,
+        )
+        .await?;
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -589,6 +844,130 @@ impl DataStore {
                 }
             })
             .map(|_| ())
+    }
+
+    /// Decompose [`BundleDataSelection`]s into per-variant table rows and
+    /// insert them.
+    async fn insert_support_bundle_data_selection_rows(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sitrep_id: SitrepUuid,
+        data_selections: &[(SupportBundleUuid, BundleDataSelection)],
+    ) -> Result<(), InsertSitrepError> {
+        let mut sbdata_reconfigurator_rows = Vec::new();
+        let mut sbdata_cubby_info_rows = Vec::new();
+        let mut sbdata_sp_dumps_rows = Vec::new();
+        let mut sbdata_host_info_rows = Vec::new();
+        let mut sbdata_ereports_rows = Vec::new();
+
+        for &(req_id, ref data_selection) in data_selections {
+            for data in data_selection.iter() {
+                match data {
+                    BundleData::Reconfigurator => {
+                        sbdata_reconfigurator_rows.push(
+                            model::fm::SbdataReconfigurator {
+                                sitrep_id: sitrep_id.into(),
+                                request_id: req_id.into(),
+                            },
+                        );
+                    }
+                    BundleData::SledCubbyInfo => {
+                        sbdata_cubby_info_rows.push(
+                            model::fm::SbdataSledCubbyInfo {
+                                sitrep_id: sitrep_id.into(),
+                                request_id: req_id.into(),
+                            },
+                        );
+                    }
+                    BundleData::SpDumps => {
+                        sbdata_sp_dumps_rows.push(model::fm::SbdataSpDumps {
+                            sitrep_id: sitrep_id.into(),
+                            request_id: req_id.into(),
+                        });
+                    }
+                    BundleData::HostInfo(sleds) => {
+                        sbdata_host_info_rows.push(
+                            model::fm::SbdataHostInfo::new(
+                                sitrep_id, req_id, sleds,
+                            ),
+                        );
+                    }
+                    BundleData::Ereports(filters) => {
+                        sbdata_ereports_rows.push(
+                            model::fm::SbdataEreports::new(
+                                sitrep_id, req_id, filters,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        if !sbdata_reconfigurator_rows.is_empty() {
+            diesel::insert_into(
+                sbdata_reconfigurator_dsl::fm_support_bundle_data_reconfigurator,
+            )
+            .values(sbdata_reconfigurator_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert sb_req_reconfigurator rows",
+                    )
+            })?;
+        }
+        if !sbdata_cubby_info_rows.is_empty() {
+            diesel::insert_into(
+                sbdata_cubby_info_dsl::fm_support_bundle_data_sled_cubby_info,
+            )
+            .values(sbdata_cubby_info_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert sb_req_sled_cubby_info rows",
+                    )
+            })?;
+        }
+        if !sbdata_sp_dumps_rows.is_empty() {
+            diesel::insert_into(
+                sbdata_sp_dumps_dsl::fm_support_bundle_data_sp_dumps,
+            )
+            .values(sbdata_sp_dumps_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_sp_dumps rows")
+            })?;
+        }
+        if !sbdata_host_info_rows.is_empty() {
+            diesel::insert_into(
+                sbdata_host_info_dsl::fm_support_bundle_data_host_info,
+            )
+            .values(sbdata_host_info_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_host_info rows")
+            })?;
+        }
+        if !sbdata_ereports_rows.is_empty() {
+            diesel::insert_into(
+                sbdata_ereports_dsl::fm_support_bundle_data_ereports,
+            )
+            .values(sbdata_ereports_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_ereports rows")
+            })?;
+        }
+
+        Ok(())
     }
 
     // Uncastable sentinel used to detect we attempt to make a sitrep current when
@@ -909,6 +1288,7 @@ impl DataStore {
             sitreps_deleted: usize,
             case_ereports_deleted: usize,
             alert_requests_deleted: usize,
+            support_bundle_requests_deleted: usize,
             cases_deleted: usize,
         }
 
@@ -917,6 +1297,7 @@ impl DataStore {
             sitreps_deleted,
             case_ereports_deleted,
             alert_requests_deleted,
+            support_bundle_requests_deleted,
             cases_deleted,
         } = self
             // Sitrep deletion is transactional to prevent a sitrep from being
@@ -955,6 +1336,13 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
+                    // Delete support bundle request per-variant
+                    // data selection rows, then the requests
+                    // themselves.
+                    let support_bundle_requests_deleted =
+                        Self::delete_support_bundle_rows(&conn, ids.clone())
+                            .await?;
+
                     // Delete case metadata records.
                     let cases_deleted = diesel::delete(
                         case_dsl::fm_case
@@ -975,6 +1363,7 @@ impl DataStore {
                         sitreps_deleted,
                         cases_deleted,
                         alert_requests_deleted,
+                        support_bundle_requests_deleted,
                         case_ereports_deleted,
                     })
                 }
@@ -993,9 +1382,62 @@ impl DataStore {
             "cases_deleted" => cases_deleted,
             "case_ereports_deleted" => case_ereports_deleted,
             "alert_requests_deleted" => alert_requests_deleted,
+            "support_bundle_requests_deleted" => support_bundle_requests_deleted,
         );
 
         Ok(sitreps_deleted)
+    }
+
+    /// Delete per-variant data selection rows for support bundle requests,
+    /// then the support bundle request rows themselves.
+    async fn delete_support_bundle_rows(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sitrep_ids: Vec<uuid::Uuid>,
+    ) -> Result<usize, DieselError> {
+        diesel::delete(
+            sbdata_reconfigurator_dsl::fm_support_bundle_data_reconfigurator
+                .filter(
+                    sbdata_reconfigurator_dsl::sitrep_id
+                        .eq_any(sitrep_ids.clone()),
+                ),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            sbdata_cubby_info_dsl::fm_support_bundle_data_sled_cubby_info
+                .filter(
+                    sbdata_cubby_info_dsl::sitrep_id.eq_any(sitrep_ids.clone()),
+                ),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            sbdata_sp_dumps_dsl::fm_support_bundle_data_sp_dumps.filter(
+                sbdata_sp_dumps_dsl::sitrep_id.eq_any(sitrep_ids.clone()),
+            ),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            sbdata_host_info_dsl::fm_support_bundle_data_host_info.filter(
+                sbdata_host_info_dsl::sitrep_id.eq_any(sitrep_ids.clone()),
+            ),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            sbdata_ereports_dsl::fm_support_bundle_data_ereports.filter(
+                sbdata_ereports_dsl::sitrep_id.eq_any(sitrep_ids.clone()),
+            ),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            sbreq_dsl::fm_support_bundle_request
+                .filter(sbreq_dsl::sitrep_id.eq_any(sitrep_ids)),
+        )
+        .execute_async(conn)
+        .await
     }
 
     pub async fn fm_sitrep_version_list(
@@ -1057,6 +1499,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SupportBundleUuid;
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
@@ -1561,7 +2004,7 @@ mod tests {
                 de,
                 ereports,
                 alerts_requested,
-                support_bundles_requested: _,
+                support_bundles_requested,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -1638,6 +2081,10 @@ mod tests {
             // the whole map is the same.
             assert_eq!(
                 alerts_requested, &expected.alerts_requested,
+                "while checking case {case_id}"
+            );
+            assert_eq!(
+                support_bundles_requested, &expected.support_bundles_requested,
                 "while checking case {case_id}"
             );
         }
@@ -1773,6 +2220,50 @@ mod tests {
                 })
                 .unwrap();
 
+            let mut support_bundles_requested = iddqd::IdOrdMap::new();
+            support_bundles_requested
+                .insert_unique(fm::case::SupportBundleRequest {
+                    id: SupportBundleUuid::new_v4(),
+                    requested_sitrep_id: sitrep_id,
+
+                    data_selection: BundleDataSelection::all(),
+                })
+                .unwrap();
+            // A request with a multi-variant data_selection, including
+            // HostInfo(Specific) and ereport time filters.
+            {
+                use nexus_types::fm::ereport::EreportFilters;
+                use nexus_types::support_bundle::*;
+                // Truncate to microsecond precision for CRDB roundtrip.
+                let now = {
+                    let t = chrono::Utc::now();
+                    t - chrono::Duration::nanoseconds(
+                        t.timestamp_subsec_nanos() as i64 % 1000,
+                    )
+                };
+                let sel = BundleDataSelection::new()
+                    .with_sp_dumps()
+                    .with_reconfigurator()
+                    .with_specific_sleds([
+                        omicron_uuid_kinds::SledUuid::new_v4(),
+                    ])
+                    .with_ereports(
+                        EreportFilters::new()
+                            .with_start_time(now - chrono::Duration::hours(1))
+                            .unwrap()
+                            .with_end_time(now)
+                            .unwrap(),
+                    );
+                support_bundles_requested
+                    .insert_unique(fm::case::SupportBundleRequest {
+                        id: SupportBundleUuid::new_v4(),
+                        requested_sitrep_id: sitrep_id,
+
+                        data_selection: sel,
+                    })
+                    .unwrap();
+            }
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 created_sitrep_id: sitrep_id,
@@ -1780,7 +2271,7 @@ mod tests {
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
                 alerts_requested,
-                support_bundles_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested,
                 comment: "my cool case".to_string(),
             }
         };
@@ -1858,6 +2349,108 @@ mod tests {
         assert_sitreps_eq(&sitrep, &read_sitrep);
 
         // Clean up
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_support_bundle_requests_roundtrip() {
+        let logctx = dev::test_setup_log(
+            "test_sitrep_support_bundle_requests_roundtrip",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Build a sitrep with cases that include support bundle requests,
+        // including one with a data_selection.
+        let sitrep_id = SitrepUuid::new_v4();
+        let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
+
+        let mut support_bundles_requested = iddqd::IdOrdMap::new();
+        // A request with no data_selection (whole-sled default).
+        support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: SupportBundleUuid::new_v4(),
+                requested_sitrep_id: sitrep_id,
+
+                data_selection: BundleDataSelection::all(),
+            })
+            .unwrap();
+        // A request with HostInfo(Specific) and Ereports with time-range
+        // filters, plus SpDumps.
+        {
+            use nexus_types::fm::ereport::EreportFilters;
+            use nexus_types::support_bundle::*;
+            // Truncate timestamps to microsecond precision so they survive
+            // the CRDB roundtrip (CRDB TIMESTAMPTZ has microsecond precision).
+            let now = {
+                let t = chrono::Utc::now();
+                t - chrono::Duration::nanoseconds(
+                    t.timestamp_subsec_nanos() as i64 % 1000,
+                )
+            };
+            let sled1 = omicron_uuid_kinds::SledUuid::new_v4();
+            let sled2 = omicron_uuid_kinds::SledUuid::new_v4();
+            let sel = BundleDataSelection::new()
+                .with_sp_dumps()
+                .with_specific_sleds([sled1, sled2])
+                .with_ereports(
+                    EreportFilters::new()
+                        .with_start_time(now - chrono::Duration::hours(2))
+                        .unwrap()
+                        .with_end_time(now)
+                        .unwrap()
+                        .with_serials(["BRM42"])
+                        .with_classes(["ereport.io"]),
+                );
+            support_bundles_requested
+                .insert_unique(fm::case::SupportBundleRequest {
+                    id: SupportBundleUuid::new_v4(),
+                    requested_sitrep_id: sitrep_id,
+
+                    data_selection: sel,
+                })
+                .unwrap();
+        }
+
+        let case = fm::Case {
+            id: case_id,
+            created_sitrep_id: sitrep_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::PowerShelf,
+            ereports: iddqd::IdOrdMap::new(),
+            alerts_requested: iddqd::IdOrdMap::new(),
+            support_bundles_requested,
+            comment: "testing support bundle requests".to_string(),
+        };
+
+        let mut cases = iddqd::IdOrdMap::new();
+        cases.insert_unique(case).unwrap();
+        let sitrep = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "sitrep with support bundle requests".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases,
+        };
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Read back and verify the support bundle requests roundtripped.
+        let read_sitrep = datastore
+            .fm_sitrep_read(&opctx, sitrep_id)
+            .await
+            .expect("failed to read sitrep");
+
+        assert_sitreps_eq(&sitrep, &read_sitrep);
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

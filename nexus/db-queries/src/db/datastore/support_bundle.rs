@@ -158,6 +158,167 @@ impl DataStore {
             })
     }
 
+    /// Returns the [`BundleDataSelection`] for a support bundle.
+    ///
+    /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
+    pub async fn support_bundle_data_selection(
+        &self,
+        opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+    ) -> Result<nexus_types::support_bundle::BundleDataSelection, Error> {
+        use crate::db::model::fm::{
+            SbdataEreports, SbdataHostInfo, SbdataReconfigurator,
+            SbdataSledCubbyInfo, SbdataSpDumps,
+        };
+        use nexus_db_schema::schema::fm_support_bundle_data_ereports::dsl as sbdata_ereports_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_data_host_info::dsl as sbdata_host_info_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_data_reconfigurator::dsl as sbdata_reconfigurator_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_data_sled_cubby_info::dsl as sbdata_sled_cubby_info_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_data_sp_dumps::dsl as sbdata_sp_dumps_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request::dsl as sbreq_dsl;
+        use nexus_db_schema::schema::support_bundle::dsl as sb_dsl;
+        use nexus_types::support_bundle::BundleDataSelection;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Look up a sitrep that carries this bundle's request, by joining
+        // support_bundle with fm_support_bundle_request on the bundle ID.
+        // If the bundle isn't FM-managed or has no request row, return
+        // `BundleDataSelection::all()` so that the collector gathers
+        // everything.
+        //
+        // The same request appears in every sitrep that carries it forward,
+        // each with identical per-variant data selection rows, so any
+        // matching sitrep will do.
+        let sitrep_id: Option<Uuid> = sb_dsl::support_bundle
+            .inner_join(
+                sbreq_dsl::fm_support_bundle_request
+                    .on(sb_dsl::id.eq(sbreq_dsl::id)),
+            )
+            .filter(sb_dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .select(sbreq_dsl::sitrep_id)
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to look up support bundle request",
+                    )
+            })?;
+
+        let Some(sitrep_id) = sitrep_id else {
+            return Ok(BundleDataSelection::all());
+        };
+
+        // Query each per-variant table scoped by (sitrep_id, request_id).
+        let bundle_uuid = bundle_id.into_untyped_uuid();
+
+        let reconfigurator: Option<SbdataReconfigurator> =
+            sbdata_reconfigurator_dsl::fm_support_bundle_data_reconfigurator
+                .filter(
+                    sbdata_reconfigurator_dsl::sitrep_id.eq(sitrep_id).and(
+                        sbdata_reconfigurator_dsl::request_id.eq(bundle_uuid),
+                    ),
+                )
+                .select(SbdataReconfigurator::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to query sb_req_reconfigurator",
+                        )
+                })?;
+
+        let sled_cubby_info: Option<SbdataSledCubbyInfo> =
+            sbdata_sled_cubby_info_dsl::fm_support_bundle_data_sled_cubby_info
+                .filter(
+                    sbdata_sled_cubby_info_dsl::sitrep_id.eq(sitrep_id).and(
+                        sbdata_sled_cubby_info_dsl::request_id.eq(bundle_uuid),
+                    ),
+                )
+                .select(SbdataSledCubbyInfo::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to query sb_req_sled_cubby_info",
+                        )
+                })?;
+
+        let sp_dumps: Option<SbdataSpDumps> =
+            sbdata_sp_dumps_dsl::fm_support_bundle_data_sp_dumps
+                .filter(
+                    sbdata_sp_dumps_dsl::sitrep_id
+                        .eq(sitrep_id)
+                        .and(sbdata_sp_dumps_dsl::request_id.eq(bundle_uuid)),
+                )
+                .select(SbdataSpDumps::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to query sb_req_sp_dumps")
+                })?;
+
+        let host_info: Option<SbdataHostInfo> =
+            sbdata_host_info_dsl::fm_support_bundle_data_host_info
+                .filter(
+                    sbdata_host_info_dsl::sitrep_id
+                        .eq(sitrep_id)
+                        .and(sbdata_host_info_dsl::request_id.eq(bundle_uuid)),
+                )
+                .select(SbdataHostInfo::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to query sb_req_host_info")
+                })?;
+
+        let ereports: Option<SbdataEreports> =
+            sbdata_ereports_dsl::fm_support_bundle_data_ereports
+                .filter(
+                    sbdata_ereports_dsl::sitrep_id
+                        .eq(sitrep_id)
+                        .and(sbdata_ereports_dsl::request_id.eq(bundle_uuid)),
+                )
+                .select(SbdataEreports::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to query sb_req_ereports")
+                })?;
+
+        // Assemble the BundleDataSelection from the variant rows.
+        let mut selection = BundleDataSelection::new();
+        if let Some(s) = reconfigurator {
+            selection.insert(s.into());
+        }
+        if let Some(s) = sled_cubby_info {
+            selection.insert(s.into());
+        }
+        if let Some(s) = sp_dumps {
+            selection.insert(s.into());
+        }
+        if let Some(s) = host_info {
+            selection.insert(s.into());
+        }
+        if let Some(s) = ereports {
+            selection.insert(s.try_into()?);
+        }
+
+        Ok(selection)
+    }
+
     /// Looks up a single support bundle
     pub async fn support_bundle_get(
         &self,

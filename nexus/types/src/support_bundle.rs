@@ -115,7 +115,10 @@ impl BundleDataSelection {
             .with_sp_dumps()
             .with_ereports(
                 EreportFilters::new()
-                    .with_start_time(chrono::Utc::now() - chrono::Days::new(7))
+                    .with_start_time(
+                        omicron_common::now_db_precision()
+                            - chrono::Days::new(7),
+                    )
                     .expect("no end time set, cannot fail"),
             )
     }
