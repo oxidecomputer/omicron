@@ -22,7 +22,6 @@ use diesel::{
     PgConnection, PgExpressionMethods, QueryDsl, SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
-use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
@@ -41,9 +40,11 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// This is a wrapper around [`networking::BgpPeer`], with three additions:
@@ -1439,15 +1440,14 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    // Map to look up peers by the db representation of their address.
-    let mut peer_by_addr: BTreeMap<Option<IpNetwork>, &networking::BgpPeer> =
-        BTreeMap::new();
+    // Map to look up peer properties after insertion.
+    let mut peer_properties = BgpPeerProperties::default();
 
     let mut bgp_peer_config = Vec::new();
     for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
             // Track peers for policy lookup.
-            peer_by_addr.insert(p.addr.ip_db_repr(), &p);
+            peer_properties.insert(&peer_config.link_name, p);
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1560,7 +1560,7 @@ async fn do_switch_port_settings_create(
 
     for p in db_bgp_peers.into_iter() {
         // Lookup policies and communities for peers.
-        let Some(peer) = peer_by_addr.get(&p.raw_ip_in_db_repr()) else {
+        let Some(peer) = peer_properties.get(&p) else {
             return Err(err.bail(
                 SwitchPortSettingsCreateError::InternalError(format!(
                     "unexpectedly missing peer {:?} on interface {} \
@@ -1657,6 +1657,51 @@ async fn do_switch_port_settings_create(
     result.addresses = switch_port_address_view(conn, addresses).await?;
 
     Ok(result)
+}
+
+/// Helper struct for mapping just-inserted `SwitchPortBgpPeerConfig` rows back
+/// to their communities and import/export policies.
+///
+/// In `do_switch_port_settings_create()`, we insert into
+/// `switch_port_settings_bgp_peer_config`, take the returned inserted rows, and
+/// use them to construct a `BgpPeerFromDb`. This requires also reassembling
+/// each peer's communities and import/export policies; this structure keeps
+/// track of the mapping.
+///
+/// Internally, it uses separate maps for numbered peers (identified by the peer
+/// address) and unnumbered peers (identified by the link name).
+#[derive(Debug, Default)]
+struct BgpPeerProperties<'a> {
+    numbered_peers: BTreeMap<IpAddr, &'a networking::BgpPeer>,
+    unnumbered_peers: BTreeMap<&'a external::Name, &'a networking::BgpPeer>,
+}
+
+impl<'a> BgpPeerProperties<'a> {
+    fn insert(
+        &mut self,
+        link_name: &'a external::Name,
+        peer: &'a networking::BgpPeer,
+    ) {
+        match peer.addr {
+            RouterPeerType::Unnumbered { .. } => {
+                self.unnumbered_peers.insert(link_name, peer);
+            }
+            RouterPeerType::Numbered { ip } => {
+                self.numbered_peers.insert(ip.into(), peer);
+            }
+        }
+    }
+
+    fn get(
+        &self,
+        inserted_peer: &SwitchPortBgpPeerConfig,
+    ) -> Option<&'a networking::BgpPeer> {
+        let maybe_peer = match inserted_peer.raw_ip_in_db_repr() {
+            Some(ip) => self.numbered_peers.get(&ip.ip()),
+            None => self.unnumbered_peers.get(&inserted_peer.interface_name.0),
+        };
+        maybe_peer.copied() // strip off one level of reference
+    }
 }
 
 async fn switch_port_address_view(
