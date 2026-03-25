@@ -3,13 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Subnet Pools, collections of IP subnets for external subnet allocation
-//!
-//! TODO(#9453): This module contains stub implementations that return
-//! "not implemented" errors. Full implementation requires:
-//! - Database schema and models (see nexus/db-model/)
-//! - Datastore methods (see nexus/db-queries/src/db/datastore/)
-//! - Authorization resources (see nexus/auth/src/authz/)
-//! - Replacing these stubs with real implementations
 
 use crate::app::Unimpl;
 use nexus_auth::authz;
