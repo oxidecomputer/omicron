@@ -3746,7 +3746,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_c
     -- application-level checks for those requirements.
     addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     community INT8 NOT NULL,
-    id UUID NOT NULL PRIMARY KEY
+    id UUID NOT NULL,
+
+    -- We use an explictly-named primary key index to ensure idempotency in the
+    -- schema migration step that changed the primary key of this table.
+    CONSTRAINT switch_port_settings_bgp_peer_config_communities_pkey_id
+        PRIMARY KEY (id)
 );
 
 -- Unique constraint for numbered BGP peers (those with an address)
@@ -3772,7 +3777,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_a
     -- application-level checks for those requirements.
     addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     prefix INET NOT NULL,
-    id UUID NOT NULL PRIMARY KEY
+    id UUID NOT NULL,
+
+    -- We use an explictly-named primary key index to ensure idempotency in the
+    -- schema migration step that changed the primary key of this table.
+    CONSTRAINT switch_port_settings_bgp_peer_config_allow_import_pkey_id
+        PRIMARY KEY (id)
 );
 
 -- Unique constraint for numbered BGP peers (those with an address)
@@ -3798,7 +3808,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_a
     -- application-level checks for those requirements.
     addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     prefix INET NOT NULL,
-    id UUID NOT NULL PRIMARY KEY
+    id UUID NOT NULL,
+
+    -- We use an explictly-named primary key index to ensure idempotency in the
+    -- schema migration step that changed the primary key of this table.
+    CONSTRAINT switch_port_settings_bgp_peer_config_allow_export_pkey_id
+        PRIMARY KEY (id)
 );
 
 -- Unique constraint for numbered BGP peers (those with an address)
