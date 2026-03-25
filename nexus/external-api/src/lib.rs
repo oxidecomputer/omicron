@@ -34,7 +34,7 @@ use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_03_06_01;
-use nexus_types_versions::v2026_03_18_00;
+use nexus_types_versions::v2026_03_25_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -4638,13 +4638,13 @@ pub trait NexusExternalApi {
         tags = ["system/networking"],
         versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
     }]
-    async fn networking_switch_port_settings_create_v2026_03_18_00(
+    async fn networking_switch_port_settings_create_v2026_03_25_00(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<
-            v2026_03_18_00::networking::SwitchPortSettingsCreate,
+            v2026_03_25_00::networking::SwitchPortSettingsCreate,
         >,
     ) -> Result<
-        HttpResponseCreated<v2026_03_18_00::networking::SwitchPortSettings>,
+        HttpResponseCreated<v2026_03_25_00::networking::SwitchPortSettings>,
         HttpError,
     > {
         Self::networking_switch_port_settings_create(
@@ -4676,7 +4676,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create_v2026_03_18_00(
+        Self::networking_switch_port_settings_create_v2026_03_25_00(
             rqctx,
             new_settings.try_map(TryFrom::try_from).map_err(|err| {
                 HttpError::for_bad_request(
@@ -4766,11 +4766,11 @@ pub trait NexusExternalApi {
         tags = ["system/networking"],
         versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
     }]
-    async fn networking_switch_port_settings_view_v2026_03_18_00(
+    async fn networking_switch_port_settings_view_v2026_03_25_00(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<
-        HttpResponseOk<v2026_03_18_00::networking::SwitchPortSettings>,
+        HttpResponseOk<v2026_03_25_00::networking::SwitchPortSettings>,
         HttpError,
     > {
         Self::networking_switch_port_settings_view(rqctx, path_params)
@@ -4792,7 +4792,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_view_v2026_03_18_00(
+        Self::networking_switch_port_settings_view_v2026_03_25_00(
             rqctx,
             path_params,
         )

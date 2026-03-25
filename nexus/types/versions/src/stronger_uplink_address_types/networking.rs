@@ -24,9 +24,9 @@ use crate::v2025_11_20_00::networking::RouteConfig;
 use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
 use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
 use crate::v2026_03_06_01;
-use crate::v2026_03_18_00;
-use crate::v2026_03_18_00::networking::BgpPeer;
-use crate::v2026_03_18_00::networking::BgpPeerConfig;
+use crate::v2026_03_25_00;
+use crate::v2026_03_25_00::networking::BgpPeer;
+use crate::v2026_03_25_00::networking::BgpPeerConfig;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -75,7 +75,8 @@ impl TryFrom<v2025_11_20_00::networking::Address> for Address {
                 InvalidIpAddrError::LoopbackAddress
                 | InvalidIpAddrError::MulticastAddress
                 | InvalidIpAddrError::Ipv4Broadcast
-                | InvalidIpAddrError::Ipv6UnicastLinkLocal => return Err(err),
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                | InvalidIpAddrError::Ipv4MappedIpv6 => return Err(err),
             },
         };
 
@@ -148,13 +149,13 @@ pub struct SwitchPortSettingsCreate {
     pub addresses: Vec<AddressConfig>,
 }
 
-impl TryFrom<v2026_03_18_00::networking::SwitchPortSettingsCreate>
+impl TryFrom<v2026_03_25_00::networking::SwitchPortSettingsCreate>
     for SwitchPortSettingsCreate
 {
     type Error = UplinkIpNetError;
 
     fn try_from(
-        value: v2026_03_18_00::networking::SwitchPortSettingsCreate,
+        value: v2026_03_25_00::networking::SwitchPortSettingsCreate,
     ) -> Result<Self, Self::Error> {
         let addresses = value
             .addresses
@@ -364,7 +365,7 @@ pub struct SwitchPortSettings {
 }
 
 impl From<SwitchPortSettings>
-    for v2026_03_18_00::networking::SwitchPortSettings
+    for v2026_03_25_00::networking::SwitchPortSettings
 {
     fn from(value: SwitchPortSettings) -> Self {
         Self {
