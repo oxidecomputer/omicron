@@ -1365,6 +1365,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::ip_pool_resource::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_ip_pool).await?;
@@ -1402,12 +1403,20 @@ impl DataStore {
         self.transaction_retry_wrapper("ip_pool_set_default")
             .transaction(&conn, |conn| {
                 async move {
-                    // Read this link to get its pool_type and ip_version.
-                    // These are denormalized from ip_pool onto the link.
+                    // Read this link to get its pool_type and ip_version, and
+                    // revalidate that the parent pool is still live. This is
+                    // only possible during the narrow window in a concurrent
+                    // pool delete after the pool has been soft-deleted but
+                    // before its link rows have been removed.
                     let link = dsl::ip_pool_resource
+                        .inner_join(
+                            pool_dsl::ip_pool
+                                .on(pool_dsl::id.eq(dsl::ip_pool_id)),
+                        )
                         .filter(dsl::ip_pool_id.eq(ip_pool_id))
                         .filter(dsl::resource_id.eq(silo_id))
                         .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                        .filter(pool_dsl::time_deleted.is_null())
                         .select(IpPoolResource::as_select())
                         .get_result_async(&conn)
                         .await?;
@@ -4401,6 +4410,88 @@ mod test {
             .ip_pool_link_silo(&opctx, external_link)
             .await
             .expect_err("Should have failed to link deleted IP Pool to Silo");
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This is probably very hard to reproduce reliably in an integration test:
+    // the real delete path soft-deletes the pool and then removes link rows in
+    // the next statement, so the buggy behavior depends on hitting that narrow
+    // inter-statement window.
+    #[tokio::test]
+    async fn cannot_set_deleted_pool_as_default_even_if_link_exists() {
+        let logctx = dev::test_setup_log(
+            "cannot_set_deleted_pool_as_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should be able to link pool to default silo");
+
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
+        let c = diesel::update(pool_dsl::ip_pool.find(ip_pool.id()))
+            .set(pool_dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        use nexus_db_schema::schema::ip_pool_resource::dsl as resource_dsl;
+        let links: Vec<IpPoolResource> = resource_dsl::ip_pool_resource
+            .filter(resource_dsl::ip_pool_id.eq(ip_pool.id()))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should still have link rows for deleted pool");
+        assert_eq!(links.len(), 1);
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::Fleet,
+            nexus_types::silo::DEFAULT_SILO_ID,
+            LookupType::ById(nexus_types::silo::DEFAULT_SILO_ID),
+        );
+        let err = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err(
+                "Should not be able to set default on a deleted pool link",
+            );
         assert_matches!(err, Error::ObjectNotFound { .. });
 
         db.terminate().await;

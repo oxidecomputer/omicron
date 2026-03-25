@@ -404,6 +404,7 @@ impl DataStore {
     ) -> UpdateResult<SubnetPoolSiloLink> {
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
         let pool_id = to_db_typed_uuid(authz_pool.id());
         let silo_id = authz_silo.id();
@@ -436,10 +437,19 @@ impl DataStore {
         self.transaction_retry_wrapper("update_subnet_pool_silo_link")
             .transaction(&conn, |conn| {
                 async move {
-                    // Get this link's ip_version.
+                    // Read this link to get its ip_version, and revalidate
+                    // that the parent pool is still live. This is only
+                    // possible during the narrow window in a concurrent pool
+                    // delete after the pool has been soft-deleted but before
+                    // its link rows have been removed.
                     let link = dsl::subnet_pool_silo_link
+                        .inner_join(
+                            pool_dsl::subnet_pool
+                                .on(pool_dsl::id.eq(dsl::subnet_pool_id)),
+                        )
                         .filter(dsl::subnet_pool_id.eq(pool_id))
                         .filter(dsl::silo_id.eq(silo_id))
+                        .filter(pool_dsl::time_deleted.is_null())
                         .select(SubnetPoolSiloLink::as_select())
                         .get_result_async(&conn)
                         .await?;
@@ -1464,6 +1474,7 @@ mod tests {
     use chrono::Utc;
     use diesel::ExpressionMethods as _;
     use diesel::QueryDsl as _;
+    use diesel::SelectableHelper as _;
     use dropshot::PaginationOrder;
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
@@ -4002,6 +4013,83 @@ mod tests {
         };
         assert!(id.contains(&authz_silo.id().to_string()));
         assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This is probably very hard to reproduce reliably in an integration test:
+    // the real delete path soft-deletes the pool and then removes link rows in
+    // the next statement, so the buggy behavior depends on hitting that narrow
+    // inter-statement window.
+    #[tokio::test]
+    async fn cannot_set_deleted_subnet_pool_as_default_even_if_link_exists() {
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl as link_dsl;
+
+        let logctx = dev::test_setup_log(
+            "cannot_set_deleted_subnet_pool_as_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect("should be able to link pool to default silo");
+
+        let c = diesel::update(
+            pool_dsl::subnet_pool.find(db_pool.id().into_untyped_uuid()),
+        )
+        .set(pool_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete subnet pool");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let links: Vec<SubnetPoolSiloLink> = link_dsl::subnet_pool_silo_link
+            .filter(
+                link_dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("should still have link rows for deleted subnet pool");
+        assert_eq!(links.len(), 1);
+
+        let err = datastore
+            .update_subnet_pool_silo_link(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err(
+                "should not be able to set default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
 
         db.terminate().await;
         logctx.cleanup_successful();

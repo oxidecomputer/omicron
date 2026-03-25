@@ -20,6 +20,7 @@ use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
@@ -581,6 +582,12 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(link.subnet_pool_id, new_pool.identity.id);
     assert_eq!(link.silo_id, new_silo_id);
     assert!(link.is_default);
+
+    // Promoting the same pool again is a no-op, not an error.
+    let link: SubnetPoolSiloLink =
+        object_put(client, &new_pool_link_url, &update).await;
+    assert!(link.is_default);
+
     // Verify from both sides: pool view and silo view.
     assert_silos_for_pool(client, "new-pool-guy", &[(new_silo_id, true)]).await;
     assert_silos_for_pool(
@@ -628,6 +635,28 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         ],
     )
     .await;
+}
+
+#[nexus_test]
+async fn cannot_update_nonexistent_silo_link(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
+
+    let url = format!(
+        "{}/{}/silos/{}",
+        SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID
+    );
+
+    // Updating to default on a nonexistent link should 404.
+    let params = subnet_pool::SubnetPoolSiloUpdate { is_default: true };
+    object_put_error(client, &url, &params, StatusCode::NOT_FOUND).await;
+
+    // Updating to non-default on a nonexistent link should also 404.
+    let params = subnet_pool::SubnetPoolSiloUpdate { is_default: false };
+    object_put_error(client, &url, &params, StatusCode::NOT_FOUND).await;
 }
 
 #[nexus_test]
