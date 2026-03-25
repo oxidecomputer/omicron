@@ -162,5 +162,5 @@ pub fn mk_ereport(
         "serial_number" => ?data.serial_number,
         "part_number" => ?data.part_number,
     );
-    Ereport { reporter, data }
+    Ereport::new(data, reporter)
 }

@@ -176,6 +176,14 @@ impl FmRendezvous {
 
         status
     }
+
+    async fn mark_ereports_seen(
+        &self,
+        sitrep: &Arc<(SitrepVersion, Sitrep)>,
+        opctx: &OpContext,
+    ) -> AlertStats {
+        todo!("eliza draw the rest of the owl")
+    }
 }
 
 #[cfg(test)]

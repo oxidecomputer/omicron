@@ -19,6 +19,7 @@ use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
 ///
@@ -41,6 +42,8 @@ pub struct Sitrep {
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
     pub cases: IdOrdMap<Case>,
+    // A map of all ereports associated with cases in this sitrep.
+    // pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please

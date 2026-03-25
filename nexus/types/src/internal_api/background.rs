@@ -916,6 +916,16 @@ pub struct FmAlertStats {
     pub errors: Vec<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FmEreportMarkingStats {
+    /// The total number of alerts requested by the current sitrep.
+    pub total_ereports_seen: usize,
+    /// The total number of alerts which were *first* requested in the current sitrep.
+    pub ereports_marked_seen: usize,
+    /// Errors that occurred during this activation.
+    pub errors: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProbeError {
     /// ID of the sled we failed to send a probe to.

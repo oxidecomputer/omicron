@@ -16,7 +16,9 @@ use diesel::sql_types;
 use nexus_db_schema::schema::ereport;
 use nexus_types::fm::ereport::{self as types, Ena, EreportId};
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
+use omicron_uuid_kinds::{
+    EreporterRestartKind, OmicronZoneKind, SitrepKind, SledKind,
+};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -97,6 +99,8 @@ pub struct Ereport {
 
     #[diesel(embed)]
     pub reporter: Reporter,
+
+    pub marked_seen_in: Option<DbTypedUuid<SitrepKind>>,
 }
 
 #[derive(Copy, Clone, Debug, Insertable, Queryable, Selectable)]
@@ -175,13 +179,19 @@ impl Ereport {
             class,
             report,
             reporter: reporter.into(),
+            marked_seen_in: None,
         }
     }
 }
 
 impl From<types::Ereport> for Ereport {
-    fn from(types::Ereport { data, reporter }: types::Ereport) -> Self {
-        Self::new(data, reporter)
+    fn from(
+        types::Ereport { data, reporter, marked_seen_in }: types::Ereport,
+    ) -> Self {
+        Self {
+            marked_seen_in: marked_seen_in.map(Into::into),
+            ..Self::new(data, reporter)
+        }
     }
 }
 
@@ -197,6 +207,7 @@ impl TryFrom<Ereport> for types::Ereport {
             class,
             report,
             reporter,
+            marked_seen_in,
             ..
         } = ereport;
         let reporter = reporter.try_into().map_err(|e: Error| {
@@ -215,6 +226,7 @@ impl TryFrom<Ereport> for types::Ereport {
                 report,
             },
             reporter,
+            marked_seen_in: marked_seen_in.map(Into::into),
         })
     }
 }

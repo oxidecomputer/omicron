@@ -210,18 +210,8 @@ impl DataStore {
         // JOINed query *will* potentially load the same ereport multiple times
         // in that case, but this is still probably much more efficient than
         // issuing a bunch of smaller queries to load ereports individually.
+        let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
         let mut case_ereports = {
-            // TODO(eliza): as a potential optimization, since ereport
-            // records are immutable, we might consider hanging onto this
-            // map of all ereports in the `Sitrep` structure. Then, when we
-            // load the next sitrep, we could first check if the ereports in
-            // that sitrep are contained in the map before loading them
-            // again. That would require changing the rest of this code to
-            // not `JOIN` with the ereports table here, and instead populate
-            // a list of additional ereports we need to load, and issue a
-            // separate query for that. But, it's worth considering maybe if
-            // this becomes a bottleneck...
-            let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
             let mut map = HashMap::<CaseUuid, iddqd::IdOrdMap<_>>::new();
 
             let mut paginator =
@@ -1749,7 +1739,7 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport { data: ereport1, reporter }),
+                    ereport: Arc::new(fm::Ereport::new(ereport1, reporter)),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 1".to_string(),
                 })
@@ -1790,7 +1780,7 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport { data: ereport2, reporter }),
+                    ereport: Arc::new(fm::Ereport::new(ereport2, reporter)),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 2".to_string(),
                 })

@@ -96,6 +96,7 @@ impl<'a> SitrepBuilder<'a> {
                 time_created,
             },
             cases: self.cases.cases.into_iter().map(fm::Case::from).collect(),
+            // ereports_by_id: todo!(),
         }
     }
 }

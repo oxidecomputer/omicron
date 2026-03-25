@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,9 +23,15 @@ pub struct Ereport {
     pub data: EreportData,
     #[serde(flatten)]
     pub reporter: Reporter,
+
+    pub marked_seen_in: Option<SitrepUuid>,
 }
 
 impl Ereport {
+    pub fn new(data: EreportData, reporter: Reporter) -> Self {
+        Self {data, reporter, marked_seen_in: None }
+    }
+
     pub fn id(&self) -> &EreportId {
         &self.data.id
     }

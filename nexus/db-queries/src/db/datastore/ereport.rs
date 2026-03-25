@@ -16,12 +16,15 @@ use crate::db::model::SqlU32;
 use crate::db::model::ereport as model;
 use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -36,6 +39,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
@@ -314,6 +318,57 @@ impl DataStore {
             })?;
         Ok((created, latest))
     }
+
+    pub async fn ereports_mark_seen(
+        &self,
+        opctx: &OpContext,
+        sitrep_id: SitrepUuid,
+        ereport_ids: impl IntoIterator<Item = EreportId>,
+    ) -> Result<usize, Error> {
+        // let ids: Vec<(Uuid, diesel::sql_types::BigInt)> = ereport_ids
+        //     .into_iter()
+        //     .map(|EreportId { restart_id, ena }| {
+        //         (restart_id.into_untyped_uuid(), DbEna::from(ena).to_sql())
+        //     })
+        //     .collect();
+        // diesel::update(dsl::ereport)
+        //     .filter((dsl::restart_id, dsl::ena).eq_any(&ids))
+        //     .filter(dsl::marked_seen_in.is_null())
+        //     .set(dsl::marked_seen_in.eq(sitrep_id.into_untyped_uuid()))
+        //     .execute_async(&self.pool_connection_authorized(opctx).await?)
+        //     .await
+        //     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        //
+        todo!()
+    }
+
+    fn ereports_mark_seen_query(
+        sitrep_id: SitrepUuid,
+        ereport_ids: impl IntoIterator<Item = EreportId>,
+    ) -> TypedSqlQuery<sql_types::BigInt> {
+        let mut restart_ids = Vec::new();
+        let mut enas = Vec::new();
+        for EreportId { restart_id, ena } in ereport_ids {
+            restart_ids.push(restart_id.into_untyped_uuid());
+            enas.push(DbEna::from(ena));
+        }
+        let mut builder = QueryBuilder::new();
+        builder
+            .sql("UPDATE EREPORT SET marked_seen_in = ")
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(
+                " WHERE (restart_id, ena) IN (\
+                SELECT unnest (",
+            )
+            .param()
+            .bind::<sql_types::Array<sql_types::Uuid>, _>(restart_ids)
+            .sql("), unnest (")
+            .param()
+            .bind::<sql_types::Array<sql_types::BigInt>, _>(enas)
+            .sql("))");
+        builder.query::<sql_types::BigInt>()
+    }
 }
 
 #[cfg(test)]
@@ -321,6 +376,7 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use dropshot::PaginationOrder;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -490,6 +546,67 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn expectorate_ereports_mark_seen() {
+        let query = DataStore::ereports_mark_seen_query(
+            SitrepUuid::new_v4(),
+            vec![
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(2),
+                },
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(3),
+                },
+            ],
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereports_mark_seen.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_ereports_mark_seen_query() {
+        let logctx = dev::test_setup_log("explain_ereports_mark_seen_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::ereports_mark_seen_query(
+            SitrepUuid::new_v4(),
+            vec![
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(2),
+                },
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(3),
+                },
+            ],
+        );
+
+        // Before trying to explain the query, let's start by making sure it's
+        // valid SQL...
+        let q = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
+        match dev::db::format_sql(&q).await {
+            Ok(q) => eprintln!("HELLO ELIZA YOUR QUERY LOOKS LIKE THIS:\n {q}"),
+            Err(e) => panic!("query is malformed: {e}\n{q}"),
+        }
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("--- explanation:\n{explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
     // This test tests that the `ereport_fetch_matching` queries succeed with
     // filters that only select ereports over a time range, and the default (no
     // filters).

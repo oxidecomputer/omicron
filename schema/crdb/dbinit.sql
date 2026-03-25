@@ -7220,6 +7220,16 @@ ON omicron.public.user_data_export (state);
      */
     slot INT4,
 
+    /*
+     * if this is `true`, the ereport has *definitely* been seen by at least
+     * one committed sitrep at some point in time. if it is `false`, the
+     * ereport may or may not have been included in a sitrep, and you will
+     * have to actually check the sitrep to find out.
+     *
+     * have fun!
+     */
+    marked_seen_in UUID,
+
     CONSTRAINT reporter_identity_validity CHECK (
         (
             -- ereports from SPs must have a SP type and slot, and must not
