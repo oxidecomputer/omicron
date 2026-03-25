@@ -11,6 +11,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
@@ -32,6 +33,15 @@ pub struct Project {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     // Important: Silo ID does not get presented to user
+}
+
+/// View of a Project at the system level
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloProject {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub silo_id: Uuid,
 }
 
 /// Create-time parameters for a `Project`

@@ -292,6 +292,10 @@ networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-p
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
 networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
 
+API operations found with tag "system/projects"
+OPERATION ID                             METHOD   URL PATH
+system_project_list                      GET      /v1/system/projects
+
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users

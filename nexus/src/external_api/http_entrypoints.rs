@@ -58,7 +58,7 @@ use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::probe::ProbeInfo;
-use nexus_types::external_api::project::Project;
+use nexus_types::external_api::project::{Project, SiloProject};
 use nexus_types::external_api::rack::{Rack, RackMembershipStatus};
 use nexus_types::external_api::silo::{
     Silo, SiloQuotas, SiloUtilization, Utilization,
@@ -93,7 +93,6 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -110,6 +109,7 @@ use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::*;
 use propolis_client::support::WebSocketStream;
@@ -1063,6 +1063,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus.scim_v2_delete_group(&opctx, path.group_id).await
         })
         .await
+    }
+
+    async fn system_project_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<SiloProject>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let projects = nexus
+                .system_project_list(&opctx, &pag_params)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                projects,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn project_list(

@@ -15,6 +15,7 @@ use nexus_db_queries::db;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -24,6 +25,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use std::sync::Arc;
+use uuid::Uuid;
 
 impl super::Nexus {
     pub fn project_lookup<'a>(
@@ -79,6 +81,14 @@ impl super::Nexus {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Project> {
         self.db_datastore.projects_list(opctx, pagparams).await
+    }
+
+    pub(crate) async fn system_project_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Project> {
+        self.db_datastore.system_projects_list(opctx, pagparams).await
     }
 
     pub(crate) async fn project_update(

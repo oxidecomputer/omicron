@@ -28,6 +28,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::project::SERVICES_PROJECT;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -37,6 +38,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 // Generates internal functions used for validation during project deletion.
 // Used simply to reduce boilerplate.
@@ -328,6 +330,21 @@ impl DataStore {
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn system_projects_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Project> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use nexus_db_schema::schema::project::dsl;
+        paginated(dsl::project, dsl::id, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(Project::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Updates a project (clobbering update -- no etag)

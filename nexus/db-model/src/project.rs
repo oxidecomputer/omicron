@@ -67,6 +67,12 @@ impl From<Project> for project_types::Project {
     }
 }
 
+impl From<Project> for project_types::SiloProject {
+    fn from(project: Project) -> Self {
+        Self { identity: project.identity(), silo_id: project.silo_id }
+    }
+}
+
 impl DatastoreCollectionConfig<Instance> for Project {
     type CollectionId = Uuid;
     type GenerationNumberColumn = project::dsl::rcgen;

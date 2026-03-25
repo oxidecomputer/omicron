@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_24_00, SYSTEM_PROJECT_LIST),
     (2026_03_23_00, RENAME_PREFIX_LEN),
     (2026_03_14_00, MULTICAST_DROP_MVLAN),
     (2026_03_12_00, CAPITALIZE_DESCRIPTIONS),
@@ -343,6 +344,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     for allocation by users in that silo.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-ip-pools"
+                }
+            },
+            "system/projects" = {
+                description = "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-projects"
                 }
             },
             "system/subnet-pools" = {
@@ -1084,6 +1091,21 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::project::Project>>, HttpError>;
+
+    /// List system-wide projects
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/projects",
+        tags = ["system/projects"],
+        versions = VERSION_SYSTEM_PROJECT_LIST..,
+    }]
+    async fn system_project_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::project::SiloProject>>,
+        HttpError,
+    >;
 
     /// Create project
     #[endpoint {
