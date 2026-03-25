@@ -88,6 +88,11 @@ pub struct GcOrphansResult {
     pub cases_deleted: usize,
     pub case_ereports_deleted: usize,
     pub alert_requests_deleted: usize,
+    pub batch_size: u32,
+    pub sitrep_metadata_batches: usize,
+    pub case_batches: usize,
+    pub case_ereport_batches: usize,
+    pub alert_request_batches: usize,
 }
 
 impl DataStore {
@@ -942,9 +947,11 @@ impl DataStore {
                 async move {
                     // Step 1: Delete orphaned fm_sitrep metadata rows.
                     let mut sitreps_deleted = 0usize;
+                    let mut sitrep_metadata_batches = 0usize;
                     {
                         let mut marker = SitrepUuid::nil();
                         loop {
+                            sitrep_metadata_batches += 1;
                             let result =
                                 Self::delete_orphaned_sitrep_metadata_query(
                                     marker,
@@ -971,20 +978,30 @@ impl DataStore {
                     let mut cases_deleted = 0usize;
                     let mut case_ereports_deleted = 0usize;
                     let mut alert_requests_deleted = 0usize;
+                    let mut case_batches = 0usize;
+                    let mut case_ereport_batches = 0usize;
+                    let mut alert_request_batches = 0usize;
 
-                    for (table, counter) in [
+                    for (table, counter, batch_counter) in [
                         (
                             SitrepChildTable::CaseEreport,
                             &mut case_ereports_deleted,
+                            &mut case_ereport_batches,
                         ),
                         (
                             SitrepChildTable::AlertRequest,
                             &mut alert_requests_deleted,
+                            &mut alert_request_batches,
                         ),
-                        (SitrepChildTable::Case, &mut cases_deleted),
+                        (
+                            SitrepChildTable::Case,
+                            &mut cases_deleted,
+                            &mut case_batches,
+                        ),
                     ] {
                         let mut marker = SitrepUuid::nil();
                         loop {
+                            *batch_counter += 1;
                             let result = Self::deeply_orphaned_batch_query(
                                 table,
                                 marker,
@@ -1010,6 +1027,11 @@ impl DataStore {
                         cases_deleted,
                         case_ereports_deleted,
                         alert_requests_deleted,
+                        batch_size: SQL_BATCH_SIZE.get(),
+                        sitrep_metadata_batches,
+                        case_batches,
+                        case_ereport_batches,
+                        alert_request_batches,
                     })
                 }
             })

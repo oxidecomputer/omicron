@@ -896,6 +896,11 @@ pub struct SitrepGcStatus {
     pub orphaned_cases_deleted: usize,
     pub orphaned_case_ereports_deleted: usize,
     pub orphaned_alert_requests_deleted: usize,
+    pub batch_size: u32,
+    pub sitrep_metadata_batches: usize,
+    pub case_batches: usize,
+    pub case_ereport_batches: usize,
+    pub alert_request_batches: usize,
     pub errors: Vec<String>,
 }
 

@@ -54,6 +54,11 @@ impl SitrepGc {
                     result.case_ereports_deleted;
                 status.orphaned_alert_requests_deleted =
                     result.alert_requests_deleted;
+                status.batch_size = result.batch_size;
+                status.sitrep_metadata_batches = result.sitrep_metadata_batches;
+                status.case_batches = result.case_batches;
+                status.case_ereport_batches = result.case_ereport_batches;
+                status.alert_request_batches = result.alert_request_batches;
             }
             Err(err) => {
                 let err = InlineErrorChain::new(&err);

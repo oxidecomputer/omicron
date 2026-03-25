@@ -3458,6 +3458,11 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         orphaned_cases_deleted,
         orphaned_case_ereports_deleted,
         orphaned_alert_requests_deleted,
+        batch_size,
+        sitrep_metadata_batches,
+        case_batches,
+        case_ereport_batches,
+        alert_request_batches,
         errors,
     } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
         Err(error) => {
@@ -3470,17 +3475,27 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
+    pub const BATCH_SIZE: &str = "batch size:";
     pub const SITREPS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const SITREP_BATCHES: &str = "  batches:";
     pub const CASES_DELETED: &str = "orphaned cases deleted:";
+    pub const CASE_BATCHES: &str = "  batches:";
     pub const EREPORTS_DELETED: &str = "orphaned case ereports deleted:";
+    pub const EREPORT_BATCHES: &str = "  batches:";
     pub const ALERTS_DELETED: &str = "orphaned alert requests deleted:";
+    pub const ALERT_BATCHES: &str = "  batches:";
     pub const ERRORS: &str = "errors:";
     pub const WIDTH: usize = const_max_len(&[
         ERRORS,
+        BATCH_SIZE,
         SITREPS_DELETED,
+        SITREP_BATCHES,
         CASES_DELETED,
+        CASE_BATCHES,
         EREPORTS_DELETED,
+        EREPORT_BATCHES,
         ALERTS_DELETED,
+        ALERT_BATCHES,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
     if !errors.is_empty() {
@@ -3490,16 +3505,23 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         }
     }
 
+    println!("    {BATCH_SIZE:<WIDTH$}{batch_size:>NUM_WIDTH$}");
     println!(
         "    {SITREPS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
     );
+    println!(
+        "    {SITREP_BATCHES:<WIDTH$}{sitrep_metadata_batches:>NUM_WIDTH$}"
+    );
     println!("    {CASES_DELETED:<WIDTH$}{orphaned_cases_deleted:>NUM_WIDTH$}");
+    println!("    {CASE_BATCHES:<WIDTH$}{case_batches:>NUM_WIDTH$}");
     println!(
         "    {EREPORTS_DELETED:<WIDTH$}{orphaned_case_ereports_deleted:>NUM_WIDTH$}"
     );
+    println!("    {EREPORT_BATCHES:<WIDTH$}{case_ereport_batches:>NUM_WIDTH$}");
     println!(
         "    {ALERTS_DELETED:<WIDTH$}{orphaned_alert_requests_deleted:>NUM_WIDTH$}"
     );
+    println!("    {ALERT_BATCHES:<WIDTH$}{alert_request_batches:>NUM_WIDTH$}");
 }
 
 fn print_task_fm_rendezvous(details: &serde_json::Value) {
