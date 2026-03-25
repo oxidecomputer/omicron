@@ -193,6 +193,7 @@ impl TryFrom<v2026_04_16_00::networking::SwitchPortSettingsCreate>
     Ord,
 )]
 #[serde(from = "UplinkIpNet", into = "UplinkIpNet")]
+#[schemars(transparent)]
 pub struct LoopbackAddressIpNet(pub(crate) UplinkIpNet);
 
 /// A loopback address is an address that is assigned to a rack switch but is

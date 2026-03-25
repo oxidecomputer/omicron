@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026041600.0.0"
+    "version": "2026042000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -15329,10 +15329,10 @@
         "type": "object",
         "properties": {
           "address": {
-            "description": "The address and prefix length of this address.",
+            "description": "The address and prefix length of this address or a specification that this address should be an `addrconf` address.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNet"
+                "$ref": "#/components/schemas/UplinkAddress"
               }
             ]
           },
@@ -24436,7 +24436,7 @@
             "description": "The loopback IP address and prefix length.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNet"
+                "$ref": "#/components/schemas/UplinkIpNet"
               }
             ]
           },
@@ -24477,9 +24477,12 @@
         "type": "object",
         "properties": {
           "address": {
-            "description": "The address to create.",
-            "type": "string",
-            "format": "ip"
+            "description": "The address to create and its subnet mask.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkIpNet"
+              }
+            ]
           },
           "address_lot": {
             "description": "The name or id of the address lot this loopback address will pull an address from.",
@@ -24492,12 +24495,6 @@
           "anycast": {
             "description": "Address is an anycast address.\n\nThis allows the address to be assigned to multiple locations simultaneously.",
             "type": "boolean"
-          },
-          "mask": {
-            "description": "The subnet mask to use for the address.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
           },
           "rack_id": {
             "description": "The rack containing the switch this loopback address will be configured on.",
@@ -24517,7 +24514,6 @@
           "address",
           "address_lot",
           "anycast",
-          "mask",
           "rack_id",
           "switch_slot"
         ]
@@ -28787,10 +28783,10 @@
         "type": "object",
         "properties": {
           "address": {
-            "description": "The IP address and prefix.",
+            "description": "The IP address and prefix, or indicator that this is an `addrconf` address.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNet"
+                "$ref": "#/components/schemas/UplinkAddress"
               }
             ]
           },
@@ -29867,6 +29863,45 @@
         "required": [
           "items"
         ]
+      },
+      "UplinkAddress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "addrconf"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip_net": {
+                "$ref": "#/components/schemas/UplinkIpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "static"
+                ]
+              }
+            },
+            "required": [
+              "ip_net",
+              "type"
+            ]
+          }
+        ]
+      },
+      "UplinkIpNet": {
+        "$ref": "#/components/schemas/IpNet"
       },
       "User": {
         "description": "View of a User",

@@ -4663,7 +4663,7 @@ pub trait NexusExternalApi {
         tags = ["system/networking"],
         versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_STRONGER_UPLINK_ADDRESS_TYPES,
     }]
-    async fn networking_switch_port_settings_create_v2026_03_18_00(
+    async fn networking_switch_port_settings_create_v2026_03_25_00(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<
             v2026_04_16_00::networking::SwitchPortSettingsCreate,
@@ -4701,7 +4701,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create_v2026_03_18_00(
+        Self::networking_switch_port_settings_create_v2026_03_25_00(
             rqctx,
             new_settings.try_map(TryFrom::try_from).map_err(|err| {
                 HttpError::for_bad_request(
