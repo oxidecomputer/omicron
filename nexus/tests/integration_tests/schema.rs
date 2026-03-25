@@ -4798,6 +4798,8 @@ mod migration_242 {
     }
 }
 
+mod migration_243;
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -4945,6 +4947,12 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new()
             .before(migration_242::before)
             .after(migration_242::after),
+    );
+    map.insert(
+        Version::new(243, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_243::before)
+            .after(migration_243::after),
     );
     map
 }
