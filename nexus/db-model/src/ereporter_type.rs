@@ -26,12 +26,3 @@ impl_enum_type!(
     Sp => b"sp"
     Host => b"host"
 );
-
-impl EreporterType {
-    pub fn for_reporter(reporter: &nexus_types::fm::ereport::Reporter) -> Self {
-        match reporter {
-            nexus_types::fm::ereport::Reporter::Sp { .. } => Self::Sp,
-            nexus_types::fm::ereport::Reporter::HostOs { .. } => Self::Host,
-        }
-    }
-}
