@@ -225,6 +225,7 @@ mod test {
                 time_created: Utc::now(),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone())
@@ -290,6 +291,7 @@ mod test {
                 time_created: Utc::now(),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone())

@@ -329,6 +329,7 @@ mod tests {
                     time_created: Utc::now(),
                 },
                 cases,
+                ereports_by_id: Default::default(),
             }
         };
 
@@ -344,7 +345,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, alerts } = status else {
+        let Status::Executed { sitrep_id, alerts, .. } = status else {
             panic!("rendezvous should have executed, as there is a sitrep");
         };
         assert_eq!(sitrep_id, sitrep1_id);
@@ -416,6 +417,7 @@ mod tests {
                     time_created: Utc::now(),
                 },
                 cases,
+                ereports_by_id: Default::default(),
             }
         };
 
@@ -431,7 +433,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, alerts } = status else {
+        let Status::Executed { sitrep_id, alerts, .. } = status else {
             panic!("rendezvous should have executed, as there is a sitrep");
         };
         assert_eq!(sitrep_id, sitrep2_id);

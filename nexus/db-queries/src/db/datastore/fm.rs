@@ -1234,6 +1234,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
 
         datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
@@ -1283,6 +1284,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1297,6 +1299,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -1338,6 +1341,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1353,6 +1357,7 @@ mod tests {
                 parent_sitrep_id: Some(nonexistent_id),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, sitrep2).await;
@@ -1388,6 +1393,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1402,6 +1408,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.unwrap();
 
@@ -1417,6 +1424,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         let result = datastore.fm_sitrep_insert(&opctx, sitrep3.clone()).await;
 
@@ -1458,6 +1466,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone())
@@ -1499,6 +1508,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.metadata.id),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone())
@@ -1670,6 +1680,7 @@ mod tests {
                 parent_sitrep_id,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         match datastore.fm_sitrep_insert(&opctx, sitrep).await {
             Ok(_) => {
@@ -1811,6 +1822,11 @@ mod tests {
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
+        let mut ereports_by_id = iddqd::IdOrdMap::new();
+        for case in cases.iter() {
+            ereports_by_id
+                .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
+        }
         fm::Sitrep {
             metadata: fm::SitrepMetadata {
                 id: sitrep_id,
@@ -1822,6 +1838,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases,
+            ereports_by_id,
         }
     }
 
@@ -1883,11 +1900,13 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                     },
                     cases: Default::default(),
+                    ereports_by_id: Default::default(),
                 },
             )
             .await
             .expect("failed to insert second sitrep");
 
+        // Delete the original sitrep
         // Verify the sitrep, cases, and ereport assignments exist
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -2038,6 +2057,7 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                     },
                     cases: Default::default(),
+                    ereports_by_id: Default::default(),
                 },
             )
             .await

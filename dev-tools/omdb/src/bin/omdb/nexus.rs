@@ -3547,7 +3547,7 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
     }
 }
 
-fn display_fm_ereport_marking_stats(stats: &FmEreportMarkingStats) {
+fn display_fm_ereport_marking_stats(_stats: &FmEreportMarkingStats) {
     todo!("eliza")
 }
 
