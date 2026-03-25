@@ -488,9 +488,9 @@ pub mod external_subnet {
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetSelector;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetUpdate;
 
-    // Create types from FLOATING_IP_ALLOCATOR_UPDATE (pool field removed).
-    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetAllocator;
-    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetCreate;
+    // Create types from RENAME_PREFIX_LEN (prefix_len -> prefix_length).
+    pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetAllocator;
+    pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetCreate;
 }
 
 pub mod sled {

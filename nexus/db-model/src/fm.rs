@@ -11,7 +11,8 @@
 //!
 //! These types are used when inserting and reading sitreps in CRDB; when in
 //! use, the sitrep is represented as a [`nexus_types::fm::Sitrep`]. See the
-//! documentation in [`nexus_types::fm`] for more information.
+//! documentation in [`nexus_types::fm`] for more information, and the
+//! [crate-level documentation](crate) for general conventions.
 
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;

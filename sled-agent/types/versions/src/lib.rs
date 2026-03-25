@@ -73,6 +73,8 @@ pub mod v29;
 pub mod v3;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
 pub mod v30;
+#[path = "add_icmpv6_firewall_support/mod.rs"]
+pub mod v31;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

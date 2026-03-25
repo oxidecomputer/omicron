@@ -102,7 +102,7 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -210,7 +210,7 @@ async fn external_subnet_pagination(cptestctx: &ControlPlaneTestContext) {
                 description: String::from("A test external subnet"),
             },
             allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-                prefix_len: 28,
+                prefix_length: 28,
                 pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
                 },
@@ -310,7 +310,7 @@ async fn attach_test_impl(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -429,7 +429,7 @@ async fn cannot_attach_subnet_in_another_project(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -497,7 +497,7 @@ async fn cannot_attach_subnet_attached_to_another_instance(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -582,7 +582,7 @@ async fn cannot_detach_subnet_that_is_not_attached(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -653,7 +653,7 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
                 description: String::from("A test external subnet"),
             },
             allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-                prefix_len: 30,
+                prefix_length: 30,
                 pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
                 },
@@ -679,7 +679,7 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 30,
+            prefix_length: 30,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -735,7 +735,7 @@ async fn cannot_delete_attached_external_subnet(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -856,7 +856,7 @@ async fn external_subnet_create_name_conflict(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -892,7 +892,7 @@ async fn external_subnet_create_nonexistent_pool(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name("no-such-pool".parse().unwrap()),
             },
@@ -962,7 +962,7 @@ async fn test_limited_collaborator_external_subnet_lifecycle(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -1103,7 +1103,7 @@ async fn external_subnet_create_unlinked_pool(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
