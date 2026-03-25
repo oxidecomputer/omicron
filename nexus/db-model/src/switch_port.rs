@@ -976,7 +976,7 @@ impl SwitchPortBgpPeerConfig {
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr: p.addr.ip_db_repr().map(From::from),
+            addr: p.addr.ip_db_repr(),
             hold_time: p.hold_time.into(),
             idle_hold_time: p.idle_hold_time.into(),
             delay_open: p.delay_open.into(),
