@@ -353,6 +353,12 @@ impl DataStore {
                 " WHERE (restart_id, ena) IN (\
                 SELECT unnest (",
             )
+            // This bit is kindas screwy: unfortunately, Postgres serialization
+            // does not support bind parameters which are arrays of tuples, so
+            // we must bind two separate arrays and `unnest` them back into one
+            // big array.
+            //
+            // Pretend it's just one array please?
             .param()
             .bind::<sql_types::Array<sql_types::Uuid>, _>(restart_ids)
             .sql("), unnest (")
