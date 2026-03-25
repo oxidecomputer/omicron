@@ -5183,7 +5183,7 @@ mod migration_244 {
                 ))
                 .await
                 .expect("failed to insert pre-migration rows for 243");
-            })
+        })
     }
 
     pub(super) fn after<'a>(
@@ -5230,7 +5230,6 @@ mod migration_244 {
         })
     }
 }
-
 
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
