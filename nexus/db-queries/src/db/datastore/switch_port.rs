@@ -2339,4 +2339,164 @@ mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    /// Regression test for omicron#10151: two unnumbered BGP peers on different
+    /// links must each retain their own communities and import/export policies.
+    #[tokio::test]
+    async fn test_two_unnumbered_bgp_peers_on_different_links() {
+        let logctx = dev::test_setup_log(
+            "test_two_unnumbered_bgp_peers_on_different_links",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rack_id: Uuid =
+            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+
+        datastore
+            .switch_port_create(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch0,
+                "qsfp0".parse::<Name>().unwrap().into(),
+            )
+            .await
+            .expect("switch port create");
+
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "announce-set".parse().unwrap(),
+                description: String::new(),
+            },
+            announcement: Vec::new(),
+        };
+        datastore.bgp_create_announce_set(&opctx, &announce_set).await.unwrap();
+
+        let bgp_config = BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "bgp-cfg".parse().unwrap(),
+                description: String::new(),
+            },
+            asn: 65000,
+            bgp_announce_set_id: NameOrId::Name(
+                "announce-set".parse().unwrap(),
+            ),
+            vrf: None,
+            checker: None,
+            shaper: None,
+            max_paths: Default::default(),
+        };
+        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
+
+        // Two unnumbered peers on different links, each with distinct
+        // communities and import/export policies.
+        let peer_phy0 = BgpPeer {
+            bgp_config: NameOrId::Name("bgp-cfg".parse().unwrap()),
+            addr: RouterPeerType::Unnumbered {
+                router_lifetime: RouterLifetimeConfig::new(100).unwrap(),
+            },
+            hold_time: 0,
+            idle_hold_time: 0,
+            delay_open: 0,
+            connect_retry: 0,
+            keepalive: 0,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: vec![10, 20],
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_export: ImportExportPolicy::Allow(vec![
+                "10.0.0.0/8".parse().unwrap(),
+            ]),
+            allowed_import: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        };
+
+        let peer_phy1 = BgpPeer {
+            addr: RouterPeerType::Unnumbered {
+                router_lifetime: RouterLifetimeConfig::new(200).unwrap(),
+            },
+            communities: vec![30, 40],
+            allowed_export: ImportExportPolicy::NoFiltering,
+            allowed_import: ImportExportPolicy::Allow(vec![
+                "172.16.0.0/12".parse().unwrap(),
+            ]),
+            ..peer_phy0.clone()
+        };
+
+        let settings = SwitchPortSettingsCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "two-unnumbered".parse().unwrap(),
+                description: String::new(),
+            },
+            port_config: SwitchPortConfigCreate {
+                geometry: SwitchPortGeometry::Qsfp28x1,
+            },
+            groups: Vec::new(),
+            links: vec![],
+            interfaces: vec![],
+            routes: vec![],
+            bgp_peers: vec![
+                BgpPeerConfig {
+                    link_name: "phy0".parse().unwrap(),
+                    peers: vec![peer_phy0],
+                },
+                BgpPeerConfig {
+                    link_name: "phy1".parse().unwrap(),
+                    peers: vec![peer_phy1],
+                },
+            ],
+            addresses: vec![],
+        };
+
+        let result = datastore
+            .switch_port_settings_create(&opctx, &settings, None)
+            .await
+            .expect("created settings");
+
+        assert_eq!(result.bgp_peers.len(), 2);
+
+        let db_peers: HashMap<_, _> =
+            result.bgp_peers.into_iter().map(|p| (p.inner.addr, p)).collect();
+
+        let input_peers: Vec<_> =
+            settings.bgp_peers.iter().flat_map(|c| c.peers.iter()).collect();
+
+        for input in input_peers {
+            let db_peer = db_peers
+                .get(&input.addr)
+                .expect("each input peer should be present in db result");
+
+            let mut expected_communities = input.communities.clone();
+            let mut actual_communities = db_peer.inner.communities.clone();
+            expected_communities.sort_unstable();
+            actual_communities.sort_unstable();
+            assert_eq!(expected_communities, actual_communities);
+
+            let mut expected_export = input.allowed_export.clone();
+            let mut actual_export = db_peer.inner.allowed_export.clone();
+            if let ImportExportPolicy::Allow(v) = &mut expected_export {
+                v.sort_unstable();
+            }
+            if let ImportExportPolicy::Allow(v) = &mut actual_export {
+                v.sort_unstable();
+            }
+            assert_eq!(expected_export, actual_export);
+
+            let mut expected_import = input.allowed_import.clone();
+            let mut actual_import = db_peer.inner.allowed_import.clone();
+            if let ImportExportPolicy::Allow(v) = &mut expected_import {
+                v.sort_unstable();
+            }
+            if let ImportExportPolicy::Allow(v) = &mut actual_import {
+                v.sort_unstable();
+            }
+            assert_eq!(expected_import, actual_import);
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
