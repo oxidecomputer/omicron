@@ -343,7 +343,10 @@ impl DataStore {
         }
         let mut builder = QueryBuilder::new();
         builder
-            .sql("UPDATE EREPORT SET marked_seen_in = ")
+            .sql(
+                "UPDATE omicron.public.ereport \
+                 SET marked_seen_in = ",
+            )
             .param()
             .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
             .sql(
