@@ -13578,6 +13578,7 @@ dependencies = [
  "iddqd",
  "illumos-utils",
  "indent_write",
+ "ipnetwork",
  "omicron-common",
  "omicron-ledger",
  "omicron-passwords",
