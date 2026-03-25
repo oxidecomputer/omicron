@@ -1891,33 +1891,61 @@ async fn do_switch_port_settings_delete(
         .execute_async(conn)
         .await?;
 
-    // delete allowed exports
+    // delete allowed exports; this is split into two queries (whether or not
+    // `addr` is NULL) so we can make use of the two unique indices we have on
+    // this table and avoid a full scan
     use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
     use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl;
     diesel::delete(
         allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export,
     )
     .filter(allow_export::port_settings_id.eq(id))
+    .filter(allow_export::addr.is_null())
+    .execute_async(conn)
+    .await?;
+    diesel::delete(
+        allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export,
+    )
+    .filter(allow_export::port_settings_id.eq(id))
+    .filter(allow_export::addr.is_not_null())
     .execute_async(conn)
     .await?;
 
-    // delete allowed imports
+    // delete allowed imports; as above, split into two queries to use the two
+    // unique indices on this table
     use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
     use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl;
     diesel::delete(
         allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import,
     )
     .filter(allow_import::port_settings_id.eq(id))
+    .filter(allow_import::addr.is_null())
+    .execute_async(conn)
+    .await?;
+    diesel::delete(
+        allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import,
+    )
+    .filter(allow_import::port_settings_id.eq(id))
+    .filter(allow_import::addr.is_not_null())
     .execute_async(conn)
     .await?;
 
-    // delete communities
+    // delete communities; as above, split into two queries to use the two
+    // unique indices on this table
     use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities as bgp_communities;
     use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl;
     diesel::delete(
         bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities,
     )
     .filter(bgp_communities::port_settings_id.eq(id))
+    .filter(bgp_communities::addr.is_null())
+    .execute_async(conn)
+    .await?;
+    diesel::delete(
+        bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities,
+    )
+    .filter(bgp_communities::port_settings_id.eq(id))
+    .filter(bgp_communities::addr.is_not_null())
     .execute_async(conn)
     .await?;
 
