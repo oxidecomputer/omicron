@@ -1204,6 +1204,7 @@ enum SwitchPortSettingsCreateError {
     AddressLotNotFound,
     BgpConfigNotFound,
     ReserveBlock(ReserveBlockError),
+    DuplicatePeer { kind: &'static str, duplication: String },
     InternalError(String),
 }
 
@@ -1222,6 +1223,12 @@ impl From<SwitchPortSettingsCreateError> for Error {
             SwitchPortSettingsCreateError::ReserveBlock(
                 ReserveBlockError::AddressNotInLot,
             ) => Error::invalid_request("address not in lot"),
+            SwitchPortSettingsCreateError::DuplicatePeer {
+                kind,
+                duplication,
+            } => Error::invalid_request(format!(
+                "duplicate {kind} peer using {duplication}"
+            )),
             SwitchPortSettingsCreateError::InternalError(cause) => {
                 Error::internal_error(cause)
             }
@@ -1467,7 +1474,9 @@ async fn do_switch_port_settings_create(
     for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
             // Track peers for policy lookup.
-            peer_properties.insert(&peer_config.link_name, p);
+            if let Err(e) = peer_properties.insert(&peer_config.link_name, p) {
+                return Err(err.bail(e));
+            };
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1701,14 +1710,34 @@ impl<'a> BgpPeerProperties<'a> {
         &mut self,
         link_name: &'a external::Name,
         peer: &'a networking::BgpPeer,
-    ) {
-        match peer.addr {
+    ) -> Result<(), SwitchPortSettingsCreateError> {
+        let prev = match peer.addr {
             RouterPeerType::Unnumbered { .. } => {
-                self.unnumbered_peers.insert(link_name, peer);
+                self.unnumbered_peers.insert(link_name, peer)
             }
             RouterPeerType::Numbered { ip } => {
-                self.numbered_peers.insert(ip.into(), peer);
+                self.numbered_peers.insert(ip.into(), peer)
             }
+        };
+
+        // We should never have duplicates: that either means we have multiple
+        // numbered peers with the same address or multiple unnumbered peers on
+        // the same link, either of which is a configuration error.
+        if prev.is_none() {
+            Ok(())
+        } else {
+            let (kind, duplication) = match peer.addr {
+                RouterPeerType::Unnumbered { .. } => {
+                    ("unnumbered", format!("link {link_name}"))
+                }
+                RouterPeerType::Numbered { ip } => {
+                    ("numbered", format!("address {ip}"))
+                }
+            };
+            Err(SwitchPortSettingsCreateError::DuplicatePeer {
+                kind,
+                duplication,
+            })
         }
     }
 
