@@ -40,8 +40,6 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::OptionalError;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_lookup::DbConnection;
@@ -1367,7 +1365,6 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
-        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::ip_pool_resource::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_ip_pool).await?;
@@ -1378,10 +1375,9 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // if we're making is_default false, we can just do that without
-        // checking any other stuff
         if !is_default {
-            let updated_link = diesel::update(dsl::ip_pool_resource)
+            // Simple case: just unset the default flag.
+            return diesel::update(dsl::ip_pool_resource)
                 .filter(dsl::resource_id.eq(silo_id))
                 .filter(dsl::ip_pool_id.eq(ip_pool_id))
                 .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
@@ -1389,128 +1385,79 @@ impl DataStore {
                 .returning(IpPoolResource::as_returning())
                 .get_result_async(&*conn)
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "Transaction error: {:?}",
-                        e
-                    ))
-                })?;
-            return Ok(updated_link);
+                .map_err(|e| match e {
+                    DieselError::NotFound => LookupType::ByCompositeId(
+                        format!(
+                            "ip_pool_id: {}, silo_id: {}",
+                            ip_pool_id, silo_id,
+                        ),
+                    )
+                    .into_not_found(ResourceType::IpPoolResource),
+                    e => public_error_from_diesel(e, ErrorHandler::Server),
+                });
         }
 
-        // Errors returned from the below transactions.
-        #[derive(Debug)]
-        enum IpPoolResourceUpdateError {
-            FailedToUnsetDefault(DieselError),
-            PoolNotFound(DieselError),
-        }
-        type TxnError = TransactionError<IpPoolResourceUpdateError>;
-
-        let err = OptionalError::new();
-
+        // Setting as default: demote any existing default for the same
+        // (silo, pool_type, ip_version), then promote this one.
         self.transaction_retry_wrapper("ip_pool_set_default")
             .transaction(&conn, |conn| {
-                let err = err.clone();
                 async move {
-                    // Get the pool type and IP version of the pool we're
-                    // making default. A silo can have multiple defaults (one
-                    // per pool type + IP version variant), so we only unset the
-                    // default for the matching (pool_type, ip_version) pair.
-                    let (pool_type, ip_version) = pool_dsl::ip_pool
-                        .filter(pool_dsl::id.eq(ip_pool_id))
-                        .filter(pool_dsl::time_deleted.is_null())
-                        .select((pool_dsl::pool_type, pool_dsl::ip_version))
-                        .first_async::<(IpPoolType, IpVersion)>(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail(TxnError::CustomError(
-                                IpPoolResourceUpdateError::PoolNotFound(e),
-                            ))
-                        })?;
-
-                    // Find existing default for this silo with the same pool
-                    // type and IP version.
-                    let existing_default = dsl::ip_pool_resource
-                        .inner_join(pool_dsl::ip_pool)
-                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                    // Read this link to get its pool_type and ip_version.
+                    // These are denormalized from ip_pool onto the link.
+                    let link = dsl::ip_pool_resource
+                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
                         .filter(dsl::resource_id.eq(silo_id))
-                        .filter(dsl::is_default.eq(true))
-                        .filter(pool_dsl::pool_type.eq(pool_type))
-                        .filter(pool_dsl::ip_version.eq(ip_version))
+                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
                         .select(IpPoolResource::as_select())
                         .get_result_async(&conn)
-                        .await;
+                        .await?;
 
-                    // If there is an existing default, we need to unset it
-                    // before we can set the new default
-                    if let Ok(existing_default) = existing_default {
-                        // If the pool we're making default is already default
-                        // for this silo, don't error: just noop
-                        if existing_default.ip_pool_id == ip_pool_id {
-                            return Ok(existing_default);
-                        }
-
-                        let unset_default =
-                            diesel::update(dsl::ip_pool_resource)
-                                .filter(
-                                    dsl::resource_id
-                                        .eq(existing_default.resource_id),
-                                )
-                                .filter(
-                                    dsl::ip_pool_id
-                                        .eq(existing_default.ip_pool_id),
-                                )
-                                .filter(
-                                    dsl::resource_type
-                                        .eq(existing_default.resource_type),
-                                )
-                                .set(dsl::is_default.eq(false))
-                                .execute_async(&conn)
-                                .await;
-                        if let Err(e) = unset_default {
-                            return Err(err.bail(TxnError::CustomError(
-                                IpPoolResourceUpdateError::FailedToUnsetDefault(
-                                    e,
-                                ),
-                            )));
-                        }
+                    // Already default — no-op.
+                    if link.is_default {
+                        return Ok(link);
                     }
 
-                    let updated_link = diesel::update(dsl::ip_pool_resource)
-                        .filter(dsl::resource_id.eq(silo_id))
-                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
-                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
-                        .set(dsl::is_default.eq(true))
-                        .returning(IpPoolResource::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
-                    Ok(updated_link)
+                    // Demote any existing default for same
+                    // (silo, pool_type, ip_version).
+                    diesel::update(
+                        dsl::ip_pool_resource
+                            .filter(dsl::resource_id.eq(silo_id))
+                            .filter(
+                                dsl::resource_type
+                                    .eq(IpPoolResourceType::Silo),
+                            )
+                            .filter(dsl::pool_type.eq(link.pool_type))
+                            .filter(dsl::ip_version.eq(link.ip_version))
+                            .filter(dsl::is_default.eq(true)),
+                    )
+                    .set(dsl::is_default.eq(false))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Promote this one.
+                    diesel::update(
+                        dsl::ip_pool_resource
+                            .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                            .filter(dsl::resource_id.eq(silo_id))
+                            .filter(
+                                dsl::resource_type
+                                    .eq(IpPoolResourceType::Silo),
+                            ),
+                    )
+                    .set(dsl::is_default.eq(true))
+                    .returning(IpPoolResource::as_returning())
+                    .get_result_async(&conn)
+                    .await
                 }
             })
             .await
-            .map_err(|e| match err.take() {
-                Some(TxnError::CustomError(
-                    IpPoolResourceUpdateError::FailedToUnsetDefault(err),
-                )) => public_error_from_diesel(err, ErrorHandler::Server),
-                Some(TxnError::CustomError(
-                    IpPoolResourceUpdateError::PoolNotFound(err),
-                )) => public_error_from_diesel(
-                    err,
-                    ErrorHandler::NotFoundByResource(authz_ip_pool),
-                ),
-                Some(TxnError::Database(err)) => {
-                    public_error_from_diesel(err, ErrorHandler::Server)
-                }
-                None => public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::IpPoolResource,
-                        // TODO: would be nice to put the actual names and/or ids in
-                        // here but LookupType on each of the two silos doesn't have
-                        // a nice to_string yet or a way of composing them
-                        LookupType::ByCompositeId("(pool, silo)".to_string()),
-                    ),
-                ),
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "ip_pool_id: {}, silo_id: {}",
+                    ip_pool_id, silo_id,
+                ))
+                .into_not_found(ResourceType::IpPoolResource),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 

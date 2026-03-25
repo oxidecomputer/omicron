@@ -738,9 +738,10 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let error =
         object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
             .await;
-    assert_eq!(
+    assert!(
+        error.message.starts_with("not found: ip-pool-resource with id"),
+        "unexpected error: {}",
         error.message,
-        "not found: ip-pool-resource with id \"(pool, silo)\""
     );
 
     // associate both pools with the test silo
