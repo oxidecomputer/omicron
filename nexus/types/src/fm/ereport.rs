@@ -163,33 +163,6 @@ pub enum Reporter {
     HostOs { sled: SledUuid, slot: Option<u16> },
 }
 
-impl Reporter {
-    /// Returns the slot type occupied by this reporter.
-    ///
-    /// N.B. that while the return type of this method is [`SpType`], this is
-    /// technically a bit of a misnomer, as it's really the type of the physical
-    /// slot in the rack --- `SpType::Sled` is returned for both sled SP *and*
-    /// sled host OS reporters.
-    pub fn slot_type(&self) -> SpType {
-        match self {
-            Self::Sp { sp_type, .. } => *sp_type,
-            Self::HostOs { .. } => SpType::Sled,
-        }
-    }
-
-    /// Returns the slot number occupied by this reporter, if it is known.
-    ///
-    /// This will always be `Some` for SP reporters. For host OS reporters, this
-    /// may be `None` if inventory data has not yet been collected that contains
-    /// a given sled.
-    pub fn slot(&self) -> Option<u16> {
-        match self {
-            Self::Sp { slot, .. } => Some(*slot),
-            Self::HostOs { slot, .. } => *slot,
-        }
-    }
-}
-
 impl fmt::Display for Reporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Display format based on:
