@@ -818,7 +818,8 @@ impl DataStore {
     }
 
     /// Deletes all sitreps with the provided IDs.
-    pub async fn fm_sitrep_delete_all(
+    #[cfg(test)]
+    async fn fm_sitrep_delete_all(
         &self,
         opctx: &OpContext,
         ids: impl IntoIterator<Item = SitrepUuid>,
@@ -1011,9 +1012,7 @@ impl DataStore {
                                     marker,
                                     SQL_BATCH_SIZE,
                                 )
-                                .get_result_async::<(i64, Option<Uuid>)>(
-                                    &conn,
-                                )
+                                .get_result_async::<(i64, Option<Uuid>)>(&conn)
                                 .await?;
                             *counter += rows_deleted as usize;
 
