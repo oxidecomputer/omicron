@@ -960,15 +960,13 @@ impl DataStore {
                         let mut marker = SitrepUuid::nil();
                         loop {
                             sitrep_metadata_batches += 1;
-                            let result =
+                            let (deleted, next_marker) =
                                 Self::delete_orphaned_sitrep_metadata_query(
                                     marker,
                                     SQL_BATCH_SIZE,
                                 )
                                 .get_result_async::<(i64, Option<Uuid>)>(&conn)
                                 .await?;
-
-                            let (deleted, next_marker) = result;
                             sitreps_deleted += deleted as usize;
 
                             match next_marker {
@@ -1007,15 +1005,16 @@ impl DataStore {
                         let mut marker = SitrepUuid::nil();
                         loop {
                             *batch_counter += 1;
-                            let result = Self::deeply_orphaned_batch_query(
-                                table,
-                                marker,
-                                SQL_BATCH_SIZE,
-                            )
-                            .get_result_async::<(i64, Option<Uuid>)>(&conn)
-                            .await?;
-
-                            let (rows_deleted, next_marker) = result;
+                            let (rows_deleted, next_marker) =
+                                Self::deeply_orphaned_batch_query(
+                                    table,
+                                    marker,
+                                    SQL_BATCH_SIZE,
+                                )
+                                .get_result_async::<(i64, Option<Uuid>)>(
+                                    &conn,
+                                )
+                                .await?;
                             *counter += rows_deleted as usize;
 
                             match next_marker {
