@@ -414,12 +414,6 @@ impl DataStore {
         opctx: &OpContext,
         name_or_id: &NameOrId,
     ) -> LookupResult<SwitchPortSettingsCombinedResult> {
-        #[derive(Debug)]
-        enum SwitchPortSettingsGetError {
-            NotFound(NameOrId),
-            InternalError(String),
-        }
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -1232,6 +1226,32 @@ impl From<SwitchPortSettingsCreateError> for Error {
                 Error::internal_error(cause)
             }
         }
+    }
+}
+
+#[derive(Debug)]
+enum SwitchPortSettingsGetError {
+    NotFound(NameOrId),
+    InternalError(String),
+}
+
+// Helper trait that lets functions accept either
+// `OptionalError<SwitchPortSettingsCreateError>` or
+// `OptionalError<SwitchPortSettingsGetError>` if the only error variant they
+// need to produce is `*::InternalError(reason)`.
+trait SwitchPortSettingsInternalError: std::fmt::Debug {
+    fn internal_error(reason: String) -> Self;
+}
+
+impl SwitchPortSettingsInternalError for SwitchPortSettingsCreateError {
+    fn internal_error(reason: String) -> Self {
+        Self::InternalError(reason)
+    }
+}
+
+impl SwitchPortSettingsInternalError for SwitchPortSettingsGetError {
+    fn internal_error(reason: String) -> Self {
+        Self::InternalError(reason)
     }
 }
 
