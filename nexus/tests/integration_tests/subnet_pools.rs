@@ -14,6 +14,13 @@ use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_subnet_pool;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_delete_error;
+use nexus_test_utils::resource_helpers::object_get;
+use nexus_test_utils::resource_helpers::object_get_error;
+use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
@@ -54,26 +61,13 @@ async fn basic_subnet_pool_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(time_created, time_modified);
 
     // Get the same object if we view it directly.
-    let as_view = NexusRequest::object_get(
-        client,
-        format!("{}/{}", SUBNET_POOLS_URL, SUBNET_POOL_NAME).as_str(),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request")
-    .parsed_body::<SubnetPool>()
-    .expect("a subnet pool");
+    let pool_url = format!("{}/{}", SUBNET_POOLS_URL, SUBNET_POOL_NAME);
+    let as_view: SubnetPool = object_get(client, &pool_url).await;
     assert_eq!(as_view, pool);
 
     // Or if we list it.
-    let listed = NexusRequest::object_get(client, SUBNET_POOLS_URL)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request")
-        .parsed_body::<ResultsPage<SubnetPool>>()
-        .expect("failed to parse list of subnet pools");
+    let listed =
+        objects_list_page_authz::<SubnetPool>(client, SUBNET_POOLS_URL).await;
     assert_eq!(listed.items.len(), 1);
     assert_eq!(listed.items[0], pool);
 
@@ -86,42 +80,16 @@ async fn basic_subnet_pool_crud(cptestctx: &ControlPlaneTestContext) {
             description: Some(new_description.clone()),
         },
     };
-    let new_pool = NexusRequest::object_put(
-        client,
-        format!("{}/{}", SUBNET_POOLS_URL, SUBNET_POOL_NAME).as_str(),
-        Some(&updates),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request")
-    .parsed_body::<SubnetPool>()
-    .expect("updated subnet pool");
+    let new_pool: SubnetPool = object_put(client, &pool_url, &updates).await;
     assert_eq!(new_pool.identity.name, new_name);
     assert_eq!(new_pool.identity.description, new_description);
     assert_eq!(new_pool.identity.time_created, time_created);
     assert!(new_pool.identity.time_modified > time_modified);
 
     // Delete it, and we can't look it up anymore.
-    NexusRequest::object_delete(
-        client,
-        format!("{}/{}", SUBNET_POOLS_URL, new_name).as_str(),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        format!("{}/{}", SUBNET_POOLS_URL, new_name).as_str(),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let new_url = format!("{}/{}", SUBNET_POOLS_URL, new_name);
+    object_delete(client, &new_url).await;
+    object_get_error(client, &new_url, StatusCode::NOT_FOUND).await;
 }
 
 #[nexus_test]
@@ -136,13 +104,8 @@ async fn can_list_subnet_pools(cptestctx: &ControlPlaneTestContext) {
         pools.push(pool);
     }
     pools.sort_by(|a, b| a.identity.name.cmp(&b.identity.name));
-    let listed = NexusRequest::object_get(client, SUBNET_POOLS_URL)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request")
-        .parsed_body::<ResultsPage<SubnetPool>>()
-        .expect("failed to parse list of subnet pools");
+    let listed =
+        objects_list_page_authz::<SubnetPool>(client, SUBNET_POOLS_URL).await;
     assert_eq!(pools, listed.items);
 }
 
@@ -162,30 +125,21 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
         members.push(member);
     }
 
-    let list = NexusRequest::object_get(client, url.as_str())
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request")
-        .parsed_body::<ResultsPage<SubnetPoolMember>>()
-        .expect("a list of subnet pool members")
-        .items;
+    let list =
+        objects_list_page_authz::<SubnetPoolMember>(client, &url).await.items;
     assert_eq!(list, members);
 
     // Removing something not in the pool fails
     let to_remove =
         SubnetPoolMemberRemove { subnet: "2002:db8::/48".parse().unwrap() };
-    NexusRequest::expect_failure_with_body(
+    let remove_url = format!("{}/remove", url);
+    object_create_error(
         client,
-        StatusCode::BAD_REQUEST,
-        Method::POST,
-        format!("{}/remove", url).as_str(),
+        &remove_url,
         &to_remove,
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    .await;
 
     // Now delete one really in the pool.
     //
@@ -208,14 +162,8 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // List them and ensure it's really gone.
-    let new_list = NexusRequest::object_get(client, url.as_str())
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request")
-        .parsed_body::<ResultsPage<SubnetPoolMember>>()
-        .expect("a list of subnet pool members")
-        .items;
+    let new_list =
+        objects_list_page_authz::<SubnetPoolMember>(client, &url).await.items;
     assert_eq!(new_list.len(), list.len() - 1);
     assert!(!new_list.iter().any(|member| member.subnet == to_remove.subnet));
 
@@ -225,29 +173,13 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
         min_prefix_length: None,
         max_prefix_length: None,
     };
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::POST,
-        format!("{}/add", url).as_str(),
-        &to_add,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let add_url = format!("{}/add", url);
+    object_create_error(client, &add_url, &to_add, StatusCode::BAD_REQUEST)
+        .await;
 
     // Cannot delete the pool, because it still has members.
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::DELETE,
-        format!("{}/{}", SUBNET_POOLS_URL, SUBNET_POOL_NAME).as_str(),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let pool_url = format!("{}/{}", SUBNET_POOLS_URL, SUBNET_POOL_NAME);
+    object_delete_error(client, &pool_url, StatusCode::BAD_REQUEST).await;
 }
 
 #[nexus_test]
@@ -263,17 +195,7 @@ async fn cannot_add_pool_member_of_different_ip_version(
         min_prefix_length: None,
         max_prefix_length: None,
     };
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::POST,
-        url.as_str(),
-        &params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    object_create_error(client, &url, &params, StatusCode::BAD_REQUEST).await;
 }
 
 #[nexus_test]
@@ -298,11 +220,8 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // There should be none linked to the pool at first.
-    let linked = NexusRequest::object_get(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
-        .await
-        .items;
+    let linked =
+        objects_list_page_authz::<SubnetPoolSiloLink>(client, &url).await.items;
     assert!(linked.is_empty());
 
     // Link the first few silos.
@@ -313,11 +232,8 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Now we should list all and only those in the list.
-    let linked = NexusRequest::object_get(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
-        .await
-        .items;
+    let linked =
+        objects_list_page_authz::<SubnetPoolSiloLink>(client, &url).await.items;
     let linked_silo_ids: BTreeSet<_> =
         silos.iter().take(n_to_link).map(|s| s.identity.id).collect();
     assert_eq!(linked.len(), n_to_link);
@@ -363,23 +279,14 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
     assert!(should_be_empty.is_empty());
 
     // And if we unlink one, it no longer shows up.
-    NexusRequest::object_delete(
-        client,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL, SUBNET_POOL_NAME, linked[0].silo_id
-        ),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let unlink_url = format!(
+        "{}/{}/silos/{}",
+        SUBNET_POOLS_URL, SUBNET_POOL_NAME, linked[0].silo_id
+    );
+    object_delete(client, &unlink_url).await;
 
-    let new_linked = NexusRequest::object_get(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
-        .await
-        .items;
+    let new_linked =
+        objects_list_page_authz::<SubnetPoolSiloLink>(client, &url).await.items;
     assert_eq!(new_linked.len(), linked.len() - 1);
     assert!(!new_linked.iter().any(|new| new.silo_id == linked[0].silo_id))
 }
@@ -406,11 +313,8 @@ async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // There should be none linked to the silo at first.
-    let linked = NexusRequest::object_get(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
-        .await
-        .items;
+    let linked =
+        objects_list_page_authz::<SiloSubnetPool>(client, &url).await.items;
     assert!(linked.is_empty());
 
     // Link the first few pools.
@@ -426,11 +330,8 @@ async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Now we should list all and only those in the list.
-    let linked = NexusRequest::object_get(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
-        .await
-        .items;
+    let linked =
+        objects_list_page_authz::<SiloSubnetPool>(client, &url).await.items;
     let linked_pool_ids: BTreeSet<_> =
         pools.iter().take(n_to_link).map(|p| p.identity.id).collect();
     assert_eq!(linked.len(), n_to_link);
@@ -478,25 +379,12 @@ async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
 
     // And if we unlink one, it no longer shows up.
     let to_unlink = pools[0].identity.id;
-    NexusRequest::object_delete(
-        client,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL,
-            pools[0].name(),
-            silo.id()
-        ),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let unlink_url =
+        format!("{}/{}/silos/{}", SUBNET_POOLS_URL, pools[0].name(), silo.id());
+    object_delete(client, &unlink_url).await;
 
-    let new_linked = NexusRequest::object_get(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
-        .await
-        .items;
+    let new_linked =
+        objects_list_page_authz::<SiloSubnetPool>(client, &url).await.items;
     assert_eq!(new_linked.len(), linked.len() - 1);
     assert!(!new_linked.iter().any(|pool| pool.identity.id == to_unlink))
 }
@@ -647,17 +535,11 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     // Promote to default.
     let update = subnet_pool::SubnetPoolSiloUpdate { is_default: true };
-    let link = NexusRequest::object_put(
-        client,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID,
-        ),
-        Some(&update),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
-    .await;
+    let link_url = format!(
+        "{}/{}/silos/{}",
+        SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID,
+    );
+    let link: SubnetPoolSiloLink = object_put(client, &link_url, &update).await;
     assert_eq!(link.subnet_pool_id, pool_id);
     assert_eq!(link.silo_id, DEFAULT_SILO_ID);
     assert!(link.is_default);
@@ -693,44 +575,26 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     // Cannot make the second pool the default, since there is already one
     // for this IP version.
     let params = subnet_pool::SubnetPoolSiloUpdate { is_default: true };
-    NexusRequest::expect_failure_with_body(
+    let new_pool_link_url = format!(
+        "{}/{}/silos/{}",
+        SUBNET_POOLS_URL, new_pool.identity.id, new_silo_id,
+    );
+    object_put_error(
         client,
-        StatusCode::BAD_REQUEST,
-        Method::PUT,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL, new_pool.identity.id, new_silo_id
-        ),
+        &new_pool_link_url,
         &params,
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    .await;
 
     // But if we unlink the first pool from this silo, we can promote the second.
-    NexusRequest::object_delete(
-        client,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL, SUBNET_POOL_NAME, new_silo_id
-        ),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-    let link = NexusRequest::object_put(
-        client,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL, new_pool.identity.id, new_silo_id,
-        ),
-        Some(&params),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
-    .await;
+    let first_pool_link_url = format!(
+        "{}/{}/silos/{}",
+        SUBNET_POOLS_URL, SUBNET_POOL_NAME, new_silo_id,
+    );
+    object_delete(client, &first_pool_link_url).await;
+    let link: SubnetPoolSiloLink =
+        object_put(client, &new_pool_link_url, &params).await;
     assert_eq!(link.subnet_pool_id, new_pool.identity.id);
     assert_eq!(link.silo_id, new_silo_id);
     assert!(link.is_default);
@@ -747,19 +611,11 @@ async fn cannot_delete_nonexistent_silo_link(
 
     // It's not linked to the default silo, so what happens if we try to unlink
     // it?
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::DELETE,
-        &format!(
-            "{}/{}/silos/{}",
-            SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID
-        ),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let url = format!(
+        "{}/{}/silos/{}",
+        SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID
+    );
+    object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
 }
 
 #[nexus_test]
@@ -776,17 +632,8 @@ async fn cannot_link_multiple_times(cptestctx: &ControlPlaneTestContext) {
         silo: omicron_common::api::external::NameOrId::Id(DEFAULT_SILO_ID),
         is_default: false,
     };
-    let _err = NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::CONFLICT,
-        Method::POST,
-        &format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME),
-        &link_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    let url = format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME);
+    object_create_error(client, &url, &link_params, StatusCode::CONFLICT).await;
 }
 
 #[nexus_test]
@@ -795,17 +642,7 @@ async fn test_subnet_pool_utilization_unimplemented(
 ) {
     let client = &cptestctx.external_client;
     let url = format!("{}/test-pool/utilization", SUBNET_POOLS_URL);
-
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::GET,
-        &url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    object_get_error(client, &url, StatusCode::INTERNAL_SERVER_ERROR).await;
 }
 
 /// Assert that the silo links for a pool match the expected set of
