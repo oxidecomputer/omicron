@@ -60,6 +60,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAlertStats;
+use nexus_types::internal_api::background::FmEreportMarkingStats;
 use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -3499,9 +3500,10 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         Ok(FmRendezvousStatus::NoSitrep) => {
             println!("    no FM situation report loaded");
         }
-        Ok(FmRendezvousStatus::Executed { sitrep_id, alerts }) => {
+        Ok(FmRendezvousStatus::Executed { sitrep_id, alerts, marking }) => {
             println!("    current sitrep: {sitrep_id}");
             display_fm_alert_stats(&alerts);
+            display_fm_ereport_marking_stats(&marking);
         }
     }
 }
@@ -3543,6 +3545,10 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
     for error in errors {
         println!("      > {error}");
     }
+}
+
+fn display_fm_ereport_marking_stats(stats: &FmEreportMarkingStats) {
+    todo!("eliza")
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {

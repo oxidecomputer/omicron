@@ -904,7 +904,7 @@ pub enum FmRendezvousStatus {
     Executed {
         sitrep_id: SitrepUuid,
         alerts: FmAlertStats,
-        marking: EreportMarkingStats,
+        marking: FmEreportMarkingStats,
     },
 }
 
@@ -922,9 +922,9 @@ pub struct FmAlertStats {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FmEreportMarkingStats {
-    /// The total number of alerts requested by the current sitrep.
-    pub total_ereports_seen: usize,
-    /// The total number of alerts which were *first* requested in the current sitrep.
+    /// The total number of ereports included in the current sitrep.
+    pub ereports_in_sitrep: usize,
+    /// Ereports marked as seen during this activation.
     pub ereports_marked_seen: usize,
     /// Errors that occurred during this activation.
     pub errors: Vec<String>,

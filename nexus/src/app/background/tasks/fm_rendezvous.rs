@@ -70,7 +70,7 @@ impl FmRendezvous {
         // bundles, updating problems), consider spawning these in their own tasks...
         let alerts = self.create_requested_alerts(&sitrep, opctx).await;
         let marking = self.mark_ereports_seen(&sitrep, opctx).await;
-        
+
         Status::Executed { sitrep_id: sitrep.1.id(), alerts, marking }
     }
 
@@ -189,11 +189,21 @@ impl FmRendezvous {
 
         let (_, ref sitrep) = **sitrep;
         let mut status = EreportMarkingStats::default();
-        status.total_ereports_seen = sitrep.ereports_by_id.len();
+        status.ereports_in_sitrep = sitrep.ereports_by_id.len();
 
         let mut ereport_ids = sitrep
             .ereports_by_id
             .iter()
+            // it is unfortunately necessary to clone the arc here, for if we do
+            // not, the async block in `activate` is not valid for the requisite
+            // lifetime, as the iterator crosses an await point in the loop
+            // below, and this is sadly all too much for the compiler's little
+            // brain to handle.
+            //
+            // this is just a reference-count bump, so it doesn't really matter,
+            // especially as the alternative would be to `collect()` all the
+            // ereports into a giant `Vec`, which would make me much sadder.
+            .cloned()
             .filter_map(|ereport| {
                 if ereport.marked_seen_in.is_none() {
                     Some(*ereport.id())
