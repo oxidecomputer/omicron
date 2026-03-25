@@ -1703,7 +1703,7 @@ impl DataStore {
                         Error::invalid_request(
                             format!(
                                 "The provided IP range {}-{} overlaps with \
-                            an existing IP Pool range or Subnet Pool member",
+                            an existing IP pool range or subnet pool member",
                                 range.first_address(),
                                 range.last_address(),
                             )
@@ -6073,7 +6073,7 @@ mod test {
             message.external_message(),
             format!(
                 "The provided IP range {}-{} overlaps with an existing \
-                IP Pool range or Subnet Pool member",
+                IP pool range or subnet pool member",
                 range.first_address(),
                 range.last_address(),
             ),

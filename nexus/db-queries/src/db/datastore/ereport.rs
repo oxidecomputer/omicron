@@ -8,7 +8,11 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::model::Ereport;
+use crate::db::model::EreporterRestart;
+use crate::db::model::EreporterType;
+use crate::db::model::Generation;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
@@ -16,16 +20,21 @@ use crate::db::model::SqlU32;
 use crate::db::model::ereport as model;
 use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
+
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
-use diesel::dsl::{count, min};
+use diesel::dsl::{count, exists, max, min, not, select};
 use diesel::prelude::*;
+use diesel::sql_types;
+use diesel::sql_types::Int8;
+use diesel::sql_types::Nullable;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
+use nexus_db_schema::schema::ereporter_restart::dsl as restart_dsl;
 use nexus_types::fm::ereport as fm;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
@@ -210,6 +219,45 @@ impl DataStore {
             .order_by(dsl::restart_id)
     }
 
+    /// List restarts of an ereporter at a given physical location, paginated by
+    /// restart generation.
+    pub async fn ereporter_restart_list(
+        &self,
+        opctx: &OpContext,
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SpMgsSlot,
+        pagparams: &DataPageParams<'_, Generation>,
+    ) -> ListResultVec<EreporterRestart> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::restart_list_query(
+            reporter_type,
+            slot_type,
+            slot.into(),
+            pagparams,
+        )
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn restart_list_query(
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SqlU16,
+        pagparams: &DataPageParams<'_, Generation>,
+    ) -> impl RunnableQuery<EreporterRestart> + use<> {
+        paginated(
+            restart_dsl::ereporter_restart,
+            restart_dsl::generation,
+            pagparams,
+        )
+        .filter(restart_dsl::reporter_type.eq(reporter_type))
+        .filter(restart_dsl::slot_type.eq(slot_type))
+        .filter(restart_dsl::slot.eq(slot))
+        .select(EreporterRestart::as_select())
+    }
+
     pub async fn latest_ereport_id(
         &self,
         opctx: &OpContext,
@@ -285,11 +333,42 @@ impl DataStore {
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
+        restart_id: EreporterRestartUuid,
         reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = fm::EreportData>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
+
+        // First, record the reporter's restart ID in the restart ID ordering
+        // table, if we haven't seen it before.
+        if let Some(slot) = reporter.slot() {
+            let reporter_type = EreporterType::for_reporter(&reporter);
+            let new_restart = self
+                .ereporter_restart_insert_on_conn(
+                    &conn,
+                    reporter_type,
+                    reporter.slot_type().into(),
+                    slot.into(),
+                    restart_id,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert ereporter restart")
+                })?;
+            if new_restart {
+                slog::info!(
+                    &opctx.log,
+                    "recognized a new restart of ereport reporter {reporter}";
+                    "reporter_type" => ?reporter_type,
+                    "slot_type" => %reporter.slot_type(),
+                    "slot" => slot,
+                    "restart_id" => %restart_id,
+                );
+            }
+        }
+
         let ereports = ereports
             .into_iter()
             .map(|data| Ereport::new(data, reporter))
@@ -302,7 +381,10 @@ impl DataStore {
             .await
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to insert ereports")
+                    .internal_context(format!(
+                        "failed to insert ereports from {reporter} (at \
+                         restart {restart_id})"
+                    ))
             })?;
         let latest = self
             .latest_ereport_id_on_conn(&conn, reporter)
@@ -314,6 +396,110 @@ impl DataStore {
             })?;
         Ok((created, latest))
     }
+
+    /// Recognize a new restart ID for the reporter at a given location, if one
+    /// has not already been recorded.
+    ///
+    /// Reporter restarts are tracked for each unique tuple of `(reporter_type,
+    /// slot_type, slot)`. When a never-before-seen restart ID is inserted, it
+    /// is assigned the next generation number for that location. Inserting a
+    /// restart ID for a given location is idempotent; recording the same ID
+    /// multiple times will have no effect. However, attempting to insert an ID
+    /// that already exists at a _different_ location returns an error.
+    ///
+    /// This method returns `true` if the restart ID was not previously
+    /// recorded, and `false` if it was already known.
+    async fn ereporter_restart_insert_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        reporter_type: EreporterType,
+        slot_type: SpType,
+        slot: SpMgsSlot,
+        restart_id: EreporterRestartUuid,
+    ) -> Result<bool, diesel::result::Error> {
+        let inserted = Self::restart_insert_query(
+            reporter_type,
+            slot_type,
+            slot.into(),
+            restart_id,
+        )
+        .execute_async(conn)
+        .await?;
+        Ok(inserted != 0)
+    }
+
+    /// Query for inserting a new reporter restart record into the
+    /// `ereporter_restart` table.
+    ///
+    /// The SQL this generates can be found in
+    /// `tests/output/ereporter_restart_insert.sql`.
+    fn restart_insert_query(
+        reporter_type: nexus_db_model::EreporterType,
+        slot_type: SpType,
+        slot: SqlU16,
+        restart_id: EreporterRestartUuid,
+    ) -> impl RunnableQueryNoReturn {
+        define_sql_function! {
+            fn coalesce(x: Nullable<Int8>, y: Int8) -> Int8;
+        }
+
+        let restart_id = restart_id.into_untyped_uuid();
+
+        // Subquery to compute the next generation number for this
+        // `(reporter_type, slot_type, slot)` tuple, by selecting the maximum
+        // existing generation and incrementing it. If there are no existing
+        // restarts for this location, COALESCE nulls to 0 to insert the first
+        // generation.
+        let next_generation = coalesce(
+            restart_dsl::ereporter_restart
+                .filter(restart_dsl::reporter_type.eq(reporter_type))
+                .filter(restart_dsl::slot_type.eq(slot_type))
+                .filter(restart_dsl::slot.eq(slot))
+                .select(max(restart_dsl::generation))
+                .limit(1)
+                .single_value()
+                + 1,
+            0,
+        );
+
+        // Idempotency check: only insert if no row with this restart ID at this
+        // location already exists. Note that we *could* just do an `ON CONFLICT
+        // ... DO NOTHING` clause instead. However, I thought it was nice to
+        // treat conflicts where we are attempting to insert a known restart ID
+        // in a *different* location as an error, since that's obviously wrong,
+        // while trying to insert the same restart ID in the *same* location
+        // should just be idempotent.
+        let already_exists = restart_dsl::ereporter_restart
+            .filter(restart_dsl::id.eq(restart_id))
+            .filter(restart_dsl::reporter_type.eq(reporter_type))
+            .filter(restart_dsl::slot_type.eq(slot_type))
+            .filter(restart_dsl::slot.eq(slot))
+            .select(1.into_sql::<sql_types::Integer>());
+
+        // SELECT the values to insert, but only if the restart ID has
+        // not already been recorded at this location.
+        let selection = select((
+            restart_id.into_sql::<sql_types::Uuid>(),
+            next_generation,
+            reporter_type
+                .into_sql::<nexus_db_schema::enums::EreporterTypeEnum>(),
+            slot_type.into_sql::<nexus_db_schema::enums::SpTypeEnum>(),
+            slot.into_sql::<sql_types::Int4>(),
+            diesel::dsl::now.into_sql::<sql_types::Timestamptz>(),
+        ))
+        .filter(not(exists(already_exists)));
+
+        diesel::insert_into(restart_dsl::ereporter_restart)
+            .values(selection)
+            .into_columns((
+                restart_dsl::id,
+                restart_dsl::generation,
+                restart_dsl::reporter_type,
+                restart_dsl::slot_type,
+                restart_dsl::slot,
+                restart_dsl::time_first_seen,
+            ))
+    }
 }
 
 #[cfg(test)]
@@ -321,7 +507,10 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+    use diesel::pg::Pg;
     use dropshot::PaginationOrder;
+    use nexus_db_model::EreporterType;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::num::NonZeroU32;
@@ -490,6 +679,93 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn expectorate_insert_restart_query() {
+        let query = DataStore::restart_insert_query(
+            nexus_db_model::EreporterType::Host,
+            SpType::Sled,
+            SqlU16::from(16u16),
+            EreporterRestartUuid::nil(),
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereporter_restart_insert.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_insert_restart_query() {
+        let logctx = dev::test_setup_log("explain_insert_restart_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::restart_insert_query(
+            nexus_db_model::EreporterType::Host,
+            SpType::Sled,
+            SqlU16::from(16u16),
+            EreporterRestartUuid::nil(),
+        );
+
+        // Before trying to explain the query, let's start by making sure it's
+        // valid SQL...
+        let q = diesel::debug_query::<Pg, _>(&query).to_string();
+        match dev::db::format_sql(&q).await {
+            Ok(q) => eprintln!("query: {q}"),
+            Err(e) => panic!("query is malformed: {e}\n{q}"),
+        }
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_ereporter_restart_list() {
+        let logctx = dev::test_setup_log("explain_ereporter_restart_list");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams: DataPageParams<'_, Generation> = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Descending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::restart_list_query(
+            nexus_db_model::EreporterType::Host,
+            SpType::Sled,
+            SqlU16::new(1),
+            &pagparams,
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // This test tests that the `ereport_fetch_matching` queries succeed with
     // filters that only select ereports over a time range, and the default (no
     // filters).
@@ -507,10 +783,8 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let id = fm::EreportId {
-            restart_id: EreporterRestartUuid::new_v4(),
-            ena: ereport_types::Ena(2),
-        };
+        let restart_id = EreporterRestartUuid::new_v4();
+        let id = fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport = fm::EreportData {
             id,
             time_collected: Utc::now(),
@@ -523,6 +797,7 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
@@ -598,6 +873,204 @@ mod tests {
             .await
             .expect("fetch matching with class filters should succeed");
         check_results(dbg!(found_by_class), &id, &ereport);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ereporter_restart_insert() {
+        let logctx = dev::test_setup_log("test_ereporter_restart_insert");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let slot_type = SpType::Sled;
+        let slot = SpMgsSlot::from(SqlU16::new(1));
+
+        let restart_id_1 = EreporterRestartUuid::new_v4();
+        let restart_id_2 = EreporterRestartUuid::new_v4();
+        let restart_id_3 = EreporterRestartUuid::new_v4();
+
+        // Helper to construct a `Generation` from a raw number for assertions.
+        let generation = |n: u32| -> Generation {
+            Generation::from(
+                omicron_common::api::external::Generation::from_u32(n),
+            )
+        };
+
+        let pagparams: DataPageParams<'_, Generation> = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Descending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+
+        // --- Test 1: Two different restart IDs for the same
+        // (reporter_type, slot_type, slot) should produce two different
+        // generations. ---
+
+        // Insert the first restart: should get generation 0.
+        datastore
+            .ereporter_restart_insert_on_conn(
+                &conn,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                restart_id_1,
+            )
+            .await
+            .expect("first insert should succeed");
+
+        let restarts = datastore
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(restarts.len(), 1);
+        assert_eq!(restarts[0].id, restart_id_1.into());
+        assert_eq!(restarts[0].generation, generation(0));
+
+        // Insert a second, different restart ID at the same location:
+        // should get generation 1.
+        datastore
+            .ereporter_restart_insert_on_conn(
+                &conn,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                restart_id_2,
+            )
+            .await
+            .unwrap();
+
+        let restarts = datastore
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(restarts.len(), 2);
+        // Results are ordered by generation descending.
+        assert_eq!(restarts[0].generation, generation(1));
+        assert_eq!(restarts[0].id, restart_id_2.into());
+        assert_eq!(restarts[1].generation, generation(0));
+        assert_eq!(restarts[1].id, restart_id_1.into());
+
+        // --- Test 2: Re-inserting the same restart ID for the same
+        // location should be idempotent (do nothing). ---
+
+        datastore
+            .ereporter_restart_insert_on_conn(
+                &conn,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                restart_id_1,
+            )
+            .await
+            .expect(
+                "re-inserting the same restart ID at the same location \
+                 should succeed",
+            );
+
+        let restarts = datastore
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        // Should still be exactly 2 entries — no new row was created.
+        assert_eq!(restarts.len(), 2);
+        assert_eq!(restarts[0].generation, generation(1));
+        assert_eq!(restarts[0].id, restart_id_2.into());
+        assert_eq!(restarts[1].generation, generation(0));
+        assert_eq!(restarts[1].id, restart_id_1.into());
+
+        // --- Test 3: Inserting the same (slot_type, slot) with a
+        // different reporter_type should produce separate entries with
+        // independent generation counts. ---
+
+        datastore
+            .ereporter_restart_insert_on_conn(
+                &conn,
+                EreporterType::Host,
+                slot_type,
+                slot,
+                restart_id_3,
+            )
+            .await
+            .expect("insert for a different reporter_type should succeed");
+
+        // The host OS reporter should have its own generation starting at 0.
+        let host_restarts = datastore
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Host,
+                slot_type,
+                slot,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(host_restarts.len(), 1);
+        assert_eq!(host_restarts[0].id, restart_id_3.into());
+        assert_eq!(host_restarts[0].generation, generation(0));
+
+        // The SP reporter's entries should be completely unchanged.
+        let sp_restarts = datastore
+            .ereporter_restart_list(
+                opctx,
+                EreporterType::Sp,
+                slot_type,
+                slot,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(sp_restarts.len(), 2);
+        assert_eq!(sp_restarts[0].generation, generation(1));
+        assert_eq!(sp_restarts[1].generation, generation(0));
+
+        // --- Test 4: Inserting the same restart_id with a different
+        // (reporter_type, slot_type, slot) should be an error, because
+        // `id` is the primary key of the ereporter_restart table. ---
+
+        let different_slot = SpMgsSlot::from(SqlU16::new(2));
+        let result = datastore
+            .ereporter_restart_insert_on_conn(
+                &conn,
+                EreporterType::Sp,
+                slot_type,
+                different_slot,
+                restart_id_1,
+            )
+            .await;
+        match result {
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => {
+                // this the one that should happen
+            }
+            something_else => panic!(
+                "inserting the same restart_id at a different location \
+                 should fail with a primary-key conflict (but it returned \
+                 {something_else:?} instead)",
+            ),
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
