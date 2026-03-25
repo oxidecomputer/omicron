@@ -207,6 +207,7 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::subnet_pool_member::dsl as member_dsl;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
 
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
@@ -244,6 +245,15 @@ impl DataStore {
                 "deletion failed due to concurrent modification",
             ));
         }
+
+        // As with IP pools, deleting the pool should also remove any silo
+        // links. Once the pool is deleted, these links are no longer useful.
+        diesel::delete(subnet_pool_silo_link::table)
+            .filter(subnet_pool_silo_link::subnet_pool_id.eq(pool_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -1464,6 +1474,7 @@ mod tests {
     use nexus_db_model::Project;
     use nexus_db_model::SubnetPool;
     use nexus_db_model::SubnetPoolMember;
+    use nexus_db_model::SubnetPoolSiloLink;
     use nexus_db_model::SubnetPoolUpdate;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
@@ -1688,6 +1699,83 @@ mod tests {
             .delete_subnet_pool(opctx, &authz_pool, &db_pool)
             .await
             .expect("able to delete subnet pool after deleting all members");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn deleting_subnet_pool_removes_silo_links() {
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        let logctx =
+            dev::test_setup_log("deleting_subnet_pool_removes_silo_links");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let pool_id = NameOrId::Id(pool.identity.id.into_untyped_uuid());
+
+        let (authz_pool, _db_pool) = datastore
+            .lookup_subnet_pool(opctx, &pool_id)
+            .fetch()
+            .await
+            .expect("able to lookup subnet pool we just made");
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect("able to link pool to silo");
+
+        let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
+        let links: Vec<SubnetPoolSiloLink> = subnet_pool_silo_link::table
+            .filter(
+                subnet_pool_silo_link::subnet_pool_id
+                    .eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(&*conn)
+            .await
+            .expect("should list links for pool before deletion");
+        assert_eq!(links.len(), 1);
+
+        // Re-fetch the pool after linking because that increments its rcgen.
+        let (authz_pool, db_pool) = datastore
+            .lookup_subnet_pool(opctx, &pool_id)
+            .fetch()
+            .await
+            .expect("able to lookup subnet pool after linking");
+        datastore
+            .delete_subnet_pool(opctx, &authz_pool, &db_pool)
+            .await
+            .expect("able to delete subnet pool");
+
+        let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
+        let links: Vec<SubnetPoolSiloLink> = subnet_pool_silo_link::table
+            .filter(
+                subnet_pool_silo_link::subnet_pool_id
+                    .eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(&*conn)
+            .await
+            .expect("should query links after deletion");
+        assert!(links.is_empty(), "expected pool links to be deleted");
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -1386,13 +1386,13 @@ impl DataStore {
                 .get_result_async(&*conn)
                 .await
                 .map_err(|e| match e {
-                    DieselError::NotFound => LookupType::ByCompositeId(
-                        format!(
+                    DieselError::NotFound => {
+                        LookupType::ByCompositeId(format!(
                             "ip_pool_id: {}, silo_id: {}",
                             ip_pool_id, silo_id,
-                        ),
-                    )
-                    .into_not_found(ResourceType::IpPoolResource),
+                        ))
+                        .into_not_found(ResourceType::IpPoolResource)
+                    }
                     e => public_error_from_diesel(e, ErrorHandler::Server),
                 });
         }
@@ -1423,8 +1423,7 @@ impl DataStore {
                         dsl::ip_pool_resource
                             .filter(dsl::resource_id.eq(silo_id))
                             .filter(
-                                dsl::resource_type
-                                    .eq(IpPoolResourceType::Silo),
+                                dsl::resource_type.eq(IpPoolResourceType::Silo),
                             )
                             .filter(dsl::pool_type.eq(link.pool_type))
                             .filter(dsl::ip_version.eq(link.ip_version))
@@ -1440,8 +1439,7 @@ impl DataStore {
                             .filter(dsl::ip_pool_id.eq(ip_pool_id))
                             .filter(dsl::resource_id.eq(silo_id))
                             .filter(
-                                dsl::resource_type
-                                    .eq(IpPoolResourceType::Silo),
+                                dsl::resource_type.eq(IpPoolResourceType::Silo),
                             ),
                     )
                     .set(dsl::is_default.eq(true))
