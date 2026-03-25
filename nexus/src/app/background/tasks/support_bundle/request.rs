@@ -76,4 +76,35 @@ impl BundleRequest {
     pub fn include_sp_dumps(&self) -> bool {
         self.data_selection.contains(BundleDataCategory::SpDumps)
     }
+
+    pub fn from_data_selection(data_selection: BundleDataSelection) -> Self {
+        Self {
+            transfer_chunk_size: CHUNK_SIZE,
+            data_selection,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::support_bundle::{BundleData, BundleDataSelection};
+
+    #[test]
+    fn test_from_data_selection_all() {
+        let selection = BundleDataSelection::all();
+        let from = BundleRequest::from_data_selection(selection.clone());
+        let all = BundleRequest::all();
+        assert_eq!(from.transfer_chunk_size, all.transfer_chunk_size);
+        assert_eq!(from.data_selection, all.data_selection);
+    }
+
+    #[test]
+    fn test_from_data_selection_specific() {
+        let selection = BundleDataSelection::new().with_sp_dumps();
+        let req = BundleRequest::from_data_selection(selection);
+        assert!(req.include_sp_dumps());
+        assert!(!req.include_reconfigurator_data());
+        assert!(!req.include_sled_cubby_info());
+    }
 }

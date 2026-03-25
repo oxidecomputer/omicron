@@ -189,6 +189,9 @@ impl DataStore {
 
     /// Returns the [`BundleDataSelection`] for a support bundle.
     ///
+    /// If the bundle was not created by the FM system, or has no FM request
+    /// row, returns [`BundleDataSelection::all()`] (collect everything).
+    ///
     /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
     pub async fn support_bundle_data_selection(
         &self,
