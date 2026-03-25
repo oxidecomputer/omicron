@@ -73,5 +73,7 @@ pub mod v2026_03_02_00;
 pub mod v2026_03_06_01;
 #[path = "multicast_drop_mvlan/mod.rs"]
 pub mod v2026_03_14_00;
+#[path = "rename_prefix_len/mod.rs"]
+pub mod v2026_03_23_00;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
-pub mod v2026_03_18_00;
+pub mod v2026_03_25_00;

@@ -292,12 +292,12 @@ pub mod networking {
     pub use crate::v2026_03_06_01::networking::SwitchPort;
     pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
 
-    pub use crate::v2026_03_18_00::networking::BgpPeer;
-    pub use crate::v2026_03_18_00::networking::BgpPeerConfig;
-    pub use crate::v2026_03_18_00::networking::BgpPeerConversionError;
-    pub use crate::v2026_03_18_00::networking::SwitchPortSettings;
-    pub use crate::v2026_03_18_00::networking::SwitchPortSettingsCreate;
-    pub use crate::v2026_03_18_00::networking::router_peer_type_try_from_old_representation;
+    pub use crate::v2026_03_25_00::networking::BgpPeer;
+    pub use crate::v2026_03_25_00::networking::BgpPeerConfig;
+    pub use crate::v2026_03_25_00::networking::BgpPeerConversionError;
+    pub use crate::v2026_03_25_00::networking::SwitchPortSettings;
+    pub use crate::v2026_03_25_00::networking::SwitchPortSettingsCreate;
+    pub use crate::v2026_03_25_00::networking::router_peer_type_try_from_old_representation;
 }
 
 pub mod oxql {
@@ -491,9 +491,9 @@ pub mod external_subnet {
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetSelector;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetUpdate;
 
-    // Create types from FLOATING_IP_ALLOCATOR_UPDATE (pool field removed).
-    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetAllocator;
-    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetCreate;
+    // Create types from RENAME_PREFIX_LEN (prefix_len -> prefix_length).
+    pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetAllocator;
+    pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetCreate;
 }
 
 pub mod sled {

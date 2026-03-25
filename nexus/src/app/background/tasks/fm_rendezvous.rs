@@ -82,7 +82,19 @@ impl FmRendezvous {
 
         // XXX(eliza): is it better to allocate all of these into a big array
         // and do a single `INSERT INTO` query, or iterate over them one by one
-        // (not allocating) but insert one at a time?
+        // (not allocating) but insert one at a time? Note that a batched insert
+        // would need to use `ON CONFLICT DO NOTHING` rather than checking for
+        // `Conflict` errors from individual inserts, since multiple Nexus
+        // instances may run this task concurrently.
+        //
+        // TODO(#9592) Currently, these `alert_create` calls have no guard
+        // against a stale Nexus inserting alerts from an outdated sitrep. This
+        // is fine for now because alert requests are carried forward into newer
+        // sitreps, so a stale insert is redundant rather than incorrect.
+        // However, if alerts are ever hard-deleted (e.g. when a case is
+        // closed), a lagging Nexus could re-create "zombie" alert records after
+        // deletion. At that point, the INSERT should be guarded by a CTE that
+        // checks the sitrep generation matches the current one.
         for (case_id, req) in sitrep.alerts_requested() {
             let &AlertRequest { id, class, requested_sitrep_id, .. } = req;
             status.total_alerts_requested += 1;
@@ -97,7 +109,9 @@ impl FmRendezvous {
                 )
                 .await
             {
-                // Alert already exists, that's fine.
+                // Alert already exists --- this is expected, since multiple
+                // Nexus instances may run this task concurrently for the same
+                // sitrep, or a previous activation may have partially completed.
                 Err(Error::Conflict { .. }) => {}
                 Err(e) => {
                     slog::warn!(

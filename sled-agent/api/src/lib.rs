@@ -21,7 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v30,
+    v24, v25, v26, v29, v30, v31,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (31, ADD_ICMPV6_FIREWALL_SUPPORT),
     (30, STRONGER_BGP_UNNUMBERED_TYPES),
     (29, ADD_VSOCK_COMPONENT),
     (28, MODIFY_SERVICES_IN_INVENTORY),
@@ -434,13 +435,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_VSOCK_COMPONENT..
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_VSOCK_COMPONENT..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT
+    }]
+    async fn vmm_register_v29(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v29::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -454,7 +469,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v18::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v29(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -700,13 +715,29 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vpc/{vpc_id}/firewall/rules",
-        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
     }]
     async fn vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VpcPathParam>,
         body: TypedBody<latest::firewall_rules::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_put",
+        method = PUT,
+        path = "/vpc/{vpc_id}/firewall/rules",
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_put_v11(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VpcPathParam>,
+        body: TypedBody<v11::firewall_rules::VpcFirewallRulesEnsureBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body =
+            body.map(v31::firewall_rules::VpcFirewallRulesEnsureBody::from);
+        Self::vpc_firewall_rules_put(rqctx, path_params, body).await
+    }
 
     #[endpoint {
         operation_id = "vpc_firewall_rules_put",
@@ -720,9 +751,9 @@ pub trait SledAgentApi {
         body: TypedBody<v9::firewall_rules::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(
-            latest::firewall_rules::VpcFirewallRulesEnsureBody::try_from,
+            v11::firewall_rules::VpcFirewallRulesEnsureBody::try_from,
         )?;
-        Self::vpc_firewall_rules_put(rqctx, path_params, body).await
+        Self::vpc_firewall_rules_put_v11(rqctx, path_params, body).await
     }
 
     /// Create a mapping from a virtual NIC to a physical host

@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! External subnet types for version FLOATING_IP_ALLOCATOR_UPDATE.
+//! External subnet types for version RENAME_PREFIX_LEN.
 //!
-//! This version removes the `pool` field from
-//! `ExternalSubnetAllocator::Explicit`.
+//! Renames `prefix_len` to `prefix_length` in
+//! `ExternalSubnetAllocator::Auto`.
 
-use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+use crate::v2026_01_22_00;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ pub enum ExternalSubnetAllocator {
     /// Automatically allocate a subnet with the specified prefix length.
     Auto {
         /// The prefix length for the allocated subnet (e.g., 24 for a /24).
-        prefix_len: u8,
+        prefix_length: u8,
         /// Pool selection.
         ///
         /// If omitted, this field uses the silo's default pool. If the
@@ -46,49 +47,35 @@ pub struct ExternalSubnetCreate {
     pub allocator: ExternalSubnetAllocator,
 }
 
-// Conversion from the prior version (EXTERNAL_SUBNET_ATTACHMENT), which
-// accepted a `pool` field on ExternalSubnetAllocator::Explicit that was
-// later removed.
-impl TryFrom<crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator>
+// Conversion from the prior version (FLOATING_IP_ALLOCATOR_UPDATE).
+impl From<v2026_01_22_00::external_subnet::ExternalSubnetAllocator>
     for ExternalSubnetAllocator
 {
-    type Error = Error;
-
-    fn try_from(
-        value: crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator,
-    ) -> Result<Self, Self::Error> {
+    fn from(
+        value: v2026_01_22_00::external_subnet::ExternalSubnetAllocator,
+    ) -> Self {
         match value {
-            crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator::Explicit {
+            v2026_01_22_00::external_subnet::ExternalSubnetAllocator::Explicit {
                 subnet,
-                pool,
-            } => {
-                if pool.is_some() {
-                    return Err(Error::invalid_request(
-                        "May not specify both an IP subnet and a subnet pool",
-                    ));
-                }
-                Ok(Self::Explicit { subnet })
-            }
-            crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator::Auto {
+            } => Self::Explicit { subnet },
+            v2026_01_22_00::external_subnet::ExternalSubnetAllocator::Auto {
                 prefix_len,
                 pool_selector,
-            } => Ok(Self::Auto { prefix_len, pool_selector }),
+            } => Self::Auto { prefix_length: prefix_len, pool_selector },
         }
     }
 }
 
-impl TryFrom<crate::v2026_01_16_01::external_subnet::ExternalSubnetCreate>
+impl From<v2026_01_22_00::external_subnet::ExternalSubnetCreate>
     for ExternalSubnetCreate
 {
-    type Error = Error;
-
-    fn try_from(
-        value: crate::v2026_01_16_01::external_subnet::ExternalSubnetCreate,
-    ) -> Result<Self, Self::Error> {
-        let crate::v2026_01_16_01::external_subnet::ExternalSubnetCreate {
+    fn from(
+        value: v2026_01_22_00::external_subnet::ExternalSubnetCreate,
+    ) -> Self {
+        let v2026_01_22_00::external_subnet::ExternalSubnetCreate {
             identity,
             allocator,
         } = value;
-        allocator.try_into().map(|allocator| Self { identity, allocator })
+        Self { identity, allocator: allocator.into() }
     }
 }

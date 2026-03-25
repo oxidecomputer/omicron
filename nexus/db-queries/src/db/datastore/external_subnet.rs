@@ -292,8 +292,8 @@ impl DataStore {
                 info,
             ) if info.constraint_name() == Some("single_default_per_silo") => {
                 Error::invalid_request(
-                    "Can only have a single default Subnet Pool for a \
-                    Silo for each IP version.",
+                    "Each silo can only have one default subnet pool \
+                    for each IP version.",
                 )
             }
             DieselError::DatabaseError(
@@ -302,7 +302,7 @@ impl DataStore {
             ) if info.constraint_name()
                 == Some("subnet_pool_silo_link_pkey") =>
             {
-                Error::conflict("Subnet Pool is already linked to Silo")
+                Error::conflict("Subnet pool is already linked to silo")
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
@@ -356,8 +356,8 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if has_children {
             return Err(Error::invalid_request(
-                "Cannot unlink Subnet Pool from Silo while there are \
-                External Subnets allocated from the pool. Delete the \
+                "Cannot unlink subnet pool from silo while there are \
+                external subnets allocated from the pool. Delete the \
                 subnets first, and try again.",
             ));
         }
@@ -407,8 +407,8 @@ impl DataStore {
                 ref info,
             ) if info.constraint_name() == Some("single_default_per_silo") => {
                 Error::invalid_request(
-                    "Can only have a single default Subnet Pool for a \
-                    Silo for each IP version.",
+                    "Each silo can only have one default subnet pool \
+                    for each IP version.",
                 )
             }
             e => public_error_from_diesel(e, ErrorHandler::Server),
@@ -532,7 +532,7 @@ impl DataStore {
         };
         if pool_version != member_version {
             return Err(Error::invalid_request(&format!(
-                "Cannot add IP{} members to IP{} Subnet Pool",
+                "Cannot add IP{} members to IP{} subnet pool",
                 member_version, pool_version,
             )));
         }
@@ -544,7 +544,7 @@ impl DataStore {
             .map_err(|e| match e {
                 DieselError::NotFound => Error::invalid_request(&format!(
                     "The IP subnet {} overlaps with an existing \
-                    Subnet Pool member or IP Pool range",
+                    subnet pool member or IP pool range",
                     params.subnet,
                 )),
                 e => public_error_from_diesel(e, ErrorHandler::Server),
@@ -597,7 +597,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 DieselError::NotFound => Error::invalid_request(format!(
-                    "A provided External Subnet Pool member with \
+                    "A provided subnet pool member with \
                         subnet {subnet} does not exist",
                 )),
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
@@ -1690,7 +1690,7 @@ mod tests {
         assert_eq!(
             message.external_message(),
             "The IP subnet 10.1.1.0/24 overlaps with an existing \
-            Subnet Pool member or IP Pool range"
+            subnet pool member or IP pool range"
         );
 
         db.terminate().await;
@@ -1744,7 +1744,7 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "Subnet Pool is already linked to Silo"
+            "Subnet pool is already linked to silo"
         );
 
         // We should not be able to link another default of the same IP version.
@@ -1773,7 +1773,7 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "Can only have a single default Subnet Pool for a Silo \
+            "Each silo can only have one default subnet pool \
             for each IP version."
         );
 
@@ -2083,8 +2083,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "Cannot unlink Subnet Pool from Silo while there are \
-            External Subnets allocated from the pool. Delete the \
+            "Cannot unlink subnet pool from silo while there are \
+            external subnets allocated from the pool. Delete the \
             subnets first, and try again.",
         );
 
@@ -2212,7 +2212,7 @@ mod tests {
         assert_eq!(
             message.external_message(),
             "The requested IP subnet is not contained in any \
-            Subnet Pool available in the current Silo."
+            subnet pool available in the current silo."
         );
 
         context.db.terminate().await;
@@ -2304,7 +2304,7 @@ mod tests {
             "can_insert_external_subnet_from_explicit_pool_selection",
         )
         .await;
-        let prefix_len = 64;
+        let prefix_length = 64;
         let subnet = context
             .db
             .datastore()
@@ -2323,7 +2323,7 @@ mod tests {
                                 context.db_pool.id().into_untyped_uuid(),
                             ),
                         },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2335,7 +2335,7 @@ mod tests {
         // Should take the first /64 from any pool member.
         let expected_subnet = IpNet::new(
             oxnet::IpNet::from(context.members[0].subnet).addr(),
-            prefix_len,
+            prefix_length,
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
@@ -2350,7 +2350,7 @@ mod tests {
             "can_insert_external_subnet_from_ip_version",
         )
         .await;
-        let prefix_len = 64;
+        let prefix_length = 64;
         let subnet = context
             .db
             .datastore()
@@ -2367,7 +2367,7 @@ mod tests {
                         pool_selector: PoolSelector::Auto {
                             ip_version: Some(IpVersion::V6),
                         },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2379,7 +2379,7 @@ mod tests {
         // Should take the first /64 from any pool member.
         let expected_subnet = IpNet::new(
             oxnet::IpNet::from(context.members[0].subnet).addr(),
-            prefix_len,
+            prefix_length,
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
@@ -2394,7 +2394,7 @@ mod tests {
             "can_insert_external_subnet_using_default_pool",
         )
         .await;
-        let prefix_len = 64;
+        let prefix_length = 64;
         let subnet = context
             .db
             .datastore()
@@ -2409,7 +2409,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2421,7 +2421,7 @@ mod tests {
         // Should take the first /64 from any pool member.
         let expected_subnet = IpNet::new(
             oxnet::IpNet::from(context.members[0].subnet).addr(),
-            prefix_len,
+            prefix_length,
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
@@ -2552,7 +2552,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len: 48,
+                            prefix_length: 48,
                         },
                     },
                 )
@@ -2577,7 +2577,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -2588,8 +2588,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "All subnets are used in the default Subnet Pool for \
-            the current Silo",
+            "Could not allocate a /48 subnet from the default \
+            subnet pool for the current silo",
         );
 
         // Also fail, but since we're requesting a pool by version, the error
@@ -2610,7 +2610,7 @@ mod tests {
                         pool_selector: PoolSelector::Auto {
                             ip_version: Some(IpVersion::V6),
                         },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -2621,8 +2621,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "All subnets are used in the default IPv6 Subnet Pool \
-            for the current Silo",
+            "Could not allocate a /48 subnet from the default \
+            IPv6 subnet pool for the current silo",
         );
 
         // Also fail, but since we're requesting a pool, the error message
@@ -2645,7 +2645,7 @@ mod tests {
                                 context.authz_pool.id().into_untyped_uuid(),
                             ),
                         },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -2657,7 +2657,8 @@ mod tests {
         assert_eq!(
             message.external_message(),
             format!(
-                "All subnets are used in the Subnet Pool with ID '{}'",
+                "Could not allocate a /48 subnet \
+                from the subnet pool with ID '{}'",
                 context.authz_pool.id().into_untyped_uuid(),
             ),
         );
@@ -2682,7 +2683,7 @@ mod tests {
                                 context.db_pool.name().clone(),
                             ),
                         },
-                        prefix_len: 56,
+                        prefix_length: 56,
                     },
                 },
             )
@@ -2694,7 +2695,8 @@ mod tests {
         assert_eq!(
             message.external_message(),
             format!(
-                "All subnets are used in the Subnet Pool with name '{}'",
+                "Could not allocate a /56 subnet \
+                from the subnet pool with name '{}'",
                 context.db_pool.name(),
             ),
         );
@@ -2744,7 +2746,7 @@ mod tests {
 
         // Now when we try to allocate by taking "the" default for our silo, we
         // should fail predictably.
-        let prefix_len = 64;
+        let prefix_length = 64;
         let err = context
             .db
             .datastore()
@@ -2759,7 +2761,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2799,7 +2801,7 @@ mod tests {
 
         // Now when we try to allocate by taking "the" default for our silo, we
         // should fail predictably.
-        let prefix_len = 64;
+        let prefix_length = 64;
         let err = context
             .db
             .datastore()
@@ -2814,7 +2816,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2838,7 +2840,7 @@ mod tests {
 
         // Allocate 2 /56s.
         let mut subnets = Vec::with_capacity(2);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..subnets.capacity() {
             let subnet = context
                 .db
@@ -2856,7 +2858,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -2895,7 +2897,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2916,7 +2918,7 @@ mod tests {
 
         // Allocate 3 /56s.
         let mut subnets = Vec::with_capacity(3);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..subnets.capacity() {
             let subnet = context
                 .db
@@ -2934,7 +2936,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -2973,7 +2975,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2995,7 +2997,7 @@ mod tests {
 
         // Allocate 3 /56s.
         let mut minis = Vec::with_capacity(3);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..3 {
             let subnet = context
                 .db
@@ -3013,7 +3015,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -3055,7 +3057,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -3076,7 +3078,7 @@ mod tests {
 
         // Allocate 2 /56s.
         let mut minis = Vec::with_capacity(2);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..minis.capacity() {
             let subnet = context
                 .db
@@ -3094,7 +3096,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -3136,7 +3138,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -3157,7 +3159,7 @@ mod tests {
 
         // Allocate 4 /57s.
         let mut minis = Vec::with_capacity(4);
-        let prefix_len = 57;
+        let prefix_length = 57;
         for i in 0..minis.capacity() {
             let subnet = context
                 .db
@@ -3175,7 +3177,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -3218,7 +3220,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 56,
+                        prefix_length: 56,
                     },
                 },
             )
@@ -3300,7 +3302,7 @@ mod tests {
         context: &Context,
     ) -> Option<(AllocationKind, ExternalName, ExternalSubnetAllocator)> {
         let mut rng = rng();
-        let prefix_len: u8 = rng.random_range(0..=64);
+        let prefix_length: u8 = rng.random_range(0..=64);
         let kind: AllocationKind = rng.random();
         let allocator = match kind {
             AllocationKind::ExplicitInvalidSubnet => {
@@ -3309,7 +3311,7 @@ mod tests {
                 // sure we don't loop forever though.
                 let mut i = 0;
                 let subnet = loop {
-                    let net = random_network(&mut rng, prefix_len);
+                    let net = random_network(&mut rng, prefix_length);
                     if context.members.iter().all(|member| {
                         let subnet = IpNet::from(member.subnet);
                         !subnet.overlaps(&net)
@@ -3337,17 +3339,17 @@ mod tests {
                         context.db_pool.id().into_untyped_uuid(),
                     ),
                 },
-                prefix_len,
+                prefix_length,
             },
             AllocationKind::AutoVersion => ExternalSubnetAllocator::Auto {
                 pool_selector: PoolSelector::Auto {
                     ip_version: Some(IpVersion::V6),
                 },
-                prefix_len,
+                prefix_length,
             },
             AllocationKind::AutoDefaultPool => ExternalSubnetAllocator::Auto {
                 pool_selector: PoolSelector::Auto { ip_version: None },
-                prefix_len,
+                prefix_length,
             },
         };
         Some((kind, random_name(&mut rng), allocator))
@@ -3523,6 +3525,13 @@ mod tests {
                                 allocated_subnets.insert(net, subnet.id());
                             }
                             Err(Error::InvalidRequest { message }) => {
+                                let ExternalSubnetAllocator::Auto {
+                                    prefix_length,
+                                    ..
+                                } = &allocator
+                                else {
+                                    unreachable!();
+                                };
                                 let expected_message = match kind {
                                     AllocationKind::ExplicitInvalidSubnet
                                     | AllocationKind::ExplicitValidSubnet => {
@@ -3530,23 +3539,23 @@ mod tests {
                                     }
                                     AllocationKind::ExplicitPool => {
                                         format!(
-                                            "All subnets are used in the \
-                                            Subnet Pool with ID '{}'",
+                                            "Could not allocate a /{prefix_length} subnet \
+                                            from the subnet pool with ID '{}'",
                                             context.authz_pool.id(),
                                         )
                                     }
                                     AllocationKind::AutoVersion => {
-                                        String::from(
-                                            "All subnets are used in the \
-                                            default IPv6 Subnet Pool for \
-                                            the current Silo",
+                                        format!(
+                                            "Could not allocate a /{prefix_length} subnet \
+                                            from the default IPv6 subnet pool \
+                                            for the current silo",
                                         )
                                     }
                                     AllocationKind::AutoDefaultPool => {
-                                        String::from(
-                                            "All subnets are used in the \
-                                            default Subnet Pool for \
-                                            the current Silo",
+                                        format!(
+                                            "Could not allocate a /{prefix_length} subnet \
+                                            from the default subnet pool \
+                                            for the current silo",
                                         )
                                     }
                                 };
@@ -3678,7 +3687,7 @@ mod tests {
                         description: String::new(),
                     },
                     allocator: ExternalSubnetAllocator::Auto {
-                        prefix_len: 26,
+                        prefix_length: 26,
                         pool_selector: PoolSelector::Auto { ip_version: None },
                     },
                 },
@@ -3771,8 +3780,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "The IP subnet fd00::/48 overlaps with an existing Subnet Pool \
-            member or IP Pool range",
+            "The IP subnet fd00::/48 overlaps with an existing subnet pool \
+            member or IP pool range",
         );
 
         db.terminate().await;

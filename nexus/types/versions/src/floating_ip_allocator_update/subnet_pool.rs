@@ -73,7 +73,7 @@ impl TryFrom<crate::v2026_01_16_01::subnet_pool::SubnetPoolCreate>
         } = value;
         if pool_type != crate::v2025_11_20_00::ip_pool::IpPoolType::Unicast {
             return Err(Error::invalid_request(
-                "Subnet Pools must have pool type unicast",
+                "Subnet pools must have pool type unicast",
             ));
         }
         Ok(Self { identity, ip_version })

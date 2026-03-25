@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026031800.0.0"
+    "version": "2026032500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -20572,7 +20572,7 @@
                   }
                 ]
               },
-              "prefix_len": {
+              "prefix_length": {
                 "description": "The prefix length for the allocated subnet (e.g., 24 for a /24).",
                 "type": "integer",
                 "format": "uint8",
@@ -20586,7 +20586,7 @@
               }
             },
             "required": [
-              "prefix_len",
+              "prefix_length",
               "type"
             ]
           }
@@ -30715,6 +30715,29 @@
                 "type": "string",
                 "enum": [
                   "icmp"
+                ]
+              },
+              "value": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VpcFirewallIcmpFilter"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp6"
                 ]
               },
               "value": {

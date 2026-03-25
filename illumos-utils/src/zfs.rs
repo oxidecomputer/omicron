@@ -1129,6 +1129,40 @@ pub struct DatasetVolumeDeleteArgs<'a> {
     pub raw: bool,
 }
 
+/// Error returned by [`Zfs::remove_reservation`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to remove reservation from '{name}': {err}")]
+pub struct RemoveReservationError {
+    name: String,
+    #[source]
+    err: RemoveReservationErrorInner,
+}
+
+impl RemoveReservationError {
+    pub fn get_value(name: String, err: GetValueError) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::GetValue(err),
+        }
+    }
+
+    pub fn set_value(name: String, err: SetValueError) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::SetValue(err),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum RemoveReservationErrorInner {
+    #[error(transparent)]
+    GetValue(#[from] GetValueError),
+
+    #[error(transparent)]
+    SetValue(#[from] SetValueError),
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -2127,6 +2161,23 @@ impl Zfs {
                 }
             }
         }
+    }
+
+    /// Remove a dataset's reservation, if set
+    pub async fn remove_reservation(
+        name: &str,
+    ) -> Result<(), RemoveReservationError> {
+        let value = Zfs::get_value(name, "reservation").await.map_err(|e| {
+            RemoveReservationError::get_value(name.to_string(), e)
+        })?;
+
+        if value != "none" {
+            Zfs::set_value(name, "reservation", "none").await.map_err(|e| {
+                RemoveReservationError::set_value(name.to_string(), e)
+            })?;
+        }
+
+        Ok(())
     }
 }
 

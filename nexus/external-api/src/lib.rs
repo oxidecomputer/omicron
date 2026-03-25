@@ -50,6 +50,7 @@ use slog_error_chain::InlineErrorChain;
 mod v2025_11_20_00_local;
 mod v2026_01_01_00_local;
 mod v2026_01_30_00_local;
+mod v2026_03_24_00_local;
 
 api_versions!([
     // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
@@ -80,7 +81,9 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_03_18_00, STRONGER_BGP_UNNUMBERED_TYPES),
+    (2026_03_25_00, STRONGER_BGP_UNNUMBERED_TYPES),
+    (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
+    (2026_03_23_00, RENAME_PREFIX_LEN),
     (2026_03_14_00, MULTICAST_DROP_MVLAN),
     (2026_03_12_00, CAPITALIZE_DESCRIPTIONS),
     (2026_03_06_01, SWITCH_SLOT_ENUM),
@@ -2571,7 +2574,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/external-subnets",
         tags = ["external-subnets"],
-        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
+        versions = VERSION_RENAME_PREFIX_LEN..,
     }]
     async fn external_subnet_create(
         rqctx: RequestContext<Self::Context>,
@@ -2581,6 +2584,29 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
         HttpError,
     >;
+
+    /// Create external subnet
+    #[endpoint {
+        operation_id = "external_subnet_create",
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_RENAME_PREFIX_LEN,
+    }]
+    async fn external_subnet_create_v2026_01_22_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::external_subnet::ExternalSubnetCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    > {
+        let subnet_params = subnet_params.map(Into::into);
+        Self::external_subnet_create(rqctx, query_params, subnet_params).await
+    }
 
     /// Create external subnet
     #[endpoint {
@@ -2602,7 +2628,12 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let subnet_params = subnet_params.try_map(TryInto::try_into)?;
-        Self::external_subnet_create(rqctx, query_params, subnet_params).await
+        Self::external_subnet_create_v2026_01_22_01(
+            rqctx,
+            query_params,
+            subnet_params,
+        )
+        .await
     }
 
     /// Fetch external subnet
@@ -6134,11 +6165,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
     }]
     async fn vpc_firewall_rules_view(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// List firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_view",
+        method = GET,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_view_v2026_03_24_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+    ) -> Result<HttpResponseOk<v2026_03_24_00_local::VpcFirewallRules>, HttpError>
+    {
+        Self::vpc_firewall_rules_view(rqctx, query_params).await.and_then(
+            |resp| resp.try_map(TryInto::try_into).map_err(HttpError::from),
+        )
+    }
 
     // Note: the limits in the below comment come from the firewall rules model
     // file, nexus/db-model/src/vpc_firewall_rule.rs.
@@ -6161,12 +6211,35 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
     }]
     async fn vpc_firewall_rules_update(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
-        router_params: TypedBody<VpcFirewallRuleUpdateParams>,
+        update: TypedBody<VpcFirewallRuleUpdateParams>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// Replace firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_update",
+        method = PUT,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_update_v2026_03_24_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        update: TypedBody<v2026_03_24_00_local::VpcFirewallRuleUpdateParams>,
+    ) -> Result<HttpResponseOk<v2026_03_24_00_local::VpcFirewallRules>, HttpError>
+    {
+        let body = update.map(Into::into);
+        Self::vpc_firewall_rules_update(rqctx, query_params, body)
+            .await
+            .and_then(|resp| {
+                resp.try_map(TryInto::try_into).map_err(HttpError::from)
+            })
+    }
 
     // VPC Routers
 
