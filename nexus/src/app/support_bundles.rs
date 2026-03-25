@@ -68,9 +68,11 @@ impl super::Nexus {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    reason,
+                    id: SupportBundleUuid::new_v4(),
+                    reason: reason.to_string(),
                     nexus_id: self.id,
                     user_comment,
+                    fm_case_id: None,
                 },
             )
             .await

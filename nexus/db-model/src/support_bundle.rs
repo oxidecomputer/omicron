@@ -101,16 +101,17 @@ pub struct SupportBundle {
 
 impl SupportBundle {
     pub fn new(
-        reason_for_creation: &'static str,
+        id: SupportBundleUuid,
+        reason_for_creation: String,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         nexus_id: OmicronZoneUuid,
         user_comment: Option<String>,
     ) -> Self {
         Self {
-            id: SupportBundleUuid::new_v4().into(),
+            id: id.into(),
             time_created: Utc::now(),
-            reason_for_creation: reason_for_creation.to_string(),
+            reason_for_creation,
             reason_for_failure: None,
             state: SupportBundleState::Collecting,
             zpool_id: zpool_id.into(),

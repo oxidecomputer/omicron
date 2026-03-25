@@ -61,6 +61,7 @@ use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAlertStats;
 use nexus_types::internal_api::background::FmRendezvousStatus;
+use nexus_types::internal_api::background::FmSupportBundleStats;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -3499,9 +3500,14 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         Ok(FmRendezvousStatus::NoSitrep) => {
             println!("    no FM situation report loaded");
         }
-        Ok(FmRendezvousStatus::Executed { sitrep_id, alerts }) => {
+        Ok(FmRendezvousStatus::Executed {
+            sitrep_id,
+            alerts,
+            support_bundles,
+        }) => {
             println!("    current sitrep: {sitrep_id}");
             display_fm_alert_stats(&alerts);
+            display_fm_support_bundle_stats(&support_bundles);
         }
     }
 }
@@ -3513,8 +3519,9 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
         alerts_created,
         errors,
     } = stats;
-    let already_created =
-        total_alerts_requested - alerts_created - errors.len();
+    let already_created = total_alerts_requested
+        .saturating_sub(*alerts_created)
+        .saturating_sub(errors.len());
     pub const REQUESTED: &str = "alerts requested:";
     pub const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
     pub const CREATED: &str = "  created in this activation:";
@@ -3535,6 +3542,55 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
     );
     println!("    {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
     println!("    {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}");
+    println!(
+        "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("      > {error}");
+    }
+}
+
+fn display_fm_support_bundle_stats(stats: &FmSupportBundleStats) {
+    let FmSupportBundleStats {
+        total_bundles_requested,
+        current_sitrep_bundles_requested,
+        bundles_created,
+        capacity_errors,
+        errors,
+    } = stats;
+    let already_created = total_bundles_requested
+        .saturating_sub(*bundles_created)
+        .saturating_sub(*capacity_errors)
+        .saturating_sub(errors.len());
+    pub const REQUESTED: &str = "support bundles requested:";
+    pub const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+    pub const CREATED: &str = "  created in this activation:";
+    pub const ALREADY_CREATED: &str = "  already created:";
+    pub const CAPACITY_ERRORS: &str = "  capacity errors:";
+    pub const ERRORS: &str = "  errors:";
+    pub const WIDTH: usize = const_max_len(&[
+        REQUESTED,
+        REQUESTED_THIS_SITREP,
+        CREATED,
+        ALREADY_CREATED,
+        CAPACITY_ERRORS,
+        ERRORS,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    println!("    {REQUESTED:<WIDTH$}{total_bundles_requested:>NUM_WIDTH$}");
+    println!(
+        "    {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+        current_sitrep_bundles_requested
+    );
+    println!("    {CREATED:<WIDTH$}{bundles_created:>NUM_WIDTH$}");
+    println!("    {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}");
+    println!(
+        "{} {CAPACITY_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(*capacity_errors),
+        capacity_errors
+    );
     println!(
         "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
         warn_if_nonzero(errors.len()),

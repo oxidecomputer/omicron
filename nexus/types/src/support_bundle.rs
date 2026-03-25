@@ -9,8 +9,10 @@
 
 use crate::fm::ereport::EreportFilters;
 use itertools::Itertools;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -18,12 +20,17 @@ use std::fmt;
 
 /// Parameters for creating a support bundle.
 pub struct SupportBundleCreateParams {
+    /// The ID for the new bundle. Use `SupportBundleUuid::new_v4()` to
+    /// auto-generate, or provide a specific ID for idempotent creation.
+    pub id: SupportBundleUuid,
     /// Why this bundle is being created.
-    pub reason: &'static str,
+    pub reason: String,
     /// The Nexus instance responsible for collection.
     pub nexus_id: OmicronZoneUuid,
     /// Optional user-provided comment.
     pub user_comment: Option<String>,
+    /// Optional FM case association.
+    pub fm_case_id: Option<CaseUuid>,
 }
 
 /// Describes the category of support bundle data.
