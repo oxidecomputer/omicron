@@ -56,11 +56,19 @@ use uuid::Uuid;
 /// Identifies a child table of `fm_sitrep` for use in orphan-deletion
 /// queries. Using an enum (rather than raw strings) ensures the table and
 /// column names are known at compile time, preventing SQL injection.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SitrepChildTable {
     CaseEreport,
     AlertRequest,
     Case,
+}
+
+impl SitrepChildTable {
+    /// All child tables. Used by the GC loop and by tests to ensure
+    /// completeness. If you add a new variant, add it here — the GC
+    /// loop will fail to compile until you handle it.
+    pub const ALL: &[SitrepChildTable] =
+        &[Self::CaseEreport, Self::AlertRequest, Self::Case];
 }
 
 impl SitrepChildTable {
@@ -72,7 +80,7 @@ impl SitrepChildTable {
         }
     }
 
-    const fn sitrep_id_column(&self) -> &'static str {
+    pub(crate) const fn sitrep_id_column(&self) -> &'static str {
         match self {
             Self::CaseEreport => "sitrep_id",
             Self::AlertRequest => "sitrep_id",
@@ -982,23 +990,20 @@ impl DataStore {
                     let mut case_ereport_batches = 0usize;
                     let mut alert_request_batches = 0usize;
 
-                    for (table, counter, batch_counter) in [
-                        (
-                            SitrepChildTable::CaseEreport,
-                            &mut case_ereports_deleted,
-                            &mut case_ereport_batches,
-                        ),
-                        (
-                            SitrepChildTable::AlertRequest,
-                            &mut alert_requests_deleted,
-                            &mut alert_request_batches,
-                        ),
-                        (
-                            SitrepChildTable::Case,
-                            &mut cases_deleted,
-                            &mut case_batches,
-                        ),
-                    ] {
+                    for &table in SitrepChildTable::ALL {
+                        let (counter, batch_counter) = match table {
+                            SitrepChildTable::CaseEreport => (
+                                &mut case_ereports_deleted,
+                                &mut case_ereport_batches,
+                            ),
+                            SitrepChildTable::AlertRequest => (
+                                &mut alert_requests_deleted,
+                                &mut alert_request_batches,
+                            ),
+                            SitrepChildTable::Case => {
+                                (&mut cases_deleted, &mut case_batches)
+                            }
+                        };
                         let mut marker = SitrepUuid::nil();
                         loop {
                             *batch_counter += 1;
@@ -1221,6 +1226,7 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::QueryBuilder;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
     use diesel::pg::Pg;
@@ -1231,6 +1237,8 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -2566,6 +2574,224 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cases_after, 0, "all ghost cases should be deleted");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // ---------------------------------------------------------------
+    // SitrepChildTableCounts: mirrors BlueprintTableCounts from
+    // deployment.rs to ensure every fm_* child table is covered by
+    // `SitrepChildTable`.
+    // ---------------------------------------------------------------
+
+    struct SitrepChildTableCounts {
+        counts: BTreeMap<String, i64>,
+    }
+
+    impl SitrepChildTableCounts {
+        /// Query row counts for each child table tracked by
+        /// `SitrepChildTable`, for the given `sitrep_id`.
+        async fn new(
+            datastore: &DataStore,
+            sitrep_id: SitrepUuid,
+        ) -> SitrepChildTableCounts {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let mut counts = BTreeMap::new();
+
+            for &table in SitrepChildTable::ALL {
+                let mut query = QueryBuilder::new();
+                query.sql("SELECT COUNT(*) FROM ");
+                query.sql(table.table_name());
+                query.sql(" WHERE ");
+                query.sql(table.sitrep_id_column());
+                query.sql(" = ");
+                query.param().bind::<diesel::sql_types::Uuid, _>(
+                    sitrep_id.into_untyped_uuid(),
+                );
+
+                let count: i64 = query
+                    .query::<diesel::sql_types::BigInt>()
+                    .get_result_async(&*conn)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "failed to count rows in {}: {e}",
+                            table.table_name()
+                        )
+                    });
+                counts.insert(table.table_name().to_string(), count);
+            }
+
+            let table_counts = SitrepChildTableCounts { counts };
+
+            // Verify no new fm_* child tables were added without
+            // updating SitrepChildTable.
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
+                panic!("{msg}");
+            }
+
+            table_counts
+        }
+
+        fn all_empty(&self) -> bool {
+            self.counts.values().all(|&count| count == 0)
+        }
+
+        fn empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        fn non_empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        fn tables_checked(&self) -> BTreeSet<&str> {
+            self.counts.keys().map(|s| s.as_str()).collect()
+        }
+
+        /// Verify no new fm_* tables were added without updating
+        /// `SitrepChildTable`.
+        async fn verify_all_tables_covered(
+            &self,
+            datastore: &DataStore,
+        ) -> Result<(), String> {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // fm_* tables that are NOT children of fm_sitrep and are
+            // intentionally ignored.
+            let tables_ignored: BTreeSet<&str> =
+                ["fm_sitrep", "fm_sitrep_history"].into_iter().collect();
+            let tables_checked = self.tables_checked();
+
+            let mut query = QueryBuilder::new();
+            query.sql(
+                "SELECT table_name FROM information_schema.tables \
+                 WHERE table_name LIKE 'fm\\_%'",
+            );
+            let tables_unchecked: Vec<String> = query
+                .query::<diesel::sql_types::Text>()
+                .load_async(&*conn)
+                .await
+                .expect("failed to query information_schema for fm_* tables")
+                .into_iter()
+                .filter(|f: &String| {
+                    let t = f.as_str();
+                    !tables_ignored.contains(t) && !tables_checked.contains(t)
+                })
+                .collect();
+
+            if !tables_unchecked.is_empty() {
+                Err(format!(
+                    "found fm_* child table(s) not covered by \
+                     SitrepChildTable: {}\n\n\
+                     If you added a new fm_* child table, add a variant \
+                     to SitrepChildTable and update the orphan GC code \
+                     in fm_sitrep_gc_orphans.",
+                    tables_unchecked.join(", ")
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    async fn ensure_sitrep_fully_populated(
+        datastore: &DataStore,
+        sitrep_id: SitrepUuid,
+    ) {
+        let counts = SitrepChildTableCounts::new(datastore, sitrep_id).await;
+
+        let empty = counts.empty_tables();
+        if !empty.is_empty() {
+            panic!(
+                "expected all fm_* child tables to be populated for \
+                 sitrep {sitrep_id}, but these were empty: {empty:?}\n\n\
+                 If every sitrep should have rows in this table, this \
+                 is a bug in the test fixture. Otherwise, add an \
+                 exception to ensure_sitrep_fully_populated()."
+            );
+        }
+    }
+
+    async fn ensure_sitrep_children_fully_deleted(
+        datastore: &DataStore,
+        sitrep_id: SitrepUuid,
+    ) {
+        let counts = SitrepChildTableCounts::new(datastore, sitrep_id).await;
+
+        assert!(
+            counts.all_empty(),
+            "sitrep {sitrep_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_representative_sitrep_child_tables() {
+        let logctx =
+            dev::test_setup_log("test_representative_sitrep_child_tables");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Build a representative sitrep that populates every child table.
+        let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let sitrep_id = sitrep.id();
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Verify every child table has ≥1 row, AND that every fm_*
+        // child table in the schema is covered by SitrepChildTable.
+        ensure_sitrep_fully_populated(&datastore, sitrep_id).await;
+
+        // Insert a child sitrep so the original is no longer current
+        // and can be deleted.
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                fm::Sitrep {
+                    metadata: fm::SitrepMetadata {
+                        parent_sitrep_id: Some(sitrep_id),
+                        id: SitrepUuid::new_v4(),
+                        time_created: Utc::now(),
+                        creator_id: OmicronZoneUuid::new_v4(),
+                        comment: "child sitrep".to_string(),
+                        inv_collection_id: CollectionUuid::new_v4(),
+                    },
+                    cases: Default::default(),
+                },
+            )
+            .await
+            .expect("failed to insert child sitrep");
+
+        // Delete the original sitrep.
+        let deleted = datastore
+            .fm_sitrep_delete_all(&opctx, vec![sitrep_id])
+            .await
+            .expect("failed to delete sitrep");
+        assert_eq!(deleted, 1);
+
+        // Verify all child rows are gone.
+        ensure_sitrep_children_fully_deleted(&datastore, sitrep_id).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
