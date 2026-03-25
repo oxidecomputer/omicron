@@ -9,6 +9,7 @@ use nexus_db_schema::schema::support_bundle;
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::support_bundle as support_bundle_types;
 use omicron_uuid_kinds::CaseKind;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -136,6 +137,9 @@ impl From<SupportBundle> for support_bundle_types::SupportBundleInfo {
             reason_for_failure: bundle.reason_for_failure,
             user_comment: bundle.user_comment,
             state: bundle.state.into(),
+            fm_case_id: bundle
+                .fm_case_id
+                .map(|id| *id.as_untyped_uuid()),
         }
     }
 }

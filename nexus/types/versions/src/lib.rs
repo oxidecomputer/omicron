@@ -75,3 +75,5 @@ pub mod v2026_03_06_01;
 pub mod v2026_03_14_00;
 #[path = "rename_prefix_len/mod.rs"]
 pub mod v2026_03_23_00;
+#[path = "support_bundle_fm_case_id/mod.rs"]
+pub mod v2026_03_24_01;

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026032400.0.0"
+    "version": "2026032401.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -28378,6 +28378,11 @@
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
+          "fm_case_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "id": {
             "type": "string",
             "format": "uuid"

@@ -372,7 +372,7 @@ pub mod snapshot {
 pub mod support_bundle {
     pub use crate::v2025_11_20_00::support_bundle::SupportBundleCreate;
     pub use crate::v2025_11_20_00::support_bundle::SupportBundleFilePath;
-    pub use crate::v2025_11_20_00::support_bundle::SupportBundleInfo;
+    pub use crate::v2026_03_24_01::support_bundle::SupportBundleInfo;
     pub use crate::v2025_11_20_00::support_bundle::SupportBundlePath;
     pub use crate::v2025_11_20_00::support_bundle::SupportBundleState;
     pub use crate::v2025_11_20_00::support_bundle::SupportBundleUpdate;

@@ -9168,6 +9168,11 @@
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
+          "fm_case_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
