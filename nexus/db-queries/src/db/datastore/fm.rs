@@ -27,8 +27,6 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::OptionalError;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
@@ -824,6 +822,9 @@ impl DataStore {
         opctx: &OpContext,
         ids: impl IntoIterator<Item = SitrepUuid>,
     ) -> Result<usize, Error> {
+        use nexus_db_errors::OptionalError;
+        use nexus_db_errors::TransactionError;
+
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
