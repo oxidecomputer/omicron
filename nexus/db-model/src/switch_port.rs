@@ -38,17 +38,31 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use std::net::IpAddr;
 use uuid::Uuid;
 
 /// Extension trait on [`RouterPeerType`] for converting it to and from the way
 /// we represent peer addresses in the database.
-pub trait RouterPeerTypeDbRepresentation {
+///
+/// This trait should only be used by database model and query functions.
+pub trait RouterPeerTypeDbRepresentation: Sized {
     /// Get the database representation of the address of this peer.
     ///
     /// For numbered peers, returns `Some(ip)` (corresponding to a non-NULL
     /// `INET`); for unnumbered peers, returns `None` (corresponding to NULL).
     fn ip_db_repr(&self) -> Option<IpNetwork>;
+
+    /// Convert the database representation of a peer back into a
+    /// [`RouterPeerType`].
+    ///
+    /// Unconditionally requires the caller to supply a `router_lifetime`, but
+    /// this argument is only used if `ip` is `None` (indicating an unnumbered
+    /// peer). This matches the database table's storage of a NULLable address
+    /// (the peer IP, where NULL means unnumbered) alongside a non-NULL
+    /// router_lifetime (left at 0 for numbered peers).
+    fn from_db_repr(
+        ip: Option<IpNetwork>,
+        router_lifetime: RouterLifetimeConfig,
+    ) -> Result<Self, RouterPeerIpAddrError>;
 }
 
 impl RouterPeerTypeDbRepresentation for RouterPeerType {
@@ -56,6 +70,19 @@ impl RouterPeerTypeDbRepresentation for RouterPeerType {
         match self {
             Self::Unnumbered { .. } => None,
             Self::Numbered { ip } => Some((*ip).into()),
+        }
+    }
+
+    fn from_db_repr(
+        ip: Option<IpNetwork>,
+        router_lifetime: RouterLifetimeConfig,
+    ) -> Result<Self, RouterPeerIpAddrError> {
+        match ip.map(|ip| ip.ip()) {
+            Some(ip) => {
+                let ip = RouterPeerIpAddr::try_from(ip)?;
+                Ok(Self::Numbered { ip })
+            }
+            None => Ok(Self::Unnumbered { router_lifetime }),
         }
     }
 }
