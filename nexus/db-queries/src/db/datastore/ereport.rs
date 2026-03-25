@@ -325,21 +325,10 @@ impl DataStore {
         sitrep_id: SitrepUuid,
         ereport_ids: impl IntoIterator<Item = EreportId>,
     ) -> Result<usize, Error> {
-        // let ids: Vec<(Uuid, diesel::sql_types::BigInt)> = ereport_ids
-        //     .into_iter()
-        //     .map(|EreportId { restart_id, ena }| {
-        //         (restart_id.into_untyped_uuid(), DbEna::from(ena).to_sql())
-        //     })
-        //     .collect();
-        // diesel::update(dsl::ereport)
-        //     .filter((dsl::restart_id, dsl::ena).eq_any(&ids))
-        //     .filter(dsl::marked_seen_in.is_null())
-        //     .set(dsl::marked_seen_in.eq(sitrep_id.into_untyped_uuid()))
-        //     .execute_async(&self.pool_connection_authorized(opctx).await?)
-        //     .await
-        //     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        //
-        todo!()
+        Self::ereports_mark_seen_query(sitrep_id, ereport_ids)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn ereports_mark_seen_query(
