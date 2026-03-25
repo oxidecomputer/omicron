@@ -3547,8 +3547,32 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
     }
 }
 
-fn display_fm_ereport_marking_stats(_stats: &FmEreportMarkingStats) {
-    todo!("eliza")
+fn display_fm_ereport_marking_stats(stats: &FmEreportMarkingStats) {
+    let FmEreportMarkingStats {
+        ereports_in_sitrep,
+        ereports_marked_seen,
+        errors,
+    } = stats;
+    let already_marked =
+        ereports_in_sitrep - ereports_marked_seen - errors.len();
+    pub const IN_SITREP: &str = "ereports in sitrep:";
+    pub const MARKED_SEEN: &str = "  marked seen this activation:";
+    pub const ALREADY_MARKED: &str = "  already marked seen:";
+    pub const ERRORS: &str = "  errors:";
+    pub const WIDTH: usize =
+        const_max_len(&[IN_SITREP, MARKED_SEEN, ALREADY_MARKED, ERRORS]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    println!("    {IN_SITREP:<WIDTH$}{ereports_in_sitrep:>NUM_WIDTH$}");
+    println!("    {MARKED_SEEN:<WIDTH$}{ereports_marked_seen:>NUM_WIDTH$}");
+    println!("    {ALREADY_MARKED:<WIDTH$}{already_marked:>NUM_WIDTH$}");
+    println!(
+        "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("      > {error}");
+    }
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
