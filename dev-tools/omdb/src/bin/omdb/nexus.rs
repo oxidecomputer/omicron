@@ -3659,17 +3659,21 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         print_details(&op.details)
     }
 
-    let FmRendezvousStatus { sitrep_id, alerts, ereport_marking: marking } =
-        match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let FmRendezvousStatus {
+        sitrep_id,
+        alerts,
+        support_bundles,
+        ereport_marking: marking,
+    } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     match sitrep_id {
         Some(id) => println!("    current sitrep: {id}"),
         None => println!(
@@ -3709,6 +3713,51 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
                 current_sitrep_alerts_requested
             );
             println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
+            println!(
+                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+            );
+            println!(
+                "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                warn_if_nonzero(errors.len()),
+                errors.len()
+            );
+            for error in errors {
+                println!("        > {error}");
+            }
+        },
+    );
+    print_op(
+        "creating requested support bundles",
+        &support_bundles,
+        |fm_rendezvous::SupportBundleCreationStatus {
+             total_bundles_requested,
+             current_sitrep_bundles_requested,
+             bundles_created,
+             errors,
+         }| {
+            let already_created =
+                total_bundles_requested - bundles_created - errors.len();
+            const REQUESTED: &str = "support bundles requested:";
+            const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+            const CREATED: &str = "  created in this activation:";
+            const ALREADY_CREATED: &str = "  already created:";
+            const ERRORS: &str = "  errors:";
+            const WIDTH: usize = const_max_len(&[
+                REQUESTED,
+                REQUESTED_THIS_SITREP,
+                CREATED,
+                ALREADY_CREATED,
+                ERRORS,
+            ]) + 1;
+            pub const NUM_WIDTH: usize = 4;
+            println!(
+                "      {REQUESTED:<WIDTH$}{total_bundles_requested:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+                current_sitrep_bundles_requested
+            );
+            println!("      {CREATED:<WIDTH$}{bundles_created:>NUM_WIDTH$}");
             println!(
                 "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
             );
