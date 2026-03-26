@@ -443,7 +443,6 @@ mod test {
     use crate::app::background::tasks::support_bundle::perfetto;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
-    use illumos_utils::zpool::ZpoolHealth;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
@@ -468,6 +467,7 @@ mod test {
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
         PhysicalDiskUuid, SledUuid,
     };
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::HashSet;
     use std::num::NonZeroU64;
     use uuid::Uuid;

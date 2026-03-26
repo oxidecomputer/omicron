@@ -5,7 +5,6 @@
 use chrono::DateTime;
 use chrono::Utc;
 use iddqd::IdOrdMap;
-use illumos_utils::svcs::Svc;
 use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -23,6 +22,45 @@ use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24;
 use crate::v24::inventory::InventoryZpool;
+
+/// Each service instance is always in a well-defined state based on its
+/// dependencies, the results of the execution of its methods, and its potential
+/// contracts events. See <https://illumos.org/man/7/smf> for more information.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SvcState {
+    /// Initial state for all service instances.
+    Uninitialized,
+    /// The instance is enabled, but not yet running or available to run.
+    Offline,
+    /// The instance is enabled and running or is available to run.
+    Online,
+    /// The instance is enabled and running or available to run. It is, however,
+    /// functioning at a limited capacity in comparison to normal operation.
+    Degraded,
+    /// The instance is enabled, but not able to run.
+    Maintenance,
+    /// The instance is disabled.
+    Disabled,
+    /// Represents a legacy instance that is not managed by the service
+    /// management facility.
+    LegacyRun,
+    /// We were unable to determine the state of the service instance.
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Information about an SMF service that is enabled but not running
+// TODO-correctness `SvcState::Online` is one possibility; should we have a
+// different enum if we're actually restricted to "enabled but not running"?
+pub struct Svc {
+    pub fmri: String,
+    pub zone: String,
+    pub state: SvcState,
+}
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

@@ -1242,6 +1242,7 @@ Options:
       --summaries              Print summaries of each SQL query run against the database
       --elapsed                Print the total elapsed query duration
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -e, --execute <QUERY>        Execute the query and exit
   -h, --help                   Print help
 
 Connection Options:
