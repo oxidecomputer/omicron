@@ -106,15 +106,13 @@ pub enum NodeApiRequest {
         config: NetworkConfig,
         responder: oneshot::Sender<Result<(), NodeRequestError>>,
     },
-
-    /// Retrieve the current network config
-    GetNetworkConfig { responder: oneshot::Sender<Option<NetworkConfig>> },
 }
 
 /// A handle for interacting with a `Node` task
 #[derive(Debug, Clone)]
 pub struct NodeHandle {
     tx: mpsc::Sender<NodeApiRequest>,
+    network_config_rx: watch::Receiver<Option<NetworkConfig>>,
 }
 
 impl NodeHandle {
@@ -223,17 +221,11 @@ impl NodeHandle {
         rx.await?
     }
 
-    /// Retrieve the current network config
-    pub async fn get_network_config(
+    /// Subscribe to the watch channel containing the network config
+    pub fn network_config_subscribe(
         &self,
-    ) -> Result<Option<NetworkConfig>, NodeRequestError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::GetNetworkConfig { responder: tx })
-            .await
-            .map_err(|_| NodeRequestError::Send)?;
-        let res = rx.await?;
-        Ok(res)
+    ) -> watch::Receiver<Option<NetworkConfig>> {
+        self.network_config_rx.clone()
     }
 }
 
@@ -339,7 +331,7 @@ impl Node {
             config.clone().into(),
         )
         .await;
-        let (network_config, _) = watch::channel(
+        let (network_config, network_config_rx) = watch::channel(
             NetworkConfig::load(
                 &log,
                 config.network_config_ledger_paths.clone(),
@@ -366,7 +358,7 @@ impl Node {
                 conn_rx,
                 conn_tx,
             },
-            NodeHandle { tx },
+            NodeHandle { tx, network_config_rx },
         )
     }
 
@@ -629,9 +621,6 @@ impl Node {
                     self.broadcast_network_config(None).await;
                     let _ = responder.send(Ok(()));
                 }
-            }
-            NodeApiRequest::GetNetworkConfig { responder } => {
-                let _ = responder.send(self.network_config.borrow().clone());
             }
         }
     }
