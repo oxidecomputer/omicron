@@ -319,6 +319,12 @@ impl DataStore {
         Ok((created, latest))
     }
 
+    /// Mark the ereports with the given ereport IDs as having definitely been
+    /// processed as of the provided sitrep ID.
+    ///
+    /// If any ereports have already been marked as seen with another sitrep ID,
+    /// they are unmodified. Otherwise, this query sets the `marked_seen_in`
+    /// column to the provided sitrep ID.
     pub async fn ereports_mark_seen(
         &self,
         opctx: &OpContext,
@@ -335,12 +341,27 @@ impl DataStore {
         sitrep_id: SitrepUuid,
         ereport_ids: impl IntoIterator<Item = EreportId>,
     ) -> TypedSqlQuery<sql_types::BigInt> {
+        // Untuple the ereport IDs into separate vecs of `restart_id`s and
+        // `ena`s, which we will pass as separate bind parameters in the SQL
+        // query and then re-tuple back into one array of pairs using `unnest`
+        // when the query is executed.
+        //
+        // This bit is kindas screwy: unfortunately, Postgres serialization
+        // does not support bind parameters which are arrays of tuples, so
+        // we must bind two separate arrays. Trust me on this one.
         let mut restart_ids = Vec::new();
         let mut enas = Vec::new();
         for EreportId { restart_id, ena } in ereport_ids {
             restart_ids.push(restart_id.into_untyped_uuid());
             enas.push(DbEna::from(ena));
         }
+
+        // Raw SQL is necessary here as `diesel`'s `.eq_any` doesn't work with
+        // arrays of tuples (likely due to the weird `unnest` thing being
+        // required to serialize the bind parameter properly).
+        //
+        // The SQL generated here is output to
+        // `tests/output/ereports_mark_seen.sql`
         let mut builder = QueryBuilder::new();
         builder
             .sql(
@@ -351,13 +372,8 @@ impl DataStore {
             .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
             .sql(
                 " WHERE (restart_id, ena) IN (\
-                SELECT unnest (",
+                    SELECT unnest (",
             )
-            // This bit is kindas screwy: unfortunately, Postgres serialization
-            // does not support bind parameters which are arrays of tuples, so
-            // we must bind two separate arrays and `unnest` them back into one
-            // big array.
-            //
             // Pretend it's just one array please?
             .param()
             .bind::<sql_types::Array<sql_types::Uuid>, _>(restart_ids)
@@ -587,14 +603,6 @@ mod tests {
             ],
         );
 
-        // Before trying to explain the query, let's start by making sure it's
-        // valid SQL...
-        let q = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
-        match dev::db::format_sql(&q).await {
-            Ok(q) => eprintln!("HELLO ELIZA YOUR QUERY LOOKS LIKE THIS:\n {q}"),
-            Err(e) => panic!("query is malformed: {e}\n{q}"),
-        }
-
         let explanation = query
             .explain_async(&conn)
             .await
@@ -605,6 +613,7 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
     // This test tests that the `ereport_fetch_matching` queries succeed with
     // filters that only select ereports over a time range, and the default (no
     // filters).
