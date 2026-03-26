@@ -116,6 +116,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -627,7 +628,7 @@ pub(crate) struct SledAgentInfo {
     pub(crate) underlay_address: Ipv6Addr,
     pub(crate) local_switch_zone_ip: LocalSwitchZoneIpAddr,
     pub(crate) rack_id: Uuid,
-    pub(crate) rack_network_config: RackNetworkConfig,
+    pub(crate) rack_network_config_rx: watch::Receiver<RackNetworkConfig>,
     pub(crate) metrics_queue: MetricsRequestQueue,
 }
 
@@ -1089,7 +1090,7 @@ impl ServiceManager {
             port_manager,
             underlay_address,
             resolver,
-            rack_network_config,
+            rack_network_config_rx,
             ..
         } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
@@ -1097,7 +1098,7 @@ impl ServiceManager {
             EarlyNetworkSetup::new(&self.inner.log)
                 .lookup_uplinked_switch_zone_underlay_addrs(
                     resolver,
-                    rack_network_config,
+                    rack_network_config_rx,
                     WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT,
                 )
                 .await;
@@ -3363,7 +3364,7 @@ impl ServiceManager {
     async fn ensure_switch_zone_uplinks_configured_loop(
         &self,
         switch_zone_ip: LocalSwitchZoneIpAddr,
-        rack_network_config: &RackNetworkConfig,
+        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
@@ -3375,7 +3376,7 @@ impl ServiceManager {
             match self
                 .ensure_switch_zone_uplinks_configured(
                     switch_zone_ip,
-                    rack_network_config,
+                    rack_network_config_rx,
                 )
                 .await
             {
@@ -3421,13 +3422,13 @@ impl ServiceManager {
     async fn ensure_switch_zone_uplinks_configured(
         &self,
         switch_zone_ip: LocalSwitchZoneIpAddr,
-        rack_network_config: &RackNetworkConfig,
+        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
         // Configure uplinks via DPD in our switch zone.
         let our_ports = EarlyNetworkSetup::new(log)
-            .init_switch_config(rack_network_config, switch_zone_ip)
+            .init_switch_config(rack_network_config_rx, switch_zone_ip)
             .await?
             .into_iter()
             .map(From::from)
@@ -4019,10 +4020,10 @@ impl ServiceManager {
                     self.inner.sled_info.get().map(|sled_info| {
                         (
                             sled_info.local_switch_zone_ip,
-                            sled_info.rack_network_config.clone(),
+                            sled_info.rack_network_config_rx.clone(),
                         )
                     });
-                if let Some((switch_zone_ip, rack_network_config)) =
+                if let Some((switch_zone_ip, rack_network_config_rx)) =
                     maybe_our_underlay_info
                 {
                     if let Some(old_worker) = worker.take() {
@@ -4035,7 +4036,7 @@ impl ServiceManager {
                         initializer: tokio::task::spawn(async move {
                             me.ensure_switch_zone_uplinks_configured_loop(
                                 switch_zone_ip,
-                                &rack_network_config,
+                                &rack_network_config_rx,
                                 exit_rx,
                             )
                             .await;
@@ -4186,7 +4187,7 @@ impl ServiceManager {
         // initialized the switch zone above, also go into a loop trying to
         // configure our uplinks. As above, retry until we succeed or are told
         // to stop.
-        let (switch_zone_ip, rack_network_config) =
+        let (switch_zone_ip, rack_network_config_rx) =
             match self.inner.sled_info.get() {
                 Some(sled_info) => {
                     if request_used_to_initialize.addresses.contains(
@@ -4199,7 +4200,7 @@ impl ServiceManager {
                         );
                         (
                             sled_info.local_switch_zone_ip,
-                            sled_info.rack_network_config.clone(),
+                            sled_info.rack_network_config_rx.clone(),
                         )
                     } else {
                         info!(
@@ -4225,7 +4226,7 @@ impl ServiceManager {
 
         self.ensure_switch_zone_uplinks_configured_loop(
             switch_zone_ip,
-            &rack_network_config,
+            &rack_network_config_rx,
             exit_rx,
         )
         .await;
