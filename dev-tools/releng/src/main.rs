@@ -629,7 +629,7 @@ async fn main() -> Result<()> {
             .arg("-o") // output directory for image
             .arg(args.output_dir.join(format!("os-{}", target)))
             .arg("-F") // pass extra image builder features
-            .arg(format!("optever={}", opte_version))
+            .arg(format!("optever={opte_version}"))
             .arg("-P") // include all files from extra proto area
             .arg(proto_dir.join("root"))
             .arg("-N") // image name
@@ -690,7 +690,7 @@ async fn main() -> Result<()> {
         // When OPTE_COMMIT is set, download the override p5p from buildomat
         // and add it as a package source for the image build.
         if let Some(ov) = &opte_override {
-            let p5p_path = tempdir.path().join(format!("opte-{}.p5p", target));
+            let p5p_path = tempdir.path().join(format!("opte-{target}.p5p"));
             let commit = ov.commit.clone();
             let dest = p5p_path.clone();
             let cl = client.clone();
@@ -702,17 +702,17 @@ async fn main() -> Result<()> {
 
             image_cmd = image_cmd
                 .arg("-p")
-                .arg(format!("helios-dev=file://{}", p5p_path,));
+                .arg(format!("helios-dev=file://{p5p_path}"));
+        }
 
-            jobs.push_command(format!("{target}-image"), image_cmd)
-                .after("helios-setup")
-                .after("helios-incorp")
-                .after(format!("{target}-opte-p5p"));
-        } else {
-            jobs.push_command(format!("{target}-image"), image_cmd)
-                .after("helios-setup")
-                .after("helios-incorp")
-                .after(format!("{target}-proto"));
+        let image_job = jobs
+            .push_command(format!("{target}-image"), image_cmd)
+            .after("helios-setup")
+            .after("helios-incorp")
+            .after(format!("{target}-proto"));
+
+        if opte_override.is_some() {
+            image_job.after(format!("{target}-opte-p5p"));
         }
     }
     // Build the recovery target after we build the host target. Only one

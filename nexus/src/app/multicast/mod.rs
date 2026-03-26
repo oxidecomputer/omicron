@@ -70,6 +70,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 pub(crate) mod dataplane;
+pub(crate) mod sled;
 
 /// Validate that SSM addresses have source IPs.
 ///
@@ -886,5 +887,33 @@ mod tests {
         assert!(!is_ssm_address(IpAddr::V6(Ipv6Addr::new(
             0xff1e, 0, 0, 0, 0, 0, 0, 1
         ))));
+    }
+
+    #[test]
+    fn test_generate_group_name_from_ip() {
+        let v4 = IpAddr::V4(Ipv4Addr::new(224, 1, 2, 3));
+        assert_eq!(
+            generate_group_name_from_ip(v4).unwrap().as_str(),
+            "mcast-224-1-2-3"
+        );
+
+        let v4_zeros = IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1));
+        assert_eq!(
+            generate_group_name_from_ip(v4_zeros).unwrap().as_str(),
+            "mcast-224-0-0-1"
+        );
+
+        let v6: IpAddr = IpAddr::V6(Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1));
+        assert_eq!(
+            generate_group_name_from_ip(v6).unwrap().as_str(),
+            "mcast-ff0e-0-0-0-0-0-0-1"
+        );
+
+        let v6_ssm: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0xff3e, 0, 0, 0, 0, 0, 0, 0xabcd));
+        assert_eq!(
+            generate_group_name_from_ip(v6_ssm).unwrap().as_str(),
+            "mcast-ff3e-0-0-0-0-0-0-abcd"
+        );
     }
 }

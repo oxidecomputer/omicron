@@ -79,10 +79,14 @@ use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::multicast::{
+    ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
+    McastForwardingEntry,
+};
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -415,7 +419,6 @@ struct SledAgentInner {
 
     // A handle to the trust quorum.
     trust_quorum: trust_quorum::NodeTaskHandle,
-
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
 
@@ -1013,26 +1016,28 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Subscribe a VMM's OPTE port to a multicast group.
     pub async fn instance_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        multicast_body: &InstanceMulticastBody,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .join_multicast_group(propolis_id, multicast_body)
+            .join_multicast_group(propolis_id, membership)
             .await
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Unsubscribe a VMM's OPTE port from a multicast group.
     pub async fn instance_leave_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        multicast_body: &InstanceMulticastBody,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .leave_multicast_group(propolis_id, multicast_body)
+            .leave_multicast_group(propolis_id, membership)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1115,6 +1120,52 @@ impl SledAgent {
             .port_manager
             .unset_virtual_nic_host(mapping)
             .map_err(Error::from)
+    }
+
+    /// Install a multicast overlay-to-underlay (M2P) mapping in OPTE.
+    pub async fn set_mcast_m2p(
+        &self,
+        req: &Mcast2PhysMapping,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.set_mcast_m2p(req).map_err(Error::from)
+    }
+
+    /// Remove a multicast overlay-to-underlay (M2P) mapping from OPTE.
+    pub async fn clear_mcast_m2p(
+        &self,
+        req: &ClearMcast2Phys,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.clear_mcast_m2p(req).map_err(Error::from)
+    }
+
+    /// Set multicast forwarding next hops for an underlay group address.
+    pub async fn set_mcast_fwd(
+        &self,
+        req: &McastForwardingEntry,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.set_mcast_fwd(req).map_err(Error::from)
+    }
+
+    /// Remove multicast forwarding entries for an underlay group address.
+    pub async fn clear_mcast_fwd(
+        &self,
+        req: &ClearMcastForwarding,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.clear_mcast_fwd(req).map_err(Error::from)
+    }
+
+    /// List all multicast M2P mappings from OPTE.
+    pub async fn list_mcast_m2p(
+        &self,
+    ) -> Result<Vec<Mcast2PhysMapping>, Error> {
+        self.inner.port_manager.list_mcast_m2p().map_err(Error::from)
+    }
+
+    /// List all multicast forwarding entries from OPTE.
+    pub async fn list_mcast_fwd(
+        &self,
+    ) -> Result<Vec<McastForwardingEntry>, Error> {
+        self.inner.port_manager.list_mcast_fwd().map_err(Error::from)
     }
 
     pub async fn ensure_scrimlet_host_ports(
