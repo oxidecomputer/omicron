@@ -484,7 +484,6 @@ impl DataStore {
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(IpPoolType::Unicast))
-            .order(ip_pool_resource::resource_type.asc())
             .select(IpPool::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await

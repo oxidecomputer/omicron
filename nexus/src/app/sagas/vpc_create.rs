@@ -571,6 +571,22 @@ async fn svc_create_gateway(
         .await
         .map_err(saga_action_failed)?;
 
+    if default_pools.v4.is_none() && default_pools.v6.is_none() {
+        warn!(
+            osagactx.log(),
+            "This VPC's silo has no default IP pools of \
+            either IP version, so nothing to attach to the \
+            internet gateway. Instances in this VPC will not \
+            have default outbound connectivity until IP pools \
+            are attached.";
+            "vpc_id" => %vpc_id,
+            "igw_id" => %default_igw_id,
+        );
+        return Ok(authz_igw);
+    }
+
+    // We have at least one IP Pool linked as the default, so attach it to the
+    // internet gateway too.
     for (authz_ip_pool, name, version) in [
         (default_pools.v4, "default-v4", "IPv4"),
         (default_pools.v6, "default-v6", "IPv6"),
