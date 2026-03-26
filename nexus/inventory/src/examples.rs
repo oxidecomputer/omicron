@@ -64,6 +64,7 @@ use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootMismatch;
@@ -532,7 +533,7 @@ pub fn representative() -> Representative {
         zpools.push(InventoryZpool {
             id: pool_id,
             total_size: ByteCount::from(4096),
-            health: illumos_utils::zpool::ZpoolHealth::Online,
+            health: ZpoolHealth::Online,
         });
     }
     let dataset_name = DatasetName::new(

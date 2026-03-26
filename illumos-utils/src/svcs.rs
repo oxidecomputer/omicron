@@ -17,10 +17,11 @@ use chrono::Utc;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use slog::Logger;
-use slog::{error, info};
 use sled_agent_types::inventory::Svc;
 use sled_agent_types::inventory::SvcState;
+use sled_agent_types::inventory::SvcsEnabledNotOnline;
+use slog::Logger;
+use slog::{error, info};
 #[cfg(target_os = "illumos")]
 use tokio::process::Command;
 
@@ -60,6 +61,13 @@ pub struct SvcsResult {
     pub services: Vec<Svc>,
     pub errors: Vec<String>,
     pub time_of_status: DateTime<Utc>,
+}
+
+impl From<SvcsResult> for SvcsEnabledNotOnline {
+    fn from(value: SvcsResult) -> Self {
+        let SvcsResult { services, errors, time_of_status } = value;
+        Self { services, errors, time_of_status }
+    }
 }
 
 impl SvcsResult {
@@ -165,77 +173,6 @@ impl SvcsResult {
         self
     }
 }
-
-/*
-/// Each service instance is always in a well-defined state based on its
-/// dependencies, the results of the execution of its methods, and its potential
-/// contracts events. See <https://illumos.org/man/7/smf> for more information.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SvcState {
-    /// Initial state for all service instances.
-    Uninitialized,
-    /// The instance is enabled, but not yet running or available to run.
-    Offline,
-    /// The instance is enabled and running or is available to run.
-    Online,
-    /// The instance is enabled and running or available to run. It is, however,
-    /// functioning at a limited capacity in comparison to normal operation.
-    Degraded,
-    /// The instance is enabled, but not able to run.
-    Maintenance,
-    /// The instance is disabled.
-    Disabled,
-    /// Represents a legacy instance that is not managed by the service
-    /// management facility.
-    LegacyRun,
-    /// We were unable to determine the state of the service instance.
-    Unknown,
-}
-
-impl From<String> for SvcState {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "uninitialized" => SvcState::Uninitialized,
-            "offline" => SvcState::Offline,
-            "online" => SvcState::Online,
-            "degraded" => SvcState::Degraded,
-            "maintenance" => SvcState::Maintenance,
-            "disabled" => SvcState::Disabled,
-            "legacy_run" => SvcState::LegacyRun,
-            _ => SvcState::Unknown,
-        }
-    }
-}
-
-impl Display for SvcState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = match self {
-            SvcState::Uninitialized => "uninitialized",
-            SvcState::Offline => "offline",
-            SvcState::Online => "online",
-            SvcState::Degraded => "degraded",
-            SvcState::Maintenance => "maintenance",
-            SvcState::Disabled => "disabled",
-            SvcState::LegacyRun => "legacy_run",
-            SvcState::Unknown => "unknown",
-        };
-
-        write!(f, "{state}")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-/// Information about an SMF service that is enabled but not running
-pub struct Svc {
-    fmri: String,
-    zone: String,
-    state: SvcState,
-}
-*/
 
 #[cfg(test)]
 mod tests {

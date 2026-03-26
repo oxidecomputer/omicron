@@ -361,16 +361,6 @@ impl OmicronZoneConfig {
         self.zone_type.underlay_ip()
     }
 
-    /*
-    /// Returns the zone name for this zone configuration.
-    pub fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.kind().zone_prefix(),
-            Some(self.id),
-        )
-    }
-    */
-
     /// If this kind of zone has an associated dataset, return the dataset's
     /// name. Otherwise, return `None`.
     pub fn dataset_name(&self) -> Option<DatasetName> {
@@ -875,39 +865,6 @@ impl HostPhase2DesiredSlots {
         }
     }
 }
-
-/*
-impl From<illumos_utils::svcs::SvcsResult> for SvcsEnabledNotOnline {
-    fn from(value: illumos_utils::svcs::SvcsResult) -> Self {
-        let illumos_utils::svcs::SvcsResult {
-            services,
-            errors,
-            time_of_status,
-        } = value;
-        Self { services, errors, time_of_status }
-    }
-}
-
-impl From<illumos_utils::ExecutionError> for SvcsError {
-    fn from(e: illumos_utils::ExecutionError) -> Self {
-        match e {
-            illumos_utils::ExecutionError::ExecutionStart { command, err } => {
-                Self::ExecutionStart { command, err: err.to_string() }
-            }
-            illumos_utils::ExecutionError::CommandFailure(e) => {
-                Self::CommandFailure(e.to_string())
-            }
-            illumos_utils::ExecutionError::ContractFailure { msg, err } => {
-                Self::ContractFailure { msg, err: err.to_string() }
-            }
-            illumos_utils::ExecutionError::ParseFailure(e) => {
-                Self::ParseFailure(e)
-            }
-            illumos_utils::ExecutionError::NotRunning => Self::NotRunning,
-        }
-    }
-}
-*/
 
 impl Default for OmicronSledConfig {
     fn default() -> Self {

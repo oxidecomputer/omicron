@@ -74,59 +74,6 @@ pub struct GetInfoError {
     err: Error,
 }
 
-/*
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ZpoolHealth {
-    /// The device is online and functioning.
-    Online,
-    /// One or more components are degraded or faulted, but sufficient
-    /// replicas exist to continue functioning.
-    Degraded,
-    /// One or more components are degraded or faulted, and insufficient
-    /// replicas exist to continue functioning.
-    Faulted,
-    /// The device was explicitly taken offline by "zpool offline".
-    Offline,
-    /// The device was physically removed.
-    Removed,
-    /// The device could not be opened.
-    Unavailable,
-}
-
-impl FromStr for ZpoolHealth {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ONLINE" => Ok(ZpoolHealth::Online),
-            "DEGRADED" => Ok(ZpoolHealth::Degraded),
-            "FAULTED" => Ok(ZpoolHealth::Faulted),
-            "OFFLINE" => Ok(ZpoolHealth::Offline),
-            "REMOVED" => Ok(ZpoolHealth::Removed),
-            "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ParseError(format!("Unrecognized zpool 'health': {}", s))),
-        }
-    }
-}
-
-impl Display for ZpoolHealth {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            ZpoolHealth::Online => "online",
-            ZpoolHealth::Degraded => "degraded",
-            ZpoolHealth::Faulted => "faulted",
-            ZpoolHealth::Offline => "offline",
-            ZpoolHealth::Removed => "removed",
-            ZpoolHealth::Unavailable => "unavailable",
-        };
-        write!(f, "{s}")
-    }
-}
-*/
-
 /// Describes a Zpool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZpoolInfo {
