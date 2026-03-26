@@ -5,6 +5,7 @@ on:
       - '.github/workflows/check-opte-ver.yml'
       - 'Cargo.toml'
       - 'tools/opte_version'
+      - 'tools/opte_version_override'
 jobs:
   check-opte-ver:
     runs-on: ubuntu-22.04
@@ -18,3 +19,17 @@ jobs:
         run: cargo install toml-cli@0.2.3
       - name: Check OPTE version and rev match
         run: ./tools/ci_check_opte_ver.sh
+  check-opte-override:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+      - name: Reject OPTE override on main
+        run: |
+          source tools/opte_version_override
+          if [[ "x$OPTE_COMMIT" != "x" ]]; then
+            echo "::error::OPTE_COMMIT is set in tools/opte_version_override."
+            echo "::error::The OPTE override must be cleared before merging to main."
+            exit 1
+          fi
