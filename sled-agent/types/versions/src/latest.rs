@@ -155,8 +155,11 @@ pub mod inventory {
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
     pub use crate::v24::inventory::InventoryZpool;
+    pub use crate::v24::inventory::ZpoolHealth;
 
     pub use crate::v28::inventory::Inventory;
+    pub use crate::v28::inventory::Svc;
+    pub use crate::v28::inventory::SvcState;
     pub use crate::v28::inventory::SvcsEnabledNotOnline;
     pub use crate::v28::inventory::SvcsEnabledNotOnlineResult;
     pub use crate::v28::inventory::SvcsError;
@@ -169,6 +172,7 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
     pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
+    pub use crate::impls::inventory::ZpoolHealthParseError;
 }
 
 pub mod probes {
