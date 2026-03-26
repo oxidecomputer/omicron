@@ -4,7 +4,7 @@
 
 //! OxQL shell implementation.
 
-// Copyright 2025 Oxide Computer
+// Copyright 2026 Oxide Computer
 
 use super::{list_timeseries, prepare_columns};
 use crate::{Client, OxqlResult, make_client, oxql::query::QueryAuthzScope};
@@ -26,10 +26,10 @@ pub enum OutputFormat {
     HumanReadable,
     /// Simple human-readable formatted output.
     ///
-    /// This is the same format as "human readable", but without non-printable
+    /// This is the same format as `human-readable`, but without non-printable
     /// style characters like bold or underline, or enclosing data points in
     /// square brackets.
-    SimpleHumanReadable,
+    Simple,
     /// Compact JSON format.
     Json,
     /// Prettified JSON format.
@@ -40,7 +40,7 @@ impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             OutputFormat::HumanReadable => "human-readable",
-            OutputFormat::SimpleHumanReadable => "simple",
+            OutputFormat::Simple => "simple",
             OutputFormat::Json => "json",
             OutputFormat::JsonPretty => "json-pretty",
         };
@@ -58,7 +58,7 @@ pub struct ShellOptions {
     #[clap(long = "elapsed")]
     pub print_elapsed: bool,
     /// Query result output format.
-    #[clap(short = 'f', default_value_t = Default::default())]
+    #[clap(long, short = 'f', default_value_t = Default::default())]
     pub output_format: OutputFormat,
 }
 
@@ -396,7 +396,7 @@ fn print_query_summary(
 fn print_tables(tables: &[Table], output_format: OutputFormat) {
     match output_format {
         OutputFormat::HumanReadable => print_human_readable_tables(tables),
-        OutputFormat::SimpleHumanReadable => print_simple_tables(tables),
+        OutputFormat::Simple => print_simple_tables(tables),
         OutputFormat::Json => match serde_json::to_string(tables) {
             Ok(s) => println!("{s}"),
             Err(e) => eprintln!("failed to print tables to JSON: {e}"),

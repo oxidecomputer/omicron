@@ -1226,10 +1226,10 @@ Options:
           The format for printing the result of queries
 
           Possible values:
-          - human-readable:        Human-readable formatted output, the default
-          - simple-human-readable: Simple human-readable formatted output
-          - json:                  Compact JSON format
-          - json-pretty:           Prettified JSON format
+          - human-readable: Human-readable formatted output, the default
+          - simple:         Simple human-readable formatted output
+          - json:           Compact JSON format
+          - json-pretty:    Prettified JSON format
           
           [default: human-readable]
 
