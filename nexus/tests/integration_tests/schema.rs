@@ -179,20 +179,6 @@ async fn apply_update(
             } else {
                 apply_update_as_transaction(&log, &client, step).await;
             }
-
-            // The following is a set of "versions exempt from being
-            // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
-            const NOT_IDEMPOTENT_VERSIONS: [semver::Version; 1] = [
-                // Why: This calls "ALTER TYPE ... DROP VALUE", which does not
-                // support the "IF EXISTS" syntax in CockroachDB.
-                //
-                // https://github.com/cockroachdb/cockroach/issues/120801
-                semver::Version::new(10, 0, 0),
-            ];
-
-            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver()) {
-                break;
-            }
         }
 
         // After applying the step, run its verification SQL (if any) in a
@@ -3917,7 +3903,7 @@ async fn validate_migration_from_base_version() {
     let base_version = KNOWN_VERSIONS
         .iter()
         .find(|v| *v.semver() == base_version_semver)
-        .expect("Base schema version not  in KNOWN_VERSIONS");
+        .expect("Base schema version not in KNOWN_VERSIONS");
 
     assert_ne!(base_version_semver, LATEST_SCHEMA_VERSION);
 

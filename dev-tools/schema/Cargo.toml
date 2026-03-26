@@ -14,7 +14,6 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
-fs-err.workspace = true
 nexus-db-model.workspace = true
 omicron-workspace-hack.workspace = true
 pq-sys = "*"

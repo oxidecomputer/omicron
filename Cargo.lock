@@ -12687,7 +12687,6 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "fs-err 3.3.0",
  "nexus-db-model",
  "omicron-rpaths",
  "omicron-workspace-hack",
