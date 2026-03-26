@@ -3340,7 +3340,7 @@ impl ServiceManager {
         let maybe_underlay_ip =
             self.inner.sled_info.get().map(|info| info.local_switch_zone_ip);
         let mut addresses = if let Some(ip) = maybe_underlay_ip {
-            vec![ip.into_ip()]
+            vec![Ipv6Addr::from(ip)]
         } else {
             vec![]
         };

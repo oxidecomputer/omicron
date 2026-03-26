@@ -1778,7 +1778,7 @@ mod local_switch_zone_ip {
     ///
     /// That switch zone will only exist if we are a scrimlet, but we always
     /// know what the IP would be.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
     pub(crate) struct LocalSwitchZoneIpAddr(Ipv6Addr);
 
     impl LocalSwitchZoneIpAddr {
@@ -1796,9 +1796,13 @@ mod local_switch_zone_ip {
         ) -> Self {
             LocalSwitchZoneIpAddr(get_switch_zone_address(request.body.subnet))
         }
+    }
 
-        pub(crate) fn into_ip(self) -> Ipv6Addr {
-            self.0
+    // NOTE: We impl `From` only in this direction: constructing a
+    // `LocalSwitchZoneIpAddr` must happen only via `from_sled_agent_request()`.
+    impl From<LocalSwitchZoneIpAddr> for Ipv6Addr {
+        fn from(value: LocalSwitchZoneIpAddr) -> Self {
+            value.0
         }
     }
 
