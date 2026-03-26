@@ -29,7 +29,7 @@ pub struct Ereport {
 
 impl Ereport {
     pub fn new(data: EreportData, reporter: Reporter) -> Self {
-        Self {data, reporter, marked_seen_in: None }
+        Self { data, reporter, marked_seen_in: None }
     }
 
     pub fn id(&self) -> &EreportId {
