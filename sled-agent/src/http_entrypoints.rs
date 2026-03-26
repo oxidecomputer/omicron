@@ -1498,10 +1498,8 @@ impl SledAgentApi for SledAgentImpl {
                 match policy {
                     OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
                     OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
-                        let our_switch_zone_ip =
-                            sa.switch_zone_underlay_info().ip;
                         if request_context.request.remote_addr().ip()
-                            == our_switch_zone_ip
+                            == sa.local_switch_zone_ip()
                         {
                             let message =
                                 "requests to disable the switch zone must \

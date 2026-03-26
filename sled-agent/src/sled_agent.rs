@@ -17,7 +17,7 @@ use crate::nexus::{
 };
 use crate::probe_manager::ProbeManager;
 use crate::rot::{RotAttestationHandle, RotAttestationTask};
-use crate::services::{self, ServiceManager, UnderlayInfo};
+use crate::services::{self, ServiceManager};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -815,8 +815,8 @@ impl SledAgent {
         )
     }
 
-    pub(crate) fn switch_zone_underlay_info(&self) -> UnderlayInfo {
-        UnderlayInfo { ip: self.inner.switch_zone_ip() }
+    pub(crate) fn local_switch_zone_ip(&self) -> LocalSwitchZoneIpAddr {
+        self.inner.switch_zone_ip()
     }
 
     pub fn id(&self) -> SledUuid {

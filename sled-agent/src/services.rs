@@ -327,13 +327,6 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
-/// Information describing the underlay network, used when activating the switch
-/// zone.
-#[derive(Debug, Clone)]
-pub(crate) struct UnderlayInfo {
-    pub(crate) ip: LocalSwitchZoneIpAddr,
-}
-
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     if errors.len() == 1 {
         return format!(
