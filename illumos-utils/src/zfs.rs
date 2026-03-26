@@ -20,6 +20,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use rustix::fd::AsRawFd;
+use sled_agent_types::inventory::InventoryDataset;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -589,6 +590,20 @@ impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
             quota: props.quota,
             reservation: props.reservation,
         })
+    }
+}
+
+impl From<DatasetProperties> for InventoryDataset {
+    fn from(props: DatasetProperties) -> Self {
+        Self {
+            id: props.id,
+            name: props.name,
+            available: props.avail,
+            used: props.used,
+            quota: props.quota,
+            reservation: props.reservation,
+            compression: props.compression,
+        }
     }
 }
 

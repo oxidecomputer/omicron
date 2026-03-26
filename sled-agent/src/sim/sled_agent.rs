@@ -25,7 +25,6 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
@@ -68,7 +67,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
     InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
-    SingleMeasurementInventory, SledRole,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
