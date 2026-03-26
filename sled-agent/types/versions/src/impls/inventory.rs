@@ -911,6 +911,9 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
 #[error("unrecognized zpool health value `{0}`")]
 pub struct ZpoolHealthParseError(pub String);
 
+// TODO-correctness `ZpoolHealth` implements both `FromStr` and `Display`, but
+// they aren't symmetric - we should replace one of these (probably `FromStr`?)
+// with an explicitly-named method.
 impl FromStr for ZpoolHealth {
     type Err = ZpoolHealthParseError;
 

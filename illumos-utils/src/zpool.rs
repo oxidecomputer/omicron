@@ -23,7 +23,7 @@ pub const ZPOOL_MOUNTPOINT_ROOT: &str = "/";
 pub enum ZpoolInfoParseError {
     #[error(transparent)]
     ZpoolHealth(#[from] ZpoolHealthParseError),
-    #[error("zpool list output: missing field `{0}`)")]
+    #[error("zpool list output: missing field `{0}`")]
     MissingField(&'static str),
     #[error("zpool list output: failed to parse field `{field}`")]
     IntegerField {

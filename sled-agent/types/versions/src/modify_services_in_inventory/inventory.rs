@@ -54,6 +54,8 @@ pub enum SvcState {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
+// TODO-correctness `SvcState::Onlien` is one possibility; should we have a
+// different enum if we're actually restricted to "enabled but not running"?
 pub struct Svc {
     pub fmri: String,
     pub zone: String,

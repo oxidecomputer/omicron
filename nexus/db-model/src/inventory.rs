@@ -2259,7 +2259,7 @@ impl From<InvNvmeDiskFirmware>
     }
 }
 
-// See [`illumos_utils::zpool::ZpoolHealth`].
+// See [`sled_agent_types::inventory::ZpoolHealth`].
 impl_enum_type!(
     InvZpoolHealthEnum:
 
