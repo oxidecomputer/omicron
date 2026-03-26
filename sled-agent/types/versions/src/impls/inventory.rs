@@ -27,7 +27,7 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcsEnabledNotOnline, SvcState,
+    SingleMeasurementInventory, SvcState, SvcsEnabledNotOnline,
     ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 

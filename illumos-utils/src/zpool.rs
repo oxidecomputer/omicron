@@ -126,9 +126,8 @@ impl FromStr for ZpoolInfo {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
         let expected_field = |name| ZpoolInfoParseError::MissingField(name);
-        let failed_to_parse = |field, err| {
-            ZpoolInfoParseError::IntegerField { field, err }
-        };
+        let failed_to_parse =
+            |field, err| ZpoolInfoParseError::IntegerField { field, err };
 
         let mut values = s.trim().split_whitespace();
         let name =
