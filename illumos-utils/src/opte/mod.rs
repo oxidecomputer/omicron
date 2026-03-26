@@ -171,6 +171,22 @@ pub struct AttachedSubnet {
     pub kind: AttachedSubnetKind,
 }
 
+impl From<sled_agent_types::attached_subnet::AttachedSubnet>
+    for AttachedSubnet
+{
+    fn from(value: sled_agent_types::attached_subnet::AttachedSubnet) -> Self {
+        Self { cidr: net_to_cidr(value.subnet), kind: value.kind.into() }
+    }
+}
+
+impl From<AttachedSubnet>
+    for sled_agent_types::attached_subnet::AttachedSubnet
+{
+    fn from(value: AttachedSubnet) -> Self {
+        Self { subnet: cidr_to_net(value.cidr), kind: value.kind.into() }
+    }
+}
+
 /// The kind of subnet that is attached.
 #[derive(Clone, Copy, Debug)]
 pub enum AttachedSubnetKind {
@@ -178,6 +194,34 @@ pub enum AttachedSubnetKind {
     Vpc,
     /// This is an external subnet.
     External,
+}
+
+impl From<sled_agent_types::attached_subnet::AttachedSubnetKind>
+    for AttachedSubnetKind
+{
+    fn from(
+        value: sled_agent_types::attached_subnet::AttachedSubnetKind,
+    ) -> Self {
+        match value {
+            sled_agent_types::attached_subnet::AttachedSubnetKind::Vpc => {
+                Self::Vpc
+            }
+            sled_agent_types::attached_subnet::AttachedSubnetKind::External => {
+                Self::External
+            }
+        }
+    }
+}
+
+impl From<AttachedSubnetKind>
+    for sled_agent_types::attached_subnet::AttachedSubnetKind
+{
+    fn from(value: AttachedSubnetKind) -> Self {
+        match value {
+            AttachedSubnetKind::Vpc => Self::Vpc,
+            AttachedSubnetKind::External => Self::External,
+        }
+    }
 }
 
 /// A set of removed / added attached subnets in an OPTE API call.

@@ -16,7 +16,6 @@ use headers::authorization::Credentials;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
-use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -28,6 +27,7 @@ use nexus_types::external_api::snapshot;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::ZpoolHealth;
 use std::sync::LazyLock;
 
 type DiskTest<'a> =
