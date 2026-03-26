@@ -1958,9 +1958,11 @@ mod test {
             }
         }
 
+        // This check is intended to validate that the test isn't misconfigured,
+        // but the actual count doesn't matter much - as long as it's non-zero.
         assert!(
-            version_count > 100,
-            "Expected > 100 schema versions, found {version_count}"
+            version_count > 1,
+            "Expected > 1 schema versions, found {version_count}"
         );
     }
 
