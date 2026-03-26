@@ -345,11 +345,9 @@ mod test {
 
         // Similar to the prior test case, just omit "health".
         let input = format!("{} {} {} {}", name, size, allocated, free);
-        let result: Result<ZpoolInfo, ParseError> = input.parse();
+        let result = input.parse::<ZpoolInfo>();
 
-        let expected_err = ParseError(
-            "Missing 'health' value in zpool list output".to_owned(),
-        );
+        let expected_err = ZpoolInfoParseError::MissingField("health");
         assert_eq!(result.unwrap_err(), expected_err,);
     }
 }
