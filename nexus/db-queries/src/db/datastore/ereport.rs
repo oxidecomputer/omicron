@@ -319,6 +319,32 @@ impl DataStore {
         Ok((created, latest))
     }
 
+    pub async fn ereports_list_unseen(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> ListResultVec<Ereport> {
+        // TODO(eliza): ereports should probably have their own resource type someday...
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::ereports_list_unseen_query(pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn ereports_list_unseen_query(
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> impl RunnableQuery<Ereport> + use<> {
+        paginated_multicolumn(
+            dsl::ereport,
+            (dsl::restart_id, dsl::ena),
+            pagparams,
+        )
+        .filter(dsl::marked_seen_in.is_null())
+        .filter(dsl::time_deleted.is_null())
+        .select(Ereport::as_select())
+    }
+
     /// Mark the ereports with the given ereport IDs as having definitely been
     /// processed as of the provided sitrep ID.
     ///
@@ -608,7 +634,56 @@ mod tests {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        eprintln!("--- explanation:\n{explanation}");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_ereports_list_unseen() {
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::ereports_list_unseen_query(&pagparams);
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereports_list_unseen.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_ereports_list_unseen_query() {
+        let logctx = dev::test_setup_log("explain_ereports_list_unseen_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::ereports_list_unseen_query(&pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
