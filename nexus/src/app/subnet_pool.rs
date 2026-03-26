@@ -23,6 +23,14 @@ use oxnet::IpNet;
 use uuid::Uuid;
 
 impl super::Nexus {
+    pub fn subnet_pool_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        pool: &'a NameOrId,
+    ) -> lookup::SubnetPool<'a> {
+        self.datastore().lookup_subnet_pool(opctx, pool)
+    }
+
     // === Subnet Pool CRUD ===
 
     pub(crate) async fn subnet_pool_list(
@@ -318,9 +326,8 @@ impl super::Nexus {
     pub(crate) async fn subnet_pool_utilization_view(
         &self,
         opctx: &OpContext,
-        pool: &NameOrId,
+        pool_lookup: &lookup::SubnetPool<'_>,
     ) -> LookupResult<subnet_pool_types::SubnetPoolUtilization> {
-        let pool_lookup = self.datastore().lookup_subnet_pool(opctx, pool);
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Read).await?;
 
