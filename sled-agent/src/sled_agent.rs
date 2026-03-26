@@ -74,7 +74,6 @@ use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -402,9 +401,6 @@ struct SledAgentInner {
     // A handle to the RoT for attestation requests.
     rot_attestor: RotAttestationHandle,
 
-    // The current rack network config from the replicated bootstore.
-    rack_network_config: RackNetworkConfig,
-
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
 
@@ -439,6 +435,10 @@ struct SledAgentInner {
 pub(crate) struct LocalSwitchZoneIpAddr(Ipv6Addr);
 
 impl LocalSwitchZoneIpAddr {
+    fn from_our_sled_subnet(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        LocalSwitchZoneIpAddr(get_switch_zone_address(subnet))
+    }
+
     pub(crate) fn into_ip(self) -> Ipv6Addr {
         self.0
     }
@@ -468,7 +468,7 @@ impl SledAgentInner {
     }
 
     fn switch_zone_ip(&self) -> LocalSwitchZoneIpAddr {
-        LocalSwitchZoneIpAddr(get_switch_zone_address(self.subnet))
+        LocalSwitchZoneIpAddr::from_our_sled_subnet(self.subnet)
     }
 }
 
@@ -717,8 +717,11 @@ impl SledAgent {
                 svc_config,
                 port_manager.clone(),
                 *sled_address.ip(),
+                LocalSwitchZoneIpAddr::from_our_sled_subnet(
+                    request.body.subnet,
+                ),
                 request.body.rack_id,
-                rack_network_config.clone(),
+                rack_network_config,
                 metrics_manager.request_queue(),
             )
             .await?;
@@ -773,7 +776,6 @@ impl SledAgent {
                 services,
                 nexus_notifier: nexus_notifier_handle,
                 rot_attestor: rot_attest_handle,
-                rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 trust_quorum: long_running_task_handles.trust_quorum.clone(),
@@ -814,10 +816,7 @@ impl SledAgent {
     }
 
     pub(crate) fn switch_zone_underlay_info(&self) -> UnderlayInfo {
-        UnderlayInfo {
-            ip: self.inner.switch_zone_ip(),
-            rack_network_config: self.inner.rack_network_config.clone(),
-        }
+        UnderlayInfo { ip: self.inner.switch_zone_ip() }
     }
 
     pub fn id(&self) -> SledUuid {

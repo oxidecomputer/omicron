@@ -332,7 +332,6 @@ impl From<Error> for omicron_common::api::external::Error {
 #[derive(Debug, Clone)]
 pub(crate) struct UnderlayInfo {
     pub(crate) ip: LocalSwitchZoneIpAddr,
-    pub(crate) rack_network_config: RackNetworkConfig,
 }
 
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
@@ -467,7 +466,6 @@ struct SwitchZoneConfig {
     id: Uuid,
     addresses: Vec<Ipv6Addr>,
     services: Vec<SwitchService>,
-    underlay_info: Option<UnderlayInfo>,
 }
 
 /// Describes one of several services that may be deployed in a switch zone
@@ -631,6 +629,7 @@ struct SledAgentInfo {
     port_manager: PortManager,
     resolver: Resolver,
     underlay_address: Ipv6Addr,
+    local_switch_zone_ip: LocalSwitchZoneIpAddr,
     rack_id: Uuid,
     rack_network_config: RackNetworkConfig,
     metrics_queue: MetricsRequestQueue,
@@ -827,11 +826,13 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    pub async fn sled_agent_started(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn sled_agent_started(
         &self,
         config: Config,
         port_manager: PortManager,
         underlay_address: Ipv6Addr,
+        local_switch_zone_ip: LocalSwitchZoneIpAddr,
         rack_id: Uuid,
         rack_network_config: RackNetworkConfig,
         metrics_queue: MetricsRequestQueue,
@@ -850,6 +851,7 @@ impl ServiceManager {
                     underlay_address,
                 )?,
                 underlay_address,
+                local_switch_zone_ip,
                 rack_id,
                 rack_network_config,
                 metrics_queue: metrics_queue.clone(),
@@ -3372,7 +3374,6 @@ impl ServiceManager {
             id: Uuid::new_v4(),
             addresses,
             services,
-            underlay_info,
         };
 
         self.ensure_switch_zone(Some(request), filesystems, data_links).await?;
@@ -3388,7 +3389,8 @@ impl ServiceManager {
     // <https://github.com/oxidecomputer/omicron/issues/8970> for details.
     async fn ensure_switch_zone_uplinks_configured_loop(
         &self,
-        underlay_info: &UnderlayInfo,
+        switch_zone_ip: LocalSwitchZoneIpAddr,
+        rack_network_config: &RackNetworkConfig,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
@@ -3396,12 +3398,10 @@ impl ServiceManager {
         // but we probably don't want to use backoff here.
         const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-        let rack_network_config = &underlay_info.rack_network_config;
-
         loop {
             match self
                 .ensure_switch_zone_uplinks_configured(
-                    underlay_info.ip,
+                    switch_zone_ip,
                     rack_network_config,
                 )
                 .await
@@ -4042,7 +4042,16 @@ impl ServiceManager {
 
                 // We also need to ensure any uplinks are configured. Spawn a
                 // task that goes into an infinite retry loop until it succeeds.
-                if let Some(underlay_info) = request.underlay_info.clone() {
+                let maybe_our_underlay_info =
+                    self.inner.sled_info.get().map(|sled_info| {
+                        (
+                            sled_info.local_switch_zone_ip,
+                            sled_info.rack_network_config.clone(),
+                        )
+                    });
+                if let Some((switch_zone_ip, rack_network_config)) =
+                    maybe_our_underlay_info
+                {
                     if let Some(old_worker) = worker.take() {
                         old_worker.stop().await;
                     }
@@ -4052,7 +4061,8 @@ impl ServiceManager {
                         exit_tx,
                         initializer: tokio::task::spawn(async move {
                             me.ensure_switch_zone_uplinks_configured_loop(
-                                &underlay_info,
+                                switch_zone_ip,
+                                &rack_network_config,
                                 exit_rx,
                             )
                             .await;
@@ -4102,7 +4112,7 @@ impl ServiceManager {
     async fn try_initialize_switch_zone(
         &self,
         sled_zone: &mut SwitchZoneState,
-    ) -> Result<Option<UnderlayInfo>, Error> {
+    ) -> Result<(), Error> {
         let SwitchZoneState::Initializing {
             request,
             filesystems,
@@ -4110,7 +4120,7 @@ impl ServiceManager {
             worker,
         } = sled_zone
         else {
-            return Ok(None);
+            return Ok(());
         };
 
         // The switch zone must use the ramdisk in order to receive requests
@@ -4127,7 +4137,6 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
-        let underlay_info = request.underlay_info.clone();
 
         // Even though we've initialized the zone, the `worker` task may still
         // be running to configure uplinks. If we drop `worker` now it will
@@ -4142,7 +4151,7 @@ impl ServiceManager {
             zone: Box::new(zone),
             worker,
         };
-        Ok(underlay_info)
+        Ok(())
     }
 
     // Body of a tokio task responsible for running until the switch zone is
@@ -4158,26 +4167,11 @@ impl ServiceManager {
 
         // First, go into a loop to bring up the switch zone; retry until we
         // succeed or are told to give up via `exit_rx`.
-        let underlay_info = loop {
+        loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(None) => {
-                        info!(
-                            self.inner.log,
-                            "initialized switch zone \
-                             (no underlay info available yet)",
-                        );
-                        return;
-                    }
-                    Ok(Some(underlay_info)) => {
-                        info!(
-                            self.inner.log,
-                            "initialized switch zone (underlay info \
-                             available: will attempt uplink configuration)",
-                        );
-                        break underlay_info;
-                    }
+                    Ok(()) => break,
                     Err(e) => {
                         warn!(
                             self.inner.log, "Failed to initialize switch zone";
@@ -4205,12 +4199,36 @@ impl ServiceManager {
                     continue;
                 }
             };
-        };
+        }
 
-        // Then go into a loop trying to configure our uplinks. As above, retry
-        // until we succeed or are told to stop.
+        // If we have our underlay info, also go into a loop trying to configure
+        // our uplinks. As above, retry until we succeed or are told to stop.
+        let (switch_zone_ip, rack_network_config) =
+            match self.inner.sled_info.get() {
+                Some(sled_info) => {
+                    info!(
+                        self.inner.log,
+                        "initialized switch zone (underlay info \
+                         available: will attempt uplink configuration)",
+                    );
+                    (
+                        sled_info.local_switch_zone_ip,
+                        sled_info.rack_network_config.clone(),
+                    )
+                }
+                None => {
+                    info!(
+                        self.inner.log,
+                        "initialized switch zone \
+                         (no underlay info available yet)",
+                    );
+                    return;
+                }
+            };
+
         self.ensure_switch_zone_uplinks_configured_loop(
-            &underlay_info,
+            switch_zone_ip,
+            &rack_network_config,
             exit_rx,
         )
         .await;
