@@ -2876,19 +2876,6 @@ table! {
 }
 
 table! {
-    ereporter_restart (id) {
-        id -> Uuid,
-        generation -> Int8,
-        reporter_type -> crate::enums::EreporterTypeEnum,
-        slot_type -> crate::enums::SpTypeEnum,
-        slot -> Int4,
-        time_first_seen -> Timestamptz,
-    }
-}
-
-allow_tables_to_appear_in_same_query!(ereporter_restart, ereport);
-
-table! {
     user_data_export (id) {
         id -> Uuid,
 

@@ -590,10 +590,10 @@ mod test {
         const SLED_SLOT: u16 = 8;
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
-        let sp1_restart_id1 = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, sp1_restart_id1,  Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        let sp_restart_id = EreporterRestartUuid::new_v4();
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
-                id: EreportId { restart_id: sp1_restart_id1, ena: ereport_types::Ena(1) },
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
@@ -602,7 +602,7 @@ mod test {
                 report: serde_json::json!({"hello world": true})
             },
             EreportData {
-                id: EreportId { restart_id: sp1_restart_id1, ena: ereport_types::Ena(2) },
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
                 time_collected: chrono::Utc::now(),
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
@@ -611,7 +611,7 @@ mod test {
                 report: serde_json::json!({"system_working": "seems to be",})
             },
             EreportData {
-                id: EreportId { restart_id: sp1_restart_id1, ena: ereport_types::Ena(1) },
+                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
                 collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
@@ -621,42 +621,17 @@ mod test {
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello_world": true})
             },
-        ]).await.expect("failed to insert fake SP restart 1 ereports");
-        let sp1_restart_id2 = EreporterRestartUuid::new_v4();
-        datastore
-            .ereports_insert(
-                &opctx,
-                sp1_restart_id2,
-                Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
-                vec![EreportData {
-                    id: EreportId {
-                        restart_id: sp1_restart_id2,
-                        ena: ereport_types::Ena(1),
-                    },
-                    time_collected: chrono::Utc::now(),
-                    collector_id: OmicronZoneUuid::new_v4(),
-                    // Let's do a silly one! No VPD, to make sure that's also
-                    // handled correctly.
-                    part_number: None,
-                    serial_number: None,
-                    class: Some("ereport.fake.whatever".to_string()),
-                    report: serde_json::json!({"hello_world": true}),
-                }],
-            )
-            .await
-            .expect("failed to insert fake SP ereports");
+        ]).await.expect("failed to insert fake SP ereports");
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
-        let sp2_restart_id1 = EreporterRestartUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
-                sp2_restart_id1,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![EreportData {
                     id: EreportId {
-                        restart_id: sp2_restart_id1,
+                        restart_id: EreporterRestartUuid::new_v4(),
                         ena: ereport_types::Ena(1),
                     },
                     time_collected: chrono::Utc::now(),
@@ -674,7 +649,6 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                restart_id,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -708,15 +682,13 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
-        let host2_restart_id = EreporterRestartUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
-                host2_restart_id,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
-                        id: EreportId { restart_id: host2_restart_id, ena:  ereport_types::Ena(1) },
+                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
                         time_collected: chrono::Utc::now(),
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),

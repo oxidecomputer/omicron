@@ -1736,7 +1736,6 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
-                restart_id,
                 reporter,
                 vec![ereport1.clone(), ereport2.clone()],
             )
