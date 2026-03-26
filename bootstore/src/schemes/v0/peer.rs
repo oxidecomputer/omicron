@@ -1083,7 +1083,9 @@ mod tests {
             TestNode { config, log, node_handles: None }
         }
 
-        async fn start_node(&mut self) {
+        async fn start_node(
+            &mut self,
+        ) -> watch::Receiver<Option<NetworkConfig>> {
             // Node must have previously been shutdown (or never started)
             assert!(
                 self.node_handles.is_none(),
@@ -1095,7 +1097,7 @@ mod tests {
             self.config.addr.set_port(0);
 
             // (Re-)create node with existing config and its persistent state (if any)
-            let (mut node, handle) =
+            let (node, handle) =
                 Node::new(self.config.clone(), &self.log).await;
             let jh = tokio::spawn(async move {
                 node.run().await;
@@ -1114,7 +1116,9 @@ mod tests {
                 .port();
             self.config.addr.set_port(port);
 
+            let network_config_rx = handle.network_config_subscribe();
             self.node_handles = Some((handle, jh));
+            network_config_rx
         }
 
         async fn shutdown_node(&mut self) {
@@ -1185,11 +1189,15 @@ mod tests {
         }
 
         /// (Re-)start the given node and update peer addresses for everyone
-        async fn start_node(&mut self, i: usize) {
+        async fn start_node(
+            &mut self,
+            i: usize,
+        ) -> watch::Receiver<Option<NetworkConfig>> {
             let node = &mut self.nodes[i];
-            node.start_node().await;
+            let network_config_rx = node.start_node().await;
             self.addrs.insert(node.config.addr);
             self.load_all_peer_addresses().await;
+            network_config_rx
         }
 
         // Stop the given node and update peer addresses for everyone
@@ -1473,13 +1481,13 @@ mod tests {
     async fn network_config() {
         // Create and start test nodes
         let mut nodes = TestNodes::setup(initial_members());
-        nodes.start_node(0).await;
-        nodes.start_node(1).await;
-        nodes.start_node(2).await;
+        let node0_rx = nodes.start_node(0).await;
+        let mut node1_rx = nodes.start_node(1).await;
+        let mut node2_rx = nodes.start_node(2).await;
 
         // Ensure there is no network config at any of the nodes
-        for node in nodes.iter() {
-            assert_eq!(None, node.get_network_config().await.unwrap());
+        for rx in [&node0_rx, &node1_rx, &node2_rx] {
+            assert_eq!(None, rx.borrow().as_ref());
         }
 
         // Update the network config at node0 and ensure it has taken effect
@@ -1488,10 +1496,7 @@ mod tests {
             blob: b"Some network data".to_vec(),
         };
         nodes[0].update_network_config(network_config.clone()).await.unwrap();
-        assert_eq!(
-            Some(&network_config),
-            nodes[0].get_network_config().await.unwrap().as_ref()
-        );
+        assert_eq!(Some(&network_config), node0_rx.borrow().as_ref(),);
 
         // Poll node1 and node2 until the network config update shows up
         // Timeout after 5 seconds
@@ -1500,19 +1505,25 @@ mod tests {
         let mut node1_done = false;
         let mut node2_done = false;
         while !(node1_done && node2_done) {
-            let timeout = POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+            let timeout = POLL_TIMEOUT.saturating_sub(start.elapsed());
             tokio::select! {
                 _ = sleep(timeout) => {
                     panic!("Network config not replicated");
                 }
-                res = nodes[1].get_network_config(), if !node1_done => {
-                    if res.unwrap().as_ref() == Some(&network_config) {
+                _ = node1_rx.changed(), if !node1_done => {
+                    if node1_rx
+                        .borrow_and_update()
+                        .as_ref() == Some(&network_config)
+                    {
                         node1_done = true;
                         continue;
                     }
                 }
-                res = nodes[2].get_network_config(), if !node2_done => {
-                    if res.unwrap().as_ref() == Some(&network_config) {
+                _ = node2_rx.changed(), if !node2_done => {
+                    if node2_rx
+                        .borrow_and_update()
+                        .as_ref() == Some(&network_config)
+                    {
                         node2_done = true;
                         continue;
                     }
@@ -1527,18 +1538,20 @@ mod tests {
         // Poll the learner to ensure it gets the network config
         // Note that the learner doesn't even need to learn its share
         // for network config replication to work.
+        let mut learner_rx = nodes[LEARNER].network_config_subscribe();
         let start = Instant::now();
-        let mut done = false;
-        while !done {
-            let timeout = POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+        loop {
+            if learner_rx.borrow_and_update().as_ref() == Some(&network_config)
+            {
+                break;
+            }
+            let timeout = POLL_TIMEOUT.saturating_sub(start.elapsed());
             tokio::select! {
                 _ = sleep(timeout) => {
                     panic!("Network config not replicated");
                 }
-                res = nodes[LEARNER].get_network_config() => {
-                    if res.unwrap().as_ref() == Some(&network_config) {
-                        done = true;
-                    }
+                _ = learner_rx.changed() => {
+                    continue;
                 }
             }
         }
@@ -1546,11 +1559,8 @@ mod tests {
         // Stop node0, bring it back online and ensure it still sees the config
         // at generation 1
         nodes.shutdown_node(0).await;
-        nodes.start_node(0).await;
-        assert_eq!(
-            Some(&network_config),
-            nodes[0].get_network_config().await.unwrap().as_ref()
-        );
+        let node0_rx = nodes.start_node(0).await;
+        assert_eq!(Some(&network_config), node0_rx.borrow().as_ref(),);
 
         // Stop node0 again, update network config via node1, bring node0 back online,
         // and ensure all nodes see the latest configuration.
@@ -1560,25 +1570,22 @@ mod tests {
             blob: b"Some more network data".to_vec(),
         };
         nodes[1].update_network_config(new_config.clone()).await.unwrap();
-        assert_eq!(
-            Some(&new_config),
-            nodes[1].get_network_config().await.unwrap().as_ref()
-        );
-        nodes.start_node(0).await;
+        assert_eq!(Some(&new_config), node1_rx.borrow().as_ref(),);
+        let node0_rx = nodes.start_node(0).await;
         let start = Instant::now();
         // These should all resolve instantly, so no real need for a select,
         // which is getting tedious.
         // We also want to repeatedly loop until all consistently have the same version
         // to give some assurance that the old version from node0 doesn't replicate
         'outer: loop {
-            if Instant::now() - start > POLL_TIMEOUT {
+            if start.elapsed() > POLL_TIMEOUT {
                 panic!("network config not replicated");
             }
-            for node in nodes.iter() {
-                if node.get_network_config().await.unwrap().as_ref()
-                    != Some(&new_config)
-                {
-                    // We need to try again
+            for rx in [&node0_rx, &node1_rx, &node2_rx] {
+                if rx.borrow().as_ref() != Some(&new_config) {
+                    // We need to try again; sleep to yield back to the runtime
+                    // and give it a chance to propagate changes to us.
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                     continue 'outer;
                 }
             }
