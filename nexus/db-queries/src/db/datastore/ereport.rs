@@ -406,7 +406,8 @@ impl DataStore {
             .sql("), unnest (")
             .param()
             .bind::<sql_types::Array<sql_types::BigInt>, _>(enas)
-            .sql("))");
+            // Idempotency bit...
+            .sql("))  AND marked_seen_in IS NULL");
         builder.query::<sql_types::BigInt>()
     }
 }
