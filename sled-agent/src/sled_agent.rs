@@ -45,9 +45,7 @@ use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
-use omicron_common::address::{
-    Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
-};
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::DelegatedZvol;
@@ -101,8 +99,7 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::fmt;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -430,46 +427,13 @@ struct SledAgentInner {
     measurements: Arc<MeasurementsHandle>,
 }
 
-/// Newtype wrapper around [`Ipv6Addr`]. This type is always the IP address of
-/// our own, local switch zone, if we are a scrimlet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LocalSwitchZoneIpAddr(Ipv6Addr);
-
-impl LocalSwitchZoneIpAddr {
-    fn from_our_sled_subnet(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
-        LocalSwitchZoneIpAddr(get_switch_zone_address(subnet))
-    }
-
-    pub(crate) fn into_ip(self) -> Ipv6Addr {
-        self.0
-    }
-}
-
-impl PartialEq<IpAddr> for LocalSwitchZoneIpAddr {
-    fn eq(&self, other: &IpAddr) -> bool {
-        self.0.eq(other)
-    }
-}
-
-impl PartialEq<LocalSwitchZoneIpAddr> for IpAddr {
-    fn eq(&self, other: &LocalSwitchZoneIpAddr) -> bool {
-        self.eq(&other.0)
-    }
-}
-
-impl fmt::Display for LocalSwitchZoneIpAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 impl SledAgentInner {
     fn sled_address(&self) -> SocketAddrV6 {
         get_sled_address(self.subnet)
     }
 
     fn switch_zone_ip(&self) -> LocalSwitchZoneIpAddr {
-        LocalSwitchZoneIpAddr::from_our_sled_subnet(self.subnet)
+        LocalSwitchZoneIpAddr::from_sled_agent_request(&self.start_request)
     }
 }
 
@@ -723,9 +687,7 @@ impl SledAgent {
                 )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip:
-                    LocalSwitchZoneIpAddr::from_our_sled_subnet(
-                        request.body.subnet,
-                    ),
+                    LocalSwitchZoneIpAddr::from_sled_agent_request(&request),
                 rack_id: request.body.rack_id,
                 rack_network_config,
                 metrics_queue: metrics_manager.request_queue(),
@@ -1798,5 +1760,63 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
+    }
+}
+
+/// Private module to enforce construction of [`LocalSwitchZoneIpAddr`] only
+/// happens via the constructors we define.
+pub(crate) use self::local_switch_zone_ip::LocalSwitchZoneIpAddr;
+mod local_switch_zone_ip {
+    use omicron_common::address::get_switch_zone_address;
+    use sled_agent_types::sled::StartSledAgentRequest;
+    use std::fmt;
+    use std::net::IpAddr;
+    use std::net::Ipv6Addr;
+
+    /// Newtype wrapper around [`Ipv6Addr`]. This type is always the IP address
+    /// of our own, local switch zone.
+    ///
+    /// That switch zone will only exist if we are a scrimlet, but we always
+    /// know what the IP would be.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct LocalSwitchZoneIpAddr(Ipv6Addr);
+
+    impl LocalSwitchZoneIpAddr {
+        /// Construct a [`LocalSwitchZoneIpAddr`] from the request to start this
+        /// sled agent.
+        ///
+        /// This takes a full request object instead of something smaller (like
+        /// just a sled subnet) to put up a roadblock to accidentally
+        /// constructing a [`LocalSwitchZoneIpAddr`] that points to any address
+        /// other than our own. `sled-agent` has ready access to the subnets and
+        /// addresses of other sleds, but doesn't have ready access to other
+        /// sleds' [`StartSledAgentRequest`]s.
+        pub(crate) fn from_sled_agent_request(
+            request: &StartSledAgentRequest,
+        ) -> Self {
+            LocalSwitchZoneIpAddr(get_switch_zone_address(request.body.subnet))
+        }
+
+        pub(crate) fn into_ip(self) -> Ipv6Addr {
+            self.0
+        }
+    }
+
+    impl PartialEq<IpAddr> for LocalSwitchZoneIpAddr {
+        fn eq(&self, other: &IpAddr) -> bool {
+            self.0.eq(other)
+        }
+    }
+
+    impl PartialEq<LocalSwitchZoneIpAddr> for IpAddr {
+        fn eq(&self, other: &LocalSwitchZoneIpAddr) -> bool {
+            self.eq(&other.0)
+        }
+    }
+
+    impl fmt::Display for LocalSwitchZoneIpAddr {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.fmt(f)
+        }
     }
 }
