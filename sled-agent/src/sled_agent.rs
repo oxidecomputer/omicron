@@ -101,7 +101,8 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::fmt;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -432,13 +433,42 @@ struct SledAgentInner {
     measurements: Arc<MeasurementsHandle>,
 }
 
+/// Newtype wrapper around [`Ipv6Addr`]. This type is always the IP address of
+/// our own, local switch zone, if we are a scrimlet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LocalSwitchZoneIpAddr(Ipv6Addr);
+
+impl LocalSwitchZoneIpAddr {
+    pub(crate) fn into_ip(self) -> Ipv6Addr {
+        self.0
+    }
+}
+
+impl PartialEq<IpAddr> for LocalSwitchZoneIpAddr {
+    fn eq(&self, other: &IpAddr) -> bool {
+        self.0.eq(other)
+    }
+}
+
+impl PartialEq<LocalSwitchZoneIpAddr> for IpAddr {
+    fn eq(&self, other: &LocalSwitchZoneIpAddr) -> bool {
+        self.eq(&other.0)
+    }
+}
+
+impl fmt::Display for LocalSwitchZoneIpAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl SledAgentInner {
     fn sled_address(&self) -> SocketAddrV6 {
         get_sled_address(self.subnet)
     }
 
-    fn switch_zone_ip(&self) -> Ipv6Addr {
-        get_switch_zone_address(self.subnet)
+    fn switch_zone_ip(&self) -> LocalSwitchZoneIpAddr {
+        LocalSwitchZoneIpAddr(get_switch_zone_address(self.subnet))
     }
 }
 

@@ -30,6 +30,7 @@ use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
+use crate::sled_agent::LocalSwitchZoneIpAddr;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
@@ -329,9 +330,9 @@ impl From<Error> for omicron_common::api::external::Error {
 /// Information describing the underlay network, used when activating the switch
 /// zone.
 #[derive(Debug, Clone)]
-pub struct UnderlayInfo {
-    pub ip: Ipv6Addr,
-    pub rack_network_config: RackNetworkConfig,
+pub(crate) struct UnderlayInfo {
+    pub(crate) ip: LocalSwitchZoneIpAddr,
+    pub(crate) rack_network_config: RackNetworkConfig,
 }
 
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
@@ -3269,7 +3270,7 @@ impl ServiceManager {
     }
 
     /// Ensures that a switch zone exists with the provided IP adddress.
-    pub async fn activate_switch(
+    pub(crate) async fn activate_switch(
         &self,
         // If we're reconfiguring the switch zone with an underlay address, we
         // also need the rack network config to set tfport uplinks.
@@ -3361,7 +3362,7 @@ impl ServiceManager {
         };
 
         let mut addresses = if let Some(info) = &underlay_info {
-            vec![info.ip]
+            vec![info.ip.into_ip()]
         } else {
             vec![]
         };
@@ -3446,7 +3447,7 @@ impl ServiceManager {
     // uplinks from `rack_network_config` to assign.
     async fn ensure_switch_zone_uplinks_configured(
         &self,
-        switch_zone_ip: Ipv6Addr,
+        switch_zone_ip: LocalSwitchZoneIpAddr,
         rack_network_config: &RackNetworkConfig,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
