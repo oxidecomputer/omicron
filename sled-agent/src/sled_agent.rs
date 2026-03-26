@@ -17,7 +17,7 @@ use crate::nexus::{
 };
 use crate::probe_manager::ProbeManager;
 use crate::rot::{RotAttestationHandle, RotAttestationTask};
-use crate::services::{self, ServiceManager};
+use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -43,6 +43,7 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -713,17 +714,22 @@ impl SledAgent {
         );
 
         services
-            .sled_agent_started(
-                svc_config,
-                port_manager.clone(),
-                *sled_address.ip(),
-                LocalSwitchZoneIpAddr::from_our_sled_subnet(
-                    request.body.subnet,
-                ),
-                request.body.rack_id,
+            .sled_agent_started(SledAgentInfo {
+                config: svc_config,
+                port_manager: port_manager.clone(),
+                resolver: Resolver::new_from_ip(
+                    parent_log.new(o!("component" => "DnsResolver")),
+                    *sled_address.ip(),
+                )?,
+                underlay_address: *sled_address.ip(),
+                local_switch_zone_ip:
+                    LocalSwitchZoneIpAddr::from_our_sled_subnet(
+                        request.body.subnet,
+                    ),
+                rack_id: request.body.rack_id,
                 rack_network_config,
-                metrics_manager.request_queue(),
-            )
+                metrics_queue: metrics_manager.request_queue(),
+            })
             .await?;
 
         let repo_depot = long_running_task_handles

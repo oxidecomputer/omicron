@@ -291,6 +291,9 @@ pub enum Error {
         #[source]
         err: crate::artifact_store::Error,
     },
+
+    #[error("internal error: sled-agent started multiple times")]
+    SledAgentStartedMultipleTimes,
 }
 
 impl Error {
@@ -617,15 +620,15 @@ pub struct ServiceManagerInner {
 
 // Late-binding information, only known once the sled agent is up and
 // operational.
-struct SledAgentInfo {
-    config: Config,
-    port_manager: PortManager,
-    resolver: Resolver,
-    underlay_address: Ipv6Addr,
-    local_switch_zone_ip: LocalSwitchZoneIpAddr,
-    rack_id: Uuid,
-    rack_network_config: RackNetworkConfig,
-    metrics_queue: MetricsRequestQueue,
+pub(crate) struct SledAgentInfo {
+    pub(crate) config: Config,
+    pub(crate) port_manager: PortManager,
+    pub(crate) resolver: Resolver,
+    pub(crate) underlay_address: Ipv6Addr,
+    pub(crate) local_switch_zone_ip: LocalSwitchZoneIpAddr,
+    pub(crate) rack_id: Uuid,
+    pub(crate) rack_network_config: RackNetworkConfig,
+    pub(crate) metrics_queue: MetricsRequestQueue,
 }
 
 #[derive(Clone)]
@@ -819,38 +822,19 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn sled_agent_started(
         &self,
-        config: Config,
-        port_manager: PortManager,
-        underlay_address: Ipv6Addr,
-        local_switch_zone_ip: LocalSwitchZoneIpAddr,
-        rack_id: Uuid,
-        rack_network_config: RackNetworkConfig,
-        metrics_queue: MetricsRequestQueue,
+        sled_info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(
             &self.inner.log, "sled agent started";
-            "underlay_address" => underlay_address.to_string(),
+            "underlay_address" => %sled_info.underlay_address,
         );
+        let metrics_queue = sled_info.metrics_queue.clone();
         self.inner
             .sled_info
-            .set(SledAgentInfo {
-                config,
-                port_manager,
-                resolver: Resolver::new_from_ip(
-                    self.inner.log.new(o!("component" => "DnsResolver")),
-                    underlay_address,
-                )?,
-                underlay_address,
-                local_switch_zone_ip,
-                rack_id,
-                rack_network_config,
-                metrics_queue: metrics_queue.clone(),
-            })
-            .map_err(|_| "already set".to_string())
-            .expect("Sled Agent should only start once");
+            .set(sled_info)
+            .map_err(|_| Error::SledAgentStartedMultipleTimes)?;
 
         // At this point, we've already started up the switch zone, but the
         // VNICs inside it cannot have been tracked by the sled-agent's metrics
