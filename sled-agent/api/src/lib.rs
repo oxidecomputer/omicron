@@ -19,6 +19,10 @@ use omicron_common::api::internal::{
         SledIdentifiers, VirtualNetworkInterfaceHost,
     },
 };
+use sled_agent_types_versions::latest::multicast::{
+    ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
+    McastForwardingEntry,
+};
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v29, v30, v31,
@@ -38,6 +42,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (33, MCAST_M2P_FORWARDING),
     (32, MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL),
     (31, ADD_ICMPV6_FIREWALL_SUPPORT),
     (30, STRONGER_BGP_UNNUMBERED_TYPES),
@@ -630,24 +635,78 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}/multicast-group",
-        versions = VERSION_MULTICAST_SUPPORT..,
+        versions = VERSION_MCAST_M2P_FORWARDING..,
     }]
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceMulticastBody>,
+        body: TypedBody<latest::instance::InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = DELETE,
         path = "/vmms/{propolis_id}/multicast-group",
-        versions = VERSION_MULTICAST_SUPPORT..,
+        versions = VERSION_MCAST_M2P_FORWARDING..,
     }]
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<latest::instance::InstanceMulticastBody>,
+        body: TypedBody<latest::instance::InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Join a multicast group.
+    ///
+    /// Accepts a tagged `InstanceMulticastBody` request.
+    /// Superseded in MCAST_M2P_FORWARDING.
+    #[endpoint {
+        operation_id = "vmm_join_multicast_group",
+        method = PUT,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..VERSION_MCAST_M2P_FORWARDING,
+    }]
+    async fn vmm_join_multicast_group_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(|b| match b {
+            v7::instance::InstanceMulticastBody::Join(m) => Ok(m),
+            v7::instance::InstanceMulticastBody::Leave(_) => {
+                Err(HttpError::for_bad_request(
+                    None,
+                    "Join endpoint cannot process Leave operations".to_string(),
+                ))
+            }
+        })?;
+        Self::vmm_join_multicast_group(rqctx, path_params, body).await
+    }
+
+    /// Leave a multicast group.
+    ///
+    /// Accepts a tagged `InstanceMulticastBody` request.
+    /// Superseded in MCAST_M2P_FORWARDING.
+    #[endpoint {
+        operation_id = "vmm_leave_multicast_group",
+        method = DELETE,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..VERSION_MCAST_M2P_FORWARDING,
+    }]
+    async fn vmm_leave_multicast_group_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(|b| match b {
+            v7::instance::InstanceMulticastBody::Leave(m) => Ok(m),
+            v7::instance::InstanceMulticastBody::Join(_) => {
+                Err(HttpError::for_bad_request(
+                    None,
+                    "Leave endpoint cannot process Join operations".to_string(),
+                ))
+            }
+        })?;
+        Self::vmm_leave_multicast_group(rqctx, path_params, body).await
+    }
 
     #[endpoint {
         method = PUT,
@@ -804,6 +863,70 @@ pub trait SledAgentApi {
     async fn list_v2p(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>;
+
+    /// Set a multicast-to-physical (M2P) mapping in OPTE.
+    #[endpoint {
+        method = PUT,
+        path = "/networking/mcast-m2p",
+        versions = VERSION_MCAST_M2P_FORWARDING..,
+    }]
+    async fn set_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<Mcast2PhysMapping>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Clear a multicast-to-physical (M2P) mapping in OPTE.
+    #[endpoint {
+        method = DELETE,
+        path = "/networking/mcast-m2p",
+        versions = VERSION_MCAST_M2P_FORWARDING..,
+    }]
+    async fn clear_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcast2Phys>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set multicast forwarding entries for an underlay address.
+    #[endpoint {
+        method = PUT,
+        path = "/networking/mcast-fwd",
+        versions = VERSION_MCAST_M2P_FORWARDING..,
+    }]
+    async fn set_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<McastForwardingEntry>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Clear multicast forwarding entries for an underlay address.
+    #[endpoint {
+        method = DELETE,
+        path = "/networking/mcast-fwd",
+        versions = VERSION_MCAST_M2P_FORWARDING..,
+    }]
+    async fn clear_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcastForwarding>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List M2P mappings present on this sled.
+    #[endpoint {
+        method = GET,
+        path = "/networking/mcast-m2p",
+        versions = VERSION_MCAST_M2P_FORWARDING..,
+    }]
+    async fn list_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Mcast2PhysMapping>>, HttpError>;
+
+    /// List multicast forwarding entries present on this sled.
+    #[endpoint {
+        method = GET,
+        path = "/networking/mcast-fwd",
+        versions = VERSION_MCAST_M2P_FORWARDING..,
+    }]
+    async fn list_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<McastForwardingEntry>>, HttpError>;
 
     #[endpoint {
         method = POST,

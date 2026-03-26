@@ -982,11 +982,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "switch_slot" => ?switch_slot,
                         "config" => ?config,
                     );
-                    if let Err(e) = client.bgp_apply_v2(config).await {
+                    if let Err(e) = client.bgp_apply(config).await {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
 
-                    if let Err(e) = client.update_rib_bestpath_fanout(fanout).await {
+                    if let Err(e) = client.update_bestpath_fanout(fanout).await {
                         error!(log, "error while updating bestpath fanout"; "error" => ?e);
                     }
                 }

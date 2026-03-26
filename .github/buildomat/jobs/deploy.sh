@@ -33,6 +33,9 @@ _exit_trap() {
 	local status=$?
 	set +o errexit
 
+	if [[ "x$OPTE_COMMIT" != "x" ]]; then
+		pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
+	fi
 
 	#
 	# Stop cron in all zones (to stop logadm log rotation)
@@ -182,18 +185,22 @@ ptime -m tar xvzf /input/package/work/package.tar.gz
 source .github/buildomat/ci-env.sh
 
 # Source the OPTE override (if any) from the canonical location and apply it.
-# When set, install the override p5p from buildomat instead of using the
-# version baked into the ramdisk image. The version must be pinned explicitly
-# because IPS version ordering does not match semver.
+#
+# When set, download the xde driver and opteadm directly from buildomat and
+# swap them in. The deploy target is a ramdisk image without pkg(5), so we
+# use rem_drv/add_drv instead of the p5p approach used by install_opte.sh
+# and releng.
 # shellcheck source=/dev/null
 source tools/opte_version_override
 if [[ "x$OPTE_COMMIT" != "x" ]]; then
-	OPTE_VERSION="$(cat tools/opte_version)"
-	P5P_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo/$OPTE_COMMIT/opte.p5p"
-	P5P_PATH="/tmp/opte-override.p5p"
-	curl -sSfL -o "$P5P_PATH" "$P5P_URL"
-	pfexec pkg install -g "$P5P_PATH" "driver/network/opte@$OPTE_VERSION"
-	rm -f "$P5P_PATH"
+	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde"
+	pfexec rem_drv xde || true
+	pfexec mv xde /kernel/drv/amd64/xde
+	pfexec add_drv xde || true
+	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm"
+	chmod +x opteadm
+	cp opteadm /tmp/opteadm
+	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
 fi
 
 # Ask buildomat for the range of extra addresses that we're allowed to use, and

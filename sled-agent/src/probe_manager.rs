@@ -381,6 +381,7 @@ impl ProbeManagerInner {
             // but probes are supposed to mimic instances as closely as
             // possible. We should consider if we want to support them here.
             attached_subnets: vec![],
+            multicast_groups: &[],
         })?;
 
         let installed_zone = ZoneBuilderFactory::new()

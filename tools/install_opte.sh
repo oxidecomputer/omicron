@@ -112,9 +112,9 @@ else
 fi
 
 RC=0
-pfexec pkg freeze -c "$OMICRON_FROZEN_PKG_COMMENT" driver/network/opte || RC=$?
+pfexec pkg freeze -c "$OMICRON_FROZEN_PKG_COMMENT" driver/network/opte@"$OPTE_VERSION" || RC=$?
 if [[ "$RC" -ne 0 ]]; then
-    echo "Failed to pin opte package"
+    echo "Failed to pin opte package to $OPTE_VERSION"
     exit $RC
 fi
 
