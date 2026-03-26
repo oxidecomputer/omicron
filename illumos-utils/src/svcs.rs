@@ -19,7 +19,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
 use slog::{error, info};
-use std::fmt::Display;
+use sled_agent_types::inventory::Svc;
+use sled_agent_types::inventory::SvcState;
 #[cfg(target_os = "illumos")]
 use tokio::process::Command;
 
@@ -89,7 +90,7 @@ impl SvcsResult {
 
             if let Some(svc_state) = svc.next() {
                 // Only parse services that are in a known SMF service state.
-                let state = SvcState::from(svc_state.to_string());
+                let state = SvcState::from(svc_state);
                 match &state {
                     SvcState::Maintenance
                     | SvcState::Degraded

@@ -950,12 +950,12 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("unrecognized zpool health value `{0}`")]
-pub struct ZpoolHeathParseError(pub String);
+pub struct ZpoolHealthParseError(pub String);
 
 impl FromStr for ZpoolHealth {
-    type Err = ZpoolHeathParseError;
+    type Err = ZpoolHealthParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -965,7 +965,7 @@ impl FromStr for ZpoolHealth {
             "OFFLINE" => Ok(ZpoolHealth::Offline),
             "REMOVED" => Ok(ZpoolHealth::Removed),
             "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ZpoolHeathParseError(s.to_owned())),
+            _ => Err(ZpoolHealthParseError(s.to_owned())),
         }
     }
 }

@@ -172,6 +172,7 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
     pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
+    pub use crate::impls::inventory::ZpoolHealthParseError;
 }
 
 pub mod probes {

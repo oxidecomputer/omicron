@@ -6,7 +6,10 @@
 
 use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
+use sled_agent_types::inventory::ZpoolHealth;
+use sled_agent_types::inventory::ZpoolHealthParseError;
 use slog_error_chain::SlogInlineError;
+use std::num::ParseIntError;
 use std::str::FromStr;
 use tokio::process::Command;
 
@@ -17,8 +20,18 @@ const ZPOOL: &str = "/usr/sbin/zpool";
 pub const ZPOOL_MOUNTPOINT_ROOT: &str = "/";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-#[error("Failed to parse output: {0}")]
-pub struct ParseError(String);
+pub enum ZpoolInfoParseError {
+    #[error(transparent)]
+    ZpoolHealth(#[from] ZpoolHealthParseError),
+    #[error("zpool list output: missing field `{0}`)")]
+    MissingField(&'static str),
+    #[error("zpool list output: failed to parse field `{field}`")]
+    IntegerField {
+        field: &'static str,
+        #[source]
+        err: ParseIntError,
+    },
+}
 
 #[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
@@ -26,7 +39,7 @@ pub enum Error {
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
-    Parse(#[from] ParseError),
+    Parse(#[from] ZpoolInfoParseError),
 
     #[error("No Zpools found")]
     NoZpools,
@@ -161,15 +174,13 @@ impl ZpoolInfo {
 }
 
 impl FromStr for ZpoolInfo {
-    type Err = ParseError;
+    type Err = ZpoolInfoParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
-        let expected_field = |name| {
-            ParseError(format!("Missing '{}' value in zpool list output", name))
-        };
-        let failed_to_parse = |name, err| {
-            ParseError(format!("Failed to parse field '{}': {}", name, err))
+        let expected_field = |name| ZpoolInfoParseError::MissingField(name);
+        let failed_to_parse = |field, err| {
+            ZpoolInfoParseError::IntegerField { field, err }
         };
 
         let mut values = s.trim().split_whitespace();
