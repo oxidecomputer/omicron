@@ -101,54 +101,70 @@ pub struct BundleDataSelection {
 
 impl BundleDataSelection {
     /// Creates an empty selection with no data categories.
-    ///
-    /// This is distinct from [`Self::default`], which returns a selection
-    /// containing all categories (i.e. "collect everything").
     pub fn new() -> Self {
         Self { data: HashMap::new() }
     }
 
+    /// Returns a selection containing all default data categories
+    /// (i.e. "collect everything").
+    pub fn all() -> Self {
+        Self::new()
+            .with_reconfigurator()
+            .with_all_sleds()
+            .with_sled_cubby_info()
+            .with_sp_dumps()
+            .with_ereports(
+                EreportFilters::new()
+                    .with_start_time(chrono::Utc::now() - chrono::Days::new(7))
+                    .expect("no end time set, cannot fail"),
+            )
+    }
+
     /// Adds reconfigurator state collection.
-    pub fn with_reconfigurator(self) -> Self {
-        self.with(BundleData::Reconfigurator)
+    pub fn with_reconfigurator(mut self) -> Self {
+        self.insert(BundleData::Reconfigurator);
+        self
     }
 
     /// Adds sled cubby info collection.
-    pub fn with_sled_cubby_info(self) -> Self {
-        self.with(BundleData::SledCubbyInfo)
+    pub fn with_sled_cubby_info(mut self) -> Self {
+        self.insert(BundleData::SledCubbyInfo);
+        self
     }
 
     /// Adds SP dump collection.
-    pub fn with_sp_dumps(self) -> Self {
-        self.with(BundleData::SpDumps)
+    pub fn with_sp_dumps(mut self) -> Self {
+        self.insert(BundleData::SpDumps);
+        self
     }
 
     /// Adds host info collection from all sleds.
-    pub fn with_all_sleds(self) -> Self {
-        self.with(BundleData::HostInfo(SledSelection::All))
+    pub fn with_all_sleds(mut self) -> Self {
+        self.insert(BundleData::HostInfo(SledSelection::All));
+        self
     }
 
     /// Adds host info collection from specific sleds.
     pub fn with_specific_sleds(
-        self,
+        mut self,
         sleds: impl IntoIterator<Item = SledUuid>,
     ) -> Self {
-        self.with(BundleData::HostInfo(SledSelection::Specific(
+        self.insert(BundleData::HostInfo(SledSelection::Specific(
             sleds.into_iter().collect(),
-        )))
+        )));
+        self
     }
 
     /// Adds ereport collection with the given filters.
-    pub fn with_ereports(self, filters: EreportFilters) -> Self {
-        self.with(BundleData::Ereports(filters))
+    pub fn with_ereports(mut self, filters: EreportFilters) -> Self {
+        self.insert(BundleData::Ereports(filters));
+        self
     }
 
-    /// Builder-style method that inserts a [`BundleData`] value and returns
-    /// `self`. If multiple BundleData entries with the same type are inserted,
-    /// the last write wins.
-    pub fn with(mut self, bundle_data: BundleData) -> Self {
+    /// Inserts a [`BundleData`] value. If a value with the same category
+    /// already exists, the last write wins.
+    pub fn insert(&mut self, bundle_data: BundleData) {
         self.data.insert(bundle_data.category(), bundle_data);
-        self
     }
 
     pub fn contains(&self, category: BundleDataCategory) -> bool {
@@ -193,25 +209,17 @@ impl fmt::Display for DisplayBundleDataSelection<'_> {
 
 impl FromIterator<BundleData> for BundleDataSelection {
     fn from_iter<T: IntoIterator<Item = BundleData>>(iter: T) -> Self {
-        iter.into_iter().fold(Self::new(), |sel, data| sel.with(data))
+        let mut sel = Self::new();
+        for data in iter {
+            sel.insert(data);
+        }
+        sel
     }
 }
 
 impl Default for BundleDataSelection {
-    /// Returns a selection containing all data categories (i.e. "collect
-    /// everything"). This is distinct from [`Self::new`], which returns an
-    /// empty selection.
     fn default() -> Self {
         Self::new()
-            .with_reconfigurator()
-            .with_all_sleds()
-            .with_sled_cubby_info()
-            .with_sp_dumps()
-            .with_ereports(
-                EreportFilters::new()
-                    .with_start_time(chrono::Utc::now() - chrono::Days::new(7))
-                    .expect("no end time set, cannot fail"),
-            )
     }
 }
 
