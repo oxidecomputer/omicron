@@ -2788,6 +2788,7 @@ mod tests {
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::config::MountConfig;
+    use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
     use std::str::FromStr;
