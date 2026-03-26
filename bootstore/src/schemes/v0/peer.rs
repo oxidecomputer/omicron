@@ -22,7 +22,7 @@ use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval};
 
 #[derive(Debug, Clone)]
@@ -256,7 +256,7 @@ pub struct Status {
 /// via control of an underlying  `Fsm`.
 pub struct Node {
     fsm_ledger_generation: u64,
-    network_config: Option<NetworkConfig>,
+    network_config: watch::Sender<Option<NetworkConfig>>,
     config: Config,
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
@@ -339,11 +339,13 @@ impl Node {
             config.clone().into(),
         )
         .await;
-        let network_config = NetworkConfig::load(
-            &log,
-            config.network_config_ledger_paths.clone(),
-        )
-        .await;
+        let (network_config, _) = watch::channel(
+            NetworkConfig::load(
+                &log,
+                config.network_config_ledger_paths.clone(),
+            )
+            .await,
+        );
 
         (
             Node {
@@ -371,7 +373,7 @@ impl Node {
     /// Run the main loop of the peer
     ///
     /// This should be spawned into its own tokio task
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         // select among timer tick/received messages
         let mut interval = interval(self.config.time_per_tick);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -515,6 +517,7 @@ impl Node {
                     fsm_ledger_generation: self.fsm_ledger_generation,
                     network_config_ledger_generation: self
                         .network_config
+                        .borrow()
                         .as_ref()
                         .map(|c| c.generation),
                     fsm_state: self.fsm.state().name(),
@@ -552,8 +555,11 @@ impl Node {
                 }
             }
             NodeApiRequest::UpdateNetworkConfig { config, responder } => {
-                let current_gen =
-                    self.network_config.as_ref().map_or(0, |c| c.generation);
+                let current_gen = self
+                    .network_config
+                    .borrow()
+                    .as_ref()
+                    .map_or(0, |c| c.generation);
                 info!(
                     self.log,
                     concat!(
@@ -608,7 +614,9 @@ impl Node {
                         },
                     ));
                 } else {
-                    self.network_config = Some(config.clone());
+                    self.network_config.send_modify(|c| {
+                        *c = Some(config.clone());
+                    });
                     NetworkConfig::save(
                         &self.log,
                         self.config.network_config_ledger_paths.clone(),
@@ -623,7 +631,7 @@ impl Node {
                 }
             }
             NodeApiRequest::GetNetworkConfig { responder } => {
-                let _ = responder.send(self.network_config.clone());
+                let _ = responder.send(self.network_config.borrow().clone());
             }
         }
     }
@@ -637,7 +645,7 @@ impl Node {
     ) {
         // We only call this method when there has been an update. Otherwise we
         // have an invariant violation due to programmer error and should panic.
-        let network_config = self.network_config.as_ref().unwrap();
+        let network_config = self.network_config.borrow().clone().unwrap();
         info!(
             self.log,
             "Broadcasting network config with generation {}",
@@ -835,13 +843,10 @@ impl Node {
                     addr,
                     unique_id: accepted_handle.unique_id,
                 };
-                if let Some(network_config) = self.network_config.as_ref() {
-                    self.send_network_config(
-                        network_config.clone(),
-                        &peer_id,
-                        &handle,
-                    )
-                    .await;
+                let maybe_network_config = self.network_config.borrow().clone();
+                if let Some(network_config) = maybe_network_config {
+                    self.send_network_config(network_config, &peer_id, &handle)
+                        .await;
                 }
 
                 self.established_connections.insert(peer_id.clone(), handle);
@@ -864,9 +869,11 @@ impl Node {
                         return;
                     }
 
-                    if let Some(network_config) = self.network_config.as_ref() {
+                    let maybe_network_config =
+                        self.network_config.borrow().clone();
+                    if let Some(network_config) = maybe_network_config {
                         self.send_network_config(
-                            network_config.clone(),
+                            network_config,
                             &peer_id,
                             &handle,
                         )
@@ -941,8 +948,11 @@ impl Node {
                 self.accepted_connections.remove(&addr);
             }
             ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {
-                let current_gen =
-                    self.network_config.as_ref().map_or(0, |c| c.generation);
+                let current_gen = self
+                    .network_config
+                    .borrow()
+                    .as_ref()
+                    .map_or(0, |c| c.generation);
                 let generation = config.generation;
                 info!(
                     self.log,
@@ -955,7 +965,9 @@ impl Node {
                     current_gen
                 );
                 if generation > current_gen {
-                    self.network_config = Some(config.clone());
+                    self.network_config.send_modify(|c| {
+                        *c = Some(config.clone());
+                    });
                     NetworkConfig::save(
                         &self.log,
                         self.config.network_config_ledger_paths.clone(),
