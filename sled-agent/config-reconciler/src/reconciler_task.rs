@@ -12,32 +12,46 @@ use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
+use sled_storage::dataset::LOCAL_STORAGE_DATASET;
+use sled_storage::dataset::LOCAL_STORAGE_UNENCRYPTED_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
 use slog::Logger;
+use slog::debug;
+use slog::error;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
+use trust_quorum_types::types::Epoch;
 
+use crate::InternalDisksReceiver;
+use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
+use crate::dataset_serialization_task::DatasetRekeyInfo;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::RekeyRequest;
+use crate::debug_collector::FormerZoneRootArchiver;
+use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
@@ -56,7 +70,7 @@ pub use self::zones::TimeSyncError;
 pub use self::zones::TimeSyncStatus;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn spawn<T: SledAgentFacilities>(
+pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     mount_config: Arc<MountConfig>,
     dataset_task: DatasetTaskHandle,
     key_requester: StorageKeyRequester,
@@ -64,20 +78,24 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
-    destroy_orphans: Arc<AtomicBool>,
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
     sled_agent_facilities: T,
+    sled_agent_artifact_store: U,
     log: Logger,
 ) {
     let external_disks = ExternalDisks::new(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
         external_disks_tx,
+        former_zone_root_archiver.clone(),
     );
-    let datasets = OmicronDatasets::new(dataset_task, destroy_orphans);
-
+    let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);
+    let boot_partitions = BootPartitionReconciler::default();
 
     tokio::spawn(
         ReconcilerTask {
@@ -85,12 +103,16 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
             current_config_rx,
             reconciler_result_tx,
             raw_disks_rx,
+            internal_disks_rx,
             external_disks,
+            former_zone_root_archiver,
             datasets,
             zones,
+            boot_partitions,
+            committed_epoch_rx,
             log,
         }
-        .run(sled_agent_facilities),
+        .run(sled_agent_facilities, sled_agent_artifact_store),
     );
 }
 
@@ -117,28 +139,28 @@ impl ReconcilerResult {
             .unwrap_or(TimeSyncStatus::NotYetChecked)
     }
 
-    pub(crate) fn all_mounted_debug_datasets(
+    pub(crate) fn all_mounted_datasets_of_kind(
         &self,
+        kind: DatasetKind,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         let Some(latest_result) = &self.latest_result else {
             return Either::Left(std::iter::empty());
         };
         Either::Right(
-            latest_result
-                .all_mounted_datasets(&self.mount_config, DatasetKind::Debug),
+            latest_result.all_mounted_datasets(&self.mount_config, kind),
         )
+    }
+
+    pub(crate) fn all_mounted_debug_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::Debug)
     }
 
     pub(crate) fn all_mounted_zone_root_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
-        let Some(latest_result) = &self.latest_result else {
-            return Either::Left(std::iter::empty());
-        };
-        Either::Right(latest_result.all_mounted_datasets(
-            &self.mount_config,
-            DatasetKind::TransientZoneRoot,
-        ))
+        self.all_mounted_datasets_of_kind(DatasetKind::TransientZoneRoot)
     }
 
     pub(crate) fn to_inventory(
@@ -150,6 +172,18 @@ impl ReconcilerResult {
             self.latest_result.as_ref().map(|r| r.to_inventory());
         (status, latest_result)
     }
+
+    pub(crate) fn all_mounted_local_storage_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorage)
+    }
+
+    pub(crate) fn all_mounted_local_storage_unencrypted_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorageUnencrypted)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +192,7 @@ pub enum ReconcilerTaskStatus {
     WaitingForInternalDisks,
     WaitingForInitialConfig,
     PerformingReconciliation {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at_time: DateTime<Utc>,
         started_at_instant: Instant,
     },
@@ -204,6 +238,8 @@ struct LatestReconciliationResult {
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
+    boot_partitions: BootPartitionContentsInventory,
+    remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
 impl LatestReconciliationResult {
@@ -214,6 +250,8 @@ impl LatestReconciliationResult {
             datasets: self.datasets.clone(),
             orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
+            boot_partitions: self.boot_partitions.clone(),
+            remove_mupdate_override: self.remove_mupdate_override.clone(),
         }
     }
 
@@ -226,8 +264,20 @@ impl LatestReconciliationResult {
         // handle the specific `DatasetKind`s used by our callers.
         let mountpoint = match &kind {
             DatasetKind::Debug => U2_DEBUG_DATASET,
+            DatasetKind::LocalStorage => LOCAL_STORAGE_DATASET,
+            DatasetKind::LocalStorageUnencrypted => {
+                LOCAL_STORAGE_UNENCRYPTED_DATASET
+            }
             DatasetKind::TransientZoneRoot => ZONE_DATASET,
-            _ => unreachable!(
+
+            DatasetKind::Clickhouse
+            | DatasetKind::ClickhouseKeeper
+            | DatasetKind::ClickhouseServer
+            | DatasetKind::Cockroach
+            | DatasetKind::Crucible
+            | DatasetKind::ExternalDns
+            | DatasetKind::InternalDns
+            | DatasetKind::TransientZone { .. } => unreachable!(
                 "private function called with unexpected kind {kind:?}"
             ),
         };
@@ -258,14 +308,24 @@ struct ReconcilerTask {
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     raw_disks_rx: RawDisksReceiver,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     datasets: OmicronDatasets,
     zones: OmicronZones,
+    boot_partitions: BootPartitionReconciler,
+    /// Receiver for committed epoch notifications from trust quorum.
+    /// When a new epoch is committed, we need to rotate ZFS encryption keys.
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
     log: Logger,
 }
 
 impl ReconcilerTask {
-    async fn run<T: SledAgentFacilities>(mut self, sled_agent_facilities: T) {
+    async fn run<T: SledAgentFacilities, U: SledAgentArtifactStore>(
+        mut self,
+        sled_agent_facilities: T,
+        sled_agent_artifact_store: U,
+    ) {
         // If reconciliation fails, we may want to retry it. The "happy path"
         // that requires this is waiting for time sync: during RSS, cold boot,
         // or replacement of the NTP zone, we may fail to start any zones that
@@ -280,7 +340,12 @@ impl ReconcilerTask {
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(5);
 
         loop {
-            let result = self.do_reconcilation(&sled_agent_facilities).await;
+            let result = self
+                .do_reconcilation(
+                    &sled_agent_facilities,
+                    &sled_agent_artifact_store,
+                )
+                .await;
 
             let maybe_retry = match result {
                 ReconciliationResult::NoRetryNeeded => {
@@ -355,13 +420,41 @@ impl ReconcilerTask {
                     );
                     continue;
                 }
+
+                // Cancel-safe per docs on `changed()`
+                //
+                // Handle committed epoch changes from trust quorum. When a new
+                // epoch is committed, we need to rotate ZFS encryption keys for
+                // all managed U.2 crypt datasets. The rekey operation is
+                // performed as part of normal reconciliation in do_reconciliation.
+                result = self.committed_epoch_rx.changed() => {
+                    match result {
+                        Ok(()) => {
+                            info!(
+                                self.log,
+                                "starting reconciliation due to epoch change"
+                            );
+                            continue;
+                        }
+                        Err(_closed) => {
+                            warn!(
+                                self.log,
+                                "committed_epoch watch channel closed"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
 
-    async fn do_reconcilation<T: SledAgentFacilities>(
+    async fn do_reconcilation<
+        T: SledAgentFacilities,
+        U: SledAgentArtifactStore,
+    >(
         &mut self,
         sled_agent_facilities: &T,
+        sled_agent_artifact_store: &U,
     ) -> ReconciliationResult {
         // Take a snapshot of the current state of the input channels on which
         // we act. Clone both to avoid keeping the channels locked while we
@@ -399,6 +492,45 @@ impl ReconcilerTask {
             }
         };
 
+        let internal_disks = self.internal_disks_rx.current();
+
+        // Reconcile the mupdate override field. This can be done independently
+        // of the other parts of reconciliation (and this doesn't have to block
+        // other parts of reconciliation), but the argument for this is somewhat
+        // non-trivial. See docs/mupdate-update-flow.adoc, section
+        // "Sled Agent reconciler error handling".
+        let remove_mupdate_override =
+            if let Some(override_id) = sled_config.remove_mupdate_override {
+                Some(
+                    sled_agent_facilities
+                        .remove_mupdate_override(override_id, &internal_disks),
+                )
+            } else {
+                None
+            };
+
+        // Obtain the resolver status. This will be used to account for mupdate
+        // overrides, as well as errors while reading this information.
+        //
+        // This status is obtained after remove_mupdate_override is processed.
+        let resolver_status =
+            sled_agent_facilities.file_source_resolver_status();
+
+        // Reconcile any changes to our boot partitions. This is typically a
+        // no-op; if we've successfully read both boot partitions in a previous
+        // reconciliation and don't have new contents to write, it will just
+        // return cached status.
+        let boot_partitions = self
+            .boot_partitions
+            .reconcile(
+                &resolver_status,
+                &internal_disks,
+                &sled_config.host_phase_2,
+                sled_agent_artifact_store,
+                &self.log,
+            )
+            .await;
+
         // ---
         // We go through the removal process first: shut down zones, then stop
         // managing disks, then remove any orphaned datasets.
@@ -409,7 +541,10 @@ impl ReconcilerTask {
             .zones
             .shut_down_zones_if_needed(
                 &sled_config.zones,
+                &resolver_status,
+                &internal_disks,
                 sled_agent_facilities,
+                self.former_zone_root_archiver.clone(),
                 &self.log,
             )
             .await;
@@ -425,11 +560,6 @@ impl ReconcilerTask {
         // Finally, remove any "orphaned" datasets (i.e., datasets of a kind
         // that we ought to be managing that exist on disks we're managing but
         // don't have entries in our current config).
-        //
-        // Note: this doesn't actually delete them yet! We only report the
-        // orphans; after some bake time where we build confidence this won't
-        // remove datasets it shouldn't, we'll change this to actually remove
-        // them. https://github.com/oxidecomputer/omicron/issues/6177
         self.datasets
             .remove_datasets_if_needed(
                 &sled_config.datasets,
@@ -453,6 +583,16 @@ impl ReconcilerTask {
             )
             .await;
 
+        // Check if any disks need rekeying to the current committed epoch.
+        // We use borrow_and_update() to mark the epoch as seen, so we don't
+        // trigger another reconciliation for the same epoch change.
+        let current_epoch = *self.committed_epoch_rx.borrow_and_update();
+        let rekey_result = if let Some(epoch) = current_epoch {
+            self.rekey_for_epoch(epoch).await
+        } else {
+            ReconciliationResult::NoRetryNeeded
+        };
+
         // Ensure all the datasets we want exist.
         self.datasets
             .ensure_datasets_if_needed(
@@ -464,7 +604,13 @@ impl ReconcilerTask {
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
-        let timesync_status = self.zones.check_timesync().await;
+        let timesync_status = self.zones.check_timesync(&self.log).await;
+
+        // Call back into sled-agent and let it do any work that needs to happen
+        // once time is sync'd (e.g., rewrite `uptime`).
+        if timesync_status.is_synchronized() {
+            sled_agent_facilities.on_time_sync();
+        }
 
         // We conservatively refuse to start any new zones if any zones have
         // failed to shut down cleanly. This could be more precise, but we want
@@ -480,9 +626,12 @@ impl ReconcilerTask {
                 self.zones
                     .start_zones_if_needed(
                         &sled_config.zones,
+                        &resolver_status,
+                        &internal_disks,
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
                         &self.datasets,
+                        self.former_zone_root_archiver.clone(),
                         &self.log,
                     )
                     .await;
@@ -497,12 +646,13 @@ impl ReconcilerTask {
         }
 
         // We'll retry even if there have been no config changes if (a) time
-        // isn't sync'd yet or (b) any of our disk/dataset/zone attempts failed
-        // with a retryable error.
+        // isn't sync'd yet, (b) any of our disk/dataset/zone attempts failed
+        // with a retryable error, or (c) any rekey operations failed.
         let result = if !timesync_status.is_synchronized()
             || self.external_disks.has_retryable_error()
             || self.zones.has_retryable_error()
             || self.datasets.has_retryable_error()
+            || matches!(rekey_result, ReconciliationResult::ShouldRetry)
         {
             ReconciliationResult::ShouldRetry
         } else {
@@ -510,12 +660,15 @@ impl ReconcilerTask {
         };
 
         let inner = LatestReconciliationResult {
-            sled_config,
+            sled_config: *sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
             datasets: self.datasets.to_inventory(),
             orphaned_datasets: self.datasets.orphaned_datasets().clone(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
+            boot_partitions: boot_partitions.into_inventory(),
+            remove_mupdate_override: remove_mupdate_override
+                .map(|v| v.to_inventory()),
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {
@@ -526,6 +679,131 @@ impl ReconcilerTask {
         });
 
         result
+    }
+
+    /// Rotate encryption keys for managed U.2 crypt datasets that need rekeying.
+    ///
+    /// This is called during reconciliation when the committed epoch has changed.
+    /// Disks whose cached epoch is less than the target epoch OR whose epoch
+    /// is unknown (None) are candidates for rekeying. The actual rekey operation
+    /// has an idempotency check that skips disks already at the target epoch.
+    /// On success, updates the cached epoch in `external_disks`.
+    async fn rekey_for_epoch(
+        &mut self,
+        target_epoch: Epoch,
+    ) -> ReconciliationResult {
+        // Log an error if any disk has an epoch ahead of target (should
+        // not happen, but guard against it).
+        for info in self.external_disks.disk_rekey_info() {
+            if let Some(e) = info.cached_epoch {
+                if e > target_epoch {
+                    error!(
+                        self.log,
+                        "Disk has epoch ahead of target";
+                        "disk_id" => %info.disk_id,
+                        "cached_epoch" => %e,
+                        "target_epoch" => %target_epoch,
+                    );
+                }
+            }
+        }
+
+        // Filter to disks that need rekeying. `None < Some(_)` so disks
+        // with unknown epoch are included (idempotency check in
+        // datasets_rekey will skip if already at target).
+        let disks_needing_rekey: Vec<_> = self
+            .external_disks
+            .disk_rekey_info()
+            .filter(|i| i.cached_epoch < Some(target_epoch))
+            .collect();
+
+        if disks_needing_rekey.is_empty() {
+            debug!(self.log, "No datasets need rekeying"; "epoch" => %target_epoch);
+            return ReconciliationResult::NoRetryNeeded;
+        }
+
+        // Build request, tracking key derivation failures separately
+        let mut failed = BTreeSet::new();
+        let mut request = RekeyRequest::default();
+
+        for info in disks_needing_rekey {
+            match self
+                .key_requester
+                .get_key(target_epoch.0, info.disk.identity().clone())
+                .await
+            {
+                Ok(key) => {
+                    let dataset_name =
+                        format!("{}/{}", info.disk.zpool_name(), CRYPT_DATASET);
+                    request.disks.insert(
+                        info.disk_id,
+                        DatasetRekeyInfo {
+                            dataset_name,
+                            key,
+                            disk_identity: info.disk.identity().clone(),
+                        },
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "Failed to derive key";
+                        "disk_id" => %info.disk_id,
+                        "error" => %e,
+                    );
+                    failed.insert(info.disk_id);
+                }
+            }
+        }
+
+        if request.disks.is_empty() {
+            warn!(
+                self.log,
+                "No rekey requests (all key derivations failed)";
+                "epoch" => %target_epoch
+            );
+            return ReconciliationResult::ShouldRetry;
+        }
+
+        let disk_count = request.disks.len();
+        info!(
+            self.log,
+            "Rotating encryption keys";
+            "count" => disk_count,
+            "epoch" => %target_epoch,
+        );
+
+        // Send request to dataset task
+        let result = match self.datasets.rekey_datasets(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(
+                    self.log,
+                    "Failed to send rekey request to dataset task";
+                    "disk_count" => disk_count,
+                    "error" => %e,
+                );
+                return ReconciliationResult::ShouldRetry;
+            }
+        };
+
+        // Update cached epochs for successful rekeys
+        self.external_disks.apply_rekey_result(&result, target_epoch);
+
+        let has_failures = !failed.is_empty() || result.has_failures();
+
+        info!(
+            self.log,
+            "Key rotation complete";
+            "succeeded" => result.succeeded.len(),
+            "failed" => failed.len() + result.failed.len(),
+        );
+
+        if has_failures {
+            ReconciliationResult::ShouldRetry
+        } else {
+            ReconciliationResult::NoRetryNeeded
+        }
     }
 }
 

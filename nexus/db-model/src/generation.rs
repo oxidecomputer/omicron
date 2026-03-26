@@ -8,6 +8,7 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -23,6 +24,7 @@ use std::convert::TryFrom;
     FromSqlRow,
     Serialize,
     Deserialize,
+    JsonSchema,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 #[repr(transparent)]
@@ -58,5 +60,13 @@ where
         external::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
+    }
+}
+
+impl TryFrom<i64> for Generation {
+    type Error = external::GenerationNegativeError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(Self(external::Generation::try_from(value)?))
     }
 }

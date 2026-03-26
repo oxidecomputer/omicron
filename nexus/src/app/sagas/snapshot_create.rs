@@ -98,17 +98,22 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use anyhow::anyhow;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_types::external_api::{disk, snapshot};
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
-    api::external, progenitor_operation_retry::ProgenitorOperationRetry,
+    api::external, backoff::backon_retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, VolumeUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -134,10 +139,10 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
-    pub disk_id: Uuid,
+    pub disk: db::datastore::CrucibleDisk,
     pub attach_instance_id: Option<Uuid>,
     pub use_the_pantry: bool,
-    pub create_params: params::SnapshotCreate,
+    pub create_params: snapshot::SnapshotCreate,
 }
 
 // snapshot create saga: actions
@@ -231,6 +236,13 @@ impl NexusSaga for SagaSnapshotCreate {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
+        if params.disk.is_read_only() {
+            return Err(SagaInitError::InvalidParameter(format!(
+                "cannot snapshot read-only disk {}!",
+                params.disk.id(),
+            )));
+        }
+
         // Generate IDs
         builder.append(Node::action(
             "snapshot_id",
@@ -384,17 +396,11 @@ async fn ssc_take_volume_lock(
     // is blocked by a snapshot being created, and snapshot creation is blocked
     // by region replacement.
 
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
     osagactx
         .datastore()
-        .volume_repair_lock(&opctx, disk.volume_id(), lock_id)
+        .volume_repair_lock(&opctx, params.disk.volume_id(), lock_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -411,14 +417,9 @@ async fn ssc_take_volume_lock_undo(
         &params.serialized_authn,
     );
 
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
-        .await?;
-
     osagactx
         .datastore()
-        .volume_repair_unlock(&opctx, disk.volume_id(), lock_id)
+        .volume_repair_unlock(&opctx, params.disk.volume_id(), lock_id)
         .await?;
 
     Ok(())
@@ -449,10 +450,10 @@ async fn ssc_alloc_regions(
     );
 
     let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
+        .disk_id(params.disk.id())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
@@ -461,17 +462,19 @@ async fn ssc_alloc_regions(
         .disk_region_allocate(
             &opctx,
             destination_volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
+            &disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(
                     disk.block_size.to_bytes(),
                 )
-                .map_err(|e| ActionError::action_failed(e.to_string()))?,
+                .map_err(|e| {
+                    saga_action_failed(Error::internal_error(&e.to_string()))
+                })?,
             },
             external::ByteCount::from(disk.size),
             &strategy,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(datasets_and_regions)
 }
@@ -512,14 +515,14 @@ async fn ssc_regions_ensure(
                 )?,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
     let extent_count = datasets_and_regions[0].1.extent_count;
 
     // Create volume construction request
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     let volume_construction_request = VolumeConstructionRequest::Volume {
         id: *destination_volume_id.as_untyped_uuid(),
         block_size,
@@ -527,7 +530,7 @@ async fn ssc_regions_ensure(
             block_size,
             blocks_per_extent,
             extent_count,
-            gen: 1,
+            generation: 1,
             opts: CrucibleOpts {
                 id: *destination_volume_id.as_untyped_uuid(),
                 target: datasets_and_regions
@@ -611,7 +614,7 @@ async fn ssc_create_destination_volume_record(
         .datastore()
         .volume_create(destination_volume_id, destination_volume_data)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -661,10 +664,10 @@ async fn ssc_create_snapshot_record(
     info!(log, "grabbing disk by name {}", params.create_params.disk);
 
     let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
+        .disk_id(params.disk.id())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "creating snapshot {} from disk {}", snapshot_id, disk.id());
 
@@ -679,7 +682,7 @@ async fn ssc_create_snapshot_record(
         volume_id: volume_id.into(),
         destination_volume_id: destination_volume_id.into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: disk.block_size,
         size: disk.size,
@@ -689,13 +692,13 @@ async fn ssc_create_snapshot_record(
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let snapshot_created = osagactx
         .datastore()
         .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "created snapshot {} ok", snapshot_id);
 
@@ -721,7 +724,7 @@ async fn ssc_create_snapshot_record_undo(
             .snapshot_id(snapshot_id)
             .fetch_for(authz::Action::Delete)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
@@ -761,7 +764,7 @@ async fn ssc_account_space(
             snapshot_created.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -804,7 +807,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     // the disk detached, and resumed running on the same sled) while the saga
     // was executing.
     let Some(attach_instance_id) = params.attach_instance_id else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "attach instance id is None!",
         )));
     };
@@ -818,13 +821,13 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         .instance_id(attach_instance_id)
         .lookup_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let instance_and_vmm = osagactx
         .datastore()
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let vmm = instance_and_vmm.vmm();
 
@@ -832,16 +835,15 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     // saga - the user will have to reissue the snapshot request and it will get
     // run on a Pantry.
     let Some((propolis_id, sled_id)) =
-        vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id))
+        vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id()))
     else {
-        return Err(ActionError::action_failed(Error::unavail(
+        return Err(saga_action_failed(Error::unavail(
             "instance no longer has an active VMM!",
         )));
     };
-    let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
-          "disk_id" => %params.disk_id,
+          "disk_id" => %params.disk.id(),
           "instance_id" => %attach_instance_id,
           "propolis_id" => %propolis_id,
           "sled_id" => %sled_id);
@@ -850,33 +852,48 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let snapshot_operation = || async {
         sled_agent_client
             .vmm_issue_disk_snapshot_request(
                 &PropolisUuid::from_untyped_uuid(propolis_id),
-                &params.disk_id,
+                &params.disk.id(),
                 &VmmIssueDiskSnapshotRequestBody { snapshot_id },
             )
             .await
     };
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(snapshot_operation, gone_check)
-        .run(log)
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to issue VMM disk snapshot request: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let notify_log = log.clone();
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        snapshot_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                notify_log,
+                "failed to issue VMM disk snapshot request, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to issue VMM disk snapshot request: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
 
     Ok(())
 }
@@ -887,21 +904,15 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot request for {snapshot_id}");
 
     // Lookup the regions used by the source disk...
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
+    let datasets_and_regions = osagactx
+        .datastore()
+        .get_allocated_regions(params.disk.volume_id())
         .await?;
-    let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -926,13 +937,26 @@ async fn ssc_get_pantry_address(
     );
 
     // If the disk is already attached to a Pantry, use that, otherwise get a
-    // random one. Return boolean indicating if additional saga nodes need to
-    // attach this disk to that random pantry.
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
+    // random one. The address that was passed in the disk param might be stale
+    // so look it up again here.
+    //
+    // Return a boolean indicating if additional saga nodes need to attach this
+    // disk to that random pantry.
+
+    let disk = match osagactx
+        .datastore()
+        .disk_get(&opctx, params.disk.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?
+    {
+        db::datastore::Disk::Crucible(disk) => disk,
+
+        db::datastore::Disk::LocalStorage(_) => {
+            // This is unreachable because the saga only accepts a CrucibleDisk,
+            // and disks cannot ever change type.
+            unreachable!();
+        }
+    };
 
     let pantry_address = if let Some(pantry_address) = disk.pantry_address() {
         pantry_address
@@ -969,10 +993,10 @@ async fn ssc_attach_disk_to_pantry(
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, osagactx.datastore())
-            .disk_id(params.disk_id)
+            .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     // Query the fetched disk's runtime to see if changed after the saga
     // execution started. This can happen if it's attached to an instance, or if
@@ -983,7 +1007,7 @@ async fn ssc_attach_disk_to_pantry(
     // generation number is too low.
     match db_disk.state().into() {
         external::DiskState::Detached => {
-            info!(log, "setting state of {} to maintenance", params.disk_id);
+            info!(log, "setting state of {} to maintenance", params.disk.id());
 
             osagactx
                 .datastore()
@@ -993,14 +1017,14 @@ async fn ssc_attach_disk_to_pantry(
                     &db_disk.runtime().maintenance(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
 
         external::DiskState::Finalizing => {
             // This saga is a sub-saga of the finalize saga if the user has
             // specified an optional snapshot should be taken. No state change
             // is required.
-            info!(log, "disk {} in state finalizing", params.disk_id);
+            info!(log, "disk {} in state finalizing", params.disk.id());
         }
 
         external::DiskState::Attached(attach_instance_id) => {
@@ -1008,21 +1032,19 @@ async fn ssc_attach_disk_to_pantry(
             info!(
                 log,
                 "disk {} in state attached to instance id {}",
-                params.disk_id,
+                params.disk.id(),
                 attach_instance_id
             );
         }
 
         _ => {
             // Return a 503 indicating that the user should retry
-            return Err(ActionError::action_failed(
-                Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "disk is in state {:?}",
-                        db_disk.state(),
-                    ),
-                },
-            ));
+            return Err(saga_action_failed(Error::ServiceUnavailable {
+                internal_message: format!(
+                    "disk is in state {:?}",
+                    db_disk.state(),
+                ),
+            }));
         }
     }
 
@@ -1030,12 +1052,12 @@ async fn ssc_attach_disk_to_pantry(
     // will be important later to *only* transition this disk out of maintenance
     // if the generation number matches what *this* saga is doing.
     let (.., db_disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
+        .disk_id(params.disk.id())
         .fetch_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
-    Ok(db_disk.runtime().gen)
+    Ok(db_disk.runtime().generation)
 }
 
 async fn ssc_attach_disk_to_pantry_undo(
@@ -1051,17 +1073,17 @@ async fn ssc_attach_disk_to_pantry_undo(
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, osagactx.datastore())
-            .disk_id(params.disk_id)
+            .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     match db_disk.state().into() {
         external::DiskState::Maintenance => {
             info!(
                 log,
                 "undo: setting disk {} state from maintenance to detached",
-                params.disk_id
+                params.disk.id()
             );
 
             osagactx
@@ -1072,20 +1094,22 @@ async fn ssc_attach_disk_to_pantry_undo(
                     &db_disk.runtime().detach(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
 
         external::DiskState::Detached => {
             info!(
                 log,
-                "undo: disk {} already in state detached", params.disk_id
+                "undo: disk {} already in state detached",
+                params.disk.id()
             );
         }
 
         external::DiskState::Finalizing => {
             info!(
                 log,
-                "undo: disk {} already in state finalizing", params.disk_id
+                "undo: disk {} already in state finalizing",
+                params.disk.id()
             );
         }
 
@@ -1115,7 +1139,7 @@ async fn ssc_call_pantry_attach_for_disk(
         info!(
             log,
             "attaching disk {:?} to pantry at {:?}",
-            params.disk_id,
+            params.disk.id(),
             pantry_address
         );
 
@@ -1123,12 +1147,12 @@ async fn ssc_call_pantry_attach_for_disk(
             &log,
             &opctx,
             &osagactx.nexus(),
-            params.disk_id,
+            &params.disk,
             pantry_address,
         )
         .await?;
     } else {
-        info!(log, "disk {} already attached to a pantry", params.disk_id);
+        info!(log, "disk {} already attached to a pantry", params.disk.id());
     }
 
     Ok(())
@@ -1148,14 +1172,14 @@ async fn ssc_call_pantry_attach_for_disk_undo(
         info!(
             log,
             "undo: detaching disk {:?} from pantry at {:?}",
-            params.disk_id,
+            params.disk.id(),
             pantry_address
         );
 
         match call_pantry_detach(
             sagactx.user_data().nexus(),
             &log,
-            params.disk_id,
+            params.disk.id(),
             pantry_address,
         )
         .await
@@ -1165,7 +1189,7 @@ async fn ssc_call_pantry_attach_for_disk_undo(
             Err(err) => {
                 return Err(anyhow!(
                     "failed to detach disk {} from pantry at {}: {}",
-                    params.disk_id,
+                    params.disk.id(),
                     pantry_address,
                     InlineErrorChain::new(&err)
                 ));
@@ -1175,7 +1199,7 @@ async fn ssc_call_pantry_attach_for_disk_undo(
         info!(
             log,
             "undo: not detaching disk {}, was already attached to a pantry",
-            params.disk_id
+            params.disk.id()
         );
     }
 
@@ -1199,7 +1223,7 @@ async fn ssc_call_pantry_snapshot_for_disk(
         log,
         "sending snapshot request with id {} for disk {} to pantry endpoint {}",
         snapshot_id,
-        params.disk_id,
+        params.disk.id(),
         endpoint,
     );
 
@@ -1208,7 +1232,7 @@ async fn ssc_call_pantry_snapshot_for_disk(
     let snapshot_operation = || async {
         client
             .snapshot(
-                &params.disk_id.to_string(),
+                &params.disk.id().to_string(),
                 &crucible_pantry_client::types::SnapshotRequest {
                     snapshot_id: snapshot_id.to_string(),
                 },
@@ -1222,7 +1246,7 @@ async fn ssc_call_pantry_snapshot_for_disk(
         .run(log)
         .await
         .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
+            saga_action_failed(Error::internal_error(&e.to_string()))
         })?;
 
     Ok(())
@@ -1234,22 +1258,15 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-    let params = sagactx.saga_params::<Params>()?;
 
     info!(log, "Undoing pantry snapshot request for {snapshot_id}");
 
     // Lookup the regions used by the source disk...
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
+    let datasets_and_regions = osagactx
+        .datastore()
+        .get_allocated_regions(params.disk.volume_id())
         .await?;
-    let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1275,21 +1292,21 @@ async fn ssc_call_pantry_detach_for_disk(
         info!(
             log,
             "detaching disk {:?} from pantry at {:?}",
-            params.disk_id,
+            params.disk.id(),
             pantry_address
         );
         call_pantry_detach(
             sagactx.user_data().nexus(),
             &log,
-            params.disk_id,
+            params.disk.id(),
             pantry_address,
         )
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "pantry detach failed: {}",
                 InlineErrorChain::new(&e)
-            ))
+            )))
         })?;
     }
 
@@ -1309,10 +1326,10 @@ async fn ssc_detach_disk_from_pantry(
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, osagactx.datastore())
-            .disk_id(params.disk_id)
+            .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     match db_disk.state().into() {
         external::DiskState::Maintenance => {
@@ -1328,11 +1345,11 @@ async fn ssc_detach_disk_from_pantry(
             // this saga's execution.
             let expected_disk_generation_number =
                 sagactx.lookup::<Generation>("disk_generation_number")?;
-            if expected_disk_generation_number == db_disk.runtime().gen {
+            if expected_disk_generation_number == db_disk.runtime().generation {
                 info!(
                     log,
                     "setting disk {} state from maintenance to detached",
-                    params.disk_id
+                    params.disk.id()
                 );
 
                 osagactx
@@ -1343,24 +1360,24 @@ async fn ssc_detach_disk_from_pantry(
                         &db_disk.runtime().detach(),
                     )
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
             } else {
                 info!(
                     log,
                     "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to detach",
-                    params.disk_id,
-                    db_disk.runtime().gen,
+                    params.disk.id(),
+                    db_disk.runtime().generation,
                     expected_disk_generation_number,
                 );
             }
         }
 
         external::DiskState::Detached => {
-            info!(log, "disk {} already in state detached", params.disk_id);
+            info!(log, "disk {} already in state detached", params.disk.id());
         }
 
         external::DiskState::Finalizing => {
-            info!(log, "disk {} already in state finalizing", params.disk_id);
+            info!(log, "disk {} already in state finalizing", params.disk.id());
         }
 
         _ => {
@@ -1377,27 +1394,17 @@ async fn ssc_start_running_snapshot(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "starting running snapshot"; "snapshot_id" => %snapshot_id);
-
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
 
     // For each dataset and region that makes up the disk, create a map from the
     // region information to the new running snapshot information.
     let datasets_and_regions = osagactx
         .datastore()
-        .get_allocated_regions(disk.volume_id())
+        .get_allocated_regions(params.disk.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let mut map: ReplaceSocketsMap = BTreeMap::new();
 
@@ -1414,8 +1421,9 @@ async fn ssc_start_running_snapshot(
                 snapshot_id,
             )
             .await
-            .map_err(|e| e.to_string())
-            .map_err(ActionError::action_failed)?;
+            .map_err(|e| {
+                saga_action_failed(Error::internal_error(&e.to_string()))
+            })?;
 
         info!(
             log,
@@ -1455,7 +1463,7 @@ async fn ssc_start_running_snapshot(
                 deleting: false,
             })
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     }
 
     Ok(map)
@@ -1467,22 +1475,15 @@ async fn ssc_start_running_snapshot_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot start running request for {snapshot_id}");
 
     // Lookup the regions used by the source disk...
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
+    let datasets_and_regions = osagactx
+        .datastore()
+        .get_allocated_regions(params.disk.volume_id())
         .await?;
-
-    let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1515,33 +1516,23 @@ async fn ssc_create_volume_record(
 
     // For a snapshot, copy the volume construction request at the time the
     // snapshot was taken.
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
 
     let disk_volume = osagactx
         .datastore()
         .volume_checkout(
-            disk.volume_id(),
+            params.disk.volume_id(),
             db::datastore::VolumeCheckoutReason::CopyAndModify,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "disk volume construction request {}", disk_volume.data());
 
     let disk_volume_construction_request =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to deserialize disk {} volume data: {}",
-                disk.id(),
+                params.disk.id(),
                 e,
             )))
         })?;
@@ -1557,7 +1548,7 @@ async fn ssc_create_volume_record(
             &replace_sockets_map,
         )
         .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
+            saga_action_failed(Error::internal_error(&e.to_string()))
         })?;
 
     // Insert volume record into the DB
@@ -1572,7 +1563,7 @@ async fn ssc_create_volume_record(
         .datastore()
         .volume_create(volume_id, snapshot_volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "volume {} created ok", volume_id);
 
@@ -1618,7 +1609,7 @@ async fn ssc_finalize_snapshot_record(
             .snapshot_id(snapshot_id)
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     info!(log, "snapshot final lookup ok");
 
@@ -1627,11 +1618,11 @@ async fn ssc_finalize_snapshot_record(
         .project_snapshot_update_state(
             &opctx,
             &authz_snapshot,
-            db_snapshot.gen,
+            db_snapshot.generation,
             db::model::SnapshotState::Ready,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "snapshot finalized!");
 
@@ -1650,17 +1641,11 @@ async fn ssc_release_volume_lock(
         &params.serialized_authn,
     );
 
-    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
     osagactx
         .datastore()
-        .volume_repair_unlock(&opctx, disk.volume_id(), lock_id)
+        .volume_repair_unlock(&opctx, params.disk.volume_id(), lock_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1772,14 +1757,15 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::datastore::Disk;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::InstanceDiskAttachment;
+    use nexus_types::external_api::instance as instance_types;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Instance;
@@ -1814,7 +1800,7 @@ mod test {
                             block_size: 512,
                             blocks_per_extent: 10,
                             extent_count: 20,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 key: Some("tkBksPOA519q11jvLCCX5P8t8+kCX4ZNzr+QP8M+TSg=".into()),
@@ -1840,7 +1826,7 @@ mod test {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 80,
-                    gen: 100,
+                    generation: 100,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         key: Some("jVex5Zfm+avnFMyezI6nCVPRPs53EWwYMN844XETDBM=".into()),
@@ -1998,7 +1984,7 @@ mod test {
     async fn create_project_and_disk_and_pool(
         client: &ClientTestContext,
     ) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }
@@ -2008,7 +1994,7 @@ mod test {
         opctx: &OpContext,
         silo_id: Uuid,
         project_id: Uuid,
-        disk_id: Uuid,
+        db_disk: db::datastore::CrucibleDisk,
         disk: NameOrId,
         attach_instance_id: Option<Uuid>,
         use_the_pantry: bool,
@@ -2017,10 +2003,10 @@ mod test {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id,
             project_id,
-            disk_id,
+            disk: db_disk,
             attach_instance_id,
             use_the_pantry,
-            create_params: params::SnapshotCreate {
+            create_params: snapshot::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
                     description: "My snapshot".to_string(),
@@ -2059,6 +2045,12 @@ mod test {
                 .await
                 .expect("Failed to look up created disk");
 
+        let Disk::Crucible(disk) =
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
+
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
 
@@ -2066,7 +2058,7 @@ mod test {
             &opctx,
             silo_id,
             project_id,
-            disk_id,
+            disk,
             Name::from_str(DISK_NAME).unwrap().into(),
             None, // not attached to an instance
             true, // use the pantry
@@ -2144,18 +2136,19 @@ mod test {
     async fn setup_test_instance(
         cptestctx: &ControlPlaneTestContext,
         client: &ClientTestContext,
-        disks_to_attach: Vec<InstanceDiskAttachment>,
+        disks_to_attach: Vec<instance_types::InstanceDiskAttachment>,
     ) -> InstanceAndActiveVmm {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
 
         let mut disks_iter = disks_to_attach.into_iter();
         let boot_disk = disks_iter.next();
-        let data_disks: Vec<InstanceDiskAttachment> = disks_iter.collect();
+        let data_disks: Vec<instance_types::InstanceDiskAttachment> =
+            disks_iter.collect();
 
         let instance: Instance = object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -2168,13 +2161,15 @@ mod test {
                         .to_vec(),
                 ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 boot_disk,
+                cpu_platform: None,
                 disks: data_disks,
                 external_ips: vec![],
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await;
@@ -2201,7 +2196,7 @@ mod test {
             .as_ref()
             .expect("starting instance should have a vmm");
         let propolis_id = PropolisUuid::from_untyped_uuid(vmm_state.id);
-        let sled_id = SledUuid::from_untyped_uuid(vmm_state.sled_id);
+        let sled_id = vmm_state.sled_id();
         let sa = nexus.sled_client(&sled_id).await.unwrap();
         sa.vmm_finish_transition(propolis_id).await;
 
@@ -2215,7 +2210,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a sled")
-            .runtime
             .state;
 
         assert_eq!(new_state, nexus_db_model::VmmState::Running);
@@ -2279,6 +2273,15 @@ mod test {
                                 .identity
                                 .id;
 
+                        let Disk::Crucible(disk) = nexus
+                            .datastore()
+                            .disk_get(&opctx, disk_id)
+                            .await
+                            .unwrap()
+                        else {
+                            unreachable!()
+                        };
+
                         // If the pantry isn't being used, make sure the disk is
                         // attached. Note that under normal circumstances, a
                         // disk can only be attached to a stopped instance, but
@@ -2289,8 +2292,8 @@ mod test {
                             let state = setup_test_instance(
                                 cptestctx,
                                 client,
-                                vec![params::InstanceDiskAttachment::Attach(
-                                    params::InstanceDiskAttach {
+                                vec![instance_types::InstanceDiskAttachment::Attach(
+                                    instance_types::InstanceDiskAttach {
                                         name: Name::from_str(DISK_NAME)
                                             .unwrap(),
                                     },
@@ -2307,7 +2310,7 @@ mod test {
                             &opctx,
                             silo_id,
                             project_id,
-                            disk_id,
+                            disk,
                             Name::from_str(DISK_NAME).unwrap().into(),
                             attach_instance_id,
                             use_the_pantry,
@@ -2413,6 +2416,12 @@ mod test {
                 .await
                 .expect("Failed to look up created disk");
 
+        let Disk::Crucible(disk) =
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
+
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
 
@@ -2420,7 +2429,7 @@ mod test {
             &opctx,
             silo_id,
             project_id,
-            disk_id,
+            disk,
             Name::from_str(DISK_NAME).unwrap().into(),
             // The disk isn't attached at this time, so don't supply a sled.
             None,
@@ -2434,8 +2443,8 @@ mod test {
         let _instance_and_vmm = setup_test_instance(
             &cptestctx,
             &client,
-            vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            vec![instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
                     name: Name::from_str(DISK_NAME).unwrap(),
                 },
             )],
@@ -2461,12 +2470,17 @@ mod test {
         }
 
         // Detach the disk, then rerun the saga
-        let (.., authz_disk, db_disk) =
-            LookupPath::new(&opctx, nexus.datastore())
-                .disk_id(disk_id)
-                .fetch_for(authz::Action::Read)
-                .await
-                .expect("Failed to look up created disk");
+        let (.., authz_disk) = LookupPath::new(&opctx, nexus.datastore())
+            .disk_id(disk_id)
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("Failed to look up created disk");
+
+        let Disk::Crucible(disk) =
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         assert!(
             nexus
@@ -2474,7 +2488,7 @@ mod test {
                 .disk_update_runtime(
                     &opctx,
                     &authz_disk,
-                    &db_disk.runtime().detach(),
+                    &disk.runtime().detach(),
                 )
                 .await
                 .expect("failed to detach disk")
@@ -2485,7 +2499,7 @@ mod test {
             &opctx,
             silo_id,
             project_id,
-            disk_id,
+            disk,
             Name::from_str(DISK_NAME).unwrap().into(),
             // The disk isn't attached at this time, so don't supply a sled.
             None,
@@ -2516,12 +2530,18 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
                 .await
                 .expect("Failed to look up created disk");
+
+        let Disk::Crucible(disk) =
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
@@ -2538,7 +2558,7 @@ mod test {
             &opctx,
             silo_id,
             project_id,
-            disk_id,
+            disk.clone(),
             Name::from_str(DISK_NAME).unwrap().into(),
             Some(fake_instance_id),
             false, // use the pantry
@@ -2548,12 +2568,6 @@ mod test {
         let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, detach the disk!
-        let (.., authz_disk, db_disk) =
-            LookupPath::new(&opctx, nexus.datastore())
-                .disk_id(disk_id)
-                .fetch_for(authz::Action::Modify)
-                .await
-                .expect("Failed to look up created disk");
 
         assert!(
             nexus
@@ -2561,7 +2575,7 @@ mod test {
                 .disk_update_runtime(
                     &opctx,
                     &authz_disk,
-                    &db_disk.runtime().detach(),
+                    &disk.runtime().detach(),
                 )
                 .await
                 .expect("failed to detach disk")
@@ -2580,8 +2594,8 @@ mod test {
         let instance_state = setup_test_instance(
             cptestctx,
             client,
-            vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            vec![instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
                     name: Name::from_str(DISK_NAME).unwrap(),
                 },
             )],
@@ -2593,7 +2607,7 @@ mod test {
             &opctx,
             silo_id,
             project_id,
-            disk_id,
+            disk,
             Name::from_str(DISK_NAME).unwrap().into(),
             Some(instance_state.instance().id()),
             false, // use the pantry

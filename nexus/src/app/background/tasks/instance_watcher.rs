@@ -15,7 +15,7 @@ use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -25,9 +25,11 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
+use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -88,7 +90,7 @@ impl InstanceWatcher {
         target: VirtualMachine,
         vmm: Vmm,
         sled: Sled,
-    ) -> impl Future<Output = Check> + Send + 'static {
+    ) -> impl Future<Output = Check> + Send + 'static + use<> {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
 
@@ -129,7 +131,7 @@ impl InstanceWatcher {
                 // code path as `mark_instance_failed`...
                 SledVmmState {
                     vmm_state: nexus::VmmRuntimeState {
-                        r#gen: vmm.runtime.r#gen.0.next(),
+                        generation: vmm.generation.0.next(),
                         state: nexus::VmmState::Failed,
                         time_updated: chrono::Utc::now(),
                     },
@@ -168,7 +170,7 @@ impl InstanceWatcher {
                         // code path as `mark_instance_failed`...
                         SledVmmState {
                             vmm_state: nexus::VmmRuntimeState {
-                                r#gen: vmm.runtime.r#gen.0.next(),
+                                generation: vmm.generation.0.next(),
                                 state: nexus::VmmState::Failed,
                                 time_updated: chrono::Utc::now(),
                             },
@@ -209,7 +211,7 @@ impl InstanceWatcher {
                         // also ask the VMM directly when the sled-agent is
                         // unreachable. We should start doing that here at some
                         // point.
-                        slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
+                        slog::info!(opctx.log, "sled agent is unreachable"; InlineErrorChain::new(&e));
                         check.result = Err(Incomplete::SledAgentUnreachable);
                         return check;
                     }
@@ -305,7 +307,8 @@ impl VirtualMachine {
             silo_id: project.silo_id,
             project_id: project.id(),
             vmm_id: vmm.id,
-            sled_agent_id: sled.id(),
+            // XXX oximeter cannot do typed uuids?
+            sled_agent_id: sled.id().into_untyped_uuid(),
             sled_agent_ip: (*addr.ip()).into(),
             sled_agent_port: addr.port(),
         }
@@ -437,7 +440,10 @@ impl BackgroundTask for InstanceWatcher {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let mut paginator = Some(Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE));
+            let mut paginator = Some(Paginator::new(
+                nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending
+            ));
             let mut tasks = ParallelTaskSet::new_with_parallelism(
                 MAX_CONCURRENT_CHECKS,
             );
@@ -455,7 +461,7 @@ impl BackgroundTask for InstanceWatcher {
             // allows reusing pooled TCP connections. Therefore, we will order
             // the database query by sled ID, and reuse the same sled-agent
             // client as long as we are talking to the same sled.
-            let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
+            let mut curr_client: Option<(SledUuid, SledAgentClient)> = None;
             let mut instances = VecDeque::new();
             let mut total: usize = 0;
             loop {
@@ -478,7 +484,7 @@ impl BackgroundTask for InstanceWatcher {
                                 return serde_json::json!({ "error": e.to_string() });
                             }
                         };
-                        paginator = Some(p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id)));
+                        paginator = Some(p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id().into_untyped_uuid(), vmm.id)));
                         instances = batch.into();
                     }
                 }

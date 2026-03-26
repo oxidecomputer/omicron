@@ -7,19 +7,29 @@ use crate::report::BlippyReport;
 use crate::report::BlippyReportSortKey;
 use core::fmt;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneNicEntry;
+use nexus_types::deployment::PlanningInput;
 use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
@@ -47,43 +57,73 @@ impl fmt::Display for Severity {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
-    Sled { sled_id: SledUuid, kind: SledKind },
+    Blueprint(BlueprintKind),
+    Sled { sled_id: SledUuid, kind: Box<SledKind> },
+    PlanningInput(PlanningInputKind),
 }
 
 impl Kind {
     pub fn display_component(&self) -> impl fmt::Display + '_ {
         enum Component<'a> {
+            Blueprint,
             Sled(&'a SledUuid),
+            PlanningInput,
         }
 
         impl fmt::Display for Component<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
+                    Component::Blueprint => write!(f, "blueprint"),
                     Component::Sled(id) => write!(f, "sled {id}"),
+                    Component::PlanningInput => write!(f, "planning input"),
                 }
             }
         }
 
         match self {
+            Kind::Blueprint(_) => Component::Blueprint,
             Kind::Sled { sled_id, .. } => Component::Sled(sled_id),
+            Kind::PlanningInput(_) => Component::PlanningInput,
         }
     }
 
     pub fn display_subkind(&self) -> impl fmt::Display + '_ {
         enum Subkind<'a> {
+            Blueprint(&'a BlueprintKind),
             Sled(&'a SledKind),
+            PlanningInput(&'a PlanningInputKind),
         }
 
         impl fmt::Display for Subkind<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
+                    Subkind::Blueprint(kind) => write!(f, "{kind}"),
                     Subkind::Sled(kind) => write!(f, "{kind}"),
+                    Subkind::PlanningInput(kind) => write!(f, "{kind}"),
                 }
             }
         }
 
         match self {
+            Kind::Blueprint(kind) => Subkind::Blueprint(kind),
             Kind::Sled { kind, .. } => Subkind::Sled(kind),
+            Kind::PlanningInput(kind) => Subkind::PlanningInput(kind),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BlueprintKind {
+    /// No zones exist in the blueprint using the active Nexus generation
+    NoZonesWithActiveNexusGeneration(Generation),
+}
+
+impl fmt::Display for BlueprintKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintKind::NoZonesWithActiveNexusGeneration(r#gen) => {
+                write!(f, "No zones with active nexus generation @ {gen}",)
+            }
         }
     }
 }
@@ -95,10 +135,16 @@ pub enum SledKind {
         zone1: BlueprintZoneConfig,
         zone2: BlueprintZoneConfig,
     },
-    /// A sled has two zones that are not members of the same sled subnet.
-    SledWithMixedUnderlaySubnets {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+    /// A sled has a zone with an IP that isn't a member of its subnet.
+    UnderlayIpOnWrongSubnet {
+        zone: BlueprintZoneConfig,
+        subnet: Ipv6Subnet<SLED_PREFIX>,
+    },
+    /// A sled has a zone with an IP that is above the sled's overall "last
+    /// allocated IP" value.
+    UnderlayIpAboveLastAllocatedIp {
+        zone: BlueprintZoneConfig,
+        last_allocated_ip: Ipv6Addr,
     },
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
@@ -151,6 +197,10 @@ pub enum SledKind {
     ZpoolMissingDebugDataset { zpool: ZpoolUuid },
     /// A zpool is missing its Zone Root dataset.
     ZpoolMissingZoneRootDataset { zpool: ZpoolUuid },
+    /// A zpool is missing its LocalStorage dataset.
+    ZpoolMissingLocalStorageDataset { zpool: ZpoolUuid },
+    /// A zpool is missing its LocalStorageUnencrypted dataset.
+    ZpoolMissingLocalStorageUnencryptedDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
     ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
@@ -177,6 +227,31 @@ pub enum SledKind {
         dataset: BlueprintDatasetConfig,
         address: SocketAddrV6,
     },
+    MupdateOverrideWithArtifactZone {
+        mupdate_override_id: MupdateOverrideUuid,
+        zone: BlueprintZoneConfig,
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
+    },
+    MupdateOverrideWithHostPhase2Artifact {
+        mupdate_override_id: MupdateOverrideUuid,
+        slot: M2Slot,
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
+    },
+    /// A Nexus zone exists which is too new, relative to the "active
+    /// generation".
+    NexusZoneGenerationTooNew {
+        active_generation: Generation,
+        zone_generation: Generation,
+        id: OmicronZoneUuid,
+    },
+    /// Nexus zones with the same generation have different image sources.
+    NexusZoneGenerationImageSourceMismatch {
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
+        generation: Generation,
+    },
 }
 
 impl fmt::Display for SledKind {
@@ -193,17 +268,27 @@ impl fmt::Display for SledKind {
                     zone2.id,
                 )
             }
-            SledKind::SledWithMixedUnderlaySubnets { zone1, zone2 } => {
+            SledKind::UnderlayIpOnWrongSubnet { zone, subnet } => {
                 write!(
                     f,
-                    "zones have underlay IPs on two different sled subnets: \
-                     {:?} {} ({}) and {:?} {} ({})",
-                    zone1.zone_type.kind(),
-                    zone1.id,
-                    zone1.underlay_ip(),
-                    zone2.zone_type.kind(),
-                    zone2.id,
-                    zone2.underlay_ip(),
+                    "{:?} zone {} underlay IP {} is outside the sled subnet {}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                    zone.underlay_ip(),
+                    subnet,
+                )
+            }
+            SledKind::UnderlayIpAboveLastAllocatedIp {
+                zone,
+                last_allocated_ip,
+            } => {
+                write!(
+                    f,
+                    "{:?} zone {} underlay IP {} is above the sled's last \
+                     allocated IP: {last_allocated_ip}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                    zone.underlay_ip(),
                 )
             }
             SledKind::ConflictingSledSubnets { other_sled, subnet } => {
@@ -297,6 +382,15 @@ impl fmt::Display for SledKind {
             SledKind::ZpoolMissingZoneRootDataset { zpool } => {
                 write!(f, "zpool {zpool} is missing its Zone Root dataset")
             }
+            SledKind::ZpoolMissingLocalStorageDataset { zpool } => {
+                write!(f, "zpool {zpool} is missing its LocalStorage dataset")
+            }
+            SledKind::ZpoolMissingLocalStorageUnencryptedDataset { zpool } => {
+                write!(
+                    f,
+                    "zpool {zpool} is missing its LocalStorageUnencrypted dataset"
+                )
+            }
             SledKind::ZoneMissingFilesystemDataset { zone } => {
                 write!(
                     f,
@@ -337,8 +431,15 @@ impl fmt::Display for SledKind {
                     | DatasetKind::ExternalDns
                     | DatasetKind::InternalDns
                     | DatasetKind::TransientZone { .. } => "zone",
+
                     DatasetKind::TransientZoneRoot | DatasetKind::Debug => {
                         "disk"
+                    }
+
+                    DatasetKind::LocalStorage => "local_storage",
+
+                    DatasetKind::LocalStorageUnencrypted => {
+                        "local_storage_unencrypted"
                     }
                 };
                 write!(
@@ -370,6 +471,104 @@ impl fmt::Display for SledKind {
                     "non-Crucible dataset ({:?} {}) has an address: {} \
                      (only Crucible datasets should have addresses)",
                     dataset.kind, dataset.id, address,
+                )
+            }
+            SledKind::MupdateOverrideWithArtifactZone {
+                mupdate_override_id,
+                zone,
+                version,
+                hash,
+            } => {
+                write!(
+                    f,
+                    "sled has remove_mupdate_override set ({mupdate_override_id}), \
+                     but zone {} image source is set to Artifact (version {version}, \
+                     hash {hash})",
+                    zone.id,
+                )
+            }
+            SledKind::MupdateOverrideWithHostPhase2Artifact {
+                mupdate_override_id,
+                slot,
+                version,
+                hash,
+            } => {
+                write!(
+                    f,
+                    "sled has remove_mupdate_override set ({mupdate_override_id}), \
+                     but host phase 2 slot {slot} image source is set to Artifact \
+                     (version {version}, hash {hash})",
+                )
+            }
+            SledKind::NexusZoneGenerationTooNew {
+                active_generation,
+                zone_generation,
+                id,
+            } => {
+                write!(
+                    f,
+                    "Nexus zone {id} has a generation {zone_generation}, which \
+                     is too new relative to the active generation {active_generation}"
+                )
+            }
+            SledKind::NexusZoneGenerationImageSourceMismatch {
+                zone1,
+                zone2,
+                generation,
+            } => {
+                write!(
+                    f,
+                    "Nexus zones {} and {} both have generation {generation} but \
+                     different image sources ({:?} vs {:?})",
+                    zone1.id, zone2.id, zone1.image_source, zone2.image_source,
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PlanningInputKind {
+    IpNotInBlueprint(OmicronZoneExternalIp),
+    NicMacNotInBluperint(OmicronZoneNicEntry),
+    NicIpNotInBlueprint(OmicronZoneNicEntry),
+    NicWithUnknownOpteSubnet(OmicronZoneNicEntry),
+}
+
+impl fmt::Display for PlanningInputKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PlanningInputKind::IpNotInBlueprint(ip) => {
+                write!(
+                    f,
+                    "planning input contains an external IP \
+                     not described by the blueprint: {} ({})",
+                    ip.ip(),
+                    ip.id()
+                )
+            }
+            PlanningInputKind::NicMacNotInBluperint(nic) => {
+                write!(
+                    f,
+                    "planning input contains a NIC with a MAC address \
+                     not described by the blueprint: {} (NIC {} in zone {})",
+                    nic.nic.mac, nic.nic.id, nic.zone_id,
+                )
+            }
+            PlanningInputKind::NicIpNotInBlueprint(nic) => {
+                write!(
+                    f,
+                    "planning input contains a NIC with an IP address \
+                     not described by the blueprint: {} (NIC {} in zone {})",
+                    nic.nic.ip, nic.nic.id, nic.zone_id,
+                )
+            }
+            PlanningInputKind::NicWithUnknownOpteSubnet(nic) => {
+                write!(
+                    f,
+                    "planning input contains a NIC with an IP not in a known
+                     OPTE subnet: {} (NIC {} in zone {})",
+                    nic.nic.ip, nic.nic.id, nic.zone_id,
                 )
             }
         }
@@ -420,7 +619,20 @@ pub struct Blippy<'a> {
 }
 
 impl<'a> Blippy<'a> {
-    pub fn new(blueprint: &'a Blueprint) -> Self {
+    /// Check `blueprint` for internal inconsistencies and check for
+    /// inconsistencies between `blueprint` and `planning_input`.
+    pub fn new(
+        blueprint: &'a Blueprint,
+        planning_input: &PlanningInput,
+    ) -> Self {
+        let mut slf = Self { blueprint, notes: Vec::new() };
+        checks::perform_all_blueprint_only_checks(&mut slf);
+        checks::perform_planning_input_checks(&mut slf, planning_input);
+        slf
+    }
+
+    /// Check `blueprint` for internal inconsistencies.
+    pub fn new_blueprint_only(blueprint: &'a Blueprint) -> Self {
         let mut slf = Self { blueprint, notes: Vec::new() };
         checks::perform_all_blueprint_only_checks(&mut slf);
         slf
@@ -430,13 +642,32 @@ impl<'a> Blippy<'a> {
         self.blueprint
     }
 
+    pub(crate) fn push_blueprint_note(
+        &mut self,
+        severity: Severity,
+        kind: BlueprintKind,
+    ) {
+        self.notes.push(Note { severity, kind: Kind::Blueprint(kind) });
+    }
+
     pub(crate) fn push_sled_note(
         &mut self,
         sled_id: SledUuid,
         severity: Severity,
         kind: SledKind,
     ) {
-        self.notes.push(Note { severity, kind: Kind::Sled { sled_id, kind } });
+        self.notes.push(Note {
+            severity,
+            kind: Kind::Sled { sled_id, kind: Box::new(kind) },
+        });
+    }
+
+    pub(crate) fn push_planning_input_note(
+        &mut self,
+        severity: Severity,
+        kind: PlanningInputKind,
+    ) {
+        self.notes.push(Note { severity, kind: Kind::PlanningInput(kind) });
     }
 
     pub fn into_report(

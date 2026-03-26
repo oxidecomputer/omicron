@@ -39,7 +39,7 @@
       "description": "Uuid of the Nexus instance",
       "allOf": [
         {
-          "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
+          "$ref": "#/definitions/OmicronZoneUuid"
         }
       ]
     },
@@ -176,9 +176,14 @@
         }
       }
     },
-    "TypedUuidForOmicronZoneKind": {
+    "OmicronZoneUuid": {
       "type": "string",
-      "format": "uuid"
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::OmicronZoneUuid",
+        "version": "*"
+      }
     }
   }
 }

@@ -1,0 +1,2663 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Multicast group management and IP allocation.
+//!
+//! Database operations for multicast groups following the bifurcated design
+//! from [RFD 488](https://rfd.shared.oxide.computer/rfd/488):
+//!
+//! - External groups: customer-facing, allocated from IP pools
+//! - Underlay groups: system-generated admin-local IPv6 multicast groups within
+//!   [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64)
+//!
+//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+
+use std::net::IpAddr;
+
+use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
+use diesel::prelude::*;
+use diesel::result::{
+    DatabaseErrorKind::UniqueViolation,
+    Error::{DatabaseError, NotFound},
+};
+use ipnetwork::IpNetwork;
+use ref_cast::RefCast;
+use slog::{debug, error, info};
+use uuid::Uuid;
+
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::DbConnection;
+use nexus_types::external_api::multicast::{self as views};
+use nexus_types::identity::Resource;
+use nexus_types::multicast::MulticastGroupCreate;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{
+    self, CreateResult, DataPageParams, DeleteResult,
+    IdentityMetadataCreateParams, IpVersion, ListResultVec, LookupResult,
+    LookupType, ResourceType, UpdateResult,
+};
+use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
+
+use super::EnsureUnderlayResult;
+use crate::authz;
+use crate::context::OpContext;
+use crate::db::datastore::DataStore;
+use crate::db::model::{
+    ExternalMulticastGroup, IncompleteExternalMulticastGroup,
+    IncompleteExternalMulticastGroupParams, IpPoolType, MulticastGroup,
+    MulticastGroupState, Name, SqlU8, UnderlayMulticastGroup, Vni,
+};
+use crate::db::pagination::paginated;
+use crate::db::queries::external_multicast_group::NextExternalMulticastGroup;
+use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
+
+/// External multicast group with computed source filter state from members.
+#[derive(Clone, Debug)]
+pub struct ExternalMulticastGroupWithSources {
+    pub group: ExternalMulticastGroup,
+    pub source_ips: Vec<IpAddr>,
+    pub has_any_source_member: bool,
+}
+
+impl From<ExternalMulticastGroupWithSources> for views::MulticastGroup {
+    fn from(value: ExternalMulticastGroupWithSources) -> Self {
+        views::MulticastGroup {
+            identity: value.group.identity(),
+            multicast_ip: value.group.multicast_ip.ip(),
+            source_ips: value.source_ips,
+            has_any_source_member: value.has_any_source_member,
+            ip_pool_id: value.group.ip_pool_id,
+            state: value.group.state.to_string(),
+        }
+    }
+}
+
+/// Parameters for multicast group allocation.
+///
+/// Note: Source IPs are per-member, not per-group,
+/// allowing for [(S_1, G), ..., (S_n, G)] group pairings.
+#[derive(Debug, Clone)]
+pub(crate) struct MulticastGroupAllocationParams {
+    pub identity: IdentityMetadataCreateParams,
+    /// How to allocate the multicast IP address.
+    pub ip_allocation: MulticastIpAllocation,
+    /// Derived for whether the joining member has source IPs.
+    /// Used for default pool selection -> if true, prefer SSM pool first.
+    pub has_sources: bool,
+}
+
+/// Multicast IP allocation method.
+///
+/// When an explicit IP is provided, the pool is inferred from the address
+/// since IP pool ranges cannot overlap.
+#[derive(Debug, Clone)]
+pub(crate) enum MulticastIpAllocation {
+    /// Use a specific multicast IP address. Pool is inferred from the address.
+    Explicit { ip: IpAddr },
+    /// Auto-allocate from the default multicast pool for the silo.
+    Auto {
+        /// IP version for default pool selection.
+        /// Required if both IPv4 and IPv6 default multicast pools exist.
+        ip_version: Option<IpVersion>,
+    },
+}
+
+impl std::fmt::Display for MulticastIpAllocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Explicit { .. } => write!(f, "inferred"),
+            Self::Auto { .. } => write!(f, "default"),
+        }
+    }
+}
+
+impl DataStore {
+    /// List multicast groups by state.
+    ///
+    /// Used by RPW reconciler. For "Deleting" state, this includes groups with
+    /// `time_deleted` set so the RPW can clean them up.
+    pub async fn multicast_groups_list_by_state(
+        &self,
+        opctx: &OpContext,
+        state: MulticastGroupState,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<MulticastGroup> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let mut query = paginated(dsl::multicast_group, dsl::id, pagparams)
+            .filter(dsl::state.eq(state));
+
+        if state != MulticastGroupState::Deleting {
+            query = query.filter(dsl::time_deleted.is_null());
+        }
+
+        query
+            .select(MulticastGroup::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List multicast groups matching any of the provided states.
+    ///
+    /// Used by RPW reconciler. For "Deleting" state, includes groups with
+    /// `time_deleted` set so the RPW can clean them up.
+    pub async fn multicast_groups_list_by_states(
+        &self,
+        opctx: &OpContext,
+        states: &[MulticastGroupState],
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<MulticastGroup> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let mut query = paginated(dsl::multicast_group, dsl::id, pagparams)
+            .filter(dsl::state.eq_any(states.to_vec()));
+
+        if !states.contains(&MulticastGroupState::Deleting) {
+            query = query.filter(dsl::time_deleted.is_null());
+        }
+
+        query
+            .select(MulticastGroup::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Transition multicast group to "Active" state.
+    ///
+    /// This is used after successfully programming the dataplane (DPD) to mark
+    /// the group as fully operational.
+    ///
+    /// Note: this is the only valid state transition via this API. To delete a
+    /// group, use [`Self::mark_multicast_group_for_removal_if_no_members`] which
+    /// handles the "Deleting" state transition along with setting `time_deleted`.
+    pub async fn multicast_group_set_active(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> UpdateResult<()> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let rows_updated = diesel::update(dsl::multicast_group)
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .set((
+                dsl::state.eq(MulticastGroupState::Active),
+                dsl::time_modified.eq(diesel::dsl::now),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if rows_updated == 0 {
+            return Err(external::Error::not_found_by_id(
+                ResourceType::MulticastGroup,
+                &group_id.into_untyped_uuid(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Set the underlay salt for collision avoidance on a multicast group.
+    ///
+    /// Called when the XOR-fold mapping produces a collision in the statically
+    /// allotted space and we need to retry with the next salt value.
+    ///
+    /// See the `multicast` background task module for XOR-fold algorithm and
+    /// collision retry logic details.
+    ///
+    /// Returns an error if the group doesn't exist or was deleted.
+    pub async fn multicast_group_set_underlay_salt(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+        salt: SqlU8,
+    ) -> UpdateResult<()> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let rows_updated = diesel::update(dsl::multicast_group)
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .set((
+                dsl::underlay_salt.eq(Some(salt)),
+                dsl::time_modified.eq(diesel::dsl::now),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if rows_updated == 0 {
+            return Err(external::Error::not_found_by_id(
+                external::ResourceType::MulticastGroup,
+                &group_id.into_untyped_uuid(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Allocate a new external multicast group.
+    ///
+    /// The external multicast IP is allocated from an inferred or default pool.
+    /// If an explicit IP is provided, the pool is inferred from the address.
+    /// Otherwise, the default multicast pool is used.
+    pub async fn multicast_group_create(
+        &self,
+        opctx: &OpContext,
+        params: &MulticastGroupCreate,
+    ) -> CreateResult<ExternalMulticastGroup> {
+        let ip_allocation = match params.multicast_ip {
+            Some(ip) => MulticastIpAllocation::Explicit { ip },
+            None => {
+                MulticastIpAllocation::Auto { ip_version: params.ip_version }
+            }
+        };
+        self.allocate_external_multicast_group(
+            opctx,
+            MulticastGroupAllocationParams {
+                identity: params.identity.clone(),
+                ip_allocation,
+                has_sources: params.has_sources,
+            },
+        )
+        .await
+    }
+
+    /// Fetch an external multicast group by ID.
+    ///
+    /// See [`Self::multicast_group_fetch_on_conn`] for the connection-reusing
+    /// variant.
+    pub async fn multicast_group_fetch(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> LookupResult<ExternalMulticastGroup> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.multicast_group_fetch_on_conn(&conn, group_id.into_untyped_uuid())
+            .await
+    }
+
+    /// Fetch an external multicast group using provided connection.
+    pub async fn multicast_group_fetch_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<nexus_db_lookup::DbConnection>,
+        group_id: Uuid,
+    ) -> LookupResult<ExternalMulticastGroup> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        dsl::multicast_group
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(group_id))
+            .select(ExternalMulticastGroup::as_select())
+            .first_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::MulticastGroup,
+                        LookupType::ById(group_id.into_untyped_uuid()),
+                    ),
+                )
+            })
+    }
+
+    /// Fetch an external multicast group with computed source IPs.
+    ///
+    /// Returns the group along with the union of all member source IPs,
+    /// suitable for conversion to the API view.
+    pub async fn multicast_group_fetch_with_sources(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> LookupResult<ExternalMulticastGroupWithSources> {
+        let group = self.multicast_group_fetch(opctx, group_id).await?;
+
+        // Get source filter state via batch method
+        let filter_state_map = self
+            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .await?;
+        let (source_ips, has_any_source_member) = filter_state_map
+            .get(&group_id.into_untyped_uuid())
+            .map(|state| {
+                (
+                    state.specific_sources.iter().copied().collect(),
+                    state.has_any_source_member,
+                )
+            })
+            .unwrap_or_default();
+
+        Ok(ExternalMulticastGroupWithSources {
+            group,
+            source_ips,
+            has_any_source_member,
+        })
+    }
+
+    /// Lookup an external multicast group by IP address.
+    pub async fn multicast_group_lookup_by_ip(
+        &self,
+        opctx: &OpContext,
+        ip_addr: IpAddr,
+    ) -> LookupResult<ExternalMulticastGroup> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        dsl::multicast_group
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::multicast_ip.eq(IpNetwork::from(ip_addr)))
+            .select(ExternalMulticastGroup::as_select())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::MulticastGroup,
+                        LookupType::ByName(ip_addr.to_string()),
+                    ),
+                )
+            })
+    }
+
+    /// List multicast groups (fleet-scoped for visibility).
+    pub async fn multicast_groups_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<ExternalMulticastGroup> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::multicast_group, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::multicast_group,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalMulticastGroup::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Mark a multicast group for deletion, but only if it has no active members.
+    ///
+    /// This is a safe implicit deletion method. It atomically checks that no members
+    /// exist before marking the group as "Deleting". This prevents race conditions
+    /// where a concurrent join could create a member between a "list members"
+    /// check and the mark-for-removal call.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the group was marked for deletion (no members existed)
+    /// - `Ok(false)` if the group still has members (not marked)
+    /// - `Err` on database errors
+    pub async fn mark_multicast_group_for_removal_if_no_members(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> Result<bool, external::Error> {
+        use nexus_db_schema::schema::multicast_group;
+        use nexus_db_schema::schema::multicast_group_member;
+        let now = Utc::now();
+
+        // Atomic: only mark `Deleting` if no active members exist.
+        let rows = diesel::update(multicast_group::table)
+            .filter(multicast_group::id.eq(group_id.into_untyped_uuid()))
+            .filter(
+                multicast_group::state
+                    .eq(MulticastGroupState::Active)
+                    .or(multicast_group::state
+                        .eq(MulticastGroupState::Creating)),
+            )
+            .filter(multicast_group::time_deleted.is_null())
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                multicast_group_member::table
+                    .filter(
+                        multicast_group_member::external_group_id
+                            .eq(group_id.into_untyped_uuid()),
+                    )
+                    .filter(multicast_group_member::time_deleted.is_null()),
+            )))
+            .set((
+                multicast_group::state.eq(MulticastGroupState::Deleting),
+                multicast_group::time_deleted.eq(now),
+                multicast_group::time_modified.eq(now),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rows > 0)
+    }
+
+    /// Delete a multicast group permanently.
+    ///
+    /// This should only be called by the RPW reconciler after DPD cleanup.
+    /// Requires both `state=Deleting` and `time_deleted IS NOT NULL` as a
+    /// safety check.
+    pub async fn multicast_group_delete(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let deleted_rows = diesel::delete(dsl::multicast_group)
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::state.eq(MulticastGroupState::Deleting))
+            .filter(dsl::time_deleted.is_not_null())
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if deleted_rows == 0 {
+            return Err(external::Error::not_found_by_id(
+                ResourceType::MulticastGroup,
+                &group_id.into_untyped_uuid(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Fetch the appropriate default multicast pool based on the presence of
+    /// source IPs.
+    ///
+    /// Pool selection rule(s):
+    /// - If `has_sources` is true: try SSM pool (232/8) first, fallback to ASM
+    ///   with sources
+    /// - If `has_sources` is false: use ASM pool directly
+    ///
+    /// The fallback allows groups with sources to use ASM addresses when SSM
+    /// pools are not configured, since source filtering still works via
+    /// IGMPv3/MLDv2 on any multicast address.
+    async fn fetch_default_multicast_pool(
+        &self,
+        opctx: &OpContext,
+        has_sources: bool,
+        ip_version: Option<IpVersion>,
+    ) -> Result<authz::IpPool, external::Error> {
+        // Convert from omicron_common::address::IpVersion to nexus_db_model::IpVersion
+        let db_ip_version = ip_version.map(Into::into);
+
+        let pool_res = if has_sources {
+            // Try SSM first for source-filtered groups
+            match self.ip_pools_fetch_ssm_multicast(opctx, db_ip_version).await
+            {
+                Ok((pool, _)) => Ok(pool),
+                Err(_) => {
+                    // SSM pool unavailable -> fallback to ASM pool.
+                    // Source filtering still works on ASM addresses via IGMPv3/MLDv2,
+                    // just without SSM's network-level source guarantees.
+                    info!(
+                        opctx.log,
+                        "No SSM pool linked to silo, using ASM pool for source-filtered group"
+                    );
+                    self.ip_pools_fetch_asm_multicast(opctx, db_ip_version)
+                        .await
+                        .map(|(pool, _)| pool)
+                }
+            }
+        } else {
+            // No sources -> ASM
+            self.ip_pools_fetch_asm_multicast(opctx, db_ip_version)
+                .await
+                .map(|(pool, _)| pool)
+        };
+
+        pool_res.map_err(|e| {
+            // Preserve ambiguity errors (invalid_request) indicating the
+            // user needs to specify IP version when multiple pools of different
+            // versions exist. Only replace "not found" errors with a helpful
+            // message about pool setup.
+            match &e {
+                external::Error::ObjectNotFound { .. } => {
+                    // SSM = 232/8 or ff3x::/32, ASM = 224/8 or ff0x::/16
+                    let pool_type =
+                        if has_sources { "SSM or ASM" } else { "ASM" };
+                    let prefix = match ip_version {
+                        Some(v) => format!("No {v} {pool_type}"),
+                        None => format!("No {pool_type}"),
+                    };
+                    external::Error::invalid_request(format!(
+                        "{prefix} multicast pool linked to your silo. \
+                         Create a multicast pool and link it to your silo, \
+                         or provide an explicit pool or multicast address.",
+                    ))
+                }
+                // Preserve all other errors (including ambiguity errors)
+                _ => e,
+            }
+        })
+    }
+
+    /// Allocate an external multicast group from an IP Pool.
+    ///
+    /// # Pool Selection
+    ///
+    /// - **With explicit IP**: Pool is resolved from the IP address.
+    /// - **Without explicit IP + `source_ips`**: Auto-select SSM pool (232/8,
+    ///   ff3x::/32). If no SSM pool is linked, we fall back to an ASM pool.
+    /// - **Without explicit IP + no `source_ips`**: Auto-select an ASM pool.
+    ///
+    /// ## ASM Fallback for Join-by-Name
+    ///
+    /// When `source_ips` are provided without an explicit IP (the join-by-name
+    /// case), this function falls back to an ASM pool if no SSM pool is linked,
+    /// as source filtering still works on ASM addresses via IGMPv3/MLDv2, just
+    /// without SSM's network-level guarantees.
+    ///
+    /// **Note:** Only "pool not found" triggers fallback. Actual errors (DB
+    /// failures, permission issues) propagate normally.
+    ///
+    /// See [`Self::allocate_external_multicast_group_on_conn`] for the
+    /// connection-reusing variant.
+    pub(crate) async fn allocate_external_multicast_group(
+        &self,
+        opctx: &OpContext,
+        params: MulticastGroupAllocationParams,
+    ) -> CreateResult<ExternalMulticastGroup> {
+        let group_id = Uuid::new_v4();
+
+        // Pool resolution based on IP allocation method:
+        // - Explicit IP: infer pool from address (pools have non-overlapping ranges)
+        // - Auto: use default multicast pool based on has_sources preference
+        //
+        // Note: Source IPs are per-member, not per-group. SSM validation
+        // (sources required for 232/8 or ff3x::/32 addresses) is enforced
+        // at member join time in `resolve_multicast_group_identifier_with_sources`.
+        let (authz_pool, explicit_ip) = match &params.ip_allocation {
+            MulticastIpAllocation::Explicit { ip } => {
+                let pool = self
+                    .ip_pool_fetch_containing_address(
+                        opctx,
+                        *ip,
+                        IpPoolType::Multicast,
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        external::Error::ObjectNotFound { .. } => {
+                            external::Error::invalid_request(format!(
+                                "multicast IP address {ip} is not in any \
+                                 configured multicast pool"
+                            ))
+                        }
+                        other => other,
+                    })?;
+                (pool, Some(*ip))
+            }
+            MulticastIpAllocation::Auto { ip_version } => {
+                let pool = self
+                    .fetch_default_multicast_pool(
+                        opctx,
+                        params.has_sources,
+                        *ip_version,
+                    )
+                    .await?;
+                opctx.authorize(authz::Action::CreateChild, &pool).await?;
+                (pool, None)
+            }
+        };
+
+        debug!(
+            opctx.log,
+            "multicast group allocation";
+            "pool_selection" => %params.ip_allocation,
+            "has_sources" => params.has_sources,
+            "pool_id" => %authz_pool.id(),
+        );
+
+        // Fleet-scoped multicast groups always use DEFAULT_MULTICAST_VNI (77).
+        // This reserved VNI is below MIN_GUEST_VNI (1024) and provides consistent
+        // behavior across all multicast groups. VNI is not derived from VPC since
+        // groups are fleet-scoped and can span multiple projects/VPCs.
+        let vni = Vni(external::Vni::DEFAULT_MULTICAST_VNI);
+
+        // Create the incomplete group
+        let data = IncompleteExternalMulticastGroup::new(
+            IncompleteExternalMulticastGroupParams {
+                id: group_id,
+                name: Name(params.identity.name.clone()),
+                description: params.identity.description.clone(),
+                ip_pool_id: authz_pool.id(),
+                explicit_address: explicit_ip,
+                vni,
+            },
+        );
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::allocate_external_multicast_group_on_conn(&conn, data).await
+    }
+
+    /// Allocate an external multicast group using provided connection.
+    pub(crate) async fn allocate_external_multicast_group_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        data: IncompleteExternalMulticastGroup,
+    ) -> Result<ExternalMulticastGroup, external::Error> {
+        let name = data.name.to_string();
+        let explicit_ip = data.explicit_address.is_some();
+
+        NextExternalMulticastGroup::new(data).get_result_async(conn).await.map_err(|e| {
+            match e {
+                NotFound => {
+                    if explicit_ip {
+                        external::Error::invalid_request(
+                            "Requested multicast IP address is not available in the specified pool range",
+                        )
+                    } else {
+                        external::Error::insufficient_capacity(
+                            "No multicast IP addresses available",
+                            "NextExternalMulticastGroup::new returned NotFound",
+                        )
+                    }
+                }
+                // Multicast group: name conflict
+                DatabaseError(UniqueViolation, ..) => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::MulticastGroup,
+                            &name,
+                        ),
+                    )
+                }
+                _ => {
+                    crate::db::queries::external_multicast_group::from_diesel(e)
+                }
+            }
+        })
+    }
+
+    /// Deallocate an external multicast group address for IP pool cleanup.
+    ///
+    /// This marks the group's IP address as deallocated by setting `time_deleted`,
+    /// releasing it back to the pool. This is not the user-initiated deletion path.
+    ///
+    /// User-initiated deletion uses `mark_multicast_group_for_removal` which
+    /// transitions to "Deleting" state for RPW cleanup before row removal.
+    ///
+    /// Returns `Ok(true)` if the group was deallocated, `Ok(false)` if it was
+    /// already deleted (i.e., `time_deleted` was already set), `Err(_)` for any
+    /// other condition including non-existent record.
+    pub async fn deallocate_external_multicast_group(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> Result<bool, external::Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.deallocate_external_multicast_group_on_conn(
+            &conn,
+            group_id.into_untyped_uuid(),
+        )
+        .await
+    }
+
+    /// Transaction-safe variant of deallocate_external_multicast_group.
+    pub(crate) async fn deallocate_external_multicast_group_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_id: Uuid,
+    ) -> Result<bool, external::Error> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let now = Utc::now();
+        let result = diesel::update(dsl::multicast_group)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(group_id))
+            .set(dsl::time_deleted.eq(now))
+            .check_if_exists::<ExternalMulticastGroup>(group_id)
+            .execute_and_check(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::MulticastGroup,
+                        LookupType::ById(group_id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
+
+        Ok(match result.status {
+            UpdateStatus::Updated => true,
+            UpdateStatus::NotUpdatedButExists => false,
+        })
+    }
+
+    /// Ensure an underlay multicast group exists for an external multicast
+    /// group. Returns [`EnsureUnderlayResult`] to distinguish between created,
+    /// existing, or collision (retry with next salt).
+    pub async fn ensure_underlay_multicast_group(
+        &self,
+        opctx: &OpContext,
+        external_group: MulticastGroup,
+        multicast_ip: IpNetwork,
+    ) -> Result<EnsureUnderlayResult, external::Error> {
+        use nexus_db_schema::schema::multicast_group::dsl as external_dsl;
+        use nexus_db_schema::schema::underlay_multicast_group::dsl as underlay_dsl;
+
+        let external_group_id = external_group.id();
+        let tag = external_group.tag;
+
+        // Try to create new underlay multicast group
+        let result =
+            match diesel::insert_into(underlay_dsl::underlay_multicast_group)
+                .values((
+                    underlay_dsl::id.eq(Uuid::new_v4()),
+                    underlay_dsl::time_created.eq(Utc::now()),
+                    underlay_dsl::time_modified.eq(Utc::now()),
+                    underlay_dsl::multicast_ip.eq(multicast_ip),
+                    underlay_dsl::tag.eq(tag.clone()),
+                ))
+                .returning(UnderlayMulticastGroup::as_returning())
+                .get_result_async(
+                    &*self.pool_connection_authorized(opctx).await?,
+                )
+                .await
+            {
+                Ok(created_group) => {
+                    info!(
+                        opctx.log,
+                        "Created new underlay multicast group";
+                        "group_id" => %created_group.id,
+                        "multicast_ip" => %multicast_ip
+                    );
+                    EnsureUnderlayResult::Created(created_group)
+                }
+                Err(DatabaseError(UniqueViolation, ..)) => {
+                    // Fetch existing group to check if idempotent or collision
+                    let existing = underlay_dsl::underlay_multicast_group
+                        .filter(underlay_dsl::multicast_ip.eq(multicast_ip))
+                        .filter(underlay_dsl::time_deleted.is_null())
+                        .first_async::<UnderlayMulticastGroup>(
+                            &*self.pool_connection_authorized(opctx).await?,
+                        )
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                    if existing.tag == tag {
+                        // Same external group
+                        info!(
+                            opctx.log,
+                            "Underlay multicast group exists (idempotent)";
+                            "multicast_ip" => %multicast_ip,
+                        );
+                        EnsureUnderlayResult::Existing(existing)
+                    } else {
+                        // Collision means different external group
+                        info!(
+                            opctx.log,
+                            "Underlay IP {multicast_ip} collision";
+                            "our_tag" => ?tag,
+                            "existing_tag" => ?existing.tag,
+                        );
+                        return Ok(EnsureUnderlayResult::Collision);
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        opctx.log,
+                        "Failed to create underlay multicast group";
+                        "error" => ?e,
+                        "multicast_ip" => %multicast_ip,
+                        "tag" => ?tag
+                    );
+                    return Err(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ));
+                }
+            };
+
+        // Extract underlay group, returning early for collision
+        let underlay_group = match &result {
+            EnsureUnderlayResult::Created(g)
+            | EnsureUnderlayResult::Existing(g) => g,
+            EnsureUnderlayResult::Collision => return Ok(result),
+        };
+
+        // Link external group to underlay group if not already linked
+        if external_group.underlay_group_id != Some(underlay_group.id) {
+            let rows_updated = diesel::update(external_dsl::multicast_group)
+                .filter(external_dsl::id.eq(external_group_id))
+                .filter(external_dsl::time_deleted.is_null())
+                .set(external_dsl::underlay_group_id.eq(underlay_group.id))
+                .execute_async(&*self.pool_connection_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            if rows_updated == 0 {
+                return Err(external::Error::not_found_by_id(
+                    external::ResourceType::MulticastGroup,
+                    &external_group_id,
+                ));
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Fetch an underlay multicast group by ID.
+    pub async fn underlay_multicast_group_fetch(
+        &self,
+        opctx: &OpContext,
+        group_id: Uuid,
+    ) -> LookupResult<UnderlayMulticastGroup> {
+        self.underlay_multicast_group_fetch_on_conn(
+            &*self.pool_connection_authorized(opctx).await?,
+            group_id,
+        )
+        .await
+    }
+
+    /// Fetch underlay multicast group using provided connection.
+    pub async fn underlay_multicast_group_fetch_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_id: Uuid,
+    ) -> LookupResult<UnderlayMulticastGroup> {
+        use nexus_db_schema::schema::underlay_multicast_group::dsl;
+
+        dsl::underlay_multicast_group
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(group_id))
+            .select(UnderlayMulticastGroup::as_select())
+            .first_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::MulticastGroup,
+                        LookupType::ById(group_id.into_untyped_uuid()),
+                    ),
+                )
+            })
+    }
+
+    /// Delete an underlay multicast group permanently.
+    ///
+    /// This should only be called by the RPW reconciler after DPD cleanup.
+    /// Underlay groups don't have independent lifecycle, i.e. they're always
+    /// deleted as part of cleaning up their parent external group.
+    pub async fn underlay_multicast_group_delete(
+        &self,
+        opctx: &OpContext,
+        group_id: Uuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::underlay_multicast_group::dsl;
+
+        let deleted_rows = diesel::delete(dsl::underlay_multicast_group)
+            .filter(dsl::id.eq(group_id))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if deleted_rows == 0 {
+            return Err(external::Error::not_found_by_id(
+                ResourceType::MulticastGroup,
+                &group_id,
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use nexus_types::identity::Resource;
+    use nexus_types::multicast::MulticastGroupCreate;
+    use omicron_common::address::{IpRange, Ipv4Range};
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+
+    use crate::db::datastore::Error;
+    use crate::db::datastore::LookupType;
+    use crate::db::model::{
+        IncompleteIpPoolResource, IpPool, IpPoolReservationType,
+        IpPoolResourceType, IpVersion,
+    };
+    use crate::db::pub_test_utils::helpers::create_instance_with_vmm;
+    use crate::db::pub_test_utils::{TestDatabase, multicast};
+
+    #[tokio::test]
+    async fn test_multicast_group_pool_exhaustion_and_reuse() {
+        let logctx = dev::test_setup_log(
+            "test_multicast_group_pool_exhaustion_and_reuse",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create multicast IP pool with small range (2 addresses)
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "exhaust-pool".parse().unwrap(),
+            description: "Pool exhaustion test".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 100, 2, 1),
+                Ipv4Addr::new(224, 100, 2, 2),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range to pool");
+
+        let link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Exhaust the pool by allocating both addresses
+        let group1 = {
+            let params = MulticastGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "first-group".parse().unwrap(),
+                    description: "First group".to_string(),
+                },
+                multicast_ip: None,
+                has_sources: false,
+                ip_version: None,
+            };
+            datastore
+                .multicast_group_create(&opctx, &params)
+                .await
+                .expect("Should create first group")
+        };
+        let first_ip = group1.multicast_ip.ip();
+
+        {
+            let params = MulticastGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "second-group".parse().unwrap(),
+                    description: "Second group".to_string(),
+                },
+                multicast_ip: None,
+                has_sources: false,
+                ip_version: None,
+            };
+            datastore
+                .multicast_group_create(&opctx, &params)
+                .await
+                .expect("Should create second group");
+        }
+
+        // Verify exhaustion: third allocation should fail
+        {
+            let params = MulticastGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "third-group".parse().unwrap(),
+                    description: "Should fail".to_string(),
+                },
+                multicast_ip: None,
+                has_sources: false,
+                ip_version: None,
+            };
+            let result =
+                datastore.multicast_group_create(&opctx, &params).await;
+            assert!(
+                result.is_err(),
+                "Third allocation should fail due to pool exhaustion"
+            );
+        }
+
+        // Delete first group and verify IP reuse
+        {
+            let deleted = datastore
+                .deallocate_external_multicast_group(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group1.id()),
+                )
+                .await
+                .expect("Should deallocate first group");
+            assert!(deleted, "Should successfully deallocate the group");
+
+            let params = MulticastGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "reuse-group".parse().unwrap(),
+                    description: "Should reuse freed IP".to_string(),
+                },
+                multicast_ip: None,
+                has_sources: false,
+                ip_version: None,
+            };
+            let reused_group = datastore
+                .multicast_group_create(&opctx, &params)
+                .await
+                .expect("Should create group after deletion freed IP");
+
+            assert_eq!(
+                reused_group.multicast_ip.ip(),
+                first_ip,
+                "Should reuse the same IP address"
+            );
+            assert_ne!(
+                group1.id(),
+                reused_group.id(),
+                "Should be different group instances"
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_datastore_default_pool_allocation() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_default_pool_allocation");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "default-multicast-pool".parse().unwrap(),
+            description: "Default pool allocation test".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 250, 1, 1),
+                Ipv4Addr::new(224, 250, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range to pool");
+
+        let link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: true, // For default allocation
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Create group without specifying pool (should use default)
+        let params_default = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "auto-alloc-group".parse().unwrap(),
+                description: "Group using default pool".to_string(),
+            },
+            multicast_ip: None,
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let group_default = datastore
+            .multicast_group_create(&opctx, &params_default)
+            .await
+            .expect("Should create group from default pool");
+
+        assert_eq!(group_default.state, MulticastGroupState::Creating);
+
+        // Verify the IP is from our default pool's range
+        let ip_str = group_default.multicast_ip.ip().to_string();
+        assert!(
+            ip_str.starts_with("224.250.1."),
+            "IP should be from default pool range"
+        );
+
+        // Create another group from default pool
+        let params_second = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "second-alloc-group".parse().unwrap(),
+                description: "Second group from default pool".to_string(),
+            },
+            multicast_ip: None,
+            has_sources: false,
+            ip_version: None,
+        };
+        let group_second = datastore
+            .multicast_group_create(&opctx, &params_second)
+            .await
+            .expect("Should create second group from default pool");
+
+        assert_eq!(group_second.state, MulticastGroupState::Creating);
+
+        // Verify the second group also got an IP from the default pool range
+        let ip_str2 = group_second.multicast_ip.ip().to_string();
+        assert!(
+            ip_str2.starts_with("224.250.1."),
+            "Second group IP should be from default pool range"
+        );
+
+        // Test state transitions on the default pool group
+        datastore
+            .multicast_group_set_active(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_default.id()),
+            )
+            .await
+            .expect("Should transition default group to 'Active'");
+
+        let updated_group = datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_default.id()),
+            )
+            .await
+            .expect("Should fetch updated group");
+        assert_eq!(updated_group.state, MulticastGroupState::Active);
+
+        // Test list by state functionality
+        let pagparams = &DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let active_groups = datastore
+            .multicast_groups_list_by_state(
+                &opctx,
+                MulticastGroupState::Active,
+                pagparams,
+            )
+            .await
+            .expect("Should list active groups");
+        assert!(active_groups.iter().any(|g| g.id() == group_default.id()));
+
+        let creating_groups = datastore
+            .multicast_groups_list_by_state(
+                &opctx,
+                MulticastGroupState::Creating,
+                pagparams,
+            )
+            .await
+            .expect("Should list creating groups");
+        // The second group should still be "Creating"
+        assert!(creating_groups.iter().any(|g| g.id() == group_second.id()));
+        // The default group should not be in "Creating" anymore
+        assert!(!creating_groups.iter().any(|g| g.id() == group_default.id()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_datastore_underlay_linkage() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_with_underlay_linkage");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "test-multicast-pool".parse().unwrap(),
+            description: "Comprehensive test pool".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 1, 3, 1),
+                Ipv4Addr::new(224, 1, 3, 5),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range to pool");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Create external multicast group with explicit address
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-group".parse().unwrap(),
+                description: "Comprehensive test group".to_string(),
+            },
+            multicast_ip: Some("224.1.3.3".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let external_group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create external group");
+
+        // Verify initial state
+        assert_eq!(external_group.multicast_ip.to_string(), "224.1.3.3/32");
+        assert_eq!(external_group.state, MulticastGroupState::Creating);
+        // With RPW pattern, underlay_group_id is initially None in "Creating" state
+        assert_eq!(external_group.underlay_group_id, None);
+
+        // Create underlay group using ensure method (this would normally be done by reconciler)
+        let underlay_group = match datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                external_group.clone(),
+                "ff04::1".parse().unwrap(),
+            )
+            .await
+            .expect("Should create underlay group")
+        {
+            EnsureUnderlayResult::Created(g)
+            | EnsureUnderlayResult::Existing(g) => g,
+            EnsureUnderlayResult::Collision => {
+                panic!("unexpected collision in test")
+            }
+        };
+
+        // Verify underlay group properties
+        assert!(underlay_group.multicast_ip.ip().is_ipv6());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_ip_reuse_after_deletion() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_ip_reuse_after_deletion");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Set up multicast IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "reuse-test-pool".parse().unwrap(),
+            description: "Pool for IP reuse testing".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 1, 100),
+                Ipv4Addr::new(224, 10, 1, 102), // Only 3 addresses
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range to pool");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        // Create group with specific IP
+        let target_ip = "224.10.1.101".parse().unwrap();
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "reuse-test".parse().unwrap(),
+                description: "Group for IP reuse test".to_string(),
+            },
+            multicast_ip: Some(target_ip),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let group1 = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create first group");
+        assert_eq!(group1.multicast_ip.ip(), target_ip);
+
+        // Delete the group completely (time_deleted set)
+        let deleted = datastore
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group1.id()),
+            )
+            .await
+            .expect("Should deallocate group");
+        assert_eq!(deleted, true, "Should successfully deallocate the group");
+
+        // Create another group with the same IP - should succeed due to time_deleted filtering
+        let params2 = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "reuse-test-2".parse().unwrap(),
+                description: "Second group reusing same IP".to_string(),
+            },
+            multicast_ip: Some(target_ip),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let group2 = datastore
+            .multicast_group_create(&opctx, &params2)
+            .await
+            .expect("Should create second group with same IP after first was deleted");
+        assert_eq!(group2.multicast_ip.ip(), target_ip);
+        assert_ne!(
+            group1.id(),
+            group2.id(),
+            "Should be different group instances"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_deallocation_return_values() {
+        let logctx = dev::test_setup_log(
+            "test_multicast_group_deallocation_return_values",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Set up multicast IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "dealloc-test-pool".parse().unwrap(),
+            description: "Pool for deallocation testing".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 30, 1, 1),
+                Ipv4Addr::new(224, 30, 1, 5),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range to pool");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        // Create a group
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "dealloc-test".parse().unwrap(),
+                description: "Group for deallocation testing".to_string(),
+            },
+            multicast_ip: None,
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create multicast group");
+
+        // Deallocate existing group - should return true
+        let res1 = datastore
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("Deallocation should succeed");
+        assert_eq!(
+            res1, true,
+            "Deallocating existing group should return true"
+        );
+
+        // Deallocate the same group again - should return false (already deleted)
+        let res2 = datastore
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("Second deallocation should succeed but return false");
+        assert_eq!(
+            res2, false,
+            "Deallocating already-deleted group should return false"
+        );
+
+        // Try to deallocate non-existent group - should return error
+        let fake_id = Uuid::new_v4();
+        let res3 = datastore
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(fake_id),
+            )
+            .await;
+        assert!(
+            res3.is_err(),
+            "Deallocating non-existent group should return an error"
+        );
+
+        // Verify it's the expected NotFound error
+        match res3.unwrap_err() {
+            external::Error::ObjectNotFound { .. } => {
+                // This is expected
+            }
+            other => panic!("Expected ObjectNotFound error, got: {other:?}"),
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_create_and_fetch() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_create_and_fetch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create project for multicast groups
+
+        // Create IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "fetch-test-pool".parse().unwrap(),
+            description: "Test pool for fetch operations".to_string(),
+        };
+
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 100, 10, 1),
+                Ipv4Addr::new(224, 100, 10, 100),
+            )
+            .unwrap(),
+        );
+
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        let link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Test creating a multicast group
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "fetch-test-group".parse().unwrap(),
+                description: "Test group for fetch operations".to_string(),
+            },
+            multicast_ip: Some("224.100.10.5".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create multicast group");
+
+        // Test fetching the created group
+        let fetched_group = datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("Should fetch created group");
+
+        assert_eq!(group.id(), fetched_group.id());
+        assert_eq!(group.name(), fetched_group.name());
+        assert_eq!(group.description(), fetched_group.description());
+        assert_eq!(group.multicast_ip, fetched_group.multicast_ip);
+        assert_eq!(group.state, MulticastGroupState::Creating);
+
+        // Test fetching non-existent group
+        let fake_id = Uuid::new_v4();
+        let result = datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(fake_id),
+            )
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            external::Error::ObjectNotFound { .. } => {
+                // Expected
+            }
+            other => panic!("Expected ObjectNotFound, got: {other:?}"),
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_list_fleet_wide() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_list_fleet_wide");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "list-test-pool".parse().unwrap(),
+            description: "Test pool for list operations".to_string(),
+        };
+
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 100, 20, 1),
+                Ipv4Addr::new(224, 100, 20, 100),
+            )
+            .unwrap(),
+        );
+
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        let link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Create fleet-scoped multicast groups
+        let params_1 = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "fleet-group-1".parse().unwrap(),
+                description: "Fleet-wide group 1".to_string(),
+            },
+            multicast_ip: Some("224.100.20.10".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let params_2 = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "fleet-group-2".parse().unwrap(),
+                description: "Fleet-wide group 2".to_string(),
+            },
+            multicast_ip: Some("224.100.20.11".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        let params_3 = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "fleet-group-3".parse().unwrap(),
+                description: "Fleet-wide group 3".to_string(),
+            },
+            multicast_ip: Some("224.100.20.12".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        // Create groups (all are fleet-scoped)
+        datastore
+            .multicast_group_create(&opctx, &params_1)
+            .await
+            .expect("Should create fleet-group-1");
+
+        datastore
+            .multicast_group_create(&opctx, &params_2)
+            .await
+            .expect("Should create fleet-group-2");
+
+        datastore
+            .multicast_group_create(&opctx, &params_3)
+            .await
+            .expect("Should create fleet-group-3");
+
+        // List all groups (fleet-scoped) - should get 3 groups
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: external::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(10).unwrap(),
+        };
+
+        let paginated_by =
+            external::http_pagination::PaginatedBy::Id(pagparams);
+        let groups = datastore
+            .multicast_groups_list(&opctx, &paginated_by)
+            .await
+            .expect("Should list all fleet-scoped groups");
+
+        assert_eq!(groups.len(), 3, "Should have 3 fleet-scoped groups");
+
+        // Verify the groups have the correct names
+        let group_names: Vec<_> =
+            groups.iter().map(|g| g.name().to_string()).collect();
+        assert!(group_names.contains(&"fleet-group-1".to_string()));
+        assert!(group_names.contains(&"fleet-group-2".to_string()));
+        assert!(group_names.contains(&"fleet-group-3".to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_state_transitions() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_state_transitions");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "state-test-pool".parse().unwrap(),
+            description: "Test pool for state transitions".to_string(),
+        };
+
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 100, 30, 1),
+                Ipv4Addr::new(224, 100, 30, 100),
+            )
+            .unwrap(),
+        );
+
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        let link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "state-test-group".parse().unwrap(),
+                description: "Test group for state transitions".to_string(),
+            },
+            multicast_ip: Some("224.100.30.5".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        // Create group - starts in "Creating" state
+        let group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create multicast group");
+
+        assert_eq!(group.state, MulticastGroupState::Creating);
+
+        // Test transition to "Active"
+        datastore
+            .multicast_group_set_active(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("Should transition to 'Active'");
+
+        let updated_group = datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("Should fetch updated group");
+
+        assert_eq!(updated_group.state, MulticastGroupState::Active);
+
+        // Test transition to "Deleting"
+        // Since this group has no members, it should be marked for deletion
+        let marked = datastore
+            .mark_multicast_group_for_removal_if_no_members(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("Should transition to 'Deleting'");
+        assert!(marked, "Group with no members should be marked for deletion");
+
+        // Note: After marking for removal, group has `time_deleted` set,
+        // so it won't show up in regular fetch (which filters `time_deleted IS NULL`).
+        // We can verify by listing groups in Deleting state which includes deleted groups.
+        let deleting_groups = datastore
+            .multicast_groups_list_by_state(
+                &opctx,
+                MulticastGroupState::Deleting,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("Should list deleting groups");
+
+        assert_eq!(deleting_groups.len(), 1);
+        assert_eq!(deleting_groups[0].id(), group.id());
+        assert_eq!(deleting_groups[0].state, MulticastGroupState::Deleting);
+        assert!(deleting_groups[0].time_deleted().is_some());
+
+        // Test trying to update non-existent group
+        let fake_id = Uuid::new_v4();
+        let result = datastore
+            .multicast_group_set_active(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(fake_id),
+            )
+            .await;
+        assert!(result.is_err());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_mark_for_removal_blocked_by_members() {
+        let logctx =
+            dev::test_setup_log("test_mark_for_removal_blocked_by_members");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let setup = multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "removal-guard-pool",
+            "removal-guard-project",
+        )
+        .await;
+
+        // Create active group
+        let group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "guarded-group",
+            "224.10.1.50",
+            true, // make_active
+        )
+        .await;
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+
+        // Create instance and add as member
+        let (instance, _vmm) = create_instance_with_vmm(
+            &opctx,
+            &datastore,
+            &setup.authz_project,
+            "member-instance",
+            setup.sled_id,
+        )
+        .await;
+
+        datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group_id,
+                InstanceUuid::from_untyped_uuid(*instance.as_untyped_uuid()),
+                Some(&[] as &[IpAddr]),
+            )
+            .await
+            .expect("Should add member");
+
+        // Try to mark for removal
+        let marked = datastore
+            .mark_multicast_group_for_removal_if_no_members(&opctx, group_id)
+            .await
+            .expect("Should not error");
+
+        assert!(
+            !marked,
+            "Group with active member should NOT be marked for deletion"
+        );
+
+        // Verify group is still "Active" (not "Deleting")
+        let group = datastore
+            .multicast_group_fetch(&opctx, group_id)
+            .await
+            .expect("Should fetch group");
+        assert_eq!(
+            group.state,
+            MulticastGroupState::Active,
+            "Group should remain Active when it has members"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_lookup_by_ip() {
+        let logctx = dev::test_setup_log("test_multicast_group_lookup_by_ip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create test setup (pool and project for group creation)
+        multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "test-pool",
+            "test-project",
+        )
+        .await;
+
+        // Create first multicast group with IP 224.10.1.100
+        let group1 = multicast::create_test_group(
+            &opctx,
+            &datastore,
+            "group1",
+            "224.10.1.100",
+        )
+        .await;
+
+        // Create second multicast group with IP 224.10.1.101
+        let group2 = multicast::create_test_group(
+            &opctx,
+            &datastore,
+            "group2",
+            "224.10.1.101",
+        )
+        .await;
+
+        // Test successful lookup for first group
+        let found_group1 = datastore
+            .multicast_group_lookup_by_ip(
+                &opctx,
+                "224.10.1.100".parse().unwrap(),
+            )
+            .await
+            .expect("Should find group by IP");
+
+        assert_eq!(found_group1.id(), group1.id());
+        assert_eq!(
+            found_group1.multicast_ip.ip(),
+            "224.10.1.100".parse::<IpAddr>().unwrap()
+        );
+
+        // Test successful lookup for second group
+        let found_group2 = datastore
+            .multicast_group_lookup_by_ip(
+                &opctx,
+                "224.10.1.101".parse().unwrap(),
+            )
+            .await
+            .expect("Should find group by IP");
+
+        assert_eq!(found_group2.id(), group2.id());
+        assert_eq!(
+            found_group2.multicast_ip.ip(),
+            "224.10.1.101".parse::<IpAddr>().unwrap()
+        );
+
+        // Test lookup for nonexistent IP - should fail
+        let not_found_result = datastore
+            .multicast_group_lookup_by_ip(
+                &opctx,
+                "224.10.1.199".parse().unwrap(),
+            )
+            .await;
+
+        assert!(not_found_result.is_err());
+        match not_found_result.err().unwrap() {
+            Error::ObjectNotFound { .. } => {
+                // Expected error type for missing multicast group
+            }
+            other => panic!("Expected ObjectNotFound error, got: {other:?}"),
+        }
+
+        // Test that soft-deleted groups are not returned
+        // Soft-delete group1 (sets time_deleted)
+        datastore
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group1.id()),
+            )
+            .await
+            .expect("Should soft-delete group");
+
+        // Now lookup should fail for deleted group
+        let deleted_lookup_result = datastore
+            .multicast_group_lookup_by_ip(
+                &opctx,
+                "224.10.1.100".parse().unwrap(),
+            )
+            .await;
+
+        assert!(deleted_lookup_result.is_err());
+        match deleted_lookup_result.err().unwrap() {
+            Error::ObjectNotFound { .. } => {
+                // Expected - deleted groups should not be found
+            }
+            other => panic!(
+                "Expected ObjectNotFound error for deleted group, got: {other:?}"
+            ),
+        }
+
+        // Second group should still be findable
+        let still_found_group2 = datastore
+            .multicast_group_lookup_by_ip(
+                &opctx,
+                "224.10.1.101".parse().unwrap(),
+            )
+            .await
+            .expect("Should still find non-deleted group");
+
+        assert_eq!(still_found_group2.id(), group2.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test ASM fallback when source_ips are provided but no SSM pool exists.
+    ///
+    /// When a user requests source filtering (`source_ips`) without an explicit
+    /// IP address, we first try to allocate from an SSM pool. If no SSM pool
+    /// is linked to the silo, we fall back to an ASM pool since source
+    /// filtering still works via IGMPv3/MLDv2 on any multicast address.
+    #[tokio::test]
+    async fn test_multicast_group_asm_fallback_when_no_ssm_pool() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_asm_fallback_no_ssm");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create ONLY an ASM pool (224.x.x.x range, NOT SSM 232.x.x.x)
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "asm-only-pool".parse().unwrap(),
+            description: "ASM pool for fallback test".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+
+        // Add ASM range (NOT SSM - 224.x.x.x, not 232.x.x.x)
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 100, 1, 1),
+                Ipv4Addr::new(224, 100, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add ASM range to pool");
+
+        // Link pool to silo as default
+        let link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ip_pool.id(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link ASM pool to silo");
+
+        // Create group without an explicit IP: this should trigger
+        // fallback to an ASM pool
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "source-filtered-group".parse().unwrap(),
+                description: "Group using ASM pool".to_string(),
+            },
+            multicast_ip: None, // No explicit IP -> triggers pool auto-selection
+            has_sources: false,
+            ip_version: None,
+        };
+
+        // This should succeed via ASM pool (no SSM pool exists)
+        let group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create group via ASM pool");
+
+        // Verify the IP is from our ASM pool range (224.100.1.x)
+        let ip_str = group.multicast_ip.ip().to_string();
+        assert!(
+            ip_str.starts_with("224.100.1."),
+            "IP {} should be from ASM pool range 224.100.1.x",
+            ip_str
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that `has_sources: true` selects SSM pool when available,
+    /// falls back to ASM when SSM unavailable, and prefers SSM when both exist.
+    #[tokio::test]
+    async fn test_multicast_group_has_sources_pool_selection() {
+        let logctx = dev::test_setup_log(
+            "test_multicast_group_has_sources_pool_selection",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Case: Only ASM pool, has_sources: true should fall back to ASM
+
+        let asm_pool_identity = IdentityMetadataCreateParams {
+            name: "asm-multicast-pool".parse().unwrap(),
+            description: "ASM multicast pool (224.x)".to_string(),
+        };
+        let asm_ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create ASM multicast IP pool");
+
+        let asm_authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_ip_pool.id(),
+            LookupType::ById(asm_ip_pool.id()),
+        );
+        let asm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 50, 1, 1),
+                Ipv4Addr::new(224, 50, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &asm_authz_pool,
+                &asm_ip_pool,
+                &asm_range,
+            )
+            .await
+            .expect("Should add ASM range to pool");
+
+        let asm_link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: asm_ip_pool.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_link)
+            .await
+            .expect("Should link ASM pool to silo");
+
+        // Create group with has_sources: true should fall back to ASM
+        let fallback_params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "fallback-to-asm".parse().unwrap(),
+                description: "Should fall back to ASM when no SSM".to_string(),
+            },
+            multicast_ip: None,
+            has_sources: true,
+            ip_version: None,
+        };
+        let fallback_group = datastore
+            .multicast_group_create(&opctx, &fallback_params)
+            .await
+            .expect("Should create group via ASM fallback");
+
+        let fallback_ip = fallback_group.multicast_ip.ip().to_string();
+        assert!(
+            fallback_ip.starts_with("224.50.1."),
+            "has_sources=true without SSM pool should fall back to ASM, got {fallback_ip}"
+        );
+
+        // Case: Add SSM pool, has_sources: true should prefer SSM
+
+        let ssm_pool_identity = IdentityMetadataCreateParams {
+            name: "ssm-multicast-pool".parse().unwrap(),
+            description: "SSM multicast pool (232.x)".to_string(),
+        };
+        let ssm_ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ssm_pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create SSM multicast IP pool");
+
+        let ssm_authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ssm_ip_pool.id(),
+            LookupType::ById(ssm_ip_pool.id()),
+        );
+        let ssm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 1, 1, 1),
+                Ipv4Addr::new(232, 1, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &ssm_authz_pool,
+                &ssm_ip_pool,
+                &ssm_range,
+            )
+            .await
+            .expect("Should add SSM range to pool");
+
+        let ssm_link = IncompleteIpPoolResource {
+            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_type: IpPoolResourceType::Silo,
+            ip_pool_id: ssm_ip_pool.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, ssm_link)
+            .await
+            .expect("Should link SSM pool to silo");
+
+        // Now with both pools, has_sources: true should prefer SSM
+        let ssm_params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "prefers-ssm".parse().unwrap(),
+                description: "Should prefer SSM over ASM".to_string(),
+            },
+            multicast_ip: None,
+            has_sources: true,
+            ip_version: None,
+        };
+        let ssm_group = datastore
+            .multicast_group_create(&opctx, &ssm_params)
+            .await
+            .expect("Should create group via SSM pool");
+
+        let ssm_ip = ssm_group.multicast_ip.ip().to_string();
+        assert!(
+            ssm_ip.starts_with("232.1.1."),
+            "has_sources=true with SSM pool should use SSM, got {}",
+            ssm_ip
+        );
+
+        // Case: has_sources: false should still use ASM
+
+        let asm_params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "uses-asm".parse().unwrap(),
+                description: "has_sources=false should use ASM".to_string(),
+            },
+            multicast_ip: None,
+            has_sources: false,
+            ip_version: None,
+        };
+        let asm_group = datastore
+            .multicast_group_create(&opctx, &asm_params)
+            .await
+            .expect("Should create group via ASM pool");
+
+        let asm_ip = asm_group.multicast_ip.ip().to_string();
+        assert!(
+            asm_ip.starts_with("224.50.1."),
+            "has_sources=false should use ASM, got {asm_ip}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_underlay_multicast_group_collision() {
+        let logctx = dev::test_setup_log(
+            "test_ensure_underlay_multicast_group_collision",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create multicast IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "collision-test-pool".parse().unwrap(),
+            description: "Pool for collision testing".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 1, 1),
+                Ipv4Addr::new(224, 10, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        // Create first external group
+        let params1 = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "collision-group-1".parse().unwrap(),
+                description: "First group for collision test".to_string(),
+            },
+            multicast_ip: Some("224.10.1.1".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+        let external_group1 = datastore
+            .multicast_group_create(&opctx, &params1)
+            .await
+            .expect("Should create first external group");
+
+        // Create second external group (different IP, different tag)
+        let params2 = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "collision-group-2".parse().unwrap(),
+                description: "Second group for collision test".to_string(),
+            },
+            multicast_ip: Some("224.10.1.2".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+        let external_group2 = datastore
+            .multicast_group_create(&opctx, &params2)
+            .await
+            .expect("Should create second external group");
+
+        // Ensure both groups have different tags
+        assert_ne!(
+            external_group1.tag, external_group2.tag,
+            "Groups should have different tags"
+        );
+
+        // Ensure underlay for first group with specific IP
+        let underlay_ip: IpNetwork = "ff04::dead:beef".parse().unwrap();
+        let res1 = datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                external_group1.clone(),
+                underlay_ip,
+            )
+            .await
+            .expect("Should create underlay for group 1");
+        assert!(
+            matches!(res1, EnsureUnderlayResult::Created(_)),
+            "First ensure should create new underlay group, got {res1:?}"
+        );
+
+        // Try to ensure underlay for second external group with same underlay IP
+        // This should return a `Collision` type because the tags are different
+        let res2 = datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                external_group2.clone(),
+                underlay_ip,
+            )
+            .await
+            .expect("Should return collision result");
+        assert!(
+            matches!(res2, EnsureUnderlayResult::Collision),
+            "Second ensure with different tag should return Collision, got {res2:?}"
+        );
+
+        // Verify idempotency -> same external group with same underlay IP
+        // returns `Existing`
+        let res3 = datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                external_group1.clone(),
+                underlay_ip,
+            )
+            .await
+            .expect("Should return existing result");
+        assert!(
+            matches!(res3, EnsureUnderlayResult::Existing(_)),
+            "Re-ensure same group should return Existing, got {res3:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_set_underlay_salt() {
+        let logctx =
+            dev::test_setup_log("test_multicast_group_set_underlay_salt");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create multicast IP pool
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "salt-test-pool".parse().unwrap(),
+            description: "Pool for salt testing".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 20, 1, 1),
+                Ipv4Addr::new(224, 20, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        // Create external group
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "salt-test-group".parse().unwrap(),
+                description: "Group for salt testing".to_string(),
+            },
+            multicast_ip: Some("224.20.1.1".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+        let external_group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create external group");
+
+        let group_id =
+            MulticastGroupUuid::from_untyped_uuid(external_group.id());
+
+        // Verify initial salt is `None`
+        let fetched = datastore
+            .multicast_group_fetch(&opctx, group_id)
+            .await
+            .expect("Should fetch group");
+        assert_eq!(fetched.underlay_salt, None, "Initial salt should be None");
+
+        // Set salt field to 1
+        datastore
+            .multicast_group_set_underlay_salt(&opctx, group_id, SqlU8(1))
+            .await
+            .expect("Should set salt to 1");
+
+        let fetched = datastore
+            .multicast_group_fetch(&opctx, group_id)
+            .await
+            .expect("Should fetch group after salt update");
+        assert_eq!(fetched.underlay_salt, Some(SqlU8(1)), "Salt should be 1");
+
+        // Set salt to max value (255)
+        datastore
+            .multicast_group_set_underlay_salt(&opctx, group_id, SqlU8(255))
+            .await
+            .expect("Should set salt to 255");
+
+        let fetched = datastore
+            .multicast_group_fetch(&opctx, group_id)
+            .await
+            .expect("Should fetch group after max salt update");
+
+        assert_eq!(
+            fetched.underlay_salt,
+            Some(SqlU8(255)),
+            "Salt should be 255 (max)"
+        );
+
+        // Test setting salt on non-existent group returns `NotFound`
+        let fake_id = MulticastGroupUuid::new_v4();
+        let res = datastore
+            .multicast_group_set_underlay_salt(&opctx, fake_id, SqlU8(1))
+            .await;
+        assert!(res.is_err(), "Setting salt on non-existent group should fail");
+        if let Err(e) = res {
+            assert!(
+                matches!(e, external::Error::ObjectNotFound { .. }),
+                "Error should be NotFound, got {e:?}"
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}

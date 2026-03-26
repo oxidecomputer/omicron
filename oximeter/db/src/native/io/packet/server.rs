@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Decode packets from the ClickHouse server.
 
@@ -14,12 +14,23 @@ use crate::native::packets::server::PasswordComplexityRule;
 use crate::native::probes;
 use bytes::Buf as _;
 use bytes::BytesMut;
+use std::net::IpAddr;
 
 /// A decoder for packets from the ClickHouse server.
 #[derive(Debug)]
-pub struct Decoder;
+pub struct Decoder {
+    /// IP address of the server we're decoding packets from.
+    ///
+    /// This is used only as an argument USDT probes, not decoding itself.
+    pub addr: IpAddr,
+}
 
 impl Decoder {
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self { addr: std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST) }
+    }
+
     /// Decode a Hello packet from the server, if possible.
     fn decode_hello(src: &mut &[u8]) -> Result<Option<Hello>, Error> {
         let Some(name) = io::string::decode(src)? else {
@@ -123,7 +134,11 @@ impl tokio_util::codec::Decoder for Decoder {
                         // how much data we need to lop off. We should
                         // realistically RST the whole TCP connection, most
                         // likely.
-                        probes::invalid__packet!(|| ("Hello", src.len()));
+                        probes::invalid__packet!(|| (
+                            self.addr.to_string(),
+                            "Hello",
+                            src.len()
+                        ));
                         src.clear();
                         return Err(e);
                     }
@@ -133,7 +148,11 @@ impl tokio_util::codec::Decoder for Decoder {
                 Ok(Some(block)) => Packet::Data(block),
                 Ok(None) => return Ok(None),
                 Err(e) => {
-                    probes::invalid__packet!(|| ("Data", src.len()));
+                    probes::invalid__packet!(|| (
+                        self.addr.to_string(),
+                        "Data",
+                        src.len()
+                    ));
                     src.clear();
                     return Err(e);
                 }
@@ -142,7 +161,11 @@ impl tokio_util::codec::Decoder for Decoder {
                 Ok(Some(exceptions)) => Packet::Exception(exceptions),
                 Ok(None) => return Ok(None),
                 Err(e) => {
-                    probes::invalid__packet!(|| ("Exception", src.len()));
+                    probes::invalid__packet!(|| (
+                        self.addr.to_string(),
+                        "Exception",
+                        src.len()
+                    ));
                     src.clear();
                     return Err(e);
                 }
@@ -167,6 +190,7 @@ impl tokio_util::codec::Decoder for Decoder {
                     Ok(None) => return Ok(None),
                     Err(e) => {
                         probes::invalid__packet!(|| (
+                            self.addr.to_string(),
                             "TableColumns",
                             src.len()
                         ));
@@ -180,7 +204,11 @@ impl tokio_util::codec::Decoder for Decoder {
                 Ok(Some(block)) => Packet::ProfileEvents(block),
                 Ok(None) => return Ok(None),
                 Err(e) => {
-                    probes::invalid__packet!(|| ("ProfileEvents", src.len()));
+                    probes::invalid__packet!(|| (
+                        self.addr.to_string(),
+                        "ProfileEvents",
+                        src.len()
+                    ));
                     src.clear();
                     return Err(e);
                 }
@@ -192,6 +220,7 @@ impl tokio_util::codec::Decoder for Decoder {
                 // it's not clear how in the absence of a header with the packet
                 // size.
                 probes::unrecognized__server__packet!(|| (
+                    self.addr.to_string(),
                     u64::from(kind),
                     src.len()
                 ));
@@ -203,7 +232,11 @@ impl tokio_util::codec::Decoder for Decoder {
         // Now that we've decoded the full frame, chop off the bytes we actually
         // consumed during that process, to be sure we start at the next frame
         // when we're called again.
-        probes::packet__received!(|| packet.kind());
+        probes::packet__received!(|| (
+            self.addr.to_string(),
+            packet.kind(),
+            &packet
+        ));
         let n_consumed = src.len() - buf.len();
         src.advance(n_consumed);
         Ok(Some(packet))
@@ -277,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_decode_full_hello() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut bytes = BytesMut::from(HELLO_PACKET);
         let packet = decoder
             .decode(&mut bytes)
@@ -292,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_decode_partial_hello() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut prefix = BytesMut::from(&HELLO_PACKET[..10]);
         let mut suffix = BytesMut::from(&HELLO_PACKET[10..]);
 
@@ -313,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_decode_hello_packet_and_a_half() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut bytes = BytesMut::from(HELLO_PACKET);
         bytes.extend(&HELLO_PACKET[..10]);
         let packet = decoder
@@ -329,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_decode_multiple_hello_packets() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut bytes = BytesMut::from(HELLO_PACKET);
         bytes.extend(HELLO_PACKET);
         bytes.extend(&HELLO_PACKET[..10]);
@@ -351,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_decode_pong() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut bytes = BytesMut::from(PONG_PACKET);
         let packet = decoder
             .decode(&mut bytes)
@@ -363,7 +396,7 @@ mod tests {
 
     #[test]
     fn test_decode_single_exception() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut bytes = BytesMut::from(EXCEPTION_PACKET);
         let packet = decoder
             .decode(&mut bytes)
@@ -377,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_decode_nested_exceptions() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
 
         // Modify the first exception so that it seems nested.
         let mut bytes =
@@ -403,7 +436,7 @@ mod tests {
 
     #[test]
     fn test_decode_progress_packet() {
-        let mut decoder = Decoder;
+        let mut decoder = Decoder::for_test();
         let mut bytes = BytesMut::from(PROGRESS_PACKET);
         let packet = decoder
             .decode(&mut bytes)

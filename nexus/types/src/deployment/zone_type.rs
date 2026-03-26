@@ -10,15 +10,15 @@
 
 use super::OmicronZoneExternalIp;
 use daft::Diffable;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
+use sled_agent_types_versions::latest::inventory::OmicronZoneType;
+use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::net::Ipv6Addr;
 
 #[derive(
@@ -152,6 +152,11 @@ impl BlueprintZoneType {
         )
     }
 
+    /// Identifies whether this is a boundary NTP zone
+    pub fn is_boundary_ntp(&self) -> bool {
+        matches!(self, BlueprintZoneType::BoundaryNtp(_))
+    }
+
     /// Identifies whether this is a Nexus zone
     pub fn is_nexus(&self) -> bool {
         matches!(self, BlueprintZoneType::Nexus(_))
@@ -195,6 +200,11 @@ impl BlueprintZoneType {
     /// Identifies whether this is a single-node clickhouse zone
     pub fn is_clickhouse(&self) -> bool {
         matches!(self, BlueprintZoneType::Clickhouse(_))
+    }
+
+    /// Identifies whether this is an Oximeter zone
+    pub fn is_oximeter(&self) -> bool {
+        matches!(self, BlueprintZoneType::Oximeter(_))
     }
 
     /// Returns the durable dataset associated with this zone, if any exists.
@@ -300,6 +310,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             }
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
+                lockstep_port: zone.lockstep_port,
                 external_ip: zone.external_ip.ip,
                 nic: zone.nic,
                 external_tls: zone.external_tls,
@@ -337,11 +348,12 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
+    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -553,6 +565,9 @@ pub mod blueprint_zone_type {
     pub struct Nexus {
         /// The address at which the internal nexus server is reachable.
         pub internal_address: SocketAddrV6,
+        /// The port at which the lockstep server is reachable. This shares the
+        /// same IP address with `internal_address`.
+        pub lockstep_port: u16,
         /// The address at which the external nexus server is reachable.
         pub external_ip: OmicronZoneExternalFloatingIp,
         /// The service vNIC providing external connectivity using OPTE.
@@ -561,6 +576,21 @@ pub mod blueprint_zone_type {
         pub external_tls: bool,
         /// External DNS servers Nexus can use to resolve external hosts.
         pub external_dns_servers: Vec<IpAddr>,
+        /// Generation number for this Nexus zone.
+        /// This is used to coordinate handoff between old and new Nexus instances
+        /// during updates. See RFD 588.
+        pub nexus_generation: Generation,
+    }
+
+    impl Nexus {
+        pub fn lockstep_address(&self) -> SocketAddrV6 {
+            SocketAddrV6::new(
+                *self.internal_address.ip(),
+                self.lockstep_port,
+                0,
+                0,
+            )
+        }
     }
 
     #[derive(

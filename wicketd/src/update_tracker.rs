@@ -34,11 +34,11 @@ use gateway_messages::ROT_PAGE_SIZE;
 use gateway_messages::SpComponent;
 use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
-use installinator_common::InstallinatorSpec;
 use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
 use semver::Version;
+use sled_hardware_types::OxideSled;
 use slog::Logger;
 use slog::error;
 use slog::info;
@@ -66,7 +66,9 @@ use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
+use update_common::artifacts::VerificationMode;
 use update_engine::AbortHandle;
+use update_engine::NestedSpec;
 use update_engine::StepSpec;
 use update_engine::events::ProgressUnits;
 use uuid::Uuid;
@@ -361,6 +363,7 @@ impl UpdateTracker {
             // uploaded over stdin, so let ArtifactsWithPlan pick the name.
             None,
             ControlPlaneZonesMode::Composite,
+            VerificationMode::BlindlyTrustAnything,
             &self.log,
         )
         .await
@@ -936,7 +939,7 @@ impl UpdateDriver {
                     let caboose = update_cx
                         .mgs_client
                         .sp_component_caboose_get(
-                            update_cx.sp.type_,
+                            &update_cx.sp.type_,
                             update_cx.sp.slot,
                             SpComponent::SP_ITSELF.const_as_str(),
                             sp_firmware_slot,
@@ -1218,10 +1221,38 @@ impl UpdateDriver {
         ipr_start_receiver: IprStartReceiver,
     ) {
         let mut host_registrar = engine.for_component(UpdateComponent::Host);
+
+        let host_type = host_registrar
+            .new_step(
+                UpdateStepId::FetchHostType,
+                "Get host type",
+                async |_cx| {
+                    let state = update_cx
+                        .mgs_client
+                        .sp_get(&update_cx.sp.type_, update_cx.sp.slot)
+                        .await
+                        .map(|response| response.into_inner())
+                        .map_err(|error| UpdateTerminalError::SpGetFailed {
+                            error,
+                        })?;
+
+                    StepSuccess::new(
+                        OxideSled::try_from_model(&state.model).ok_or(
+                            UpdateTerminalError::UnknownHost(state.model),
+                        )?,
+                    )
+                    .into()
+                },
+            )
+            .register();
+
+        let host_type = host_type.into_shared();
+
         let image_id_handle = self.register_trampoline_phase1_steps(
             update_cx,
             &mut host_registrar,
             plan,
+            host_type.clone(),
         );
 
         let start_handle = host_registrar
@@ -1284,6 +1315,7 @@ impl UpdateDriver {
             &mut host_registrar,
             plan,
             slots_to_update,
+            host_type,
         );
     }
 
@@ -1295,6 +1327,7 @@ impl UpdateDriver {
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
         plan: &'a UpdatePlan,
+        host_type: SharedStepHandle<OxideSled>,
     ) -> StepHandle<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
         // slot 0. We put this in a set for compatibility with the later step
@@ -1306,9 +1339,11 @@ impl UpdateDriver {
         self.register_deliver_host_phase1_steps(
             update_cx,
             registrar,
-            &plan.trampoline_phase_1,
+            &plan.gimlet_trampoline_phase_1,
+            &plan.cosmo_trampoline_phase_1,
             "trampoline",
             StepHandle::ready(trampoline_phase_1_boot_slots).into_shared(),
+            host_type,
         );
 
         // Wait (if necessary) for the trampoline phase 2 upload to MGS to
@@ -1365,15 +1400,42 @@ impl UpdateDriver {
                 UpdateStepId::SettingInstallinatorImageId,
                 "Setting installinator image ID",
                 async move |_cx| {
-                    let installinator_image_id = InstallinatorImageId {
-                        control_plane: plan.control_plane_hash.to_string(),
-                        host_phase_2: plan.host_phase_2_hash.to_string(),
-                        update_id: update_cx.update_id,
-                    };
+                    let installinator_image_id =
+                        match plan.installinator_doc_hash {
+                            Some(hash) => {
+                                // In this case (for newer TUF repos), we set the
+                                // host phase 2 hash to the document hash, and the
+                                // control plane hash to all zeroes. The latter acts
+                                // as an indication to installinator that the former
+                                // is actually a document hash.
+                                InstallinatorImageId {
+                                    host_phase_2: hash.to_string(),
+                                    control_plane: ArtifactHash([0; 32])
+                                        .to_string(),
+                                    update_id: update_cx.update_id,
+                                }
+                            }
+                            None => {
+                                // For older TUF repos, we follow the previous
+                                // logic.
+                                //
+                                // TODO-cleanup: Once we no longer support older TUF
+                                // repos, we can remove this logic.
+                                InstallinatorImageId {
+                                    host_phase_2: plan
+                                        .host_phase_2_hash
+                                        .to_string(),
+                                    control_plane: plan
+                                        .control_plane_hash
+                                        .to_string(),
+                                    update_id: update_cx.update_id,
+                                }
+                            }
+                        };
                     update_cx
                         .mgs_client
                         .sp_installinator_image_id_set(
-                            update_cx.sp.type_,
+                            &update_cx.sp.type_,
                             update_cx.sp.slot,
                             &installinator_image_id,
                         )
@@ -1411,7 +1473,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
-                            update_cx.sp.type_,
+                            &update_cx.sp.type_,
                             update_cx.sp.slot,
                             &HostStartupOptions {
                                 boot_net: false,
@@ -1458,6 +1520,7 @@ impl UpdateDriver {
         registrar: &mut ComponentRegistrar<'engine, 'a>,
         plan: &'a UpdatePlan,
         slots_to_update: StepHandle<BTreeSet<u16>>,
+        host_type: SharedStepHandle<OxideSled>,
     ) {
         // Installinator is done - set the stage for the real host to boot.
 
@@ -1467,9 +1530,11 @@ impl UpdateDriver {
         self.register_deliver_host_phase1_steps(
             update_cx,
             registrar,
-            &plan.host_phase_1,
+            &plan.gimlet_host_phase_1,
+            &plan.cosmo_host_phase_1,
             "host",
             slots_to_update.clone(),
+            host_type,
         );
 
         // Clear the installinator image ID; failing to do this is _not_ fatal,
@@ -1482,7 +1547,7 @@ impl UpdateDriver {
                 if let Err(err) = update_cx
                     .mgs_client
                         .sp_installinator_image_id_delete(
-                            update_cx.sp.type_,
+                            &update_cx.sp.type_,
                             update_cx.sp.slot,
                         )
                         .await
@@ -1532,7 +1597,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
-                            update_cx.sp.type_,
+                            &update_cx.sp.type_,
                             update_cx.sp.slot,
                             &HostStartupOptions {
                                 boot_net: false,
@@ -1576,9 +1641,11 @@ impl UpdateDriver {
         &self,
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
-        artifact: &'a ArtifactIdData,
+        gimlet_artifact: &'a ArtifactIdData,
+        cosmo_artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
         slots_to_update: SharedStepHandle<BTreeSet<u16>>,
+        host_type: SharedStepHandle<OxideSled>,
     ) {
         registrar
             .new_step(
@@ -1597,8 +1664,14 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 format!("Updating {kind} phase 1"),
                 async move |cx| {
+                    let host_type = host_type.into_value(cx.token()).await;
                     let slots_to_update =
                         slots_to_update.into_value(cx.token()).await;
+
+                    let artifact = match host_type {
+                        OxideSled::Cosmo => cosmo_artifact,
+                        OxideSled::Gimlet => gimlet_artifact,
+                    };
 
                     for boot_slot in slots_to_update {
                         cx.with_nested_engine(|engine| {
@@ -1693,7 +1766,7 @@ impl RotInterrogation {
     ) -> bool {
         let sp_caboose = client
             .sp_component_caboose_get(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 0,
@@ -1761,7 +1834,7 @@ impl UpdateContext {
     async fn process_installinator_reports(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: watch::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: watch::Receiver<EventReport<NestedSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -1788,6 +1861,14 @@ impl UpdateContext {
                     let Some(metadata) = outcome.completion_metadata() else {
                         continue;
                     };
+
+                    let metadata = serde_json::from_value::<
+                        InstallinatorCompletionMetadata,
+                    >(metadata.clone())
+                    .context(
+                        "failed to deserialize completion metadata \
+                         even though there's an #[unknown] variant",
+                    )?;
 
                     match metadata {
                         InstallinatorCompletionMetadata::Write { output } => {
@@ -1843,7 +1924,7 @@ impl UpdateContext {
         let stage0_fwid = match self
             .mgs_client
             .sp_rot_boot_info(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -1885,7 +1966,7 @@ impl UpdateContext {
         let caboose = self
             .mgs_client
             .sp_component_caboose_get(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::STAGE0.const_as_str(),
                 0,
@@ -1984,7 +2065,7 @@ impl UpdateContext {
         let caboose = self
             .mgs_client
             .sp_component_caboose_get(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 rot_active_slot,
@@ -2042,7 +2123,7 @@ impl UpdateContext {
         let cmpa = match self
             .mgs_client
             .sp_rot_cmpa_get(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
             )
@@ -2095,7 +2176,7 @@ impl UpdateContext {
         let cfpa = self
             .mgs_client
             .sp_rot_cfpa_get(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &gateway_client::types::GetCfpaParams {
@@ -2321,7 +2402,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<watch::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<watch::Receiver<EventReport<NestedSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -2352,7 +2433,7 @@ impl UpdateContext {
         // installinator tells us it has failed.
         if let Err(err) = self
             .mgs_client
-            .sp_host_phase2_progress_delete(self.sp.type_, self.sp.slot)
+            .sp_host_phase2_progress_delete(&self.sp.type_, self.sp.slot)
             .await
         {
             warn!(
@@ -2391,7 +2472,7 @@ impl UpdateContext {
     ) {
         match self
             .mgs_client
-            .sp_host_phase2_progress_get(self.sp.type_, self.sp.slot)
+            .sp_host_phase2_progress_get(&self.sp.type_, self.sp.slot)
             .await
             .map(|response| response.into_inner())
         {
@@ -2434,7 +2515,7 @@ impl UpdateContext {
     ) -> Result<StepResult<()>, UpdateTerminalError> {
         info!(self.log, "moving host to {power_state:?}");
         self.mgs_client
-            .sp_power_state_set(self.sp.type_, self.sp.slot, power_state)
+            .sp_power_state_set(&self.sp.type_, self.sp.slot, power_state)
             .await
             .map(|response| response.into_inner())
             .map_err(|error| UpdateTerminalError::UpdatePowerStateFailed {
@@ -2446,7 +2527,7 @@ impl UpdateContext {
     async fn get_rot_boot_info(&self) -> anyhow::Result<RotState> {
         self.mgs_client
             .sp_rot_boot_info(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -2465,7 +2546,7 @@ impl UpdateContext {
     ) -> anyhow::Result<u16> {
         self.mgs_client
             .sp_component_active_slot_get(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 component,
             )
@@ -2482,7 +2563,7 @@ impl UpdateContext {
     ) -> anyhow::Result<()> {
         self.mgs_client
             .sp_component_active_slot_set(
-                self.sp.type_,
+                &self.sp.type_,
                 self.sp.slot,
                 component,
                 persist,
@@ -2495,7 +2576,7 @@ impl UpdateContext {
 
     async fn reset_sp_component(&self, component: &str) -> anyhow::Result<()> {
         self.mgs_client
-            .sp_component_reset(self.sp.type_, self.sp.slot, component)
+            .sp_component_reset(&self.sp.type_, self.sp.slot, component)
             .await
             .context("failed to reset SP")
             .map(|res| res.into_inner())
@@ -2518,7 +2599,7 @@ impl UpdateContext {
             let status = self
                 .mgs_client
                 .sp_component_update_status(
-                    self.sp.type_,
+                    &self.sp.type_,
                     self.sp.slot,
                     component,
                 )
@@ -2735,7 +2816,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     update_cx
                         .mgs_client
                         .sp_component_update(
-                            update_cx.sp.type_,
+                            &update_cx.sp.type_,
                             update_cx.sp.slot,
                             component_name,
                             firmware_slot,

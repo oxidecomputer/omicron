@@ -1,0 +1,506 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Print the default target release
+show
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Print the default target release.
+show
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-1.0.0.zip
+
+# Print the default target release again.
+show
+
+# Test that this state survives a save/load operation.
+save saved.out
+wipe system
+# This should NOT show the target release.
+show
+load saved.out 61f451b3-2121-4ed6-91c7-a550054f6c21
+# This should show the target release.
+show
+
+# Great.  Now, let's run through an upgrade!
+# First, print out what we've got.
+sled-list
+blueprint-list
+inventory-list
+
+# First step: upgrade one RoT bootloader.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we generate another plan, there should be no change.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now, update the simulated RoT bootloader to reflect that the update completed.
+# Collect inventory from it and use that collection for another planning step.
+# This should report that the update completed, remove that update, and add one
+# for an RoT on the same sled.
+sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# After the RoT bootloader update has completed, we update the simulated RoT to
+# reflect that update has completed as well. Like before, collect inventory from
+# it and use that collection for the next step. This should report that the
+# update completed, remove that update, and add one for another sled.
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same procedure with the SP
+sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+
+# Collect inventory from it and use that collection for another planning step.
+# This should report that the update completed, remove that update, and add a
+# host OS update for this same sled.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we generate another plan, there should be no change.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update only the simulated host phase 2; this is a prerequisite for updating
+# the phase 1, and must be done first.
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+inventory-generate
+
+# Planning after only phase 2 has changed should make no changes. We're still
+# waiting on phase 1 to change.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now update the simulated SP to reflect that the phase 1 update is done.
+sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+inventory-generate
+
+# Planning _still_ shouldn't make any new changes; the OS update as a whole
+# isn't done until sled-agent reports it has booted from the new image.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the sled's boot disk; this finishes the host OS update.
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --boot-disk B
+inventory-generate
+
+# Planning should now remove the host OS update and plan the next RoT bootloader
+# update.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# This time, make it more interesting.  Change the inactive slot contents of
+# the simulated RoT bootloader.  This should make the configured update
+# impossible and cause the planner to fix it. To test this, we also need to tell
+# the planner not to ignore this update even though it's quite new.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0-next 0.5.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+# Like before, we should see a pending RoT update for this sled.
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now we'll change the inactive slot contents of the simulated RoT. Like with
+# the RoT bootloader, this should make the update impossible and cause the
+# planner to fix it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+# Like before, we should see a pending SP update for this sled.
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same procedure with the SP. Like with the RoT, this should make
+# the update impossible and cause the planner to fix it.
+set ignore-impossible-mgs-updates-since now
+sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Let's simulate the successful SP update as well.
+sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
+inventory-generate
+
+# Planning should remove this update and add an OS update for this sled.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Try a host OS impossible update replacement: write an unknown artifact to the
+# sled's phase 1. The planner should realize the update is impossible and
+# replace it. As with the impossible SP update test above, we have to bump the
+# "ignore impossible MGS updates" timestamp.)
+set ignore-impossible-mgs-updates-since now
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+inventory-generate
+
+# Another planning step should try to update the last sled, starting with the
+# RoT bootloader.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT bootloader on the last sled.
+# There should be a pending RoT update.
+sled-update-rot-bootloader d81c6a84-79b8-4958-ae41-ea46c9b19763 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now let's simulate an RoT update that hasn't completed by setting the persistent
+# boot preference to a different slot than the active one. This should cause the
+# planner to mark it as impossible, and replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot a --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# An RoT update cannot continue if pending persistent boot preference is set.
+# The slot B is set to a different version so it does not appear to be active
+# and on the correct version, and the corresponding checks are triggered.
+# Like before, this should cause the planner to mark it as impossible, and
+# replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --pending-persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We do the same for transient boot preference. Note that we need to set the
+# pending-persistent-boot-preference back to None
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --transient-boot-preference b --pending-persistent-boot-preference
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT on the last sled. Note that we need to set the
+# transient-boot-preference back to None
+# There should be one last pending SP update.
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b --transient-boot-preference
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Finish updating the last sled's SP.
+# There should be a pending host phase 1 update.
+sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Finish updating the last sled's host OS.
+sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+inventory-generate
+
+# Do another planning run. This should start updating zones (one at a time).
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the first control plane zone and plan again, which should update the
+# next zone on this sled.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Repeat until all non-Nexus zones on this sled have been updated. Some of these
+# steps update a zone in place; others expunge a zone and are followed by a zone
+# addition. It doesn't seem _particularly_ useful to spell out which step is
+# updating which zone, in terms of keeping this test up to date, but we will
+# have to tweak the number of times we iterate on this sled as our simulated
+# system or planner placement changes.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# The previous plan updated the last non-Nexus zone on this sled. Nexus comes
+# after everything else, so the next step should update the first zone on the
+# next sled.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Step through updates of all the non-Nexus zones on this sled.
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# The previous plan updated the last non-Nexus zone on this sled. Nexus comes
+# after everything else, so the next step should update the first zone on the
+# next sled.
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Step through updates of all the non-Nexus zones on this sled.
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Start the Nexus handoff process: A planning step here should place three new
+# Nexus zones, each running from the new TUF repo artifact.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update inventory to reflect the three Nexus zones starting.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Planning now should bump the top-level `nexus_generation` to 2, indicating
+# that we want handoff to begin.
+# Note that `blueprint-diff` will show the DNS changes as though the handoff has
+# happened already because that command does not take into account simulated
+# state.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Planning again should make no changes: we haven't yet performed a handoff,
+# so the old Nexus zones are still in charge.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we expunge one of the OLD nexuses, we should observe
+# that it is re-created.
+blueprint-edit latest expunge-zones 0c71b3b2-6ceb-4e8f-b020-b08675e83038
+blueprint-plan latest latest
+blueprint-diff latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+
+# Bump the set of active Nexus zones; this simulates Nexus handoff.
+set active-nexus-gen 2
+
+# Planning should now expunge one of the old Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Two more planning iterations should expunge the remaining two old 0.0.1
+# version Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update sled configs and inventory to reflect the expunged Nexus zones.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Planning now should note that the old zones are gone, but do nothing else:
+# the update is complete. All in-service zones have image sources from the new
+# TUF repo, and all zones using old images are expunged.
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-show latest

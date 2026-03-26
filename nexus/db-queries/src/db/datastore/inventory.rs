@@ -11,7 +11,8 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
@@ -25,22 +26,28 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use id_map::{IdMap, IdMappable};
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
-use nexus_db_model::InvCaboose;
+use nexus_db_model::ArtifactHash;
+use nexus_db_model::HwM2Slot;
 use nexus_db_model::InvClickhouseKeeperMembership;
+use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvHostPhase1ActiveSlot;
+use nexus_db_model::InvHostPhase1FlashHash;
+use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
 use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
+use nexus_db_model::InvMeasurementManifestNonBoot;
+use nexus_db_model::InvNtpTimesync;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
 use nexus_db_model::InvOmicronSledConfigDataset;
@@ -51,7 +58,10 @@ use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::InvSingleMeasurements;
 use nexus_db_model::InvSledAgent;
+use nexus_db_model::InvSledBootPartition;
+use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -62,10 +72,13 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::{
-    HwBaseboardId, InvZoneImageResolver, InvZoneManifestZone,
+    HwBaseboardId, InvOmicronFileSourceResolver, InvZoneManifestMeasurement,
+    InvZoneManifestZone,
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
+use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -75,23 +88,18 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
-use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
-use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -99,6 +107,19 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::BootPartitionContents;
+use sled_agent_types::inventory::BootPartitionDetails;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::ManifestNonBootInventory;
+use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -227,19 +248,42 @@ impl DataStore {
             .collect();
 
         // Pull zone manifest zones out of all sled agents.
-        let zone_manifest_zones: Vec<_> = collection
+        let mut zone_manifest_zones = Vec::new();
+        for sled_agent in &collection.sled_agents {
+            if let Some(artifacts) = sled_agent
+                .file_source_resolver
+                .zone_manifest
+                .boot_inventory
+                .as_ref()
+                .ok()
+            {
+                for artifact in artifacts.artifacts.iter() {
+                    zone_manifest_zones.push(
+                        InvZoneManifestZone::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            artifact,
+                        )
+                        .map_err(|e| Error::internal_error(&e.to_string()))?,
+                    );
+                }
+            }
+        }
+
+        // Pull zone manifest measurements out of all sled agents.
+        let zone_manifest_measurements: Vec<_> = collection
             .sled_agents
             .iter()
             .filter_map(|sled_agent| {
                 sled_agent
-                    .zone_image_resolver
-                    .zone_manifest
+                    .file_source_resolver
+                    .measurement_manifest
                     .boot_inventory
                     .as_ref()
                     .ok()
                     .map(|artifacts| {
                         artifacts.artifacts.iter().map(|artifact| {
-                            InvZoneManifestZone::new(
+                            InvZoneManifestMeasurement::new(
                                 collection_id,
                                 sled_agent.sled_id,
                                 artifact,
@@ -256,12 +300,32 @@ impl DataStore {
             .iter()
             .flat_map(|sled_agent| {
                 sled_agent
-                    .zone_image_resolver
+                    .file_source_resolver
                     .zone_manifest
                     .non_boot_status
                     .iter()
                     .map(|non_boot| {
                         InvZoneManifestNonBoot::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            non_boot,
+                        )
+                    })
+            })
+            .collect();
+
+        // Pull zone manifest non-boot info out of all sled agents.
+        let measurement_manifest_non_boot: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                sled_agent
+                    .file_source_resolver
+                    .measurement_manifest
+                    .non_boot_status
+                    .iter()
+                    .map(|non_boot| {
+                        InvMeasurementManifestNonBoot::new(
                             collection_id,
                             sled_agent.sled_id,
                             non_boot,
@@ -276,7 +340,7 @@ impl DataStore {
             .iter()
             .flat_map(|sled_agent| {
                 sled_agent
-                    .zone_image_resolver
+                    .file_source_resolver
                     .mupdate_override
                     .non_boot_status
                     .iter()
@@ -287,6 +351,22 @@ impl DataStore {
                             non_boot,
                         )
                     })
+            })
+            .collect();
+
+        // Pull reference measurementes out of all sled agents
+        let reference_measurements: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                sled_agent.reference_measurements.iter().map(|measurement| {
+                    InvSingleMeasurements::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        measurement.path.to_string(),
+                        measurement.result.clone(),
+                    )
+                })
             })
             .collect();
 
@@ -310,6 +390,7 @@ impl DataStore {
         // reconciler properties for each sled. We need all of this to construct
         // `InvSledAgent` instances below.
         let ConfigReconcilerRows {
+            config_reconcilers,
             sled_configs: omicron_sled_configs,
             disks: omicron_sled_config_disks,
             datasets: omicron_sled_config_datasets,
@@ -319,6 +400,7 @@ impl DataStore {
             dataset_results: reconciler_dataset_results,
             orphaned_datasets: reconciler_orphaned_datasets,
             zone_results: reconciler_zone_results,
+            boot_partitions: reconciler_boot_partitions,
             mut config_reconciler_fields_by_sled,
         } = ConfigReconcilerRows::new(collection_id, collection)
             .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
@@ -338,20 +420,19 @@ impl DataStore {
                 assert!(sled_agent.baseboard_id.is_none());
                 let ConfigReconcilerFields {
                     ledgered_sled_config,
-                    last_reconciliation_sled_config,
                     reconciler_status,
                 } = config_reconciler_fields_by_sled
                     .remove(&sled_agent.sled_id)
                     .expect("all sled IDs should exist");
-                let zone_image_resolver =
-                    InvZoneImageResolver::new(&sled_agent.zone_image_resolver);
+                let file_source_resolver = InvOmicronFileSourceResolver::new(
+                    &sled_agent.file_source_resolver,
+                );
                 InvSledAgent::new_without_baseboard(
                     collection_id,
                     sled_agent,
                     ledgered_sled_config,
-                    last_reconciliation_sled_config,
                     reconciler_status,
-                    zone_image_resolver,
+                    file_source_resolver,
                 )
                 .map_err(|e| Error::internal_error(&e.to_string()))
             })
@@ -367,6 +448,29 @@ impl DataStore {
                 .map_err(|e| Error::internal_error(&e.to_string()))?,
             );
         }
+
+        let inv_cockroach_status_records: Vec<InvCockroachStatus> = collection
+            .cockroach_status
+            .iter()
+            .map(|(node_id, status)| {
+                InvCockroachStatus::new(collection_id, node_id.clone(), status)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_ntp_timesync_records: Vec<InvNtpTimesync> = collection
+            .ntp_timesync
+            .iter()
+            .map(|timesync| InvNtpTimesync::new(collection_id, timesync))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_internal_dns_records: Vec<InvInternalDns> = collection
+            .internal_dns_generation_status
+            .iter()
+            .map(|status| InvInternalDns::new(collection_id, status))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -648,6 +752,134 @@ impl DataStore {
                         _stage0_error,
                         _stage0next_error,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
+                }
+            }
+
+            // Insert rows for the host phase 1 active slots that we found.
+            // Like service processors, we do this using INSERT INTO ... SELECT.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl as phase1_dsl;
+
+                for (baseboard_id, phase1) in
+                    &collection.host_phase_1_active_slots
+                {
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                        .select((
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            phase1.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            phase1.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        nexus_db_schema::schema::inv_host_phase_1_active_slot::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        phase1_dsl::inv_collection_id,
+                        phase1_dsl::hw_baseboard_id,
+                        phase1_dsl::time_collected,
+                        phase1_dsl::source,
+                        phase1_dsl::slot,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comment in the above block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _slot,
+                    ) = phase1_dsl::inv_host_phase_1_active_slot::all_columns();
+                }
+            }
+
+            // Insert rows for the host phase 1 flash hashes that we found.
+            // Like service processors, we do this using INSERT INTO ... SELECT.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl as phase1_dsl;
+
+                // Squish our map-of-maps down to a flat iterator.
+                //
+                // We can throw away the `_slot` key because the `phase1`
+                // structures also contain their own slot. (Maybe we could use
+                // `iddqd` here instead?)
+                let phase1_hashes = collection
+                    .host_phase_1_flash_hashes
+                    .iter()
+                    .flat_map(|(_slot, by_baseboard)| by_baseboard.iter());
+
+                for (baseboard_id, phase1) in phase1_hashes {
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                        .select((
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            phase1.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            phase1.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
+                            ArtifactHash(phase1.hash)
+                                .into_sql::<diesel::sql_types::Text>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        nexus_db_schema::schema::inv_host_phase_1_flash_hash::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        phase1_dsl::inv_collection_id,
+                        phase1_dsl::hw_baseboard_id,
+                        phase1_dsl::time_collected,
+                        phase1_dsl::source,
+                        phase1_dsl::slot,
+                        phase1_dsl::hash,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comment in the above block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _slot,
+                        _hash,
+                    ) = phase1_dsl::inv_host_phase_1_flash_hash::all_columns();
                 }
             }
 
@@ -955,6 +1187,49 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the config reconcilers we found.
+            {
+                use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut reconcilers = config_reconcilers.into_iter();
+                loop {
+                    let some_reconcilers = reconcilers
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_reconcilers.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_sled_config_reconciler)
+                        .values(some_reconcilers)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the boot partition details we found.
+            {
+                use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut boot_partitions = reconciler_boot_partitions
+                    .into_iter();
+                loop {
+                    let some_boot_partitions = boot_partitions
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_boot_partitions.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_sled_boot_partition)
+                        .values(some_boot_partitions)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the all the sled configs we found.
             {
                 use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -1050,6 +1325,27 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the sled config reference measurements
+            {
+                use nexus_db_schema::schema::inv_single_measurements::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut measurement_results = reference_measurements.into_iter();
+                loop {
+                    let some_measurement_results =
+                        measurement_results.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_measurement_results.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_single_measurements)
+                        .values(some_measurement_results)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+
+
             // Insert rows for all the sled config reconciler disk results
             {
                 use nexus_db_schema::schema::inv_last_reconciliation_disk_result::dsl;
@@ -1129,6 +1425,28 @@ impl DataStore {
             // Insert rows for all the zones found in the zone manifest on the
             // boot disk.
             {
+                use nexus_db_schema::schema::inv_zone_manifest_measurement::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut measurements = zone_manifest_measurements.into_iter();
+                loop {
+                    let some_measurements =
+                        measurements.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_measurements.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zone_manifest_measurement)
+                        .values(some_measurements)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+
+
+            // Insert rows for all the zones found in the zone manifest on the
+            // boot disk.
+            {
                 use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
@@ -1165,6 +1483,26 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for non-boot measurement manifests.
+            {
+                use nexus_db_schema::schema::inv_measurement_manifest_non_boot::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut non_boot = measurement_manifest_non_boot.into_iter();
+                loop {
+                    let some_non_boot =
+                        non_boot.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_non_boot.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_measurement_manifest_non_boot)
+                        .values(some_non_boot)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+
             // Insert rows for non-boot mupdate overrides.
             {
                 use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
@@ -1200,12 +1538,11 @@ impl DataStore {
                     );
                     let ConfigReconcilerFields {
                         ledgered_sled_config,
-                        last_reconciliation_sled_config,
                         reconciler_status,
                     } = config_reconciler_fields_by_sled
                         .remove(&sled_agent.sled_id)
                         .expect("all sled IDs should exist");
-                    let zone_image_resolver = InvZoneImageResolver::new(&sled_agent.zone_image_resolver);
+                    let file_source_resolver = InvOmicronFileSourceResolver::new(&sled_agent.file_source_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
                             db_collection_id
@@ -1234,14 +1571,13 @@ impl DataStore {
                                 sled_agent.usable_physical_ram,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::SledCpuFamily::from(sled_agent.cpu_family)
+                            .into_sql::<nexus_db_schema::enums::SledCpuFamilyEnum>(),
                             nexus_db_model::ByteCount::from(
                                 sled_agent.reservoir_size,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
                             ledgered_sled_config
-                                .map(|id| id.into_untyped_uuid())
-                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
-                            last_reconciliation_sled_config
                                 .map(|id| id.into_untyped_uuid())
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
                             reconciler_status.reconciler_status_kind
@@ -1253,19 +1589,27 @@ impl DataStore {
                                 .into_sql::<Nullable<diesel::sql_types::Timestamptz>>(),
                             reconciler_status.reconciler_status_duration_secs
                                 .into_sql::<Nullable<diesel::sql_types::Double>>(),
-                            zone_image_resolver.zone_manifest_boot_disk_path
+                            file_source_resolver.zone_manifest_boot_disk_path
                                 .into_sql::<diesel::sql_types::Text>(),
-                            zone_image_resolver.zone_manifest_source
+                            file_source_resolver.zone_manifest_source
                                 .into_sql::<Nullable<InvZoneManifestSourceEnum>>(),
-                            zone_image_resolver.zone_manifest_mupdate_id
+                            file_source_resolver.zone_manifest_mupdate_id
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
-                            zone_image_resolver.zone_manifest_boot_disk_error
+                            file_source_resolver.zone_manifest_boot_disk_error
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(),
-                            zone_image_resolver.mupdate_override_boot_disk_path
+                            file_source_resolver.measurement_manifest_boot_disk_path
                                 .into_sql::<diesel::sql_types::Text>(),
-                            zone_image_resolver.mupdate_override_id
+                            file_source_resolver.measurement_manifest_source
+                                .into_sql::<Nullable<InvZoneManifestSourceEnum>>(),
+                            file_source_resolver.measurement_manifest_mupdate_id
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
-                            zone_image_resolver.mupdate_override_boot_disk_error
+                            file_source_resolver.measurement_manifest_boot_disk_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
+                            file_source_resolver.mupdate_override_boot_disk_path
+                                .into_sql::<diesel::sql_types::Text>(),
+                            file_source_resolver.mupdate_override_id
+                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
+                            file_source_resolver.mupdate_override_boot_disk_error
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(),
                         ))
                         .filter(
@@ -1291,9 +1635,9 @@ impl DataStore {
                                 sa_dsl::sled_role,
                                 sa_dsl::usable_hardware_threads,
                                 sa_dsl::usable_physical_ram,
+                                sa_dsl::cpu_family,
                                 sa_dsl::reservoir_size,
                                 sa_dsl::ledgered_sled_config,
-                                sa_dsl::last_reconciliation_sled_config,
                                 sa_dsl::reconciler_status_kind,
                                 sa_dsl::reconciler_status_sled_config,
                                 sa_dsl::reconciler_status_timestamp,
@@ -1302,6 +1646,10 @@ impl DataStore {
                                 sa_dsl::zone_manifest_source,
                                 sa_dsl::zone_manifest_mupdate_id,
                                 sa_dsl::zone_manifest_boot_disk_error,
+                                sa_dsl::measurement_manifest_boot_disk_path,
+                                sa_dsl::measurement_manifest_source,
+                                sa_dsl::measurement_manifest_mupdate_id,
+                                sa_dsl::measurement_manifest_boot_disk_error,
                                 sa_dsl::mupdate_override_boot_disk_path,
                                 sa_dsl::mupdate_override_id,
                                 sa_dsl::mupdate_override_boot_disk_error,
@@ -1323,9 +1671,9 @@ impl DataStore {
                         _sled_role,
                         _usable_hardware_threads,
                         _usable_physical_ram,
+                        _cpu_family,
                         _reservoir_size,
                         _ledgered_sled_config,
-                        _last_reconciliation_sled_config,
                         _reconciler_status_kind,
                         _reconciler_status_sled_config,
                         _reconciler_status_timestamp,
@@ -1334,6 +1682,10 @@ impl DataStore {
                         _zone_manifest_source,
                         _zone_manifest_mupdate_id,
                         _zone_manifest_boot_disk_error,
+                        _measurement_manifest_boot_disk_path,
+                        _measurement_manifest_source,
+                        _measurement_manifest_mupdate_id,
+                        _measurement_manifest_boot_disk_error,
                         _mupdate_override_boot_disk_path,
                         _mupdate_override_boot_disk_id,
                         _mupdate_override_boot_disk_error,
@@ -1357,6 +1709,33 @@ impl DataStore {
                 use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
                 diesel::insert_into(dsl::inv_clickhouse_keeper_membership)
                     .values(inv_clickhouse_keeper_memberships)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the cockroach status information we've observed
+            if !inv_cockroach_status_records.is_empty() {
+                use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                diesel::insert_into(dsl::inv_cockroachdb_status)
+                    .values(inv_cockroach_status_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the NTP info we've observed
+            if !inv_ntp_timesync_records.is_empty() {
+                use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                diesel::insert_into(dsl::inv_ntp_timesync)
+                    .values(inv_ntp_timesync_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the internal DNS generation status we've observed
+            if !inv_internal_dns_records.is_empty() {
+                use nexus_db_schema::schema::inv_internal_dns::dsl;
+                diesel::insert_into(dsl::inv_internal_dns)
+                    .values(inv_internal_dns_records)
                     .execute_async(&conn)
                     .await?;
             }
@@ -1615,8 +1994,9 @@ impl DataStore {
         // transaction for simplicity.  Similar considerations apply.  We could
         // break it up if these transactions become too big.  But we'd need a
         // way to stop other clients from discovering a collection after we
-        // start removing it and we'd also need to make sure we didn't leak a
-        // collection if we crash while deleting it.
+        // start removing it (see: inventory_collection_read_batched, which
+        // reads the inventory non-transactionally) and we'd also need to make
+        // sure we didn't leak a collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_collection_id = to_db_typed_uuid(collection_id);
 
@@ -1625,6 +2005,8 @@ impl DataStore {
         struct NumRowsDeleted {
             ncollections: usize,
             nsps: usize,
+            nhost_phase1_active_slots: usize,
+            nhost_phase1_flash_hashes: usize,
             nrots: usize,
             ncabooses: usize,
             nrot_pages: usize,
@@ -1636,9 +2018,14 @@ impl DataStore {
             nlast_reconciliation_dataset_results: usize,
             nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
+            nlast_reconciliation_measurements: usize,
             nzone_manifest_zones: usize,
+            nzone_manifest_measurements: usize,
             nzone_manifest_non_boot: usize,
+            nmeasurement_manifest_non_boot: usize,
             nmupdate_override_non_boot: usize,
+            nconfig_reconcilers: usize,
+            nboot_partitions: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -1647,11 +2034,16 @@ impl DataStore {
             nzpools: usize,
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
+            ncockroach_status: usize,
+            nntp_timesync: usize,
+            ninternal_dns: usize,
         }
 
         let NumRowsDeleted {
             ncollections,
             nsps,
+            nhost_phase1_active_slots,
+            nhost_phase1_flash_hashes,
             nrots,
             ncabooses,
             nrot_pages,
@@ -1663,9 +2055,14 @@ impl DataStore {
             nlast_reconciliation_dataset_results,
             nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
+            nlast_reconciliation_measurements,
             nzone_manifest_zones,
+            nzone_manifest_measurements,
             nzone_manifest_non_boot,
+            nmeasurement_manifest_non_boot,
             nmupdate_override_non_boot,
+            nconfig_reconcilers,
+            nboot_partitions,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -1674,6 +2071,9 @@ impl DataStore {
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
+            ncockroach_status,
+            nntp_timesync,
+            ninternal_dns,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -1692,6 +2092,26 @@ impl DataStore {
                     let nsps = {
                         use nexus_db_schema::schema::inv_service_processor::dsl;
                         diesel::delete(dsl::inv_service_processor.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for host phase 1 active slots.
+                    let nhost_phase1_active_slots = {
+                        use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl;
+                        diesel::delete(dsl::inv_host_phase_1_active_slot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for host phase 1 flash hashes.
+                    let nhost_phase1_flash_hashes = {
+                        use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl;
+                        diesel::delete(dsl::inv_host_phase_1_flash_hash.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1769,7 +2189,7 @@ impl DataStore {
                     };
 
                     // Remove rows associated with the last reconciliation
-                    // result (disks, datasets, and zones).
+                    // result (disks, datasets, measurements, and zones).
                     let nlast_reconciliation_disk_results = {
                         use nexus_db_schema::schema::inv_last_reconciliation_disk_result::dsl;
                         diesel::delete(dsl::inv_last_reconciliation_disk_result.filter(
@@ -1802,11 +2222,28 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    let nlast_reconciliation_measurements = {
+                        use nexus_db_schema::schema::inv_single_measurements::dsl;
+                        diesel::delete(dsl::inv_single_measurements.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
 
                     // Remove rows associated with zone resolver inventory.
                     let nzone_manifest_zones = {
                         use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
                         diesel::delete(dsl::inv_zone_manifest_zone.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nzone_manifest_measurements = {
+                        use nexus_db_schema::schema::inv_zone_manifest_measurement::dsl;
+                        diesel::delete(dsl::inv_zone_manifest_measurement.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1820,9 +2257,36 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    let nmeasurement_manifest_non_boot = {
+                        use nexus_db_schema::schema::inv_measurement_manifest_non_boot::dsl;
+                        diesel::delete(dsl::inv_measurement_manifest_non_boot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     let nmupdate_override_non_boot = {
                         use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
                         diesel::delete(dsl::inv_mupdate_override_non_boot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows associated with sled-agent config reconcilers
+                    let nconfig_reconcilers = {
+                        use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+                        diesel::delete(dsl::inv_sled_config_reconciler.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nboot_partitions = {
+                        use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+                        diesel::delete(dsl::inv_sled_boot_partition.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1901,10 +2365,46 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for cockroach status
+                    let ncockroach_status = {
+                        use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                        diesel::delete(
+                            dsl::inv_cockroachdb_status.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    // Remove rows for NTP timesync
+                    let nntp_timesync = {
+                        use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                        diesel::delete(
+                            dsl::inv_ntp_timesync.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for internal DNS
+                    let ninternal_dns = {
+                        use nexus_db_schema::schema::inv_internal_dns::dsl;
+                        diesel::delete(
+                            dsl::inv_internal_dns.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
+                        nhost_phase1_active_slots,
+                        nhost_phase1_flash_hashes,
                         nrots,
                         ncabooses,
                         nrot_pages,
@@ -1916,9 +2416,14 @@ impl DataStore {
                         nlast_reconciliation_dataset_results,
                         nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
+                        nlast_reconciliation_measurements,
                         nzone_manifest_zones,
+                        nzone_manifest_measurements,
                         nzone_manifest_non_boot,
+                        nmeasurement_manifest_non_boot,
                         nmupdate_override_non_boot,
+                        nconfig_reconcilers,
+                        nboot_partitions,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -1927,6 +2432,9 @@ impl DataStore {
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
+                        ncockroach_status,
+                        nntp_timesync,
+                        ninternal_dns,
                     })
                 })
                 .await
@@ -1938,6 +2446,8 @@ impl DataStore {
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
+            "nhost_phase1_active_slots" => nhost_phase1_active_slots,
+            "nhost_phase1_flash_hashes" => nhost_phase1_flash_hashes,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
@@ -1953,9 +2463,15 @@ impl DataStore {
                 nlast_reconciliation_orphaned_datasets,
             "nlast_reconciliation_zone_results" =>
                 nlast_reconciliation_zone_results,
+            "nlast_reconciliation_measurements" =>
+                nlast_reconciliation_measurements,
             "nzone_manifest_zones" => nzone_manifest_zones,
+            "nzone_manifest_measurements" => nzone_manifest_measurements,
             "nzone_manifest_non_boot" => nzone_manifest_non_boot,
+            "nmeasurement_manifest_non_boot" => nmeasurement_manifest_non_boot,
             "nmupdate_override_non_boot" => nmupdate_override_non_boot,
+            "nconfig_reconcilers" => nconfig_reconcilers,
+            "nboot_partitions" => nboot_partitions,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -1963,7 +2479,10 @@ impl DataStore {
             "nomicron_sled_config_zone_nics" => nomicron_sled_config_zone_nics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
-            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
+            "ncockroach_status" => ncockroach_status,
+            "nntp_timesync" => nntp_timesync,
+            "ninternal_dns" => ninternal_dns,
         );
 
         Ok(())
@@ -1993,16 +2512,18 @@ impl DataStore {
             })
     }
 
-    /// Attempt to read the latest collection.
+    /// Attempt to get the ID of the latest collection.
     ///
     /// If there aren't any collections, return `Ok(None)`.
-    pub async fn inventory_get_latest_collection(
+    pub async fn inventory_get_latest_collection_id(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<Collection>, Error> {
+    ) -> Result<Option<CollectionUuid>, Error> {
+        use nexus_db_schema::schema::inv_collection::dsl;
+
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use nexus_db_schema::schema::inv_collection::dsl;
+
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -2011,17 +2532,23 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let Some(collection_id) = collection_id else {
+        Ok(collection_id.map(CollectionUuid::from_untyped_uuid))
+    }
+
+    /// Attempt to read the latest collection.
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
+    pub async fn inventory_get_latest_collection(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<Collection>, Error> {
+        let Some(collection_id) =
+            self.inventory_get_latest_collection_id(opctx).await?
+        else {
             return Ok(None);
         };
 
-        Ok(Some(
-            self.inventory_collection_read(
-                opctx,
-                CollectionUuid::from_untyped_uuid(collection_id),
-            )
-            .await?,
-        ))
+        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
     }
 
     /// Attempt to read the current collection
@@ -2053,31 +2580,14 @@ impl DataStore {
     ) -> Result<Collection, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_id = to_db_typed_uuid(id);
-        let (time_started, time_done, collector) = {
-            use nexus_db_schema::schema::inv_collection::dsl;
-
-            let collections = dsl::inv_collection
-                .filter(dsl::id.eq(db_id))
-                .limit(2)
-                .select(InvCollection::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-            bail_unless!(collections.len() == 1);
-            let collection = collections.into_iter().next().unwrap();
-            (
-                collection.time_started,
-                collection.time_done,
-                collection.collector,
-            )
-        };
 
         let errors: Vec<String> = {
             use nexus_db_schema::schema::inv_collection_error::dsl;
             let mut errors = Vec::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_collection_error,
@@ -2104,7 +2614,10 @@ impl DataStore {
 
             let mut sps = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_service_processor,
@@ -2135,7 +2648,10 @@ impl DataStore {
 
             let mut rots = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_root_of_trust,
@@ -2166,9 +2682,12 @@ impl DataStore {
 
             let mut rows = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let batch = paginated(
                     dsl::inv_sled_agent,
                     dsl::sled_id,
                     &p.current_pagparams(),
@@ -2181,7 +2700,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
-                rows.append(&mut batch);
+                rows.extend(batch);
             }
 
             rows
@@ -2198,7 +2717,10 @@ impl DataStore {
                 SledUuid,
                 BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
             >::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_nvme_disk_firmware,
@@ -2240,7 +2762,10 @@ impl DataStore {
                 SledUuid,
                 Vec<nexus_types::inventory::PhysicalDisk>,
             >::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_physical_disk,
@@ -2286,7 +2811,10 @@ impl DataStore {
 
             let mut zpools =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zpool,
@@ -2317,7 +2845,10 @@ impl DataStore {
 
             let mut datasets =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_dataset,
@@ -2358,7 +2889,10 @@ impl DataStore {
 
             let mut bbs = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::hw_baseboard_id,
@@ -2373,12 +2907,11 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                bbs.extend(batch.into_iter().map(|bb| {
-                    (
-                        bb.id,
-                        Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
-                    )
-                }));
+                bbs.extend(
+                    batch
+                        .into_iter()
+                        .map(|bb| (bb.id, Arc::new(BaseboardId::from(bb)))),
+                );
             }
 
             bbs
@@ -2412,13 +2945,119 @@ impl DataStore {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
+        // Fetch the host phase 1 active slots found.
+        let host_phase_1_active_slots = {
+            use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl;
+
+            let mut slots = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_host_phase_1_active_slot,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvHostPhase1ActiveSlot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
+                for row in batch {
+                    let bb = baseboards_by_id
+                        .get(&row.hw_baseboard_id)
+                        .ok_or_else(|| {
+                            Error::internal_error(
+                                "missing baseboard that we should have fetched",
+                            )
+                        })?;
+                    slots.insert(Arc::clone(bb), row.into());
+                }
+            }
+
+            slots
+        };
+
+        // Fetch records of host phase 1 flash hashes found.
+        let inv_host_phase_1_flash_hash_rows = {
+            use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl;
+
+            let mut phase_1s = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated_multicolumn(
+                    dsl::inv_host_phase_1_flash_hash,
+                    (dsl::hw_baseboard_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvHostPhase1FlashHash::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.hw_baseboard_id, row.slot)
+                });
+                phase_1s.append(&mut batch);
+            }
+
+            phase_1s
+        };
+        // Assemble the lists of host phase 1 flash hashes found.
+        let mut host_phase_1_flash_hashes = BTreeMap::new();
+        for p in inv_host_phase_1_flash_hash_rows {
+            let slot = M2Slot::from(p.slot);
+            let by_baseboard = host_phase_1_flash_hashes
+                .entry(slot)
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in \
+                     inv_host_phase_1_flash_hash: {}",
+                    p.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::HostPhase1FlashHash {
+                    time_collected: p.time_collected,
+                    source: p.source,
+                    slot,
+                    hash: *p.hash,
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate host phase 1 flash hash found: {:?} baseboard {:?}",
+                p.slot,
+                p.hw_baseboard_id
+            );
+        }
+
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
             use nexus_db_schema::schema::inv_caboose::dsl;
 
             let mut cabooses = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated_multicolumn(
                     dsl::inv_caboose,
@@ -2452,7 +3091,10 @@ impl DataStore {
 
             let mut cabooses = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch =
                     paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
@@ -2520,7 +3162,10 @@ impl DataStore {
 
             let mut rot_pages = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated_multicolumn(
                     dsl::inv_root_of_trust_page,
@@ -2554,7 +3199,10 @@ impl DataStore {
 
             let mut rot_pages = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::sw_root_of_trust_page,
@@ -2636,9 +3284,12 @@ impl DataStore {
         let mut omicron_sled_configs = {
             use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
 
-            let mut configs = IdMap::new();
+            let mut configs = IdOrdMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config,
@@ -2654,18 +3305,28 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
-                    configs.insert(OmicronSledConfigWithId {
-                        id: sled_config.id.into(),
-                        config: OmicronSledConfig {
-                            generation: sled_config.generation.into(),
-                            remove_mupdate_override: sled_config
-                                .remove_mupdate_override
-                                .map(From::from),
-                            disks: IdMap::default(),
-                            datasets: IdMap::default(),
-                            zones: IdMap::default(),
-                        },
-                    });
+                    configs
+                        .insert_unique(OmicronSledConfigWithId {
+                            id: sled_config.id.into(),
+                            config: OmicronSledConfig {
+                                generation: sled_config.generation.into(),
+                                remove_mupdate_override: sled_config
+                                    .remove_mupdate_override
+                                    .map(From::from),
+                                disks: IdOrdMap::default(),
+                                datasets: IdOrdMap::default(),
+                                zones: IdOrdMap::default(),
+                                host_phase_2: sled_config.host_phase_2.into(),
+                                measurements: sled_config.measurements.into(),
+                            },
+                        })
+                        .map_err(|e| {
+                            Error::internal_error(&format!(
+                                "duplicate omicron sled config ID found, but \
+                                 database guarantees uniqueness: {}",
+                                InlineErrorChain::new(&e),
+                            ))
+                        })?;
                 }
             }
 
@@ -2681,7 +3342,10 @@ impl DataStore {
 
             let mut nics = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_zone_nic,
@@ -2713,9 +3377,12 @@ impl DataStore {
 
             let mut zones = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let batch = paginated(
                     dsl::inv_omicron_sled_config_zone,
                     dsl::id,
                     &p.current_pagparams(),
@@ -2728,7 +3395,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                zones.append(&mut batch);
+                zones.extend(batch);
             }
 
             zones
@@ -2752,7 +3419,7 @@ impl DataStore {
                 })
                 .transpose()?;
             let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id.into())
+                .get_mut(&z.sled_config_id)
                 .ok_or_else(|| {
                     // This error means that we found a row in
                     // inv_omicron_sled_config_zone with no associated record in
@@ -2772,7 +3439,7 @@ impl DataStore {
                 .map_err(|e| {
                     Error::internal_error(&format!("{:#}", e.to_string()))
                 })?;
-            config_with_id.config.zones.insert(zone);
+            config_with_id.config.zones.insert_overwrite(zone);
         }
 
         bail_unless!(
@@ -2785,7 +3452,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::inv_omicron_sled_config_dataset::dsl;
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_dataset,
@@ -2803,14 +3473,14 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id.into())
+                        .get_mut(&row.sled_config_id)
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.datasets.insert(
+                    config_with_id.config.datasets.insert_overwrite(
                         row.try_into().map_err(|e| {
                             Error::internal_error(&format!("{e:#}"))
                         })?,
@@ -2823,7 +3493,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::inv_omicron_sled_config_disk::dsl;
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_disk,
@@ -2841,17 +3514,93 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id.into())
+                        .get_mut(&row.sled_config_id)
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "disk config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.disks.insert(row.into());
+                    config_with_id.config.disks.insert_overwrite(row.into());
                 }
             }
         }
+
+        // Load all the config reconciler top-level rows; build a map keyed by
+        // sled ID.
+        let mut sled_config_reconcilers = {
+            use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+
+            let mut results: BTreeMap<SledUuid, _> = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_sled_config_reconciler,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSledConfigReconciler::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
+
+                for row in batch {
+                    results.insert(row.sled_id.into(), row);
+                }
+            }
+
+            results
+        };
+
+        // Load all the sled boot partition details; build a map of maps keyed
+        // by sled ID -> M2Slot.
+        let mut sled_boot_partition_details = {
+            use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+
+            let mut results: BTreeMap<SledUuid, BTreeMap<M2Slot, _>> =
+                BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_sled_boot_partition,
+                    (dsl::sled_id, dsl::boot_disk_slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSledBootPartition::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.boot_disk_slot)
+                });
+
+                for row in batch {
+                    let sled_map =
+                        results.entry(row.sled_id.into()).or_default();
+                    let slot = row.slot().map_err(|err| {
+                        Error::internal_error(&format!("{err:#}"))
+                    })?;
+                    sled_map.insert(slot, row);
+                }
+            }
+
+            results
+        };
 
         // Load all the config reconciler disk results; build a map of maps
         // keyed by sled ID.
@@ -2863,7 +3612,10 @@ impl DataStore {
                 BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_disk_result,
@@ -2899,7 +3651,10 @@ impl DataStore {
                 BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_dataset_result,
@@ -2968,6 +3723,49 @@ impl DataStore {
             orphaned
         };
 
+        let mut last_reconciliation_measurements = {
+            use nexus_db_schema::schema::inv_single_measurements::dsl;
+
+            let mut measurements: BTreeMap<
+                SledUuid,
+                IdOrdMap<SingleMeasurementInventory>,
+            > = BTreeMap::new();
+
+            // TODO-performance This ought to be paginated like the other
+            // queries in this method, but
+            //
+            // (a) this table's primary key is 3 columns, and we don't have
+            //     `paginated` support that wide
+            // (b) we expect a very small number of reconciled measurements
+            //
+            // so we just do the lazy thing and load all the rows at once.
+            let rows = dsl::inv_single_measurements
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSingleMeasurements::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            for row in rows {
+                measurements
+                    .entry(row.sled_id.into())
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| {
+                        // We should never get duplicates: the table's primary
+                        // key is the path
+                        Error::internal_error(&format!(
+                            "unexpected duplicate path: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                    })?;
+            }
+
+            measurements
+        };
+
         // Load all the config reconciler zone results; build a map of maps
         // keyed by sled ID.
         let mut last_reconciliation_zone_results = {
@@ -2978,7 +3776,10 @@ impl DataStore {
                 BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_zone_result,
@@ -3004,6 +3805,48 @@ impl DataStore {
             results
         };
 
+        // Load zone_manifest_measurement rows.
+        let mut measurement_manifest_artifacts_by_sled_id = {
+            use nexus_db_schema::schema::inv_zone_manifest_measurement::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<ZoneArtifactInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zone_manifest_measurement,
+                    (dsl::sled_id, dsl::measurement_file_name),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvZoneManifestMeasurement::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.measurement_file_name.clone())
+                });
+
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
+        };
+
         // Load zone_manifest_zone rows.
         let mut zone_manifest_artifacts_by_sled_id = {
             use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
@@ -3013,7 +3856,10 @@ impl DataStore {
                 IdOrdMap<ZoneArtifactInventory>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zone_manifest_zone,
@@ -3035,7 +3881,11 @@ impl DataStore {
                     by_sled_id
                         .entry(row.sled_id.into())
                         .or_default()
-                        .insert_unique(row.into())
+                        .insert_unique(row.try_into().map_err(
+                            |e: anyhow::Error| {
+                                Error::internal_error(&e.to_string())
+                            },
+                        )?)
                         .expect("database ensures the row is unique");
                 }
             }
@@ -3049,10 +3899,13 @@ impl DataStore {
 
             let mut by_sled_id: BTreeMap<
                 SledUuid,
-                IdOrdMap<ZoneManifestNonBootInventory>,
+                IdOrdMap<ManifestNonBootInventory>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zone_manifest_non_boot,
@@ -3061,6 +3914,47 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestNonBoot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.non_boot_zpool_id)
+                });
+
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
+        };
+
+        let mut measurement_manifest_non_boot_by_sled_id = {
+            use nexus_db_schema::schema::inv_measurement_manifest_non_boot::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<ManifestNonBootInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_measurement_manifest_non_boot,
+                    (dsl::sled_id, dsl::non_boot_zpool_id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvMeasurementManifestNonBoot::as_select())
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
@@ -3091,7 +3985,10 @@ impl DataStore {
                 IdOrdMap<MupdateOverrideNonBootInventory>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_mupdate_override_non_boot,
@@ -3124,7 +4021,10 @@ impl DataStore {
         let clickhouse_keeper_cluster_membership = {
             use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
             let mut memberships = BTreeSet::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_clickhouse_keeper_membership,
@@ -3151,6 +4051,73 @@ impl DataStore {
             memberships
         };
 
+        // Load the cockroach status records for all nodes.
+        let cockroach_status: BTreeMap<CockroachNodeId, CockroachStatus> = {
+            use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+
+            let status_records: Vec<InvCockroachStatus> =
+                dsl::inv_cockroachdb_status
+                    .filter(dsl::inv_collection_id.eq(db_id))
+                    .select(InvCockroachStatus::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            status_records
+                .into_iter()
+                .map(|record| {
+                    let node_id = CockroachNodeId::new(record.node_id.clone());
+                    let status: nexus_types::inventory::CockroachStatus =
+                        record.try_into().map_err(|e| {
+                            Error::internal_error(&format!("{e:#}"))
+                        })?;
+                    Ok((node_id, status))
+                })
+                .collect::<Result<BTreeMap<_, _>, Error>>()?
+        };
+
+        // Load TimeSync statuses
+        let ntp_timesync = {
+            use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+
+            let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNtpTimesync::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| TimeSync::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
+        // Load internal DNS generation status
+        let internal_dns_generation_status: IdOrdMap<
+            InternalDnsGenerationStatus,
+        > = {
+            use nexus_db_schema::schema::inv_internal_dns::dsl;
+
+            let records: Vec<InvInternalDns> = dsl::inv_internal_dns
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvInternalDns::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| InternalDnsGenerationStatus::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -3175,7 +4142,7 @@ impl DataStore {
             let ledgered_sled_config = s
                 .ledgered_sled_config
                 .map(|id| {
-                    omicron_sled_configs.get(&id.into()).as_ref()
+                    omicron_sled_configs.get(&id).as_ref()
                     .map(|c| c.config.clone())
                         .ok_or_else(|| {
                         Error::internal_error(
@@ -3193,11 +4160,11 @@ impl DataStore {
                         .map(|c| c.config.clone())
                 })
                 .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
-            let last_reconciliation = s
-                .last_reconciliation_sled_config
-                .map(|id| {
+            let last_reconciliation = sled_config_reconcilers
+                .remove(&sled_id)
+                .map(|reconciler| {
                     let last_reconciled_config = omicron_sled_configs
-                        .get(&id.into())
+                        .get(&reconciler.last_reconciled_config)
                         .as_ref()
                         .ok_or_else(|| {
                             Error::internal_error(
@@ -3207,6 +4174,53 @@ impl DataStore {
                         })?
                         .config
                         .clone();
+
+                    let boot_partitions = {
+                        let boot_disk =
+                            reconciler.boot_disk().map_err(|err| {
+                                Error::internal_error(&format!("{err:#}"))
+                            })?;
+
+                        // Helper to convert our nullable error column into
+                        // either the error message (if present) or, if NULL,
+                        // looking up the `BootPartitionDetails` from the rows
+                        // we loaded above. We have to do this for both slots.
+                        let mut slot_details = |maybe_err, slot| match maybe_err
+                        {
+                            Some(err) => Ok(Err(err)),
+                            None => sled_boot_partition_details
+                                .get_mut(&sled_id)
+                                .and_then(|by_slot| by_slot.remove(&slot))
+                                .map(|details| {
+                                    Ok(BootPartitionDetails::from(details))
+                                })
+                                .ok_or_else(|| {
+                                    Error::internal_error(
+                                        "missing boot partition details that \
+                                         we should have fetched",
+                                    )
+                                }),
+                        };
+
+                        let slot_a = slot_details(
+                            reconciler.boot_partition_a_error,
+                            M2Slot::A,
+                        )?;
+                        let slot_b = slot_details(
+                            reconciler.boot_partition_b_error,
+                            M2Slot::B,
+                        )?;
+
+                        BootPartitionContents { boot_disk, slot_a, slot_b }
+                    };
+
+                    let remove_mupdate_override = reconciler
+                        .remove_mupdate_override
+                        .into_inventory()
+                        .map_err(|err| {
+                            Error::internal_error(&format!("{err:#}"))
+                        })?;
+
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -3222,15 +4236,19 @@ impl DataStore {
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
+                        boot_partitions,
+                        remove_mupdate_override,
                     })
                 })
                 .transpose()?;
 
-            let zone_image_resolver = s
-                .zone_image_resolver
+            let file_source_resolver = s
+                .file_source_resolver
                 .into_inventory(
                     zone_manifest_artifacts_by_sled_id.remove(&sled_id),
+                    measurement_manifest_artifacts_by_sled_id.remove(&sled_id),
                     zone_manifest_non_boot_by_sled_id.remove(&sled_id),
+                    measurement_manifest_non_boot_by_sled_id.remove(&sled_id),
                     mupdate_override_non_boot_by_sled_id.remove(&sled_id),
                 )
                 .map_err(|e| {
@@ -3255,6 +4273,7 @@ impl DataStore {
                 sled_role: s.sled_role.into(),
                 usable_hardware_threads: u32::from(s.usable_hardware_threads),
                 usable_physical_ram: s.usable_physical_ram.into(),
+                cpu_family: s.cpu_family.into(),
                 reservoir_size: s.reservoir_size.into(),
                 // For disks, zpools, and datasets, the map for a sled ID is
                 // only populated if there is at least one disk/zpool/dataset
@@ -3275,7 +4294,14 @@ impl DataStore {
                 ledgered_sled_config,
                 reconciler_status,
                 last_reconciliation,
-                zone_image_resolver,
+                file_source_resolver,
+                // TODO-K[omicron#9516]: Actually query the DB when there is
+                // something there
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
+                reference_measurements: last_reconciliation_measurements
+                    .remove(&sled_id)
+                    .unwrap_or_default(),
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -3284,6 +4310,31 @@ impl DataStore {
 
         // Check that we consumed all the reconciliation results we found in
         // this collection.
+        bail_unless!(
+            sled_config_reconcilers.is_empty(),
+            "found extra sled config reconcilers: {:?}",
+            sled_config_reconcilers.keys(),
+        );
+        {
+            // `sled_boot_partition_details` is a map of maps; we don't prune
+            // the outermost map, but they should all be empty.
+            let sleds_with_leftover_boot_partitions =
+                sled_boot_partition_details
+                    .iter()
+                    .filter_map(|(sled_id, boot_partitions)| {
+                        if boot_partitions.is_empty() {
+                            None
+                        } else {
+                            Some(sled_id)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+            bail_unless!(
+                sleds_with_leftover_boot_partitions.is_empty(),
+                "found extra sled boot partition details: {:?}",
+                sleds_with_leftover_boot_partitions,
+            );
+        }
         bail_unless!(
             last_reconciliation_disk_results.is_empty(),
             "found extra config reconciliation disk results: {:?}",
@@ -3315,6 +4366,37 @@ impl DataStore {
             mupdate_override_non_boot_by_sled_id.keys()
         );
 
+        // Read the top-level collection metadata last. We do this at the end
+        // (rather than the beginning) so that if a concurrent delete operation
+        // has started, we will observe that the top-level collection record is
+        // missing and return an error. This prevents returning a partially-torn
+        // inventory collection where child rows have been deleted but we still
+        // return an incomplete result.
+        //
+        // The inventory insert and delete operations are transactional, so if
+        // this read succeeds, we know the collection exists and hasn't been
+        // deleted.
+        let (time_started, time_done, collector) = {
+            use nexus_db_schema::schema::inv_collection::dsl;
+
+            let collections = dsl::inv_collection
+                .filter(dsl::id.eq(db_id))
+                .limit(2)
+                .select(InvCollection::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            bail_unless!(collections.len() == 1);
+            let collection = collections.into_iter().next().unwrap();
+            (
+                collection.time_started,
+                collection.time_done,
+                collection.collector,
+            )
+        };
+
         Ok(Collection {
             id,
             errors,
@@ -3325,12 +4407,40 @@ impl DataStore {
             cabooses: cabooses_by_id.values().cloned().collect(),
             rot_pages: rot_pages_by_id.values().cloned().collect(),
             sps,
+            host_phase_1_active_slots,
+            host_phase_1_flash_hashes,
             rots,
             cabooses_found,
             rot_pages_found,
             sled_agents,
             clickhouse_keeper_cluster_membership,
+            cockroach_status,
+            ntp_timesync,
+            internal_dns_generation_status,
         })
+    }
+
+    pub async fn inventory_collections_latest(
+        &self,
+        opctx: &OpContext,
+        count: u8,
+    ) -> anyhow::Result<Vec<InvCollection>> {
+        let limit: i64 = i64::from(count);
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .context("getting connection")?;
+
+        use nexus_db_schema::schema::inv_collection::dsl;
+        let collections = dsl::inv_collection
+            .select(InvCollection::as_select())
+            .order_by(dsl::time_started.desc())
+            .limit(limit)
+            .load_async(&*conn)
+            .await
+            .context("failed to list collections")?;
+
+        Ok(collections)
     }
 }
 
@@ -3340,18 +4450,17 @@ struct OmicronSledConfigWithId {
     config: OmicronSledConfig,
 }
 
-impl IdMappable for OmicronSledConfigWithId {
-    type Id = OmicronSledConfigUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for OmicronSledConfigWithId {
+    type Key<'a> = OmicronSledConfigUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 #[derive(Debug)]
 struct ConfigReconcilerFields {
     ledgered_sled_config: Option<OmicronSledConfigUuid>,
-    last_reconciliation_sled_config: Option<OmicronSledConfigUuid>,
     reconciler_status: InvConfigReconcilerStatus,
 }
 
@@ -3359,6 +4468,7 @@ struct ConfigReconcilerFields {
 // per-sled config reconciler status rows for an inventory collection.
 #[derive(Debug, Default)]
 struct ConfigReconcilerRows {
+    config_reconcilers: Vec<InvSledConfigReconciler>,
     sled_configs: Vec<InvOmicronSledConfig>,
     disks: Vec<InvOmicronSledConfigDisk>,
     datasets: Vec<InvOmicronSledConfigDataset>,
@@ -3368,6 +4478,7 @@ struct ConfigReconcilerRows {
     dataset_results: Vec<InvLastReconciliationDatasetResult>,
     orphaned_datasets: Vec<InvLastReconciliationOrphanedDataset>,
     zone_results: Vec<InvLastReconciliationZoneResult>,
+    boot_partitions: Vec<InvSledBootPartition>,
     config_reconciler_fields_by_sled:
         BTreeMap<SledUuid, ConfigReconcilerFields>,
 }
@@ -3396,20 +4507,77 @@ impl ConfigReconcilerRows {
                 Some(self.accumulate_config(collection_id, config)?);
         }
 
-        let mut last_reconciliation_sled_config = None;
+        let mut last_reconciliation_config_id = None;
         if let Some(last_reconciliation) = &sled_agent.last_reconciliation {
             // If this config exactly matches the ledgered sled config, we can
             // reuse the foreign key; otherwise, accumulate the new one.
-            if Some(&last_reconciliation.last_reconciled_config)
-                == sled_agent.ledgered_sled_config.as_ref()
-            {
-                last_reconciliation_sled_config = ledgered_sled_config;
-            } else {
-                last_reconciliation_sled_config =
-                    Some(self.accumulate_config(
+            let last_reconciled_config =
+                if Some(&last_reconciliation.last_reconciled_config)
+                    == sled_agent.ledgered_sled_config.as_ref()
+                {
+                    // We always set this to `Some(_)` above if we have a
+                    // ledgered sled config, which we must to pass this check.
+                    ledgered_sled_config
+                        .expect("always Some(_) if we have a ledgered config")
+                } else {
+                    self.accumulate_config(
                         collection_id,
                         &last_reconciliation.last_reconciled_config,
-                    )?);
+                    )?
+                };
+            last_reconciliation_config_id = Some(last_reconciled_config);
+            let remove_mupdate_override = InvRemoveMupdateOverride::new(
+                last_reconciliation.remove_mupdate_override.as_ref(),
+            );
+
+            self.config_reconcilers.push(InvSledConfigReconciler::new(
+                collection_id,
+                sled_id,
+                last_reconciled_config,
+                last_reconciliation.boot_partitions.boot_disk.clone(),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_a
+                    .as_ref()
+                    .err()
+                    .cloned(),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_b
+                    .as_ref()
+                    .err()
+                    .cloned(),
+                remove_mupdate_override,
+            ));
+
+            // Boot partition _errors_ are kept in `InvSledConfigReconciler`
+            // above, but non-errors get their own rows; handle those here.
+            //
+            // `.into_iter().flatten()` strips out `None`s (i.e., slots that had
+            // an error, after the conversions we do here).
+            for (slot, details) in [
+                last_reconciliation
+                    .boot_partitions
+                    .slot_a
+                    .as_ref()
+                    .ok()
+                    .map(|details| (M2Slot::A, details.clone())),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_b
+                    .as_ref()
+                    .ok()
+                    .map(|details| (M2Slot::B, details.clone())),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                self.boot_partitions.push(InvSledBootPartition::new(
+                    collection_id,
+                    sled_id,
+                    slot,
+                    details,
+                ));
             }
 
             self.disk_results.extend(
@@ -3475,17 +4643,17 @@ impl ConfigReconcilerRows {
                 // If this config exactly matches the ledgered or
                 // most-recently-reconciled configs, we can reuse those IDs.
                 // Otherwise, accumulate a new one.
-                let reconciler_status_sled_config = if Some(config)
+                let reconciler_status_sled_config = if Some(&**config)
                     == sled_agent.ledgered_sled_config.as_ref()
                 {
                     ledgered_sled_config
-                } else if Some(config)
+                } else if Some(&**config)
                     == sled_agent
                         .last_reconciliation
                         .as_ref()
                         .map(|lr| &lr.last_reconciled_config)
                 {
-                    last_reconciliation_sled_config
+                    last_reconciliation_config_id
                 } else {
                     Some(self.accumulate_config(collection_id, config)?)
                 };
@@ -3514,11 +4682,7 @@ impl ConfigReconcilerRows {
 
         self.config_reconciler_fields_by_sled.insert(
             sled_id,
-            ConfigReconcilerFields {
-                ledgered_sled_config,
-                last_reconciliation_sled_config,
-                reconciler_status,
-            },
+            ConfigReconcilerFields { ledgered_sled_config, reconciler_status },
         );
 
         Ok(())
@@ -3536,6 +4700,8 @@ impl ConfigReconcilerRows {
             sled_config_id,
             config.generation,
             config.remove_mupdate_override,
+            config.host_phase_2.clone(),
+            config.measurements.clone(),
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
@@ -3578,13 +4744,13 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// This does not paginate.
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()
@@ -3626,23 +4792,18 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::QueryDsl;
-    use gateway_client::types::SpType;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
-    use nexus_sled_agent_shared::inventory::OrphanedDataset;
-    use nexus_sled_agent_shared::inventory::{
-        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
-    };
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
+    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
@@ -3650,6 +4811,19 @@ mod test {
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
+    use sled_agent_types::inventory::BootPartitionContents;
+    use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::OrphanedDataset;
+    use sled_agent_types::inventory::{
+        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
+        RemoveMupdateOverrideInventory,
+    };
+    use sled_agent_types::inventory::{
+        ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
+        SingleMeasurementInventory,
+    };
+    use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
@@ -4400,6 +5574,67 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_sled_agent_measurements() {
+        // Setup
+        let logctx = dev::test_setup_log("test_sled_agent_measurements");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with a representative collection.
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+
+        // Mutate the sled-agent contents to test measurements
+        {
+            let mut sled_agents = collection.sled_agents.iter_mut();
+            let mut sa1 = sled_agents.next().expect("at least 1 sled agent");
+
+            let make_result = |i| {
+                if i % 2 == 0 {
+                    ConfigReconcilerInventoryResult::Ok
+                } else {
+                    ConfigReconcilerInventoryResult::Err {
+                        message: format!("fake measurement error {i}"),
+                    }
+                }
+            };
+
+            sa1.reference_measurements = (0..10)
+                .map(|i| SingleMeasurementInventory {
+                    path: format!("fake/path/file{i}").into(),
+                    result: make_result(i),
+                })
+                .collect();
+        }
+
+        // Write it to the db; read it back and check it survived.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        assert_eq!(collection, collection_read);
+
+        // Now delete it and ensure we remove everything.
+        datastore
+            .inventory_delete_collection(&opctx, collection.id)
+            .await
+            .expect("failed to prune collections");
+
+        // Read all "inv_" tables and ensure that they're empty
+        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
+            "All inv_... tables should be deleted alongside collection",
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_reconciler_status_fields() {
         // Setup
         let logctx = dev::test_setup_log("reconciler_status_fields");
@@ -4425,7 +5660,7 @@ mod test {
             sa1.last_reconciliation = None;
 
             sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
-                config: sa2.ledgered_sled_config.clone().unwrap(),
+                config: Box::new(sa2.ledgered_sled_config.clone().unwrap()),
                 started_at: now_db_precision(),
                 running_for: Duration::from_secs(1),
             };
@@ -4476,6 +5711,31 @@ mod test {
                             (OmicronZoneUuid::new_v4(), make_result("zone", i))
                         })
                         .collect(),
+                    boot_partitions: BootPartitionContents {
+                        boot_disk: Ok(M2Slot::B),
+                        slot_a: Err("some error".to_string()),
+                        slot_b: Ok(BootPartitionDetails {
+                            header: BootImageHeader {
+                                flags: u64::MAX,
+                                data_size: 123456,
+                                image_size: 234567,
+                                target_size: 345678,
+                                sha256: [1; 32],
+                                image_name: "test image".to_string(),
+                            },
+                            artifact_hash: ArtifactHash([2; 32]),
+                            artifact_size: 456789,
+                        }),
+                    },
+                    remove_mupdate_override: Some(
+                        RemoveMupdateOverrideInventory {
+                            boot_disk_result: Ok(
+                                RemoveMupdateOverrideBootSuccessInventory::Removed,
+                            ),
+                            non_boot_message: "simulated non-boot message"
+                                .to_owned(),
+                        },
+                    ),
                 }
             });
 
@@ -4563,6 +5823,162 @@ mod test {
         assert_eq!(collection, collection_read);
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that concurrent read and delete operations on inventory collections
+    // do not result in torn reads. With the fix for issue #9594,
+    // inventory_collection_read_batched checks for the top-level collection
+    // record at the END of reading, so if a concurrent delete has started
+    // (which deletes the top-level record first), the read will fail rather
+    // than returning partial data.
+    //
+    // This test spawns concurrent readers and a deleter to exercise the race
+    // condition. Readers should either get the complete original collection
+    // OR an error - never partial/torn data.
+    #[tokio::test]
+    async fn test_concurrent_inventory_read_delete() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        const TEST_NAME: &str = "test_concurrent_inventory_read_delete";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a representative collection and insert it
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        let collection_id = collection.id;
+
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Verify we can read it back correctly
+        let read_back = datastore
+            .inventory_collection_read(&opctx, collection_id)
+            .await
+            .expect("failed to read collection");
+        assert_eq!(collection, read_back);
+
+        // Track results from concurrent readers
+        let successful_reads = Arc::new(AtomicUsize::new(0));
+        let error_count = Arc::new(AtomicUsize::new(0));
+        let delete_completed = Arc::new(AtomicBool::new(false));
+
+        // Signal when at least one read has completed, so we know readers are
+        // running before we start deleting
+        let (first_read_tx, first_read_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let first_read_tx =
+            Arc::new(std::sync::Mutex::new(Some(first_read_tx)));
+
+        // Spawn reader tasks that loop until deletion completes
+        const NUM_READERS: usize = 10;
+        let mut reader_handles = Vec::new();
+
+        for _ in 0..NUM_READERS {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(std::collections::BTreeMap::new());
+            let collection = collection.clone();
+            let successful_reads = successful_reads.clone();
+            let error_count = error_count.clone();
+            let delete_completed = delete_completed.clone();
+            let first_read_tx = first_read_tx.clone();
+
+            reader_handles.push(tokio::spawn(async move {
+                loop {
+                    match datastore
+                        .inventory_collection_read(&opctx, collection.id)
+                        .await
+                    {
+                        Ok(read_collection) => {
+                            // If we got a collection back, it MUST be complete
+                            // and match the original. Any mismatch would
+                            // indicate a torn read.
+                            assert_eq!(
+                                read_collection, collection,
+                                "Read returned a collection that doesn't \
+                                 match the original - this indicates a torn \
+                                 read!"
+                            );
+                            successful_reads.fetch_add(1, Ordering::Relaxed);
+
+                            // Signal that at least one read completed (only
+                            // the first sender to take the channel will send)
+                            if let Some(tx) =
+                                first_read_tx.lock().unwrap().take()
+                            {
+                                let _ = tx.send(());
+                            }
+                        }
+                        Err(_) => {
+                            // Errors are expected after deletion - the
+                            // collection no longer exists. The specific error
+                            // varies depending on which query fails first.
+                            error_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+
+                    // Stop reading after delete completes
+                    if delete_completed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            }));
+        }
+
+        // Wait for at least one successful read before deleting, so we know
+        // the reader tasks have started
+        first_read_rx.await.expect("no reader completed a read");
+
+        // Delete the collection while readers are running
+        datastore
+            .inventory_delete_collection(&opctx, collection_id)
+            .await
+            .expect("failed to delete collection");
+        delete_completed.store(true, Ordering::Relaxed);
+
+        // Wait for all readers to complete
+        for handle in reader_handles {
+            handle.await.expect("reader task panicked");
+        }
+
+        // Log results for debugging
+        let successful = successful_reads.load(Ordering::Relaxed);
+        let errors = error_count.load(Ordering::Relaxed);
+        eprintln!(
+            "Results: {} successful reads, {} errors",
+            successful, errors
+        );
+
+        // Key invariant: at least one successful read (we waited for this
+        // before deleting). Successful reads are validated inside the reader
+        // loop - they must match the original collection exactly, or the
+        // assert_eq! fails indicating a torn read. Errors after deletion are
+        // expected and don't need to be categorized.
+        assert!(
+            successful > 0,
+            "Expected at least one successful read (we wait for this)"
+        );
+
+        // Verify the collection is fully deleted
+        assert_eq!(
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
+            &[]
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

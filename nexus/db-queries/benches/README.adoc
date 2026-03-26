@@ -10,7 +10,7 @@ These queries can be run with:
 
 [source,bash]
 ----
-cargo bench -p nexus-db-queries
+cargo nextest bench -p nexus-db-queries
 ----
 
 Additionally, the "SHOW_CONTENTION" environment variable can be set to display

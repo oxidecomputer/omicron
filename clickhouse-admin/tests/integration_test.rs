@@ -8,9 +8,10 @@ use clickhouse_admin_test_utils::{
     default_clickhouse_cluster_test_deployment,
     default_clickhouse_log_ctx_and_path,
 };
-use clickhouse_admin_types::{
-    ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
-    KeeperServerInfo, KeeperServerType, RaftConfig,
+use clickhouse_admin_types::config::ClickhouseHost;
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperId, KeeperServerInfo,
+    KeeperServerType, RaftConfig,
 };
 use omicron_clickhouse_admin::ClickhouseCli;
 use slog::{Drain, info, o};
@@ -83,7 +84,7 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     for i in 1..=num_keepers {
         let raft_port = get_keeper_raft_port(KeeperId(i));
         keeper_servers.insert(KeeperServerInfo {
-            server_id: clickhouse_admin_types::KeeperId(i),
+            server_id: KeeperId(i),
             host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
             raft_port,
             server_type: KeeperServerType::Participant,

@@ -48,7 +48,7 @@ pub enum Event {
     },
 
     /// The current RSS configuration.
-    RssConfig(CurrentRssUserConfig),
+    RssConfig(Box<CurrentRssUserConfig>),
 
     /// The current state of rack initialization.
     RackSetupStatus(Result<RackOperationStatus, String>),

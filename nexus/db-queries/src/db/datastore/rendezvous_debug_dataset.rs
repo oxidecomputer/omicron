@@ -66,7 +66,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut all_datasets = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .debug_dataset_list_all_page(opctx, &p.current_pagparams())
@@ -245,7 +248,7 @@ mod tests {
             .expect("inserted dataset");
         assert_eq!(
             datastore.debug_dataset_list_all_batched(opctx).await.unwrap(),
-            [dataset.clone()],
+            std::slice::from_ref(&dataset),
         );
 
         // Tombstoning it should now succeed, and we should see the tombstoned

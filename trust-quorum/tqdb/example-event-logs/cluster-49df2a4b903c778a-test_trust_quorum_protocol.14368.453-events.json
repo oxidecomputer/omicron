@@ -1,0 +1,4668 @@
+[
+{
+  "InitialSetup": {
+    "member_universe_size": 40,
+    "config": {
+      "op": "Preparing",
+      "epoch": 1,
+      "last_committed_epoch": null,
+      "coordinator": {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      "members": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "3"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "7"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ],
+      "threshold": 2,
+      "commit_crash_tolerance": 3,
+      "prepared_members": [],
+      "committed_members": []
+    },
+    "crashed_nodes": [
+      {
+        "part_number": "test",
+        "serial_number": "11"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "16"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "7"
+      }
+    ]
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "37"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "25"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "9"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "32"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "34"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "5"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "39"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "27"
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "4"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "15"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 1,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "15"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "25"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "27"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "32"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "34"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "37"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "39"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "4"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "5"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "9"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 2,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "1"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 2,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 3,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "3"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "AbortConfiguration": 3
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 4,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "3"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "AbortConfiguration": 4
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 5,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 3,
+    "commit_crash_tolerance": 0,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 5,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 5,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 5,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 5,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 6,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 0,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 6,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 7,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 0,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 8,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "0"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 8,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 9,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 9,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 9,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 9,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 9,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 10,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "1"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 10,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 11,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "1"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 11,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 12,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "1"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 12,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 13,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "0"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 13,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 14,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 3,
+    "commit_crash_tolerance": 0,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 15,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "3"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "AbortConfiguration": 15
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 16,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 0,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 17,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "1"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 0,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 17,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "Reconfigure": {
+    "op": "Preparing",
+    "epoch": 18,
+    "last_committed_epoch": null,
+    "coordinator": {
+      "part_number": "test",
+      "serial_number": "2"
+    },
+    "members": [
+      {
+        "part_number": "test",
+        "serial_number": "0"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "1"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "2"
+      },
+      {
+        "part_number": "test",
+        "serial_number": "3"
+      }
+    ],
+    "threshold": 2,
+    "commit_crash_tolerance": 1,
+    "prepared_members": [],
+    "committed_members": []
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "0"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "1"
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+{
+  "DeliverEnvelope": {
+    "destination": {
+      "part_number": "test",
+      "serial_number": "2"
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply",
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+{
+  "SendNexusReplyOnUnderlay": {
+    "AckedPreparesFromCoordinator": {
+      "epoch": 18,
+      "acks": [
+        {
+          "part_number": "test",
+          "serial_number": "0"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "1"
+        },
+        {
+          "part_number": "test",
+          "serial_number": "2"
+        }
+      ]
+    }
+  }
+},
+"DeliverNexusReply",
+"DeliverNexusReply"
+]

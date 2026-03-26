@@ -74,7 +74,8 @@ enum Cmds {
 
     /// Manage OpenAPI specifications.
     ///
-    /// For more information, see dev-tools/openapi-manager/README.adoc.
+    /// For more information, see
+    /// <https://github.com/oxidecomputer/dropshot-api-manager>
     Openapi(external::External),
 
     #[cfg(target_os = "illumos")]
@@ -142,7 +143,7 @@ fn main() -> Result<()> {
         Cmds::LsApis(external) => external.exec_bin("ls-apis"),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
-        Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
+        Cmds::Openapi(external) => external.exec_bin("omicron-dropshot-apis"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")

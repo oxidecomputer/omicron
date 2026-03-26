@@ -49,7 +49,7 @@ pub(crate) async fn instance_start(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: None,
             instance: NameOrId::from(id.into_untyped_uuid()),
         };
@@ -69,7 +69,7 @@ pub(crate) async fn instance_stop(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: None,
             instance: NameOrId::from(id.into_untyped_uuid()),
         };
@@ -90,7 +90,7 @@ pub(crate) async fn instance_stop_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -111,7 +111,7 @@ pub(crate) async fn instance_delete_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -175,7 +175,7 @@ pub(crate) async fn instance_simulate_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -228,7 +228,7 @@ pub(super) async fn instance_fetch_vmm_and_sled_ids(
         .expect("can only fetch VMM and sled IDs for an active instance");
 
     let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-    let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+    let sled_id = vmm.sled_id();
     VmmAndSledIds { vmm_id, sled_id }
 }
 
@@ -268,7 +268,7 @@ pub async fn instance_fetch_by_name(
     let datastore = nexus.datastore();
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -316,7 +316,7 @@ pub async fn instance_wait_for_state_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };

@@ -13,7 +13,7 @@ use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::transceivers::GetTransceiversResponse;
 use crate::transceivers::Handle as TransceiverHandle;
-use bootstrap_agent_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -23,11 +23,12 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use wicket_common::WICKETD_TIMEOUT;
@@ -217,24 +218,27 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {
-            HttpError::for_bad_request(None, format!("{err:#}"))
-        })?;
+        let lockstep_addr =
+            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
+                HttpError::for_bad_request(None, format!("{err:#}"))
+            })?;
 
-        let client = bootstrap_agent_client::Client::new(
-            &format!("http://{}", sled_agent_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap client")),
+        let client = bootstrap_agent_lockstep_client::Client::new(
+            &format!("http://{}", lockstep_addr),
+            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
         );
 
         let op_status = client
             .rack_initialization_status()
             .await
             .map_err(|err| {
-                use bootstrap_agent_client::Error as BaError;
+                use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
-                        let message =
-                            format!("Failed to send rack setup request: {err}");
+                        let message = format!(
+                            "Failed to send rack setup request: {}",
+                            InlineErrorChain::new(&err)
+                        );
                         HttpError {
                             status_code:
                                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
@@ -261,9 +265,10 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {
-            HttpError::for_bad_request(None, format!("{err:#}"))
-        })?;
+        let lockstep_addr =
+            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
+                HttpError::for_bad_request(None, format!("{err:#}"))
+            })?;
 
         let request = {
             let mut config = ctx.rss_config.lock().unwrap();
@@ -275,22 +280,24 @@ impl WicketdApi for WicketdApiImpl {
         slog::info!(
             ctx.log,
             "Sending RSS initialize request to {}",
-            sled_agent_addr
+            lockstep_addr
         );
-        let client = bootstrap_agent_client::Client::new(
-            &format!("http://{}", sled_agent_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap client")),
+        let client = bootstrap_agent_lockstep_client::Client::new(
+            &format!("http://{}", lockstep_addr),
+            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
         );
 
         let init_id = client
             .rack_initialize(&request)
             .await
             .map_err(|err| {
-                use bootstrap_agent_client::Error as BaError;
+                use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
-                        let message =
-                            format!("Failed to send rack setup request: {err}");
+                        let message = format!(
+                            "Failed to send rack setup request: {}",
+                            InlineErrorChain::new(&err)
+                        );
                         HttpError {
                             status_code:
                                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
@@ -316,29 +323,28 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
 
-        let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {
-            HttpError::for_bad_request(None, format!("{err:#}"))
-        })?;
+        let lockstep_addr =
+            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
+                HttpError::for_bad_request(None, format!("{err:#}"))
+            })?;
 
-        slog::info!(
-            ctx.log,
-            "Sending RSS reset request to {}",
-            sled_agent_addr
-        );
-        let client = bootstrap_agent_client::Client::new(
-            &format!("http://{}", sled_agent_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap client")),
+        slog::info!(ctx.log, "Sending RSS reset request to {}", lockstep_addr);
+        let client = bootstrap_agent_lockstep_client::Client::new(
+            &format!("http://{}", lockstep_addr),
+            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
         );
 
         let reset_id = client
             .rack_reset()
             .await
             .map_err(|err| {
-                use bootstrap_agent_client::Error as BaError;
+                use bootstrap_agent_lockstep_client::Error as BaError;
                 match err {
                     BaError::CommunicationError(err) => {
-                        let message =
-                            format!("Failed to send rack reset request: {err}");
+                        let message = format!(
+                            "Failed to send rack reset request: {}",
+                            InlineErrorChain::new(&err)
+                        );
                         HttpError {
                             status_code:
                                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
@@ -779,7 +785,7 @@ impl WicketdApi for WicketdApiImpl {
 
         apictx
             .mgs_client
-            .ignition_command(type_, slot, command)
+            .ignition_command(&type_, slot, command)
             .await
             .map_err(http_error_from_client_error)?;
 
@@ -793,10 +799,10 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         let options = body.into_inner();
 
-        let our_switch_location = match rqctx.local_switch_id().await {
+        let our_switch_slot = match rqctx.local_switch_id().await {
             Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
-                0 => SwitchLocation::Switch0,
-                1 => SwitchLocation::Switch1,
+                0 => SwitchSlot::Switch0,
+                1 => SwitchSlot::Switch1,
                 _ => {
                     return Err(HttpError::for_internal_error(format!(
                         "unexpected switch slot {slot}"
@@ -810,8 +816,8 @@ impl WicketdApi for WicketdApiImpl {
             }
             None => {
                 return Err(HttpError::for_unavail(
-                    Some("UnknownSwitchLocation".to_string()),
-                    "local switch location not yet determined".to_string(),
+                    Some("UnknownSwitchSlot".to_string()),
+                    "local switch slot not yet determined".to_string(),
                 ));
             }
         };
@@ -844,7 +850,7 @@ impl WicketdApi for WicketdApiImpl {
                 network_config,
                 dns_servers,
                 ntp_servers,
-                our_switch_location,
+                our_switch_slot,
                 options.dns_name_to_query,
             )
             .await

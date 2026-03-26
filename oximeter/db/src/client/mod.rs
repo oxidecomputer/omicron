@@ -4,12 +4,11 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;
-pub(crate) mod query_summary;
 #[cfg(any(feature = "sql", test))]
 mod sql;
 
@@ -23,7 +22,6 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
-use crate::client::query_summary::QuerySummary;
 use crate::model::columns;
 use crate::model::fields::FieldSelectRow;
 use crate::model::from_block::FromBlock;
@@ -78,10 +76,16 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
     /// Fires when a SQL query begins, with the query string.
-    fn sql__query__start(_: &usdt::UniqueId, sql: &str) {}
+    ///
+    /// The first argument is a UUID assigned to the query. This is sent to the
+    /// ClickHouse server along with the query string, where it's used as the
+    /// query ID in tables like the query log. This can be used to correlate
+    /// behavior on the client side with how the server itself processes the
+    /// query.
+    fn sql__query__start(query_id: &str, sql: &str) {}
 
     /// Fires when a SQL query ends, either in success or failure.
-    fn sql__query__done(_: &usdt::UniqueId) {}
+    fn sql__query__done(query_id: &str) {}
 }
 
 /// A `Client` to the ClickHouse metrics database.
@@ -295,8 +299,8 @@ impl Client {
         limit: NonZeroU32,
     ) -> Result<ResultsPage<Timeseries>, Error> {
         let (params, offset) = match page {
-            WhichPage::First(ref params) => (params, 0),
-            WhichPage::Next(ref sel) => (&sel.params, sel.offset.get()),
+            WhichPage::First(params) => (params, 0),
+            WhichPage::Next(sel) => (&sel.params, sel.offset.get()),
         };
         let schema = self
             .schema_for_timeseries(&params.timeseries_name)
@@ -388,7 +392,7 @@ impl Client {
                     limit.get(),
                 )
             }
-            WhichPage::Next(ref last_timeseries) => {
+            WhichPage::Next(last_timeseries) => {
                 format!(
                     concat!(
                         "SELECT * FROM {}.timeseries_schema ",
@@ -1029,8 +1033,10 @@ impl Client {
         handle: &mut Handle,
         field_query: &str,
         schema: &TimeseriesSchema,
-    ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>), Error>
-    {
+    ) -> Result<
+        (oxql_types::QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>),
+        Error,
+    > {
         let result = self.execute_with_block(handle, field_query).await?;
         let summary = result.query_summary();
         let Some(block) = &result.data else {
@@ -1124,16 +1130,16 @@ impl Client {
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
-        let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, sql));
+        let id = Uuid::new_v4();
+        probes::sql__query__start!(|| (id.to_string(), sql));
         let now = tokio::time::Instant::now();
         let result = tokio::time::timeout(
             self.request_timeout,
-            handle.insert(sql, block),
+            handle.insert(id, sql, block),
         )
         .await;
         let elapsed = now.elapsed();
-        probes::sql__query__done!(|| (&id));
+        probes::sql__query__done!(|| id.to_string());
         match result {
             Ok(result) => result.map_err(Error::from),
             Err(_) => Err(Error::DatabaseUnavailable(format!(
@@ -1166,13 +1172,14 @@ impl Client {
             "sql" => sql,
         );
 
-        let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, sql));
+        let id = Uuid::new_v4();
+        probes::sql__query__start!(|| (id.to_string(), sql));
         let now = tokio::time::Instant::now();
         let result =
-            tokio::time::timeout(self.request_timeout, handle.query(sql)).await;
+            tokio::time::timeout(self.request_timeout, handle.query(id, sql))
+                .await;
         let elapsed = now.elapsed();
-        probes::sql__query__done!(|| (&id));
+        probes::sql__query__done!(|| id.to_string());
         match result {
             Ok(result) => result.map_err(Error::from),
             Err(_) => Err(Error::DatabaseUnavailable(format!(
@@ -1796,6 +1803,12 @@ mod tests {
                     Box::pin(test_recall_of_all_fields_impl(db, client))
                 }),
             ),
+            (
+                "test_expunge_timeseries_by_name_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_expunge_timeseries_by_name_impl(db, client))
+                }),
+            ),
         ];
         for (test_name, mut test) in futures {
             let testctx = test_setup_log(test_name);
@@ -1900,6 +1913,7 @@ mod tests {
 
     mod type_mismatch {
         #[derive(oximeter::Target)]
+        #[expect(dead_code)]
         pub struct TestTarget {
             pub name1: uuid::Uuid,
             pub name2: String,
@@ -1976,7 +1990,7 @@ mod tests {
         client.schema.lock().await.clear();
 
         // Insert the new sample
-        client.insert_samples(&[sample.clone()]).await.unwrap();
+        client.insert_samples(std::slice::from_ref(&sample)).await.unwrap();
 
         // The internal map should now contain both the new timeseries schema
         let actual_schema = TimeseriesSchema::from(&sample);
@@ -3542,7 +3556,7 @@ mod tests {
         // the database data hasn't been dropped.
         assert_eq!(0, get_schema_count(&client, None).await);
         let sample = oximeter_test_utils::make_sample();
-        client.insert_samples(&[sample.clone()]).await.unwrap();
+        client.insert_samples(std::slice::from_ref(&sample)).await.unwrap();
         assert_eq!(1, get_schema_count(&client, None).await);
 
         // Re-initialize the database, see that our data still exists
@@ -4724,48 +4738,27 @@ mod tests {
     async fn test_expunge_timeseries_by_name_single_node() {
         const TEST_NAME: &str = "test_expunge_timeseries_by_name_single_node";
         let logctx = test_setup_log(TEST_NAME);
-        let log = &logctx.log;
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        test_expunge_timeseries_by_name_impl(
-            log,
-            db.native_address().into(),
-            false,
-        )
-        .await;
+        let client = Client::new(db.native_address().into(), &logctx.log);
+        test_expunge_timeseries_by_name_impl(&db, client).await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_expunge_timeseries_by_name_replicated() {
-        const TEST_NAME: &str = "test_expunge_timeseries_by_name_replicated";
-        let logctx = test_setup_log(TEST_NAME);
-        let mut cluster = create_cluster(&logctx).await;
-        test_expunge_timeseries_by_name_impl(
-            &logctx.log,
-            cluster.native_address().into(),
-            true,
-        )
-        .await;
-        cluster.cleanup().await.expect("Failed to cleanup ClickHouse cluster");
         logctx.cleanup_successful();
     }
 
     // Implementation of the test for expunging timeseries by name during an
     // upgrade.
     async fn test_expunge_timeseries_by_name_impl(
-        log: &Logger,
-        address: SocketAddr,
-        replicated: bool,
+        db: &ClickHouseDeployment,
+        client: Client,
     ) {
-        let client = Client::new(address, &log);
-
         const STARTING_VERSION: u64 = 1;
         const NEXT_VERSION: u64 = 2;
         const VERSIONS: [u64; 2] = [STARTING_VERSION, NEXT_VERSION];
 
+        // Initialize the database...
+        let replicated = db.is_cluster();
         // We need to actually have the oximeter DB here, and the version table,
         // since `ensure_schema()` writes out versions to the DB as they're
         // applied.

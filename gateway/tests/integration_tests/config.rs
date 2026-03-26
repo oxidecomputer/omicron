@@ -29,7 +29,7 @@ fn read_production_smf_config() {
     assert!(switch_config.rpc_retry_config.max_attempts_general > 0);
     assert!(switch_config.rpc_retry_config.max_attempts_reset > 0);
     assert!(switch_config.rpc_retry_config.per_attempt_timeout_millis > 0);
-    assert!(!switch_config.location.names.is_empty());
+    assert!(!switch_config.location.description.is_empty());
     assert!(!switch_config.location.determination.is_empty());
     assert!(!switch_config.port.is_empty());
 }

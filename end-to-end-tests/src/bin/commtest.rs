@@ -1,15 +1,15 @@
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
-use end_to_end_tests::helpers::cli::oxide_cli_style;
 use end_to_end_tests::helpers::icmp::ping4_test_run;
+use end_to_end_tests::helpers::{cli::oxide_cli_style, try_create_ip_range};
 use oxide_client::{
     ClientExperimentalExt, ClientLoginExt, ClientProjectsExt,
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{
-        IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range, Name, NameOrId,
-        PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
-        UsernamePasswordCredentials,
+        IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange, IpVersion, Name,
+        NameOrId, PingStatus, PoolSelector, ProbeCreate, ProbeInfo,
+        ProjectCreate, UsernamePasswordCredentials,
     },
 };
 use std::{
@@ -55,11 +55,11 @@ struct RunArgs {
 
     /// First address in the IP pool to use for testing
     #[arg(long)]
-    ip_pool_begin: Ipv4Addr,
+    ip_pool_begin: IpAddr,
 
     /// Last address in the IP pool to use for testing
     #[arg(long)]
-    ip_pool_end: Ipv4Addr,
+    ip_pool_end: IpAddr,
 }
 
 const API_RETRY_ATTEMPTS: usize = 15;
@@ -280,41 +280,48 @@ async fn rack_prepare(
     })?;
 
     let pool_name = "default";
-    api_retry!(
-        if let Err(e) = oxide.ip_pool_view().pool("default").send().await {
-            if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-                print!("default ip pool does not exist, creating ...");
-                oxide
-                    .ip_pool_create()
-                    .body(IpPoolCreate {
-                        name: pool_name.parse().unwrap(),
-                        description: "Default IP pool".to_string(),
-                    })
-                    .send()
-                    .await?;
-                oxide
-                    .ip_pool_silo_link()
-                    .pool(pool_name)
-                    .body(IpPoolLinkSilo {
-                        silo: NameOrId::Name("recovery".parse().unwrap()),
-                        is_default: true,
-                    })
-                    .send()
-                    .await?;
-                println!("done");
-                Ok(())
+    api_retry!(if let Err(e) =
+        oxide.system_ip_pool_view().pool("default").send().await
+    {
+        if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
+            print!("default ip pool does not exist, creating ...");
+            let ip_version = if args.ip_pool_begin.is_ipv4() {
+                IpVersion::V4
             } else {
-                Err(e)
-            }
-        } else {
-            println!("default ip pool already exists");
+                IpVersion::V6
+            };
+            oxide
+                .system_ip_pool_create()
+                .body(IpPoolCreate {
+                    name: pool_name.parse().unwrap(),
+                    description: "Default IP pool".to_string(),
+                    ip_version,
+                    pool_type: IpPoolType::Unicast,
+                })
+                .send()
+                .await?;
+            oxide
+                .system_ip_pool_silo_link()
+                .pool(pool_name)
+                .body(IpPoolLinkSilo {
+                    silo: NameOrId::Name("recovery".parse().unwrap()),
+                    is_default: true,
+                })
+                .send()
+                .await?;
+            println!("done");
             Ok(())
+        } else {
+            Err(e)
         }
-    )?;
+    } else {
+        println!("default ip pool already exists");
+        Ok(())
+    })?;
 
     let pool = api_retry!(
         oxide
-            .ip_pool_range_list()
+            .system_ip_pool_range_list()
             .limit(u32::MAX)
             .pool(Name::try_from("default").unwrap())
             .send()
@@ -323,23 +330,25 @@ async fn rack_prepare(
     .into_inner()
     .items;
 
-    let range = Ipv4Range { first: args.ip_pool_begin, last: args.ip_pool_end };
-
-    let range_exists = pool
-        .iter()
-        .filter_map(|x| match &x.range {
-            IpRange::V4(r) => Some(r),
-            IpRange::V6(_) => None,
-        })
-        .any(|x| x.first == range.first && x.last == range.last);
+    let range = try_create_ip_range(args.ip_pool_begin, args.ip_pool_end)?;
+    let range_exists =
+        pool.iter().any(|pool_range| match (&range, &pool_range.range) {
+            (IpRange::V4(r1), IpRange::V4(r2)) => {
+                r1.first == r2.first && r1.last == r2.last
+            }
+            (IpRange::V6(r1), IpRange::V6(r2)) => {
+                r1.first == r2.first && r1.last == r2.last
+            }
+            (_, _) => false,
+        });
 
     if !range_exists {
         print!("ip range does not exist, creating ... ");
         api_retry!(
             oxide
-                .ip_pool_range_add()
+                .system_ip_pool_range_add()
                 .pool(Name::try_from("default").unwrap())
-                .body(IpRange::V4(range.clone()))
+                .body(range.clone())
                 .send()
                 .await
         )?;
@@ -380,7 +389,9 @@ async fn launch_probes(
                     .project(Name::try_from("classone").unwrap())
                     .body(ProbeCreate {
                         description: format!("probe {i}"),
-                        ip_pool: Some("default".parse().unwrap()),
+                        pool_selector: PoolSelector::Explicit {
+                            pool: "default".parse().unwrap(),
+                        },
                         name: format!("probe{i}").parse().unwrap(),
                         sled,
                     })

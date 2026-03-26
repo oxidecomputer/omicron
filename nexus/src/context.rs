@@ -6,12 +6,14 @@ use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::HttpAuthnScheme;
+use authn::external::scim::HttpAuthnScimToken;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use nexus_config::NexusConfig;
+use nexus_config::OmdbConfig;
 use nexus_config::SchemeName;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
@@ -21,12 +23,17 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::env;
+use std::future::Future;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use dropshot::{HttpError, HttpResponse};
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -106,6 +113,8 @@ pub struct ServerContext {
     pub(crate) external_tls_enabled: bool,
     /// tunable settings needed for the console at runtime
     pub(crate) console_config: ConsoleConfig,
+    /// config supporting `omdb` system introspection
+    pub(crate) omdb_config: OmdbConfig,
 }
 
 pub(crate) struct ConsoleConfig {
@@ -137,6 +146,7 @@ impl ServerContext {
                         Box::new(HttpAuthnSessionCookie)
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
+                    SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
                 },
             )
             .collect();
@@ -193,8 +203,8 @@ impl ServerContext {
                     error!(
                         log,
                         "Failed to get current directory, \
-                         setting assets dir to None: {}",
-                        error
+                         setting assets dir to None";
+                        InlineErrorChain::new(&error),
                     );
                     None
                 }
@@ -323,8 +333,45 @@ impl ServerContext {
                 ),
                 static_dir,
             },
+            omdb_config: config.pkg.omdb.clone(),
         }))
     }
+}
+
+/// Execute an external API handler with audit logging and latency tracking.
+///
+/// This helper:
+/// 1. Creates an OpContext via authentication
+/// 2. Initializes an audit log entry
+/// 3. Runs the handler
+/// 4. Completes the audit log entry with result info
+/// 5. Wraps everything in latency instrumentation
+pub async fn audit_and_time<F, Fut, R>(
+    rqctx: &dropshot::RequestContext<ApiContext>,
+    handler: F,
+) -> Result<R, HttpError>
+where
+    F: FnOnce(Arc<OpContext>, Arc<Nexus>) -> Fut,
+    Fut: Future<Output = Result<R, HttpError>>,
+    R: HttpResponse,
+{
+    let apictx = rqctx.context();
+    let nexus = Arc::clone(&apictx.context.nexus);
+    let handler = async {
+        let opctx = Arc::new(op_context_for_external_api(rqctx).await?);
+        let audit = nexus.audit_log_entry_init(&opctx, rqctx).await?;
+        let result = handler(Arc::clone(&opctx), Arc::clone(&nexus)).await;
+        // Ignore error: unlike the init line, audit log failures cannot cause
+        // the request to fail because the primary operation has already taken
+        // place. The complete function retries internally and logs on failure.
+        let _ = nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+        result
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(rqctx, handler)
+        .await
 }
 
 /// Authenticates an incoming request to the external API and produces a new
@@ -442,7 +489,7 @@ impl authn::external::AuthenticatorContext for ServerContext {
 impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> Result<Uuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
@@ -451,12 +498,15 @@ impl authn::external::SiloUserSilo for ServerContext {
 
 #[async_trait]
 impl authn::external::token::TokenContext for ServerContext {
-    async fn token_actor(
+    async fn authenticate_token(
         &self,
         token: String,
-    ) -> Result<authn::Actor, authn::Reason> {
+    ) -> Result<
+        (authn::Actor, Option<chrono::DateTime<chrono::Utc>>, Uuid),
+        authn::Reason,
+    > {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.device_access_token_actor(opctx, token).await
+        self.nexus.authenticate_token(opctx, token).await
     }
 }
 
@@ -488,5 +538,16 @@ impl SessionStore for ServerContext {
 
     fn session_absolute_timeout(&self) -> Duration {
         self.console_config.session_absolute_timeout
+    }
+}
+
+#[async_trait]
+impl authn::external::scim::ScimTokenContext for ServerContext {
+    async fn scim_token_actor(
+        &self,
+        token: String,
+    ) -> Result<(authn::Actor, Uuid), authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.scim_token_actor(opctx, token).await
     }
 }

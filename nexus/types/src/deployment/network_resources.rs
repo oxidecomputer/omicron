@@ -7,8 +7,9 @@ use daft::Diffable;
 use iddqd::TriHashItem;
 use iddqd::TriHashMap;
 use iddqd::tri_upcast;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::MacAddr;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::VnicUuid;
@@ -193,6 +194,14 @@ impl OmicronZoneExternalIp {
             }
         }
     }
+
+    /// Return the IP version of the contained address.
+    pub fn ip_version(&self) -> IpVersion {
+        match self.ip() {
+            IpAddr::V4(_) => IpVersion::V4,
+            IpAddr::V6(_) => IpVersion::V6,
+        }
+    }
 }
 
 /// An IP-based key suitable for uniquely identifying an
@@ -203,7 +212,7 @@ impl OmicronZoneExternalIp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OmicronZoneExternalIpKey {
     Floating(IpAddr),
-    Snat(SourceNatConfig),
+    Snat(SourceNatConfigGeneric),
 }
 
 /// Floating external IP allocated to an Omicron-managed zone.
@@ -276,17 +285,21 @@ impl OmicronZoneExternalFloatingAddr {
 )]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,
-    pub snat_cfg: SourceNatConfig,
+    pub snat_cfg: SourceNatConfigGeneric,
 }
 
 /// Network interface allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
+    // TODO-completeness: Support dual-stack NICs for Omicron zones. See
+    // https://github.com/oxidecomputer/omicron/issues/9314.
     pub ip: IpAddr,
     pub slot: u8,
     pub primary: bool,
@@ -328,7 +341,9 @@ impl TriHashItem for OmicronZoneExternalIpEntry {
 /// A pair of an Omicron zone ID and a network interface.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct OmicronZoneNicEntry {
     pub zone_id: OmicronZoneUuid,
     pub nic: OmicronZoneNic,

@@ -17,7 +17,6 @@ pub mod common;
 // Modules for the non-simulated sled agent.
 pub mod artifact_store;
 mod backing_fs;
-mod boot_disk_os_writer;
 pub mod bootstrap;
 pub mod config;
 mod ddm_reconciler;
@@ -31,6 +30,7 @@ mod nexus;
 mod probe_manager;
 mod profile;
 pub mod rack_setup;
+pub(crate) mod rot;
 pub mod server;
 pub mod services;
 mod sled_agent;

@@ -1,0 +1,5 @@
+ALTER TABLE
+ omicron.public.disk_type_local_storage
+ALTER COLUMN
+ local_storage_unencrypted_dataset_allocation_id
+DROP DEFAULT;

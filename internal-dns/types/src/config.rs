@@ -69,9 +69,9 @@ use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-// "v2" types are the most recent, so we re-export them here for dependents that
+// Re-export the latest versions from the versions crate for dependents that
 // just want "latest".
-pub use crate::v2::config::*;
+pub use internal_dns_types_versions::latest::config::*;
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -410,6 +410,32 @@ impl DnsConfigBuilder {
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
     }
 
+    /// Higher-level shorthand for adding a Nexus zone with both its internal
+    /// API service and its lockstep API service.
+    ///
+    /// # Errors
+    ///
+    /// This function fails only if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_nexus(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        internal_address: SocketAddrV6,
+        lockstep_port: u16,
+    ) -> anyhow::Result<()> {
+        let zone = self.host_zone(zone_id, *internal_address.ip())?;
+        self.service_backend_zone(
+            ServiceName::Nexus,
+            &zone,
+            internal_address.port(),
+        )?;
+        self.service_backend_zone(
+            ServiceName::NexusLockstep,
+            &zone,
+            lockstep_port,
+        )
+    }
+
     /// Higher-level shorthand for adding a ClickHouse single node zone with
     /// several services.
     ///
@@ -593,8 +619,8 @@ impl DnsConfigBuilder {
             .get(&ServiceName::BoundaryNtp)
             .map(|zone2port| {
                 let records = zone2port
-                    .iter()
-                    .map(|(zone, _port)| {
+                    .keys()
+                    .map(|zone| {
                         let zone_ip = self.zones.get(&zone).expect(
                             "service_backend_zone() ensures zones are defined",
                         );
@@ -743,6 +769,10 @@ mod test {
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
+        assert_eq!(
+            ServiceName::NexusLockstep.dns_name(),
+            "_nexus-lockstep._tcp",
+        );
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
         assert_eq!(
             ServiceName::OximeterReader.dns_name(),

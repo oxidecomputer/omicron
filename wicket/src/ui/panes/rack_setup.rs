@@ -20,9 +20,6 @@ use crate::ui::widgets::PopupScrollOffset;
 use itertools::Itertools;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -35,7 +32,12 @@ use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use sled_hardware_types::Baseboard;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -44,6 +46,8 @@ use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
+use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
@@ -712,6 +716,19 @@ fn rss_config_text<'a>(
             Cow::from(external_dns_zone_name.as_str()),
         ),
         (
+            "Rack subnet address (IPv6 /56): ",
+            rack_network_config.as_ref().map_or(
+                "(will be chosen randomly)".into(),
+                |c| {
+                    match c.rack_subnet_address {
+                        Some(v) => v.to_string(),
+                        None => "(chosen randomly)".to_string(),
+                    }
+                    .into()
+                },
+            ),
+        ),
+        (
             "Infrastructure first IP: ",
             rack_network_config
                 .as_ref()
@@ -756,7 +773,9 @@ fn rss_config_text<'a>(
         // This style ensures that if a new field is added to the struct, it
         // fails to compile.
         let UserSpecifiedRackNetworkConfig {
-            // infra_ip_first and infra_ip_last have already been handled above.
+            // rack_subnet_address, infra_ip_first, and infra_ip_last
+            // have already been handled above.
+            rack_subnet_address: _,
             infra_ip_first: _,
             infra_ip_last: _,
             // switch0 and switch1 re handled via the iter_uplinks iterator.
@@ -777,12 +796,17 @@ fn rss_config_text<'a>(
                 tx_eq,
             } = uplink;
 
+            let switch_description = match switch {
+                SwitchSlot::Switch0 => "0",
+                SwitchSlot::Switch1 => "1",
+            };
+
             let mut items = vec![
                 vec![
                     Span::styled("  • Port          : ", label_style),
                     Span::styled(port.to_string(), ok_style),
                     Span::styled(" on switch ", label_style),
-                    Span::styled(switch.to_string(), ok_style),
+                    Span::styled(switch_description, ok_style),
                 ],
                 vec![
                     Span::styled("  • Speed         : ", label_style),
@@ -846,11 +870,19 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let mut items = vec![
-                    Span::styled("  • Address       : ", label_style),
-                    Span::styled(a.address.to_string(), ok_style),
-                ];
-                if let Some(vlan_id) = a.vlan_id {
+                let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
+                let addr_description = match address {
+                    UplinkAddress::AddrConf => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::ADDR_CONF,
+                    ),
+                    UplinkAddress::Static { ip_net } => {
+                        Cow::Owned(ip_net.to_string())
+                    }
+                };
+                let mut items =
+                    vec![Span::styled("  • Address       : ", label_style)];
+                items.push(Span::styled(addr_description, ok_style));
+                if let Some(vlan_id) = vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
@@ -885,12 +917,22 @@ fn rss_config_text<'a>(
                     allowed_import,
                     allowed_export,
                     vlan_id,
+                    router_lifetime,
                 } = p;
+
+                let addr_string = match addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedRouterPeerAddr::UNNUMBERED_PEER,
+                    ),
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        Cow::Owned(ip.to_string())
+                    }
+                };
 
                 let mut lines = vec![
                     vec![
                         Span::styled("  • BGP peer      : ", label_style),
-                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(addr_string, ok_style),
                         Span::styled(" asn=", label_style),
                         Span::styled(asn.to_string(), ok_style),
                         Span::styled(" port=", label_style),
@@ -969,6 +1011,15 @@ fn rss_config_text<'a>(
                         settings.extend([
                             Span::styled(" vlan_id=", label_style),
                             Span::styled(vlan_id.to_string(), ok_style),
+                        ]);
+                    }
+                    if router_lifetime.as_u16() != 0 {
+                        settings.extend([
+                            Span::styled(" router_lifetime=", label_style),
+                            Span::styled(
+                                format!("{}s", router_lifetime),
+                                ok_style,
+                            ),
                         ]);
                     }
 
@@ -1092,11 +1143,18 @@ fn rss_config_text<'a>(
                     management_addrs,
                 } = lp;
 
+                let status_description = match status {
+                    LldpAdminStatus::Enabled => "enabled",
+                    LldpAdminStatus::Disabled => "disabled",
+                    LldpAdminStatus::RxOnly => "rx only",
+                    LldpAdminStatus::TxOnly => "tx only",
+                };
+
                 let mut lldp = vec![
                     vec![Span::styled("  • LLDP port settings: ", label_style)],
                     vec![
                         Span::styled("    • Admin status      : ", label_style),
-                        Span::styled(status.to_string(), ok_style),
+                        Span::styled(status_description, ok_style),
                     ],
                 ];
 
@@ -1197,11 +1255,14 @@ fn rss_config_text<'a>(
                 // The shaper and checker are not currently used.
                 shaper: _,
                 checker: _,
+                max_paths,
             } = cfg;
             let mut items = vec![
                 Span::styled("  • BGP config    :", label_style),
                 Span::styled(" asn=", label_style),
                 Span::styled(asn.to_string(), ok_style),
+                Span::styled(" max_paths=", label_style),
+                Span::styled(max_paths.to_string(), ok_style),
                 Span::styled(" originate=", label_style),
             ];
             if originate.is_empty() {
@@ -1278,11 +1339,7 @@ fn rss_config_text<'a>(
         bootstrap_sleds
             .iter()
             .map(|desc| {
-                let identifier = match &desc.baseboard {
-                    Baseboard::Gimlet { identifier, .. } => identifier,
-                    Baseboard::Pc { identifier, .. } => identifier,
-                    Baseboard::Unknown => "unknown",
-                };
+                let identifier = desc.baseboard.identifier();
                 let mut spans = vec![
                     Span::styled("  • ", label_style),
                     Span::styled(format!("Cubby {}", desc.id.slot), ok_style),

@@ -37,12 +37,7 @@ pub async fn shell(
     opts: ShellOptions,
 ) -> anyhow::Result<()> {
     // Create the client.
-    let client = make_client(address, port, &log).await?;
-
-    // A workaround to ensure the client has all available timeseries when the
-    // shell starts.
-    let dummy = "foo:bar".parse().unwrap();
-    let _ = client.schema_for_timeseries(&dummy).await;
+    let client = make_oxql_client(address, port, &log).await?;
 
     // Create the line-editor.
     let mut ed = Reedline::create();
@@ -155,6 +150,46 @@ pub async fn shell(
             err => eprintln!("err: {err:?}"),
         }
     }
+}
+
+/// Execute the provided OxQL query.
+pub async fn exec_query(
+    address: IpAddr,
+    port: u16,
+    log: Logger,
+    opts: ShellOptions,
+    statement: String,
+) -> anyhow::Result<()> {
+    // Create the client.
+    let client = make_oxql_client(address, port, &log).await?;
+
+    let result = client
+        .oxql_query(
+            statement.trim().trim_end_matches(';'),
+            QueryAuthzScope::Fleet,
+        )
+        .await?;
+
+    print_tables(&result.tables);
+    println!();
+    print_query_summary(&result, opts.print_elapsed, opts.print_summaries);
+
+    Ok(())
+}
+
+/// Create an OxQL client and prime its schema cache.
+async fn make_oxql_client(
+    address: IpAddr,
+    port: u16,
+    log: &Logger,
+) -> anyhow::Result<Client> {
+    let client = make_client(address, port, log).await?;
+
+    // Workaround to ensure the client has all available timeseries.
+    let dummy = "foo:bar".parse().unwrap();
+    let _ = client.schema_for_timeseries(&dummy).await;
+
+    Ok(client)
 }
 
 /// Describe a single timeseries.

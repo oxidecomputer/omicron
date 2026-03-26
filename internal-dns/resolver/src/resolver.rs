@@ -28,6 +28,37 @@ pub enum ResolveError {
     NotFoundByString(String),
 }
 
+fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
+    match err.kind() {
+        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
+            match proto_error.kind() {
+                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
+                    ..
+                } => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+impl ResolveError {
+    /// Returns "true" if this error indicates the record is not found.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
+                true
+            }
+            ResolveError::Resolve(hickory_err)
+                if is_no_records_found(&hickory_err) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 /// A wrapper around a set of bootstrap DNS addresses, providing a convenient
 /// way to construct a [`qorb::resolvers::dns::DnsResolver`] for specific
 /// services.
@@ -354,7 +385,7 @@ impl Resolver {
     async fn lookup_service_targets(
         &self,
         service_lookup: SrvLookup,
-    ) -> impl Iterator<Item = SocketAddrV6> + Send {
+    ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
                 .zip(service_lookup.into_iter())
@@ -443,6 +474,7 @@ mod test {
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     struct DnsServer {
@@ -844,10 +876,8 @@ mod test {
             .config(config_dropshot)
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
-                    "api-version"
-                        .parse::<reqwest::header::HeaderName>()
-                        .expect("api-version is a valid header name"),
-                    semver::Version::new(2, 0, 0),
+                    omicron_common::api::VERSION_HEADER,
+                    dns_server_api::VERSION_SOA_AND_NS,
                 ),
             )))
             .start()
@@ -886,7 +916,9 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(
+                Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>
+            )
             .build()
             .expect("Failed to build client");
 
@@ -966,7 +998,9 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(
+                Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>
+            )
             .build()
             .expect("Failed to build client");
 

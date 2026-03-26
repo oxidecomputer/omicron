@@ -7,7 +7,9 @@
 use super::BootstrapError;
 use super::RssAccessError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use super::config::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use super::http_entrypoints;
+use super::http_entrypoints_lockstep;
 use super::views::SledAgentResponse;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
@@ -15,7 +17,9 @@ use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
-use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::bootstrap::secret_retriever::{
+    HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
+};
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
@@ -33,19 +37,20 @@ use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
-use omicron_common::ledger;
-use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
+use omicron_ledger as ledger;
+use omicron_ledger::Ledger;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -153,8 +158,8 @@ pub enum StartError {
     #[error("Failed to bind sprocket server")]
     BindSprocketsServer(#[source] io::Error),
 
-    #[error("Failed to initialize lrtq node as learner: {0}")]
-    FailedLearnerInit(bootstore::NodeRequestError),
+    #[error("Failed to initialize lrtq node as learner")]
+    FailedLearnerInit(#[source] bootstore::NodeRequestError),
 }
 
 /// Server for the bootstrap agent.
@@ -165,6 +170,11 @@ pub enum StartError {
 pub struct Server {
     inner_task: JoinHandle<()>,
     bootstrap_http_server: HttpServer<BootstrapServerContext>,
+    // The lockstep server shares the same context as bootstrap_http_server.
+    // We hold this handle to keep the server running; the actual rack
+    // initialization calls go through bootstrap_http_server.app_private().
+    #[allow(dead_code)]
+    lockstep_http_server: HttpServer<BootstrapServerContext>,
 }
 
 impl Server {
@@ -215,11 +225,18 @@ impl Server {
             updates: config.updates.clone(),
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
+            trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
+            measurements: long_running_task_handles.measurements.clone(),
         };
-        let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
+        let bootstrap_http_server =
+            start_dropshot_server(bootstrap_context.clone())?;
 
-        // Start the currently-misnamed sprockets server, which listens for raw
-        // TCP connections (which should ultimately be secured via sprockets).
+        // Start the lockstep dropshot server for rack initialization.
+        let lockstep_http_server =
+            start_lockstep_dropshot_server(bootstrap_context)?;
+
+        // Create a channel for proxying sled-initialization requests that land
+        // in the sprockets server to our bootstrap agent `Inner` task.
         let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
 
         // We don't bother to wrap this bind in a
@@ -234,6 +251,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            long_running_task_handles.measurements.clone(),
             config.sprockets.clone(),
             &base_log,
         )
@@ -285,12 +303,12 @@ impl Server {
         };
         let inner_task = tokio::spawn(inner.run());
 
-        Ok(Self { inner_task, bootstrap_http_server })
+        Ok(Self { inner_task, bootstrap_http_server, lockstep_http_server })
     }
 
     pub fn start_rack_initialize(
         &self,
-        request: RackInitializeRequest,
+        request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
@@ -330,7 +348,7 @@ pub enum SledAgentServerStartError {
     #[error("Failed to commit sled agent request to ledger")]
     CommitToLedger(#[from] ledger::Error),
 
-    #[error("Failed to initialize this lrtq node as a learner: {0}")]
+    #[error("Failed to initialize this lrtq node as a learner")]
     FailedLearnerInit(#[from] bootstore::NodeRequestError),
 }
 
@@ -369,17 +387,22 @@ async fn start_sled_agent(
     // all the changes we've made (e.g., initializing LRTQ, informing the
     // storage manager about keys, advertising prefixes, ...).
 
-    // Initialize the secret retriever used by the `KeyManager`
+    // Configure the secret retriever used by the `KeyManager`
     if request.body.use_trust_quorum {
-        info!(log, "KeyManager: using lrtq secret retriever");
+        info!(log, "KeyManager: using TQ/LRTQ secret retriever");
         let salt = request.hash_rack_id();
-        LrtqOrHardcodedSecretRetriever::init_lrtq(
-            salt,
-            long_running_task_handles.bootstore.clone(),
-        )
+        long_running_task_handles.secret_retriever.init(
+            TqOrLrtqSecretRetriever::new(
+                salt,
+                long_running_task_handles.trust_quorum.clone(),
+                long_running_task_handles.bootstore.clone(),
+            ),
+        );
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
-        LrtqOrHardcodedSecretRetriever::init_hardcoded();
+        long_running_task_handles
+            .secret_retriever
+            .init(HardcodedSecretRetriever::new());
     }
 
     if request.body.use_trust_quorum && request.body.is_lrtq_learner {
@@ -450,6 +473,44 @@ fn start_dropshot_server(
         context.base_log.new(o!("component" => "dropshot (BootstrapAgent)"));
     let http_server = dropshot::ServerBuilder::new(
         http_entrypoints::api(),
+        context,
+        dropshot_log,
+    )
+    .config(dropshot_config)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            bootstrap_agent_api::latest_version(),
+        ),
+    )))
+    .start()
+    .map_err(|error| {
+        StartError::InitBootstrapDropshotServer(error.to_string())
+    })?;
+
+    Ok(http_server)
+}
+
+// Clippy doesn't like `StartError` due to
+// https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
+// is addressed.
+#[allow(clippy::result_large_err)]
+fn start_lockstep_dropshot_server(
+    context: BootstrapServerContext,
+) -> Result<HttpServer<BootstrapServerContext>, StartError> {
+    let mut dropshot_config = dropshot::ConfigDropshot::default();
+    dropshot_config.default_request_body_max_bytes = 1024 * 1024;
+    dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
+        context.global_zone_bootstrap_ip,
+        BOOTSTRAP_AGENT_LOCKSTEP_PORT,
+        0,
+        0,
+    ));
+    let dropshot_log = context
+        .base_log
+        .new(o!("component" => "dropshot (BootstrapAgentLockstep)"));
+    let http_server = dropshot::ServerBuilder::new(
+        http_entrypoints_lockstep::api(),
         context,
         dropshot_log,
     )
@@ -583,8 +644,15 @@ impl Inner {
                     Err(err) => {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
-                        error!(log, "Failed to start sled agent: {err:#}");
-                        panic!("Failed to start sled agent: {err:#}");
+                        error!(
+                            log,
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err)
+                        );
+                        panic!(
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err)
+                        );
                     }
                 };
                 _ = response_tx.send(response);
@@ -594,8 +662,8 @@ impl Inner {
                 let initial = server.sled_agent().start_request();
                 let response = if initial != &request {
                     Err(format!(
-                        "Sled Agent already running: 
-                        initital request = {:?}, 
+                        "Sled Agent already running:
+                        initital request = {:?},
                         current request: {:?}",
                         initial, request
                     ))

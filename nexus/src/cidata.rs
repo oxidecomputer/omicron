@@ -3,6 +3,7 @@ use nexus_db_queries::db::{identity::Resource, model::Instance};
 use num_integer::Integer;
 use omicron_common::api::external::Error;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::io::{self, Cursor, Write};
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ impl InstanceCiData for Instance {
             build_vfat(&meta_data, &self.user_data).map_err(|err| {
                 Error::internal_error(&format!(
                     "failed to create cidata volume: {}",
-                    err
+                    InlineErrorChain::new(&err)
                 ))
             })?;
         Ok(cidata)
@@ -91,7 +92,7 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
+    use nexus_types::external_api::instance::MAX_USER_DATA_BYTES;
 
     /// the fatfs crate has some unfortunate panics if you ask it to do
     /// incredibly stupid things, like format an empty disk or create a

@@ -3,9 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in Silo Users
 
-use super::role_builtin;
 use nexus_db_model as model;
-use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
+use nexus_types::identity::Asset;
+use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::api::external::ResourceType;
 use std::sync::LazyLock;
 
 /// Test user that's granted all privileges, used for automated testing and
@@ -15,7 +16,7 @@ use std::sync::LazyLock;
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_PRIVILEGED: LazyLock<model::SiloUser> =
     LazyLock::new(|| {
-        model::SiloUser::new(
+        model::SiloUser::new_api_only(
             DEFAULT_SILO_ID,
             // "4007" looks a bit like "root".
             "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
@@ -29,19 +30,17 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
         vec![
             // The "test-privileged" user gets the "admin" role on the sole
             // Fleet as well as the default Silo.
-            model::RoleAssignment::new(
-                model::IdentityType::SiloUser,
+            model::RoleAssignment::new_for_silo_user(
                 USER_TEST_PRIVILEGED.id(),
-                role_builtin::FLEET_ADMIN.resource_type,
+                ResourceType::Fleet,
                 *crate::FLEET_ID,
-                role_builtin::FLEET_ADMIN.role_name,
+                "admin",
             ),
-            model::RoleAssignment::new(
-                model::IdentityType::SiloUser,
+            model::RoleAssignment::new_for_silo_user(
                 USER_TEST_PRIVILEGED.id(),
-                role_builtin::SILO_ADMIN.resource_type,
+                ResourceType::Silo,
                 DEFAULT_SILO_ID,
-                role_builtin::SILO_ADMIN.role_name,
+                "admin",
             ),
         ]
     });
@@ -52,7 +51,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_UNPRIVILEGED: LazyLock<model::SiloUser> =
     LazyLock::new(|| {
-        model::SiloUser::new(
+        model::SiloUser::new_api_only(
             DEFAULT_SILO_ID,
             // 60001 is the decimal uid for "nobody" on Helios.
             "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
@@ -62,14 +61,14 @@ pub static USER_TEST_UNPRIVILEGED: LazyLock<model::SiloUser> =
 
 #[cfg(test)]
 mod test {
-    use super::super::assert_valid_uuid;
+    use super::super::assert_valid_typed_uuid;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
     use nexus_types::identity::Asset;
 
     #[test]
     fn test_silo_user_ids_are_valid() {
-        assert_valid_uuid(&USER_TEST_PRIVILEGED.id());
-        assert_valid_uuid(&USER_TEST_UNPRIVILEGED.id());
+        assert_valid_typed_uuid(&USER_TEST_PRIVILEGED.id());
+        assert_valid_typed_uuid(&USER_TEST_UNPRIVILEGED.id());
     }
 }

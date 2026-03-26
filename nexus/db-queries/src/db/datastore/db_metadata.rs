@@ -4,22 +4,81 @@
 
 //! [`DataStore`] methods on Database Metadata.
 
-use super::DataStore;
-use anyhow::{Context, bail, ensure};
+use super::{DataStore, DbConnection, IdentityCheckPolicy};
+use crate::authz;
+use crate::context::OpContext;
+
+use anyhow::Context;
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
+use futures::FutureExt;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::AllSchemaVersions;
+use nexus_db_model::DB_METADATA_NEXUS_SCHEMA_VERSION;
+use nexus_db_model::DbMetadataNexus;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::BackoffError;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
+
+/// Errors that can occur during handoff operations
+#[derive(Debug, thiserror::Error)]
+pub enum HandoffError {
+    #[error(
+        "Cannot perform handoff: \
+         {active_count} Nexus instance(s) are still active. \
+         All instances must be quiesced or not_yet before handoff can proceed."
+    )]
+    ActiveNexusInstancesExist { active_count: u32 },
+
+    #[error(
+        "Cannot perform handoff: \
+         Nexus {nexus_id} does not have a record in db_metadata_nexus table. \
+         This Nexus must be registered before it can become active."
+    )]
+    NexusNotRegistered { nexus_id: OmicronZoneUuid },
+
+    #[error(
+        "Cannot perform handoff: \
+         Nexus {nexus_id} is in state {current_state:?}. \
+         Must be in 'not_yet' state to become active."
+    )]
+    NexusInWrongState {
+        nexus_id: OmicronZoneUuid,
+        current_state: DbMetadataNexusState,
+    },
+}
+
+impl From<HandoffError> for Error {
+    fn from(err: HandoffError) -> Self {
+        use HandoffError::*;
+        match err {
+            // These conditions are all errors that may occur transiently, with
+            // handoff from old -> new Nexus, or with multiple Nexuses
+            // concurrently attempting to perform the handoff operation.
+            //
+            // As a result, each returns a "503" error indicating that a retry
+            // should be attempted.
+            ActiveNexusInstancesExist { .. }
+            | NexusNotRegistered { .. }
+            | NexusInWrongState { .. } => Error::unavail(&err.to_string()),
+        }
+    }
+}
 
 // A SchemaVersion which uses a pre-release value to indicate
 // "incremental progress".
@@ -99,33 +158,372 @@ fn skippable_version(
     return false;
 }
 
+/// Describes the state of the database access with respect to this Nexus
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum NexusAccess {
+    /// Nexus does not yet have access to the database, but can take over when
+    /// the current-generation Nexus instances quiesce.
+    DoesNotHaveAccessYet { nexus_id: OmicronZoneUuid },
+
+    /// Nexus has been permanently, explicitly locked out of the database.
+    LockedOut,
+
+    /// Nexus should have normal access to the database
+    ///
+    /// We have a record of this Nexus, and it should have access.
+    HasExplicitAccess,
+
+    /// Nexus should have normal access to the database
+    ///
+    /// We may or may not have a record of this Nexus, but it should have
+    /// access.
+    HasImplicitAccess,
+
+    /// Nexus does not yet have access to the database, but it might get
+    /// access later. Unlike [`Self::DoesNotHaveAccessYet`], this variant
+    /// is triggered because we don't have an explicit records.
+    ///
+    /// Although some Nexuses have records, this one doesn't. This can
+    /// mean that a Nexus zone has just been deployed, and booted before
+    /// its record has been populated.
+    NoRecordNoAccess,
+}
+
+/// Describes the state of the schema with respect this Nexus
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum SchemaStatus {
+    /// The database schema matches what we want
+    UpToDate,
+
+    /// The database schema is newer than what we want
+    NewerThanDesired,
+
+    /// The database schema is older than what we want
+    OlderThanDesired,
+
+    /// The database schema is older than what we want, and it's
+    /// so old, it does not know about the "db_metadata_nexus" table.
+    ///
+    /// We should avoid accessing the "db_metadata_nexus" tables to check
+    /// access, because the schema for these tables may not exist.
+    ///
+    /// TODO: This may be removed, once we're confident deployed systems
+    /// have upgraded past DB_METADATA_NEXUS_SCHEMA_VERSION.
+    OlderThanDesiredSkipAccessCheck,
+}
+
+/// Describes what setup is necessary for DataStore creation
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum DatastoreSetupAction {
+    /// Normal operation: The database is ready for usage
+    Ready,
+
+    /// Not ready for usage yet
+    ///
+    /// The database may be ready for usage once handoff has completed.
+    /// The `nexus_id` here may attempt to takeover the database if it has
+    /// a `db_metadata_nexus` record of "not_yet", and all other records
+    /// are either "not_yet" or "quiesced".
+    NeedsHandoff { nexus_id: OmicronZoneUuid },
+
+    /// Wait, then try to set up the datastore later.
+    ///
+    /// This can be triggered by observing incomplete data, such as missing
+    /// records in the "db_metadata_nexus" table, which may be populated by
+    /// waiting for an existing system to finish execution.
+    TryLater,
+
+    /// Start a schema update
+    Update,
+
+    /// Permanently refuse to use the database
+    Refuse,
+}
+
+/// Committment that the database is willing to perform a
+/// [`DatastoreSetupAction`] to a desired schema [`Version`].
+///
+/// Can be created through [`DataStore::check_schema_and_access`]
+#[derive(Clone)]
+pub struct ValidatedDatastoreSetupAction {
+    action: DatastoreSetupAction,
+    desired: Version,
+}
+
+impl ValidatedDatastoreSetupAction {
+    pub fn action(&self) -> &DatastoreSetupAction {
+        &self.action
+    }
+
+    pub fn desired_version(&self) -> &Version {
+        &self.desired
+    }
+
+    /// Test-only constructor to create a ValidatedDatastoreSetupAction with
+    /// any action, for testing error handling in update_schema.
+    #[cfg(test)]
+    fn new_for_test(action: DatastoreSetupAction, desired: Version) -> Self {
+        Self { action, desired }
+    }
+}
+
+impl DatastoreSetupAction {
+    // Interprets the combination of access and status to decide what action
+    // should be taken.
+    fn new(access: NexusAccess, status: SchemaStatus) -> Self {
+        use NexusAccess::*;
+        use SchemaStatus::*;
+
+        match (access, status) {
+            // Nexus has been explicitly locked-out of using the database
+            (LockedOut, _) => Self::Refuse,
+
+            // The schema updated beyond what we want, do not use it.
+            (_, NewerThanDesired) => Self::Refuse,
+
+            // If we aren't sure if we have access yet, try again later.
+            (
+                NoRecordNoAccess,
+                UpToDate | OlderThanDesired | OlderThanDesiredSkipAccessCheck,
+            ) => Self::TryLater,
+
+            // If we don't have access yet, but could do something once handoff
+            // occurs, then handoff is needed
+            (
+                DoesNotHaveAccessYet { nexus_id },
+                UpToDate | OlderThanDesired | OlderThanDesiredSkipAccessCheck,
+            ) => Self::NeedsHandoff { nexus_id },
+
+            // This is the most "normal" case: Nexus should have access to the
+            // database, and the schema matches what it wants.
+            (HasExplicitAccess | HasImplicitAccess, UpToDate) => Self::Ready,
+
+            // If this Nexus is allowed to access the schema, but it looks
+            // older than what we expect, we'll need to update the schema to
+            // use it.
+            (
+                HasExplicitAccess | HasImplicitAccess,
+                OlderThanDesired | OlderThanDesiredSkipAccessCheck,
+            ) => Self::Update,
+        }
+    }
+}
+
 impl DataStore {
-    // Ensures that the database schema matches "desired_version".
-    //
-    // - Updating the schema makes the database incompatible with older
-    // versions of Nexus, which are not running "desired_version".
-    // - This is a one-way operation that cannot be undone.
-    // - The caller is responsible for ensuring that the new version is valid,
-    // and that all running Nexus instances can understand the new schema
-    // version.
-    //
-    // TODO: This function assumes that all concurrently executing Nexus
-    // instances on the rack are operating on the same version of software.
-    // If that assumption is broken, nothing would stop a "new deployment"
-    // from making a change that invalidates the queries used by an "old
-    // deployment".
-    pub async fn ensure_schema(
+    /// Returns [`DbMetadataNexus`] records in any of the supplied states.
+    pub async fn get_db_metadata_nexus_in_state(
         &self,
-        log: &Logger,
+        opctx: &OpContext,
+        states: Vec<DbMetadataNexusState>,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        dsl::db_metadata_nexus
+            .filter(dsl::state.eq_any(states.to_vec()))
+            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    // Checks if the specified Nexus has access to the database.
+    async fn check_nexus_access(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<NexusAccess, anyhow::Error> {
+        // Check if any "db_metadata_nexus" rows exist.
+        // If they don't exist, treat the database as having access.
+        //
+        // This handles the case for fresh deployments where RSS hasn't
+        // populated the table yet (we need access to finish
+        // "rack_initialization").
+        //
+        // After initialization, this conditional should never trigger
+        // again.
+        let any_records_exist = self.database_nexus_access_any_exist().await?;
+        if !any_records_exist {
+            warn!(
+                &self.log,
+                "No db_metadata_nexus records exist - skipping access check";
+                "nexus_id" => ?nexus_id,
+                "explanation" => "This is expected during initial deployment \
+                                  or before migration"
+            );
+            return Ok(NexusAccess::HasImplicitAccess);
+        }
+
+        // Records exist, so enforce the identity check
+        let Some(state) =
+            self.database_nexus_access(nexus_id).await?.map(|s| s.state())
+        else {
+            let msg = "Nexus does not have access to the database (no \
+                       db_metadata_nexus record)";
+            warn!(&self.log, "{msg}"; "nexus_id" => ?nexus_id);
+            return Ok(NexusAccess::NoRecordNoAccess);
+        };
+
+        let status = match state {
+            DbMetadataNexusState::Active => {
+                info!(
+                    &self.log,
+                    "Nexus has access to the database";
+                    "nexus_id" => ?nexus_id
+                );
+                NexusAccess::HasExplicitAccess
+            }
+            DbMetadataNexusState::NotYet => {
+                info!(
+                    &self.log,
+                    "Nexus does not yet have access to the database";
+                    "nexus_id" => ?nexus_id
+                );
+                NexusAccess::DoesNotHaveAccessYet { nexus_id }
+            }
+            DbMetadataNexusState::Quiesced => {
+                let msg = "Nexus locked out of database access (quiesced)";
+                error!(&self.log, "{msg}"; "nexus_id" => ?nexus_id);
+                NexusAccess::LockedOut
+            }
+        };
+        Ok(status)
+    }
+
+    // Checks the schema against a desired version.
+    async fn check_schema(
+        &self,
         desired_version: Version,
-        all_versions: Option<&AllSchemaVersions>,
-    ) -> Result<(), anyhow::Error> {
-        let (found_version, found_target_version) = self
+    ) -> Result<SchemaStatus, anyhow::Error> {
+        let (found_version, _found_target_version) = self
             .database_schema_version()
             .await
             .context("Cannot read database schema version")?;
 
-        let log = log.new(o!(
+        let log = self.log.new(o!(
+            "found_version" => found_version.to_string(),
+            "desired_version" => desired_version.to_string(),
+        ));
+
+        use std::cmp::Ordering;
+        match found_version.cmp(&desired_version) {
+            Ordering::Less => {
+                warn!(log, "Found schema version is older than desired");
+                if found_version < DB_METADATA_NEXUS_SCHEMA_VERSION {
+                    Ok(SchemaStatus::OlderThanDesiredSkipAccessCheck)
+                } else {
+                    Ok(SchemaStatus::OlderThanDesired)
+                }
+            }
+            Ordering::Equal => {
+                info!(log, "Database schema version is up to date");
+                Ok(SchemaStatus::UpToDate)
+            }
+            Ordering::Greater => {
+                error!(log, "Found schema version is newer than desired");
+                Ok(SchemaStatus::NewerThanDesired)
+            }
+        }
+    }
+
+    /// Compares the state of the schema with the expectations of the
+    /// currently running Nexus.
+    ///
+    /// - `identity_check`: Describes whether or not the identity of the
+    /// calling Nexus should be validated before returning database access
+    /// - `desired_version`: The version of the database schema this
+    /// Nexus wants.
+    pub async fn check_schema_and_access(
+        &self,
+        identity_check: IdentityCheckPolicy,
+        desired_version: Version,
+    ) -> Result<ValidatedDatastoreSetupAction, anyhow::Error> {
+        let schema_status = self.check_schema(desired_version.clone()).await?;
+
+        let nexus_access = match identity_check {
+            IdentityCheckPolicy::CheckAndTakeover { nexus_id } => {
+                match schema_status {
+                    // If we don't think the "db_metadata_nexus" tables exist in
+                    // the schema yet, treat them as implicitly having access.
+                    //
+                    // TODO: This may be removed, once we're confident deployed
+                    // systems have upgraded past
+                    // DB_METADATA_NEXUS_SCHEMA_VERSION.
+                    SchemaStatus::OlderThanDesiredSkipAccessCheck => {
+                        NexusAccess::HasImplicitAccess
+                    }
+                    _ => self.check_nexus_access(nexus_id).await?,
+                }
+            }
+            IdentityCheckPolicy::DontCare => {
+                // If a "nexus_id" was not supplied, skip the check, and treat
+                // it as having access.
+                //
+                // This is necessary for tools which access the schema without a
+                // running Nexus, such as the schema-updater binary.
+                NexusAccess::HasImplicitAccess
+            }
+        };
+
+        Ok(ValidatedDatastoreSetupAction {
+            action: DatastoreSetupAction::new(nexus_access, schema_status),
+            desired: desired_version,
+        })
+    }
+
+    /// Ensures that the database schema matches `desired_version`.
+    ///
+    /// - `validated_action`: A [ValidatedDatastoreSetupAction], indicating that
+    /// [Self::check_schema_and_access] has already been called.
+    /// - `all_versions`: A description of all schema versions between
+    /// "whatever is in the DB" and `desired_version`, instructing
+    /// how to perform an update.
+    ///
+    /// Returns a [BackoffError] to indicate whether the error is transient
+    /// (e.g., database connectivity issues) or permanent (e.g., version
+    /// mismatch that requires code changes).
+    pub async fn update_schema(
+        &self,
+        validated_action: ValidatedDatastoreSetupAction,
+        all_versions: Option<&AllSchemaVersions>,
+    ) -> Result<(), BackoffError<anyhow::Error>> {
+        let action = validated_action.action();
+
+        match action {
+            DatastoreSetupAction::Ready => {
+                // Permanent: API misuse - caller should not request update
+                // when schema is already at desired version.
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "No schema update is necessary"
+                )));
+            }
+            DatastoreSetupAction::Update => (),
+            DatastoreSetupAction::NeedsHandoff { .. } => {
+                return Err(BackoffError::transient(anyhow::anyhow!(
+                    "Schema update requested, but handoff is needed first"
+                )));
+            }
+            DatastoreSetupAction::TryLater => {
+                return Err(BackoffError::transient(anyhow::anyhow!(
+                    "Schema update requested, but should try later"
+                )));
+            }
+            DatastoreSetupAction::Refuse => {
+                // Permanent: Nexus has been explicitly locked out of using
+                // the database, or the schema is newer than what we support.
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "Schema update requested, but database should not be used"
+                )));
+            }
+        }
+
+        let desired_version = validated_action.desired_version().clone();
+        let (found_version, found_target_version) = self
+            .database_schema_version()
+            .await
+            .context("Cannot read database schema version")
+            .map_err(BackoffError::transient)?;
+
+        let log = self.log.new(o!(
             "found_version" => found_version.to_string(),
             "desired_version" => desired_version.to_string(),
         ));
@@ -149,21 +547,33 @@ impl DataStore {
                 log,
                 "Found schema version is newer than desired schema version";
             );
-            bail!(
+            // Permanent: Database was upgraded by newer software. This Nexus
+            // binary must be upgraded to work with the newer schema.
+            return Err(BackoffError::permanent(anyhow::anyhow!(
                 "Found schema version ({}) is newer than desired schema \
                 version ({})",
                 found_version,
                 desired_version,
-            )
+            )));
         }
 
+        // Permanent: Schema updates require migration files. If not configured,
+        // operator must fix the version mismatch (in tests: update dbinit.sql).
         let Some(all_versions) = all_versions else {
             error!(
                 log,
-                "Database schema version is out of date, but automatic update \
-                is disabled",
+                "Database schema version ({}) does not match expected ({}), \
+                and schema updates are not enabled. If you are running tests, \
+                ensure the version in dbinit.sql matches SCHEMA_VERSION.",
+                found_version,
+                desired_version,
             );
-            bail!("Schema is out of date but automatic update is disabled");
+            return Err(BackoffError::permanent(anyhow::anyhow!(
+                "Database schema version ({found_version}) does not match \
+                expected ({desired_version}), and schema updates are not \
+                enabled. If you modified dbinit.sql, you may need to update \
+                SCHEMA_VERSION to match.",
+            )));
         };
 
         // If we're here, we know the following:
@@ -172,16 +582,21 @@ impl DataStore {
         //   didn't when we read it moments ago).
         // - We should attempt to automatically upgrade the schema.
         info!(log, "Database schema is out of date.  Attempting upgrade.");
-        ensure!(
-            all_versions.contains_version(&found_version),
-            "Found schema version {found_version} was not found",
-        );
+        if !all_versions.contains_version(&found_version) {
+            // Permanent: DB has an unknown version.
+            // Known versions should be static, and determined at compile time.
+            return Err(BackoffError::permanent(anyhow::anyhow!(
+                "Found schema version {found_version} was not found in known versions",
+            )));
+        }
 
         // TODO: Test this?
-        ensure!(
-            all_versions.contains_version(&desired_version),
-            "Desired version {desired_version} was not found",
-        );
+        if !all_versions.contains_version(&desired_version) {
+            // Permanent: SCHEMA_VERSION not in known versions is a code bug.
+            return Err(BackoffError::permanent(anyhow::anyhow!(
+                "Desired version {desired_version} was not found in known versions",
+            )));
+        }
 
         let target_versions: Vec<&SchemaVersion> = all_versions
             .versions_range((
@@ -204,7 +619,11 @@ impl DataStore {
 
             // For the rationale here, see: StepSemverVersion::new.
             if target_version.semver().pre != semver::Prerelease::EMPTY {
-                bail!("Cannot upgrade to version which includes pre-release");
+                // Permanent: Schema version files are fixed; pre-release
+                // versions in the migration path indicate a code bug.
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "Cannot upgrade to version which includes pre-release"
+                )));
             }
 
             // Iterate over each individual file that comprises a schema change.
@@ -218,8 +637,11 @@ impl DataStore {
             let mut last_step_version = None;
 
             for (i, step) in target_version.upgrade_steps().enumerate() {
+                // Permanent: StepSemverVersion::new only fails if semver
+                // rejects "step.N" format, which should never happen.
                 let target_step =
-                    StepSemverVersion::new(&target_version.semver(), i)?;
+                    StepSemverVersion::new(&target_version.semver(), i)
+                        .map_err(BackoffError::permanent)?;
                 let log = log.new(o!("target_step.version" => target_step.version.to_string()));
 
                 self.apply_step_version_update(
@@ -229,7 +651,8 @@ impl DataStore {
                     &current_version,
                     &found_target_version,
                 )
-                .await?;
+                .await
+                .map_err(BackoffError::transient)?;
 
                 last_step_version = Some(target_step.clone());
             }
@@ -261,11 +684,17 @@ impl DataStore {
             // Now that the schema change has completed, set the following:
             // - db_metadata.version = new version
             // - db_metadata.target_version = NULL
-            let last_step_version = last_step_version
-                .ok_or_else(|| anyhow::anyhow!("Missing final step version"))?;
+            //
+            // Permanent: A schema version with zero upgrade steps is a code bug.
+            let last_step_version = last_step_version.ok_or_else(|| {
+                BackoffError::permanent(anyhow::anyhow!(
+                    "Missing final step version"
+                ))
+            })?;
             self.finalize_schema_update(&current_version, &last_step_version)
                 .await
-                .context("Failed to finalize schema update")?;
+                .context("Failed to finalize schema update")
+                .map_err(BackoffError::transient)?;
 
             info!(
                 log,
@@ -319,25 +748,437 @@ impl DataStore {
         );
 
         // Perform the schema change.
-        self.apply_schema_update(
-            &current_version,
-            &target_step.version,
-            step.sql(),
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "update to {}, applying step {:?}",
-                target_step.version,
-                step.label()
-            )
-        })?;
+        self.apply_schema_update(&current_version, &target_step.version, step)
+            .await
+            .with_context(|| {
+                format!(
+                    "update to {}, applying step {:?}",
+                    target_step.version,
+                    step.label()
+                )
+            })?;
 
         info!(
             log,
             "Applied subcomponent of schema upgrade";
         );
+
+        // Verify that backfill-prone schema changes completed.
+        //
+        // CockroachDB applies some DDL asynchronously (e.g., CREATE INDEX
+        // adds metadata synchronously but backfills data asynchronously).
+        // If the backfill fails (e.g., OOM), the index is silently rolled
+        // back. We run a verification query in a **separate transaction**
+        // to confirm the change actually landed.
+        if step.verification_sql().is_some() {
+            self.verify_schema_change(log, step).await.with_context(|| {
+                format!(
+                    "update to {}, verifying step {:?}",
+                    target_step.version,
+                    step.label()
+                )
+            })?;
+        }
+
         Ok(())
+    }
+
+    /// Verify that a backfill-prone schema change completed successfully.
+    ///
+    /// Runs pre-computed verification SQL (from a `.verify.sql` file) in a
+    /// **separate transaction** from the DDL that was just applied.
+    /// The verification SQL is generated at test time by parsing each
+    /// migration and detecting operations that involve async backfill in
+    /// CockroachDB (CREATE INDEX, ALTER COLUMN SET NOT NULL, ADD CONSTRAINT,
+    /// ADD COLUMN with backfill).
+    ///
+    /// If verification fails, the error propagates immediately — the outer
+    /// startup retry loop will re-attempt the entire migration.
+    async fn verify_schema_change(
+        &self,
+        log: &Logger,
+        step: &SchemaUpgradeStep,
+    ) -> Result<(), anyhow::Error> {
+        let verify_sql = step.verification_sql().expect(
+            "verify_schema_change called on a step with no verification SQL",
+        );
+        info!(
+            log,
+            "Verifying schema change";
+            "step" => step.label(),
+        );
+        let conn = self
+            .pool_connection_unauthorized()
+            .await
+            .context("verification: failed to get connection")?;
+        conn.batch_execute_async(verify_sql).await.with_context(|| {
+            format!("schema change verification failed for {:?}", step.label())
+        })?;
+        info!(
+            log,
+            "Schema change verified";
+            "step" => step.label(),
+        );
+        Ok(())
+    }
+
+    /// Returns information about access for all of the given Nexus ids
+    ///
+    /// This set is assumed to be pretty small.
+    pub async fn database_nexus_access_all(
+        &self,
+        opctx: &OpContext,
+        nexus_ids: &BTreeSet<OmicronZoneUuid>,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let db_nexus_ids: BTreeSet<_> = nexus_ids
+            .iter()
+            .copied()
+            .map(nexus_db_model::to_db_typed_uuid)
+            .collect();
+        dsl::db_metadata_nexus
+            .filter(dsl::nexus_id.eq_any(db_nexus_ids))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    pub async fn database_nexus_access_update_blueprint(
+        &self,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+        blueprint_id: Option<BlueprintUuid>,
+    ) -> Result<usize, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let blueprint_id = blueprint_id.map(nexus_db_model::to_db_typed_uuid);
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            // To be conservative, we'll only update this value if the record is
+            // currently active.  There's no reason it should ever not be active
+            // if we're calling this function and if there were an easy way to
+            // return an error in that case, we'd just do that.
+            .filter(dsl::state.eq(DbMetadataNexusState::Active))
+            .set(dsl::last_drained_blueprint_id.eq(blueprint_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
+    /// Updates the state for the given Nexus id to "quiesced"
+    pub async fn database_nexus_access_update_quiesced(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<usize, Error> {
+        // A traditional authz check is not possible here because we've quiesced
+        // the DataStore, so no further connections are ordinarily available.
+        // (We use the lower-level pool interface to bypass that.)
+        let conn = self.pool.claim_quiesced().await?;
+
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
+    // Returns the access this Nexus has to the database
+    async fn database_nexus_access(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<Option<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_access: Option<DbMetadataNexus> = dsl::db_metadata_nexus
+            .filter(
+                dsl::nexus_id.eq(nexus_db_model::to_db_typed_uuid(nexus_id)),
+            )
+            .first_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(nexus_access)
+    }
+
+    // Checks if any db_metadata_nexus records exist in the database
+    async fn database_nexus_access_any_exist(&self) -> Result<bool, Error> {
+        let conn = self.pool_connection_unauthorized().await?;
+        Self::database_nexus_access_any_exist_on_connection(&conn).await
+    }
+
+    // Checks if any db_metadata_nexus records exist in the database using an
+    // existing connection
+    async fn database_nexus_access_any_exist_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<bool, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let exists: bool = diesel::select(diesel::dsl::exists(
+            dsl::db_metadata_nexus.select(dsl::nexus_id),
+        ))
+        .get_result_async(conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(exists)
+    }
+
+    /// Deletes the "db_metadata_nexus" record for a Nexus ID, if it exists.
+    pub async fn database_nexus_access_delete(
+        &self,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+
+        diesel::delete(
+            dsl::db_metadata_nexus
+                .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid())),
+        )
+        .execute_async(conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Propagate the nexus records to the database if and only if
+    /// the blueprint is the current target.
+    ///
+    /// If any of these records already exist, they are unmodified.
+    pub async fn database_nexus_access_create(
+        &self,
+        opctx: &OpContext,
+        blueprint_id: BlueprintUuid,
+        active: &BTreeSet<OmicronZoneUuid>,
+        not_yet: &BTreeSet<OmicronZoneUuid>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let active_nexuses = active
+            .into_iter()
+            .map(|id| DbMetadataNexus::new(*id, DbMetadataNexusState::Active))
+            .collect::<Vec<_>>();
+        let not_yet_nexuses = not_yet
+            .into_iter()
+            .map(|id| DbMetadataNexus::new(*id, DbMetadataNexusState::NotYet))
+            .collect::<Vec<_>>();
+
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        self.transaction_if_current_blueprint_is(
+            &conn,
+            "database_nexus_access_create",
+            opctx,
+            blueprint_id,
+            |conn| {
+                let nexus_records =
+                    [&active_nexuses[..], &not_yet_nexuses[..]].concat();
+                async move {
+                    use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+                    diesel::insert_into(dsl::db_metadata_nexus)
+                        .values(nexus_records)
+                        .on_conflict(dsl::nexus_id)
+                        .do_nothing()
+                        .execute_async(conn)
+                        .await?;
+                    Ok(())
+                }
+                .boxed()
+            },
+        )
+        .await
+    }
+
+    // Registers a Nexus instance as having active access to the database
+    #[cfg(test)]
+    async fn database_nexus_access_insert(
+        &self,
+        nexus_id: OmicronZoneUuid,
+        state: DbMetadataNexusState,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let new_nexus = DbMetadataNexus::new(nexus_id, state);
+
+        diesel::insert_into(dsl::db_metadata_nexus)
+            .values(new_nexus)
+            .on_conflict(dsl::nexus_id)
+            .do_update()
+            .set(dsl::state.eq(diesel::upsert::excluded(dsl::state)))
+            .execute_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Initializes Nexus database access records from a blueprint using an
+    /// existing connection
+    ///
+    /// This function finds all Nexus zones in the given blueprint and creates
+    /// active database access records for them. Used during RSS rack setup.
+    ///
+    /// Returns an error if:
+    /// - Any db_metadata_nexus records already exist (should only be called
+    /// during initial setup)
+    pub async fn initialize_nexus_access_from_blueprint_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        nexus_zone_ids: Vec<OmicronZoneUuid>,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        // Ensure no db_metadata_nexus records already exist
+        let any_records_exist =
+            Self::database_nexus_access_any_exist_on_connection(conn).await?;
+        if any_records_exist {
+            return Err(Error::conflict(
+                "Cannot initialize Nexus access from blueprint: \
+                db_metadata_nexus records already exist. This function should \
+                only be called during initial rack setup.",
+            ));
+        }
+
+        // Create db_metadata_nexus records for all Nexus zones
+        let new_nexuses: Vec<DbMetadataNexus> = nexus_zone_ids
+            .iter()
+            .map(|&nexus_id| {
+                DbMetadataNexus::new(nexus_id, DbMetadataNexusState::Active)
+            })
+            .collect();
+
+        diesel::insert_into(dsl::db_metadata_nexus)
+            .values(new_nexuses)
+            .execute_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    // Implementation function for attempt_handoff that runs within a
+    // transaction
+    //
+    // This function must be executed from a transaction context to be safe.
+    async fn attempt_handoff_impl(
+        conn: async_bb8_diesel::Connection<DbConnection>,
+        nexus_id: OmicronZoneUuid,
+        err: OptionalError<HandoffError>,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        // Before proceeding, all records must be in the "quiesced" or "not_yet"
+        // states.
+        //
+        // We explicitly look for any records violating this, rather than
+        // explicitly looking for "active" records, as to protect ourselves from
+        // future states being added over time.
+        //
+        // There is no concern of time-of-check-to-time-of-use bugs because
+        // this function must be executed within a transaction.
+        let active_count: nexus_db_model::SqlU32 = dsl::db_metadata_nexus
+            .filter(
+                dsl::state
+                    .ne(DbMetadataNexusState::Quiesced)
+                    .and(dsl::state.ne(DbMetadataNexusState::NotYet)),
+            )
+            .count()
+            .get_result_async(&conn)
+            .await?;
+        let active_count: u32 = active_count.0;
+        if active_count > 0 {
+            return Err(err.bail(HandoffError::ActiveNexusInstancesExist {
+                active_count,
+            }));
+        }
+
+        // Check that our nexus has a "not_yet" record
+        //
+        // Only read the "state" field to avoid reading the rest of the struct,
+        // in case additional columns are added over time.
+        let our_nexus_state: Option<DbMetadataNexusState> =
+            dsl::db_metadata_nexus
+                .filter(
+                    dsl::nexus_id
+                        .eq(nexus_db_model::to_db_typed_uuid(nexus_id)),
+                )
+                .select(dsl::state)
+                .get_result_async(&conn)
+                .await
+                .optional()?;
+        let Some(our_state) = our_nexus_state else {
+            return Err(err.bail(HandoffError::NexusNotRegistered { nexus_id }));
+        };
+        if our_state != DbMetadataNexusState::NotYet {
+            return Err(err.bail(HandoffError::NexusInWrongState {
+                nexus_id,
+                current_state: our_state,
+            }));
+        }
+
+        // Update all "not_yet" records to "active"
+        diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::state.eq(DbMetadataNexusState::NotYet))
+            .set(dsl::state.eq(DbMetadataNexusState::Active))
+            .execute_async(&conn)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Attempts to perform a handoff to activate this Nexus for database
+    /// access.
+    ///
+    /// This function checks that:
+    /// 1. ALL records in db_metadata_nexus are in "not_yet" or "quiesced"
+    ///    states
+    /// 2. The specified nexus_id has a record which is "not_yet"
+    ///
+    /// If both conditions are met, it updates ALL "not_yet" records to
+    /// "active". These operations are performed transactionally.
+    ///
+    /// Returns an error if:
+    /// - Any record is in "active" state
+    /// - The specified nexus_id doesn't have a "not_yet" record
+    /// - Database transaction fails
+    pub async fn attempt_handoff(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<(), Error> {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+
+        self.transaction_retry_wrapper("attempt_handoff")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::attempt_handoff_impl(conn, nexus_id, err).await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err.into()
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn database_schema_version(
@@ -421,36 +1262,101 @@ impl DataStore {
 
     // Applies a schema update, using raw SQL read from a caller-supplied
     // configuration file.
+    //
+    // By default, steps are executed within a transaction, combining a version
+    // validation query with the step's own logic. Certain CockroachDB
+    // statements like `SET CLUSTER SETTING` cannot appear inside a
+    // multi-statement transaction, so we treat those as special cases. For
+    // non-transactional steps, the version validation runs in its own
+    // transaction first, then the SQL is executed directly.
+    //
+    // Non-transactional schema updates have significant TOCTOU implications.
+    // For more, see the doc comment on `NON_TRANSACTIONAL_SUFFIX` in
+    // `nexus/db-model/src/schema_versions.rs`.
     async fn apply_schema_update(
         &self,
         current: &Version,
         target: &Version,
-        sql: &str,
+        step: &SchemaUpgradeStep,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_unauthorized().await?;
+        let sql = step.sql();
+        let validate_query = version_validation_query(current, target);
 
-        let result = self.transaction_retry_wrapper("apply_schema_update")
-            .transaction(&conn, |conn| async move {
-                if *target != EARLIEST_SUPPORTED_VERSION {
-                    let validate_version_query = format!("SELECT CAST(\
-                            IF(\
-                                (\
-                                    SELECT version = '{current}' and target_version = '{target}'\
-                                    FROM omicron.public.db_metadata WHERE singleton = true\
-                                ),\
-                                'true',\
-                                'Invalid starting version for schema change'\
-                            ) AS BOOL\
-                        );");
-                    conn.batch_execute_async(&validate_version_query).await?;
+        if step.is_non_transactional() {
+            // Validate the version in its own transaction, then execute
+            // the SQL outside any transaction.
+            if *target != EARLIEST_SUPPORTED_VERSION {
+                let result = self
+                    .transaction_retry_wrapper("apply_schema_update_validate")
+                    .transaction(&conn, move |conn| {
+                        let validate_query = validate_query.clone();
+                        async move {
+                            conn.batch_execute_async(&validate_query).await?;
+                            Ok(())
+                        }
+                    })
+                    .await;
+                match result {
+                    Ok(()) => {}
+                    Err(e) => {
+                        error!(
+                            self.log,
+                            "non-transactional schema update: \
+                             version validation failed";
+                            "step" => step.label(),
+                            InlineErrorChain::new(&e),
+                        );
+                        return Err(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Server,
+                        ));
+                    }
                 }
-                conn.batch_execute_async(&sql).await?;
-                Ok(())
-            }).await;
+            }
 
-        match result {
-            Ok(()) => Ok(()),
-            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+            // It's worth noting that batch_execute_async is outside of
+            // transaction_retry_wrapper and does not benefit from retry logic.
+            // But in the case of schema migrations, that's fine because we'll
+            // bail out and perform a retry at a higher level anyway.
+            conn.batch_execute_async(sql).await.map_err(|e| {
+                error!(
+                    self.log,
+                    "non-transactional schema update: execution failed";
+                    "step" => step.label(),
+                    InlineErrorChain::new(&e),
+                );
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+
+            Ok(())
+        } else {
+            let result = self
+                .transaction_retry_wrapper("apply_schema_update")
+                .transaction(&conn, |conn| {
+                    let validate_query = validate_query.clone();
+                    async move {
+                        if *target != EARLIEST_SUPPORTED_VERSION {
+                            conn.batch_execute_async(&validate_query).await?;
+                        }
+                        conn.batch_execute_async(&sql).await?;
+                        Ok(())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "schema update: execution failed";
+                        "step" => step.label(),
+                        InlineErrorChain::new(&e),
+                    );
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
+                }
+            }
         }
     }
 
@@ -491,9 +1397,27 @@ impl DataStore {
     }
 }
 
+/// Build a SQL query that validates the current schema version before applying
+/// a migration step.
+fn version_validation_query(current: &Version, target: &Version) -> String {
+    format!(
+        "SELECT CAST(\
+            IF(\
+                (\
+                    SELECT version = '{current}' and target_version = '{target}'\
+                    FROM omicron.public.db_metadata WHERE singleton = true\
+                ),\
+                'true',\
+                'Invalid starting version for schema change'\
+            ) AS BOOL\
+        );"
+    )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::IdentityCheckPolicy;
     use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
@@ -503,15 +1427,165 @@ mod test {
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
     #[tokio::test]
-    async fn ensure_schema_is_current_version() {
-        let logctx = dev::test_setup_log("ensure_schema_is_current_version");
+    async fn check_schema_is_current_version() {
+        let logctx = dev::test_setup_log("check_schema_is_current_version");
         let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
         let datastore = db.datastore();
 
-        datastore
-            .ensure_schema(&logctx.log, SCHEMA_VERSION, None)
+        let checked_action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
             .await
-            .expect("Failed to ensure schema");
+            .expect("Failed to check schema and access");
+
+        assert!(
+            matches!(checked_action.action(), DatastoreSetupAction::Ready),
+            "Unexpected action: {:?}",
+            checked_action.action(),
+        );
+        assert_eq!(
+            checked_action.desired_version(),
+            &SCHEMA_VERSION,
+            "Unexpected desired version: {}",
+            checked_action.desired_version()
+        );
+
+        // Should return a permanent error (API misuse).
+        let err =
+            datastore.update_schema(checked_action, None).await.expect_err(
+                "Should not be able to update schema that's already up-to-date",
+            );
+        assert!(
+            matches!(err, BackoffError::Permanent(_)),
+            "Expected permanent error, got: {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Confirms that when schema version mismatches and updates are disabled,
+    // we get a permanent error (not transient), so retry loops fail fast.
+    // This is the main fix for issue #9641.
+    #[tokio::test]
+    async fn update_schema_version_mismatch_without_config_is_permanent() {
+        let logctx = dev::test_setup_log(
+            "update_schema_version_mismatch_without_config_is_permanent",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        // Set database to an older version to create a mismatch.
+        let old_version = Version::new(0, 0, 0);
+        use nexus_db_schema::schema::db_metadata::dsl;
+        diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
+            .set(dsl::version.eq(old_version.to_string()))
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to set version");
+
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), pool.clone());
+        let checked_action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+
+        // Should indicate an update is needed.
+        assert!(
+            matches!(checked_action.action(), DatastoreSetupAction::Update),
+            "Expected Update action, got: {:?}",
+            checked_action.action(),
+        );
+
+        // Call update_schema with None for all_versions (updates disabled).
+        // This should return a PERMANENT error, not transient.
+        let err =
+            datastore.update_schema(checked_action, None).await.expect_err(
+                "Should fail when updates disabled with version mismatch",
+            );
+
+        assert!(
+            matches!(err, BackoffError::Permanent(_)),
+            "Expected permanent error for version mismatch without config, got: {err:?}"
+        );
+
+        // Verify the error message mentions the version mismatch.
+        let err_msg = match &err {
+            BackoffError::Permanent(e) => e.to_string(),
+            _ => panic!("Expected permanent error"),
+        };
+        assert!(
+            err_msg.contains(&old_version.to_string()),
+            "Error should mention found version: {err_msg}"
+        );
+        assert!(
+            err_msg.contains(&SCHEMA_VERSION.to_string()),
+            "Error should mention expected version: {err_msg}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Verifies that calling update_schema with NeedsHandoff action returns
+    // a transient error, allowing retry loops to continue.
+    #[tokio::test]
+    async fn update_schema_needs_handoff_is_transient() {
+        let logctx =
+            dev::test_setup_log("update_schema_needs_handoff_is_transient");
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let action = ValidatedDatastoreSetupAction::new_for_test(
+            DatastoreSetupAction::NeedsHandoff { nexus_id },
+            SCHEMA_VERSION,
+        );
+
+        let err = datastore
+            .update_schema(action, None)
+            .await
+            .expect_err("Should fail with NeedsHandoff action");
+
+        assert!(
+            matches!(err, BackoffError::Transient { .. }),
+            "NeedsHandoff should return transient error, got: {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Verifies that calling update_schema with TryLater action returns
+    // a transient error, allowing retry loops to continue.
+    #[tokio::test]
+    async fn update_schema_try_later_is_transient() {
+        let logctx =
+            dev::test_setup_log("update_schema_try_later_is_transient");
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+
+        let action = ValidatedDatastoreSetupAction::new_for_test(
+            DatastoreSetupAction::TryLater,
+            SCHEMA_VERSION,
+        );
+
+        let err = datastore
+            .update_schema(action, None)
+            .await
+            .expect_err("Should fail with TryLater action");
+
+        assert!(
+            matches!(err, BackoffError::Transient { .. }),
+            "TryLater should return transient error, got: {err:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -614,8 +1688,13 @@ mod test {
             let log = log.clone();
             let pool = pool.clone();
             tokio::task::spawn(async move {
-                let datastore =
-                    DataStore::new(&log, pool, Some(&all_versions)).await?;
+                let datastore = DataStore::new(
+                    &log,
+                    pool,
+                    Some(&all_versions),
+                    IdentityCheckPolicy::DontCare,
+                )
+                .await?;
 
                 // This is the crux of this test: confirm that, as each
                 // migration completes, it's not possible to see any artifacts
@@ -742,13 +1821,35 @@ mod test {
 
         // Manually construct the datastore to avoid the backoff timeout.
         // We want to trigger errors, but have no need to wait.
+
         let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
-        while let Err(e) = datastore
-            .ensure_schema(&log, SCHEMA_VERSION, Some(&all_versions))
+        let checked_action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
             .await
-        {
-            warn!(log, "Failed to ensure schema"; "err" => %e);
-            continue;
+            .expect("Failed to check schema and access");
+
+        // This needs to be in a loop because we constructed a schema change
+        // that will intentionally fail sometimes when doing this work.
+        //
+        // This isn't a normal behavior! But we're trying to test the
+        // intermediate steps of a schema change here.
+        loop {
+            match datastore
+                .update_schema(checked_action.clone(), Some(&all_versions))
+                .await
+            {
+                Ok(()) => break,
+                Err(BackoffError::Permanent(e)) => {
+                    panic!("Permanent error during schema update: {e}");
+                }
+                Err(BackoffError::Transient { err: e, .. }) => {
+                    warn!(log, "Failed to ensure schema (retrying)"; "err" => %e);
+                    continue;
+                }
+            }
         }
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -769,6 +1870,1695 @@ mod test {
         assert_eq!(data, "abcd");
 
         db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_with_active_records() {
+        let logctx =
+            dev::test_setup_log("test_attempt_handoff_with_active_records");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create some nexus records, including one active
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let nexus3_id = OmicronZoneUuid::new_v4();
+
+        // Insert records: one active, one not_yet, one quiesced
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert active nexus");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert not_yet nexus");
+        datastore
+            .database_nexus_access_insert(
+                nexus3_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert quiesced nexus");
+
+        // Attempt handoff with nexus2 - should fail because nexus1 is active
+        let result = datastore.attempt_handoff(nexus2_id).await;
+        assert!(result.is_err());
+        let error_msg = format!("{}", result.unwrap_err());
+        assert!(
+            error_msg.contains("1 Nexus instance(s) are still active"),
+            "Expected error about active instances, got: {}",
+            error_msg
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_nexus_not_registered() {
+        let logctx =
+            dev::test_setup_log("test_attempt_handoff_nexus_not_registered");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create some other nexus records but not the one we're trying to handoff
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let unregistered_nexus_id = OmicronZoneUuid::new_v4();
+
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus1");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert nexus2");
+
+        // Attempt handoff with unregistered nexus - should fail
+        let result = datastore.attempt_handoff(unregistered_nexus_id).await;
+        assert!(result.is_err());
+        let error_msg = format!("{}", result.unwrap_err());
+        assert!(
+            error_msg
+                .contains("does not have a record in db_metadata_nexus table"),
+            "Expected error about unregistered nexus, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains(&unregistered_nexus_id.to_string()),
+            "Expected error to contain nexus ID {}, got: {}",
+            unregistered_nexus_id,
+            error_msg
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_nexus_wrong_state() {
+        let logctx =
+            dev::test_setup_log("test_attempt_handoff_nexus_wrong_state");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create nexus records where our target is in wrong state
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let quiesced_nexus_id = OmicronZoneUuid::new_v4();
+
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus1");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus2");
+        datastore
+            .database_nexus_access_insert(
+                quiesced_nexus_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert quiesced nexus");
+
+        // Attempt handoff with quiesced nexus - should fail
+        let result = datastore.attempt_handoff(quiesced_nexus_id).await;
+        assert!(result.is_err());
+        let error_msg = format!("{}", result.unwrap_err());
+        assert!(
+            error_msg.contains("is in state Quiesced"),
+            "Expected error about wrong state, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("Must be in 'not_yet' state to become active"),
+            "Expected error to mention required state, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains(&quiesced_nexus_id.to_string()),
+            "Expected error to contain nexus ID {}, got: {}",
+            quiesced_nexus_id,
+            error_msg
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_success() {
+        let logctx = dev::test_setup_log("test_attempt_handoff_success");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create multiple nexus records in not_yet and
+        // quiesced states
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let nexus3_id = OmicronZoneUuid::new_v4();
+
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus1");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus2");
+        datastore
+            .database_nexus_access_insert(
+                nexus3_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert nexus3");
+
+        // Verify initial state: all not_yet or quiesced
+        let nexus1_before = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1")
+            .expect("nexus1 should exist");
+        let nexus2_before = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2")
+            .expect("nexus2 should exist");
+        let nexus3_before = datastore
+            .database_nexus_access(nexus3_id)
+            .await
+            .expect("Failed to get nexus3")
+            .expect("nexus3 should exist");
+
+        assert_eq!(nexus1_before.state(), DbMetadataNexusState::NotYet);
+        assert_eq!(nexus2_before.state(), DbMetadataNexusState::NotYet);
+        assert_eq!(nexus3_before.state(), DbMetadataNexusState::Quiesced);
+
+        // Attempt handoff with nexus2 - should succeed
+        let result = datastore.attempt_handoff(nexus2_id).await;
+        if let Err(ref e) = result {
+            panic!("Handoff should succeed but got error: {}", e);
+        }
+        assert!(result.is_ok());
+
+        // Verify final state: all not_yet records should now be active,
+        // quiesced should remain quiesced
+        let nexus1_after = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1")
+            .expect("nexus1 should exist");
+        let nexus2_after = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2")
+            .expect("nexus2 should exist");
+        let nexus3_after = datastore
+            .database_nexus_access(nexus3_id)
+            .await
+            .expect("Failed to get nexus3")
+            .expect("nexus3 should exist");
+
+        assert_eq!(nexus1_after.state(), DbMetadataNexusState::Active);
+        assert_eq!(nexus2_after.state(), DbMetadataNexusState::Active);
+        // Should remain unchanged
+        assert_eq!(nexus3_after.state(), DbMetadataNexusState::Quiesced);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This test covers two cases:
+    //
+    // 1. New systems: We use RSS to initialize Nexus, but no db_metadata_nexus
+    //    entries exist.
+    // 2. Deployed systems: We have a deployed system which updates to have this
+    //    "db_metadata_nexus"-handling code, but has no rows in that table.
+    //
+    // Both of these cases must be granted database access to self-populate
+    // later.
+    #[tokio::test]
+    async fn test_check_schema_and_access_empty_table_permits_access() {
+        let logctx = dev::test_setup_log(
+            "test_check_schema_and_access_empty_table_permits_access",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // With an empty table, even explicit nexus ID should get access
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::Ready);
+
+        // Add a record to the table, now explicit nexus ID should NOT get
+        // access
+        datastore
+            .database_nexus_access_insert(
+                OmicronZoneUuid::new_v4(), // Different nexus
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::TryLater);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates the case where a Nexus ID is explicitly requested or omitted.
+    //
+    // The omission case is important for the "schema-updater" binary to keep working.
+    #[tokio::test]
+    async fn test_check_schema_and_access_nexus_id() {
+        let logctx =
+            dev::test_setup_log("test_check_schema_and_access_nexus_id");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Add an active record, for some Nexus ID.
+        datastore
+            .database_nexus_access_insert(
+                OmicronZoneUuid::new_v4(),
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        // Using 'DontCare' as a nexus ID should get access (schema updater case)
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::Ready);
+
+        // Explicit CheckAndTakeover with a Nexus ID that doesn't exist should
+        // not get access, and should be told to retry later.
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::TryLater);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates that an explicit db_metadata_nexus record can lock-out Nexuses which should not be
+    // able to access the database.
+    #[tokio::test]
+    async fn test_check_schema_and_access_lockout_refuses_access() {
+        let logctx = dev::test_setup_log(
+            "test_check_schema_and_access_lockout_refuses_access",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Insert our nexus as quiesced (locked out)
+        datastore
+            .database_nexus_access_insert(
+                nexus_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        // Should refuse access
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::Refuse);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates that if a Nexus with an "old desired schema" boots, it cannot access the
+    // database under any conditions.
+    //
+    // This is the case where the database has upgraded beyond what Nexus can understand.
+    //
+    // In practice, the db_metadata_nexus records should prevent this situation from occurring,
+    // but it's still a useful property to reject old schemas while the "schema-updater" binary
+    // exists.
+    #[tokio::test]
+    async fn test_check_schema_and_access_schema_too_new() {
+        let logctx =
+            dev::test_setup_log("test_check_schema_and_access_schema_too_new");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Insert our nexus as active
+        datastore
+            .database_nexus_access_insert(
+                nexus_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        // Try to access with an older version than what's in the database
+        let older_version = Version::new(SCHEMA_VERSION.major - 1, 0, 0);
+
+        // Explicit Nexus ID: Rejected
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                older_version.clone(),
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::Refuse);
+
+        // Implicit Access: Rejected
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                older_version.clone(),
+            )
+            .await
+            .expect("Failed to check schema and access");
+        assert_eq!(action.action(), &DatastoreSetupAction::Refuse);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates that the schema + access combinations identify we should wait for handoff
+    // when we have a "NotYet" record that could become compatible with the database.
+    #[tokio::test]
+    async fn test_check_schema_and_access_wait_for_handoff() {
+        let logctx = dev::test_setup_log(
+            "test_check_schema_and_access_wait_for_handoff",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Insert our nexus as not_yet (doesn't have access yet)
+        datastore
+            .database_nexus_access_insert(
+                nexus_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        // We should wait for handoff if the versions match, or if our desired
+        // version is newer than what exists in the database.
+        let current_version = SCHEMA_VERSION;
+        let newer_version = Version::new(SCHEMA_VERSION.major + 1, 0, 0);
+        let versions = [current_version, newer_version];
+
+        for version in &versions {
+            // Should wait for handoff when schema is up-to-date
+            let action = datastore
+                .check_schema_and_access(
+                    IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                    version.clone(),
+                )
+                .await
+                .expect("Failed to check schema and access");
+            assert_eq!(
+                action.action(),
+                &DatastoreSetupAction::NeedsHandoff { nexus_id },
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates the "normal case", where a Nexus has access and the schema already matches.
+    #[tokio::test]
+    async fn test_check_schema_and_access_normal_use() {
+        let logctx =
+            dev::test_setup_log("test_check_schema_and_access_normal_use");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Insert our nexus as active
+        datastore
+            .database_nexus_access_insert(
+                nexus_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        // With current schema version, should be ready for normal use
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+
+        assert_eq!(action.action(), &DatastoreSetupAction::Ready);
+        assert_eq!(action.desired_version(), &SCHEMA_VERSION);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates that when a Nexus is active with a newer-than-database desired
+    // version, it will request an update
+    #[tokio::test]
+    async fn test_check_schema_and_access_update_now() {
+        let logctx =
+            dev::test_setup_log("test_check_schema_and_access_update_now");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+
+        // Insert our nexus as active
+        datastore
+            .database_nexus_access_insert(
+                nexus_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus record");
+
+        let newer_version = Version::new(SCHEMA_VERSION.major + 1, 0, 0);
+
+        // With a newer desired version, should request update
+        let action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                newer_version.clone(),
+            )
+            .await
+            .expect("Failed to check schema and access");
+
+        assert_eq!(action.action(), &DatastoreSetupAction::Update);
+        assert_eq!(action.desired_version(), &newer_version);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_nexus_access_delete() {
+        let logctx = dev::test_setup_log("test_database_nexus_access_delete");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = db.opctx();
+
+        // Create test nexus IDs
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+
+        // Insert records directly using the test method
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus1 access");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus2 access");
+
+        // Verify records were created
+        let nexus1_before = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1 access");
+        let nexus2_before = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access");
+        assert!(nexus1_before.is_some(), "nexus1 should have access record");
+        assert!(nexus2_before.is_some(), "nexus2 should have access record");
+
+        // Delete nexus1 record
+        datastore
+            .database_nexus_access_delete(&opctx, nexus1_id)
+            .await
+            .expect("Failed to delete nexus1 access");
+
+        // Verify nexus1 record was deleted, nexus2 record remains
+        let nexus1_after = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1 access after delete");
+        let nexus2_after = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access after delete");
+        assert!(
+            nexus1_after.is_none(),
+            "nexus1 should not have access record after delete"
+        );
+        assert!(
+            nexus2_after.is_some(),
+            "nexus2 should still have access record"
+        );
+
+        // Delete nexus2 record
+        datastore
+            .database_nexus_access_delete(&opctx, nexus2_id)
+            .await
+            .expect("Failed to delete nexus2 access");
+
+        // Verify nexus2 record was also deleted
+        let nexus2_final = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access after final delete");
+        assert!(
+            nexus2_final.is_none(),
+            "nexus2 should not have access record after delete"
+        );
+
+        // Confirm deletion is idempotent
+        datastore
+            .database_nexus_access_delete(&opctx, nexus1_id)
+            .await
+            .expect("Failed to delete nexus1 access idempotently");
+
+        // This also means deleting non-existent records should be fine
+        datastore
+            .database_nexus_access_delete(&opctx, OmicronZoneUuid::new_v4())
+            .await
+            .expect("Failed to delete non-existent record");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // ---------------------------------------------------------------
+    // Integration tests for schema change verification
+    // ---------------------------------------------------------------
+
+    // Test that CREATE INDEX verification passes against a real CRDB.
+    #[tokio::test]
+    async fn test_verify_create_index() {
+        let logctx = dev::test_setup_log("test_verify_create_index");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        // Set up: create a table and index directly.
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_idx \
+             (id INT PRIMARY KEY, name TEXT NOT NULL); \
+             CREATE INDEX IF NOT EXISTS test_idx \
+             ON omicron.public.test_verify_idx (name);",
+        )
+        .await
+        .expect("Failed to create test table and index");
+
+        // Verify the index exists using our verification query pattern.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: nexus_db_model::SqlIdentifier::new("test_verify_idx")
+                .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("test_idx").unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        conn.batch_execute_async(&verify_sql)
+            .await
+            .expect("Verification query should pass for existing index");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification correctly fails for a non-existent index.
+    #[tokio::test]
+    async fn test_verify_fails_for_missing_index() {
+        let logctx = dev::test_setup_log("test_verify_fails_for_missing_index");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        // Create only a table, no index.
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_no_idx \
+             (id INT PRIMARY KEY, name TEXT NOT NULL);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        // The verification query should fail because the index doesn't exist.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: nexus_db_model::SqlIdentifier::new(
+                "test_verify_no_idx",
+            )
+            .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("nonexistent_idx")
+                .unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        let result = conn.batch_execute_async(&verify_sql).await;
+        assert!(result.is_err(), "Verification should fail for missing index");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification passes for an existing constraint.
+    #[tokio::test]
+    async fn test_verify_add_constraint() {
+        let logctx = dev::test_setup_log("test_verify_add_constraint");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_ck \
+             (id INT PRIMARY KEY, val INT NOT NULL, \
+             CONSTRAINT val_positive CHECK (val > 0));",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: nexus_db_model::SqlIdentifier::new(
+                    "test_verify_ck",
+                )
+                .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "val_positive",
+                )
+                .unwrap(),
+                not_valid: false,
+            };
+        let verify_sql = change.verification_query().unwrap();
+        conn.batch_execute_async(&verify_sql)
+            .await
+            .expect("Verification should pass for existing constraint");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification fails for a missing constraint.
+    #[tokio::test]
+    async fn test_verify_fails_for_missing_constraint() {
+        let logctx =
+            dev::test_setup_log("test_verify_fails_for_missing_constraint");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_no_ck \
+             (id INT PRIMARY KEY, val INT NOT NULL);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: nexus_db_model::SqlIdentifier::new(
+                    "test_verify_no_ck",
+                )
+                .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "nonexistent_constraint",
+                )
+                .unwrap(),
+                not_valid: false,
+            };
+        let verify_sql = change.verification_query().unwrap();
+        let result = conn.batch_execute_async(&verify_sql).await;
+        assert!(
+            result.is_err(),
+            "Verification should fail for missing constraint"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Reproduces the CREATE INDEX backfill race condition described in
+    // https://github.com/oxidecomputer/omicron/issues/9866
+    //
+    // When multiple connections run CREATE INDEX IF NOT EXISTS concurrently
+    // on a large table with limited SQL memory, the backfill can fail with
+    // OOM and the index is silently rolled back. CREATE INDEX IF NOT EXISTS
+    // returns "success" for some clients (because IF NOT EXISTS saw the
+    // in-progress index descriptor), but the index is gone.
+    //
+    // This test shows that our verification query (which checks
+    // crdb_internal.table_indexes) acts as a barrier that catches the
+    // missing index.
+    #[tokio::test]
+    async fn test_create_index_backfill_race() {
+        let logctx = dev::test_setup_log("test_create_index_backfill_race");
+
+        // Start a fresh CRDB with tightly constrained SQL memory to make
+        // the backfill OOM-susceptible. We bypass the normal test database
+        // setup since we don't need the Omicron schema.
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        // Create the database and table matching the reproduction script
+        // from https://github.com/oxidecomputer/omicron/issues/9866
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     token STRING(40) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_last_used TIMESTAMPTZ NOT NULL, \
+                     silo_user_id UUID NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        // Insert rows so the table isn't empty and CREATE INDEX triggers
+        // a backfill. With --max-sql-memory=32MiB, the OOM is caused by
+        // concurrent BulkAdder allocations (each requesting 32MiB),
+        // not by data volume, so a small number of rows suffices.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race \
+                 (token, time_created, time_last_used, silo_user_id) \
+                 SELECT \
+                     substr(gen_random_uuid()::STRING, 1, 40), \
+                     now() - (random() * interval '30 days'), \
+                     now() - (random() * interval '1 day'), \
+                     gen_random_uuid() \
+                 FROM generate_series(1, 100);",
+            )
+            .await
+            .expect("Failed to insert rows");
+
+        // Phase 2: Reproduce the bug by running 3 concurrent CREATE INDEX
+        // operations. Each gets its own connection, just like separate
+        // Nexus instances would.
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                tokio::spawn(async move {
+                    let result = task_client
+                        .batch_execute(
+                            "CREATE INDEX IF NOT EXISTS test_idx \
+                             ON omicron.public.test_race (time_created);",
+                        )
+                        .await;
+                    eprintln!(
+                        "test_create_index_backfill_race: \
+                         task {task_id} CREATE INDEX result: {result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    result
+                })
+            })
+            .collect();
+
+        // Wait for all tasks to complete. Some should return Ok (IF NOT
+        // EXISTS no-op), and at least one should error (OOM).
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+        eprintln!(
+            "test_create_index_backfill_race: \
+             concurrent CREATE INDEX results: {results:?}"
+        );
+
+        // The bug requires that at least one task returned Ok — that's a
+        // client that saw the in-progress index descriptor via IF NOT
+        // EXISTS and treated it as a no-op. Without our verification
+        // query, this client would proceed past the migration step
+        // believing the index exists.
+        assert!(
+            results.iter().any(|r| r.is_ok()),
+            "Bug not reproduced: all CREATE INDEX tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op) while the backfill is in \
+             progress. Results: {results:?}"
+        );
+
+        // Phase 3: Verify that our verification query catches the missing
+        // index. Even though some CREATE INDEX IF NOT EXISTS calls returned
+        // Ok, the backfill failed and the index was rolled back.
+        //
+        // Without the verification query, a Nexus that got Ok from
+        // CREATE INDEX IF NOT EXISTS would proceed past the migration
+        // step, not knowing the index is gone. The verification query
+        // acts as a barrier: it checks crdb_internal.table_indexes and
+        // fails if the index isn't actually present.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("test_idx").unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+
+        let verification_result = client.batch_execute(&verify_sql).await;
+        let err = verification_result.unwrap_err();
+        let err_msg = err
+            .as_db_error()
+            .map(|db_err| db_err.message().to_string())
+            .unwrap_or_else(|| err.to_string());
+        assert!(
+            err_msg.contains("Schema change verification failed"),
+            "Verification error should be our expected barrier message, \
+             not a SQL syntax error or other unexpected failure. \
+             Got: {err_msg}"
+        );
+
+        // Phase 4: Show that when the index actually exists, the
+        // verification query passes. Recreate the table with the index
+        // defined inline (no backfill needed — at 32MiB, even a single
+        // CREATE INDEX backfill exceeds the memory budget).
+        client
+            .batch_execute(
+                "DROP TABLE omicron.public.test_race CASCADE; \
+                 CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     token STRING(40) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_last_used TIMESTAMPTZ NOT NULL, \
+                     silo_user_id UUID NOT NULL, \
+                     INDEX test_idx (time_created) \
+                 );",
+            )
+            .await
+            .expect("Failed to recreate table with inline index");
+
+        client
+            .batch_execute(&verify_sql)
+            .await
+            .expect("Verification should pass when the index actually exists");
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // Emulates the real-world scenario from
+    // https://github.com/oxidecomputer/omicron/issues/9866:
+    // multiple Nexus instances each run CREATE INDEX IF NOT EXISTS
+    // immediately followed by the verification query, back-to-back.
+    //
+    // Without the verification barrier, a Nexus that got Ok from
+    // CREATE INDEX IF NOT EXISTS (because it saw the in-progress index
+    // descriptor via IF NOT EXISTS) would proceed, not knowing the
+    // backfill later failed. With the barrier, the verification query
+    // catches the missing index and prevents that Nexus from proceeding.
+    //
+    // The key assertion: no task gets Ok from BOTH the DDL and the
+    // verification query. Either the DDL errors (OOM), or the DDL
+    // "succeeds" (IF NOT EXISTS no-op) but verification catches it.
+    #[tokio::test]
+    async fn test_create_index_backfill_race_with_verification() {
+        let logctx = dev::test_setup_log(
+            "test_create_index_backfill_race_with_verification",
+        );
+
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     token STRING(40) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_last_used TIMESTAMPTZ NOT NULL, \
+                     silo_user_id UUID NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race \
+                 (token, time_created, time_last_used, silo_user_id) \
+                 SELECT \
+                     substr(gen_random_uuid()::STRING, 1, 40), \
+                     now() - (random() * interval '30 days'), \
+                     now() - (random() * interval '1 day'), \
+                     gen_random_uuid() \
+                 FROM generate_series(1, 100);",
+            )
+            .await
+            .expect("Failed to insert rows");
+
+        // Build the verification query that each task will run
+        // immediately after CREATE INDEX, just like a real Nexus
+        // migration would.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("test_idx").unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+
+        // Spawn 3 concurrent tasks, each running CREATE INDEX IF NOT
+        // EXISTS followed immediately by the verification query —
+        // emulating multiple Nexus instances running the same migration.
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                let verify_sql = verify_sql.clone();
+                tokio::spawn(async move {
+                    let ddl_result = task_client
+                        .batch_execute(
+                            "CREATE INDEX IF NOT EXISTS test_idx \
+                             ON omicron.public.test_race (time_created);",
+                        )
+                        .await;
+
+                    // Run verification immediately, just like Nexus would.
+                    let verify_result =
+                        task_client.batch_execute(&verify_sql).await;
+
+                    eprintln!(
+                        "test_create_index_backfill_race_with_verification: \
+                         task {task_id}: DDL={ddl_result:?}, \
+                         verify={verify_result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    (ddl_result, verify_result)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+
+        // The critical invariant: no task should get Ok from BOTH the
+        // DDL and the verification query. If DDL returned Ok (IF NOT
+        // EXISTS no-op while backfill was in progress), verification
+        // must fail to prevent that Nexus from proceeding.
+        for (task_id, (ddl_result, verify_result)) in results.iter().enumerate()
+        {
+            let ddl_ok = ddl_result.is_ok();
+            let verify_ok = verify_result.is_ok();
+
+            if ddl_ok && verify_ok {
+                panic!(
+                    "Task {task_id}: DDL and verification both succeeded! \
+                     This means a Nexus would proceed past the migration \
+                     step without the index actually being present. \
+                     The verification barrier failed to catch the race."
+                );
+            }
+        }
+
+        // Also verify at least one task got Ok from the DDL — this
+        // confirms the IF NOT EXISTS race actually happened (a task
+        // saw the in-progress index and returned early).
+        assert!(
+            results.iter().any(|(ddl, _)| ddl.is_ok()),
+            "Bug not reproduced: all CREATE INDEX tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op). Results: {results:?}"
+        );
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // ---- ADD COLUMN IF NOT EXISTS ... NOT NULL DEFAULT ----
+    //
+    // CRDB's `checkColumnDoesNotExist` only suppresses via IF NOT
+    // EXISTS when the column is fully PUBLIC. Mid-backfill columns
+    // (in Adding mutation state) always error with "column in the
+    // middle of being added, not yet public". This test confirms
+    // that CRDB rejects concurrent ADD COLUMN attempts, so no
+    // verification query is needed.
+
+    #[tokio::test]
+    async fn test_add_column_concurrent_rejected() {
+        let logctx = dev::test_setup_log("test_add_column_concurrent_rejected");
+
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     name TEXT NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        // Insert many rows so the column backfill takes measurable
+        // time, giving us a window for a concurrent attempt.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (name) \
+                 SELECT 'row_' || generate_series(1, 100000);",
+            )
+            .await
+            .expect("Failed to insert rows");
+
+        // Start the ADD COLUMN in a spawned task.
+        let ddl_client =
+            instance.connect().await.expect("Failed to create DDL connection");
+
+        let ddl_handle = tokio::spawn(async move {
+            let result = ddl_client
+                .batch_execute(
+                    "ALTER TABLE omicron.public.test_race \
+                     ADD COLUMN IF NOT EXISTS new_col \
+                     INT NOT NULL DEFAULT 42;",
+                )
+                .await;
+            eprintln!(
+                "test_add_column_concurrent_rejected: \
+                 DDL task result: {result:?}"
+            );
+            let _ = ddl_client.cleanup().await;
+            result
+        });
+
+        // Wait briefly, then try a concurrent ADD COLUMN from a
+        // second connection. While the backfill is running, the
+        // column is in Adding mutation state and CRDB should reject
+        // the second attempt even with IF NOT EXISTS.
+        let mut second_errored = false;
+        for attempt in 0..200 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            if ddl_handle.is_finished() {
+                eprintln!(
+                    "test_add_column_concurrent_rejected: \
+                     DDL completed before second attempt \
+                     (attempt {attempt})"
+                );
+                break;
+            }
+
+            let second_result = client
+                .batch_execute(
+                    "ALTER TABLE omicron.public.test_race \
+                     ADD COLUMN IF NOT EXISTS new_col \
+                     INT NOT NULL DEFAULT 42;",
+                )
+                .await;
+
+            if let Err(err) = second_result {
+                eprintln!(
+                    "test_add_column_concurrent_rejected: \
+                     second connection correctly rejected \
+                     (attempt {attempt}): {err:?}",
+                );
+                second_errored = true;
+                break;
+            }
+
+            // If the second attempt got Ok, the first DDL must have
+            // already completed (column is PUBLIC). Break out.
+            if ddl_handle.is_finished() {
+                eprintln!(
+                    "test_add_column_concurrent_rejected: \
+                     second attempt returned Ok because first \
+                     DDL completed (attempt {attempt})"
+                );
+                break;
+            }
+        }
+
+        let _ddl_result = ddl_handle.await.expect("DDL task panicked");
+
+        assert!(
+            second_errored,
+            "Failed to catch concurrent ADD COLUMN rejection \
+             during backfill (DDL completed too fast)"
+        );
+        eprintln!(
+            "test_add_column_concurrent_rejected: \
+             Confirmed: CRDB rejects concurrent ADD COLUMN \
+             IF NOT EXISTS during backfill."
+        );
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // ---- ADD CONSTRAINT IF NOT EXISTS ... CHECK ----
+    //
+    // Unlike CREATE INDEX (which OOMs via BulkAdder at 32MiB),
+    // CHECK constraint validation uses lightweight streaming scans
+    // (~800 rows/chunk). To force the validation to fail, we
+    // pre-populate the table with a row that violates the constraint.
+    // When concurrent tasks run ADD CONSTRAINT IF NOT EXISTS:
+    //   - One task initiates validation
+    //   - Other tasks see the in-progress constraint descriptor
+    //     via IF NOT EXISTS and return Ok (the race)
+    //   - Validation fails (violating data) → constraint rolled back
+    //   - The tasks that got Ok are wrong → verification catches it
+
+    #[tokio::test]
+    async fn test_add_constraint_backfill_race() {
+        let logctx = dev::test_setup_log("test_add_constraint_backfill_race");
+
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     val INT NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        // Insert many valid rows so validation scans for a while
+        // before hitting the violating rows.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 SELECT generate_series(1, 10000);",
+            )
+            .await
+            .expect("Failed to insert valid rows");
+
+        // Insert a row that violates CHECK (val > 0). When the
+        // validation scan reaches it, it will fail and the
+        // constraint will be rolled back.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 VALUES (-1);",
+            )
+            .await
+            .expect("Failed to insert violating row");
+
+        // Phase 2: Run 3 concurrent ADD CONSTRAINT operations. One
+        // task initiates validation, the others see the in-progress
+        // constraint via IF NOT EXISTS and return Ok.
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                tokio::spawn(async move {
+                    let result = task_client
+                        .batch_execute(
+                            "ALTER TABLE omicron.public.test_race \
+                             ADD CONSTRAINT IF NOT EXISTS val_positive \
+                             CHECK (val > 0);",
+                        )
+                        .await;
+                    eprintln!(
+                        "test_add_constraint_backfill_race: \
+                         task {task_id} ADD CONSTRAINT result: \
+                         {result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    result
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+        eprintln!(
+            "test_add_constraint_backfill_race: \
+             concurrent ADD CONSTRAINT results: {results:?}"
+        );
+
+        assert!(
+            results.iter().any(|r| r.is_ok()),
+            "Bug not reproduced: all ADD CONSTRAINT tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op) while validation is in \
+             progress. Results: {results:?}"
+        );
+
+        // Phase 3: Verify that our verification query catches the
+        // missing constraint. Validation failed (violating data),
+        // so the constraint was rolled back, but some tasks got Ok
+        // via IF NOT EXISTS.
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                    .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "val_positive",
+                )
+                .unwrap(),
+                not_valid: false,
+            };
+        let verify_sql = change.verification_query().unwrap();
+
+        let verification_result = client.batch_execute(&verify_sql).await;
+        let err = verification_result.unwrap_err();
+        let err_msg = err
+            .as_db_error()
+            .map(|db_err| db_err.message().to_string())
+            .unwrap_or_else(|| err.to_string());
+        assert!(
+            err_msg.contains("Schema change verification failed"),
+            "Verification error should be our expected barrier \
+             message. Got: {err_msg}"
+        );
+
+        // Phase 4: Show that when the constraint actually exists,
+        // the verification query passes. Recreate the table with
+        // the constraint defined inline (only valid data).
+        client
+            .batch_execute(
+                "DROP TABLE omicron.public.test_race CASCADE; \
+                 CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     val INT NOT NULL, \
+                     CONSTRAINT val_positive CHECK (val > 0) \
+                 );",
+            )
+            .await
+            .expect("Failed to recreate table with inline constraint");
+
+        client.batch_execute(&verify_sql).await.expect(
+            "Verification should pass when the constraint \
+                 actually exists",
+        );
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_add_constraint_backfill_race_with_verification() {
+        let logctx = dev::test_setup_log(
+            "test_add_constraint_backfill_race_with_verification",
+        );
+
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     val INT NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 SELECT generate_series(1, 10000);",
+            )
+            .await
+            .expect("Failed to insert valid rows");
+
+        // Insert a constraint-violating row to force validation
+        // failure.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 VALUES (-1);",
+            )
+            .await
+            .expect("Failed to insert violating row");
+
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                    .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "val_positive",
+                )
+                .unwrap(),
+                not_valid: false,
+            };
+        let verify_sql = change.verification_query().unwrap();
+
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                let verify_sql = verify_sql.clone();
+                tokio::spawn(async move {
+                    let ddl_result = task_client
+                        .batch_execute(
+                            "ALTER TABLE omicron.public.test_race \
+                             ADD CONSTRAINT IF NOT EXISTS val_positive \
+                             CHECK (val > 0);",
+                        )
+                        .await;
+
+                    let verify_result =
+                        task_client.batch_execute(&verify_sql).await;
+
+                    eprintln!(
+                        "test_add_constraint_backfill_race_with_verification: \
+                         task {task_id}: DDL={ddl_result:?}, \
+                         verify={verify_result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    (ddl_result, verify_result)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+
+        // The critical invariant: no task should get Ok from BOTH
+        // the DDL and the verification query. If DDL returned Ok
+        // (IF NOT EXISTS no-op while validation was in progress),
+        // verification must fail to prevent that Nexus from
+        // proceeding.
+        for (task_id, (ddl_result, verify_result)) in results.iter().enumerate()
+        {
+            let ddl_ok = ddl_result.is_ok();
+            let verify_ok = verify_result.is_ok();
+
+            if ddl_ok && verify_ok {
+                panic!(
+                    "Task {task_id}: DDL and verification both \
+                     succeeded! This means a Nexus would proceed \
+                     past the migration step without the constraint \
+                     actually being present. The verification \
+                     barrier failed to catch the race."
+                );
+            }
+        }
+
+        // Also verify at least one task got Ok from the DDL — this
+        // confirms the IF NOT EXISTS race actually happened (a task
+        // saw the in-progress constraint and returned early).
+        assert!(
+            results.iter().any(|(ddl, _)| ddl.is_ok()),
+            "Bug not reproduced: all ADD CONSTRAINT tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op). Results: {results:?}"
+        );
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // ---- ALTER COLUMN ... SET NOT NULL ----
+    //
+    // SET NOT NULL has no IF NOT EXISTS clause. CRDB reliably rejects
+    // concurrent attempts, so no verification query is needed. This
+    // test confirms that behavior so a future CRDB upgrade would
+    // catch any change.
+
+    #[tokio::test]
+    async fn test_set_not_null_concurrent_rejected() {
+        let logctx =
+            dev::test_setup_log("test_set_not_null_concurrent_rejected");
+
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        // Create a table with a nullable column and insert NULL data so
+        // the SET NOT NULL validation scan will fail.
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     name TEXT \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (name) \
+                 SELECT 'row_' || generate_series(1, 10000);",
+            )
+            .await
+            .expect("Failed to insert valid rows");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (name) \
+                 VALUES (NULL);",
+            )
+            .await
+            .expect("Failed to insert NULL row");
+
+        // Run 3 concurrent SET NOT NULL operations. Since there is no
+        // IF NOT EXISTS clause for SET NOT NULL, all concurrent
+        // attempts should error: the initiator hits NULLs during
+        // validation, and other connections get "constraint in the
+        // middle of being added".
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                tokio::spawn(async move {
+                    let result = task_client
+                        .batch_execute(
+                            "ALTER TABLE omicron.public.test_race \
+                             ALTER COLUMN name SET NOT NULL;",
+                        )
+                        .await;
+                    eprintln!(
+                        "test_set_not_null_concurrent_rejected: \
+                         task {task_id} result: {result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    result
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+
+        // No task should succeed: validation fails on NULLs for
+        // the initiator; concurrent attempts get rejected.
+        for (task_id, result) in results.iter().enumerate() {
+            assert!(
+                result.is_err(),
+                "Task {task_id}: SET NOT NULL should have been \
+                 rejected (NULLs present or concurrent rejection), \
+                 but it succeeded. If CRDB changes this behavior, \
+                 we may need to add verification queries back."
+            );
+        }
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
         logctx.cleanup_successful();
     }
 }

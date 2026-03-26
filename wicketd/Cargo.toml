@@ -1,7 +1,7 @@
 [package]
 name = "wicketd"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -43,6 +43,7 @@ serde_json.workspace = true
 sha2.workspace = true
 slog-dtrace.workspace = true
 slog.workspace = true
+rand.workspace = true
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
@@ -55,6 +56,7 @@ transceiver-controller.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
+bootstrap-agent-lockstep-client.workspace = true
 omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
 installinator-api.workspace = true
@@ -63,6 +65,7 @@ omicron-certificates.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
+sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
@@ -71,6 +74,7 @@ wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+slog-error-chain.workspace = true
 
 [[bin]]
 name = "wicketd"
@@ -88,12 +92,10 @@ maplit.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
-rand.workspace = true
 serde_json.workspace = true
 sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
-sled-agent-types.workspace = true
-sled-agent-zone-images.workspace = true
-sled-agent-zone-images-examples.workspace = true
+sled-agent-resolvable-files.workspace = true
+sled-agent-resolvable-files-examples.workspace = true
 sled-storage.workspace = true
 subprocess.workspace = true
 tar.workspace = true

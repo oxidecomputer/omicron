@@ -10,6 +10,7 @@
 mod address_lots;
 mod affinity;
 mod allow_list;
+mod audit_log;
 mod authn_http;
 mod authz;
 mod basic;
@@ -22,31 +23,38 @@ mod demo_saga;
 mod device_auth;
 mod disks;
 mod external_ips;
+mod external_subnets;
 mod images;
 mod initialization;
 mod instances;
 mod internet_gateway;
+mod inventory_matching;
 mod ip_pools;
+mod local_storage;
 mod metrics;
 mod metrics_querier;
+#[cfg(feature = "multicast")]
+mod multicast;
 mod oximeter;
 mod pantry;
 mod password_login;
 mod probe;
 mod projects;
+mod quiesce;
 mod quotas;
 mod rack;
 mod role_assignments;
-mod roles_builtin;
 mod router_routes;
 mod saml;
 mod schema;
+mod scim;
 mod silo_users;
 mod silos;
 mod sleds;
 mod snapshots;
 mod ssh_keys;
 mod subnet_allocation;
+mod subnet_pools;
 mod support_bundles;
 mod switch_port;
 mod target_release;
@@ -62,5 +70,6 @@ mod vpc_subnets;
 mod vpcs;
 mod webhooks;
 
-// This module is used only for shared data, not test cases.
+// These modules are used only for shared data/utilities, not test cases.
+mod endpoint_coverage;
 mod endpoints;

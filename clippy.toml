@@ -19,14 +19,33 @@ disallowed-methods = [
 
     # We use disallowed-methods for these rather than disallowed-types, because
     # there's still one legitimate use for `once_cell`'s types:
-    # `get_or_try_init`, which isn't stablet yet.
+    # `get_or_try_init`, which isn't stable yet.
     # https://github.com/rust-lang/rust/issues/109737
     { path = "once_cell::unsync::OnceCell::get_or_init", reason = "use `std::cell::OnceCell` instead, unless you need get_or_try_init in which case #[expect] this lint" },
     { path = "once_cell::sync::OnceCell::get_or_init", reason = "use `std::sync::OnceLock` instead, unless you need get_or_try_init in which case #[expect] this lint" },
-]
-disallowed-types = [
-    { path = "once_cell::unsync::Lazy", reason = "use `std::cell::LazyCell` instead" },
-    { path = "once_cell::unsync::LazyCell", reason = "use `std::cell::LazyCell` instead" },
+
+    # We use disallowed-methods for the Lazy types because they don't currently
+    # support into_value or into_inner:
+    # https://github.com/rust-lang/rust/issues/125623
+    #
+    # Code that needs these types will have to be annotated with #[expect] to
+    # silence the lint, but doing so on a single method call is much better than
+    # #[expect]ing an entire module.
+    { path = "once_cell::unsync::Lazy::new", reason = "use `std::cell::LazyCell` instead, unless you need into_value" },
+    { path = "once_cell::sync::Lazy::new", reason = "use `std::sync::LazyLock` instead, unless you need into_value" },
+
+    # ActionError::action_failed accepts any Debug + DeserializeOwned type,
+    # which makes it easy to accidentally pass raw Strings or other types
+    # that lose structured error information. Use
+    # nexus_types::saga::saga_action_failed instead, which only accepts
+    # omicron_common::api::external::Error.
+    { path = "steno::ActionError::action_failed", reason = "use nexus_types::saga::saga_action_failed instead" },
+
+    # The finite-retry variants can silently exhaust retries. Use the
+    # `_indefinitely` variants instead, which retry transient failures forever
+    # (or until a gone check aborts).
+    { path = "progenitor_extras::retry::retry_operation", reason = "use retry_operation_indefinitely instead" },
+    { path = "progenitor_extras::retry::retry_operation_while", reason = "use retry_operation_while_indefinitely instead" },
 ]
 
 [[disallowed-macros]]

@@ -342,7 +342,7 @@
 
 use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
-    SagaInitError,
+    SagaContext, SagaInitError,
 };
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
@@ -355,17 +355,20 @@ use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
@@ -494,7 +497,7 @@ struct UpdatesRequired {
 #[derive(Debug, Deserialize, Serialize)]
 enum NetworkConfigUpdate {
     Delete,
-    Update { active_propolis_id: PropolisUuid, new_sled_id: Uuid },
+    Update { active_propolis_id: PropolisUuid, new_sled_id: SledUuid },
 }
 
 /// Virtual provisioning counters to release when an instance no longer has a
@@ -512,7 +515,7 @@ impl UpdatesRequired {
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
-        new_runtime.gen = Generation(new_runtime.gen.next());
+        new_runtime.generation = Generation(new_runtime.generation.next());
         new_runtime.time_updated = Utc::now();
         let mut new_intent = None;
         let instance_id = snapshot.instance.id();
@@ -524,7 +527,7 @@ impl UpdatesRequired {
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state.is_terminal() {
+                if active_vmm.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -535,7 +538,7 @@ impl UpdatesRequired {
 
                     // If the active VMM's state is `Failed`, move the
                     // instance's new state to `Failed` rather than to `NoVmm`.
-                    if active_vmm.runtime.state == VmmState::Failed {
+                    if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
                     } else if snapshot.instance.intended_state
                         == InstanceIntendedState::Running
@@ -566,7 +569,7 @@ impl UpdatesRequired {
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
                 // XXX(eliza): AFAIK, target VMMs don't go to `Failed` until
                 // they become active, but...IDK. double-check that.
-                if target_vmm.runtime.state.is_terminal() {
+                if target_vmm.state.is_terminal() {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
@@ -746,7 +749,7 @@ impl NetworkConfigUpdate {
     fn to_vmm(vmm: &Vmm) -> Self {
         Self::Update {
             active_propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            new_sled_id: vmm.sled_id,
+            new_sled_id: vmm.sled_id(),
         }
     }
 }
@@ -982,7 +985,17 @@ async fn siu_become_updater(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(|e| match e {
+            // The `AlreadyLocked` variant must be serialized as
+            // `UpdaterLockError` so that the parent `start-instance-update`
+            // saga can identify this specific failure mode and handle it
+            // gracefully.
+            #[expect(clippy::disallowed_methods)]
+            instance::UpdaterLockError::AlreadyLocked => {
+                ActionError::action_failed(e)
+            }
+            instance::UpdaterLockError::Query(err) => saga_action_failed(err),
+        })?;
 
     info!(
         log,
@@ -1045,7 +1058,7 @@ async fn siu_update_network_config(
             nexus
                 .instance_delete_dpd_config(&opctx, authz_instance)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
         NetworkConfigUpdate::Update { active_propolis_id, new_sled_id } => {
             info!(
@@ -1060,17 +1073,17 @@ async fn siu_update_network_config(
                 .sled_id(new_sled_id)
                 .fetch()
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             nexus
                 .instance_ensure_dpd_config(
                     &opctx,
                     instance_id,
                     &sled.address(),
-                    None,
+                    InstanceNetworkFilters::all(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
     }
 
@@ -1087,12 +1100,11 @@ async fn siu_release_virtual_provisioning(
     let Some(Deprovision { project_id, cpus_diff, ram_diff }) =
         update.deprovision
     else {
-        return Err(ActionError::action_failed(
+        return Err(saga_action_failed(Error::internal_error(
             "a `siu_release_virtual_provisioning` action should never have \
              been added to the DAG if the update does not contain virtual \
-             resources to deprovision"
-                .to_string(),
-        ));
+             resources to deprovision",
+        )));
     };
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
@@ -1130,7 +1142,7 @@ async fn siu_release_virtual_provisioning(
                 "instance_id" => %instance_id,
             );
         }
-        Err(err) => return Err(ActionError::action_failed(err)),
+        Err(err) => return Err(saga_action_failed(err)),
     };
 
     Ok(())
@@ -1159,7 +1171,7 @@ async fn siu_unassign_oximeter_producer(
         &authz_instance.id(),
     )
     .await
-    .map_err(ActionError::action_failed)
+    .map_err(saga_action_failed)
 }
 
 async fn siu_commit_instance_updates(
@@ -1196,7 +1208,7 @@ async fn siu_commit_instance_updates(
             update.new_intent,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         log,
@@ -1222,6 +1234,36 @@ async fn siu_commit_instance_updates(
 
         nexus.background_tasks.task_v2p_manager.activate();
         nexus.vpc_needed_notify_sleds();
+
+        // If this network config update was due to instance migration (sled change),
+        // update multicast member sled_id for faster convergence
+        if let Some(NetworkConfigUpdate::Update { new_sled_id, .. }) =
+            &update.network_config
+        {
+            if nexus.multicast_enabled() {
+                if let Err(e) = osagactx
+                    .datastore()
+                    .multicast_group_member_update_sled_id(
+                        &opctx,
+                        InstanceUuid::from_untyped_uuid(instance_id),
+                        Some((*new_sled_id).into()),
+                    )
+                    .await
+                {
+                    // The reconciler will fix this later
+                    info!(log,
+                          "instance update: failed to update multicast member sled_id after migration, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "new_sled_id" => %new_sled_id,
+                          "error" => ?e);
+                } else {
+                    info!(log,
+                          "instance update: updated multicast member sled_id after migration";
+                          "instance_id" => %instance_id,
+                          "new_sled_id" => %new_sled_id);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1307,37 +1349,7 @@ async fn siu_chain_successor_saga(
                 "instance_id" => %instance_id,
             );
         } else {
-            // If the instance has transitioned to the `Failed` state and no
-            // additional update saga is required, check if the instance's
-            // auto-restart policy allows it to be automatically restarted. If
-            // it does, activate the instance-reincarnation background task to
-            // automatically restart it.
-            let karmic_state = new_state
-                .instance
-                .auto_restart_status(new_state.active_vmm.as_ref());
-            if karmic_state.should_reincarnate() {
-                info!(
-                    log,
-                    "instance update: instance transitioned to Failed, \
-                     but can be automatically restarted; activating \
-                     reincarnation.";
-                    "instance_id" => %instance_id,
-                    "auto_restart_config" => ?new_state.instance.auto_restart,
-                    "runtime_state" => ?new_state.instance.runtime_state,
-                    "intended_state" => %new_state.instance.intended_state,
-                );
-                nexus.background_tasks.task_instance_reincarnation.activate();
-            } else {
-                debug!(
-                    log,
-                    "instance update: instance will not reincarnate";
-                    "instance_id" => %instance_id,
-                    "auto_restart_config" => ?new_state.instance.auto_restart,
-                    "needs_reincarnation" => karmic_state.needs_reincarnation,
-                    "karmic_state" => ?karmic_state.can_reincarnate,
-                    "intended_state" => %new_state.instance.intended_state,
-                )
-            }
+            reincarnate_if_needed(osagactx, &new_state)
         }
 
         Ok::<(), anyhow::Error>(())
@@ -1359,6 +1371,43 @@ async fn siu_chain_successor_saga(
     }
 
     Ok(())
+}
+
+fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
+    // If the instance has transitioned to the `Failed` state and no
+    // additional update saga is required, check if the instance's
+    // auto-restart policy allows it to be automatically restarted. If
+    // it does, activate the instance-reincarnation background task to
+    // automatically restart it.
+    let karmic_state =
+        state.instance.auto_restart_status(state.active_vmm.as_ref());
+    if karmic_state.should_reincarnate() {
+        info!(
+            &osagactx.log(),
+            "instance update: instance transitioned to Failed, \
+             but can be automatically restarted; activating \
+             reincarnation.";
+            "instance_id" => %state.instance.id(),
+            "auto_restart_config" => ?state.instance.auto_restart,
+            "runtime_state" => ?state.instance.runtime(),
+            "intended_state" => %state.instance.intended_state,
+        );
+        osagactx
+            .nexus()
+            .background_tasks
+            .task_instance_reincarnation
+            .activate();
+    } else {
+        debug!(
+            &osagactx.log(),
+            "instance update: instance will not reincarnate";
+            "instance_id" => %state.instance.id(),
+            "auto_restart_config" => ?state.instance.auto_restart,
+            "needs_reincarnation" => karmic_state.needs_reincarnation,
+            "karmic_state" => ?karmic_state.can_reincarnate,
+            "intended_state" => %state.instance.intended_state,
+        )
+    }
 }
 
 /// Unlock the instance record while unwinding.
@@ -1501,15 +1550,15 @@ mod test {
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance as instance_types;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::internal::nexus::{
         MigrationRuntimeState, MigrationState, Migrations,
@@ -1547,7 +1596,7 @@ mod test {
     // 6. migration source failed
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -1562,7 +1611,7 @@ mod test {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -1573,13 +1622,15 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await
@@ -1690,7 +1741,9 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(instance.runtime().gen.0.next()),
+                    generation: Generation(
+                        instance.runtime().generation.0.next(),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -1916,7 +1969,7 @@ mod test {
                 &vmm_id,
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    gen: Generation(vmm.runtime.gen.0.next()),
+                    generation: Generation(vmm.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
             )
@@ -2467,15 +2520,13 @@ mod test {
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id = cptestctx
-                .find_sled_agent(vmm.sled_id)
+                .find_sled_agent(vmm.sled_id())
                 .expect("need at least one other sled");
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: InstanceMigrateRequest {
-                    dst_sled_id: dst_sled_id.into_untyped_uuid(),
-                },
+                migrate_params: InstanceMigrateRequest { dst_sled_id },
             };
 
             nexus
@@ -2578,7 +2629,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(src_vmm.runtime.gen.0.next()),
+                generation: Generation(src_vmm.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2590,7 +2641,7 @@ mod test {
             let migration_out = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.source_gen.0.next(),
+                generation: migration.source_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {
@@ -2635,7 +2686,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(target_vmm.runtime.gen.0.next()),
+                generation: Generation(target_vmm.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2647,7 +2698,7 @@ mod test {
             let migration_in = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.target_gen.0.next(),
+                generation: migration.target_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {

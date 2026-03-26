@@ -9,6 +9,7 @@ use crate::integration_tests::instances::{
 };
 use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::{Method, StatusCode};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::identity::Asset;
@@ -16,13 +17,14 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    DiskTest, create_default_ip_pool, create_disk, create_instance,
+    DiskTest, create_default_ip_pools, create_disk, create_instance,
     create_project, grant_iam, object_create_error,
 };
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::views::OxqlQueryResult;
+use nexus_types::external_api::oxql;
+use nexus_types::external_api::policy::ProjectRole;
+use nexus_types::external_api::timeseries;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::TimeseriesSchema;
@@ -121,7 +123,7 @@ async fn test_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await; // needed for instance create to work
+    create_default_ip_pools(&client).await; // needed for instance create to work
     DiskTest::new(cptestctx).await; // needed for disk create to work
 
     // Wait until Nexus registers as a producer with Oximeter.
@@ -257,30 +259,31 @@ async fn test_instance_watcher_metrics(
                               filter timestamp > @2000-01-01";
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let oximeter = &cptestctx.oximeter;
 
     let activate_instance_watcher = || async {
         use nexus_test_utils::background::activate_background_task;
 
-        let _ = activate_background_task(&internal_client, "instance_watcher")
+        let _ = activate_background_task(&lockstep_client, "instance_watcher")
             .await;
     };
 
     #[track_caller]
     fn count_state(
-        table: &oxql_types::Table,
+        table: &oxql::OxqlTable,
         instance_id: InstanceUuid,
         state: &'static str,
     ) -> Result<i64, MetricsNotYet> {
         use oxql_types::point::ValueArray;
         let uuid = FieldValue::Uuid(instance_id.into_untyped_uuid());
         let state = FieldValue::String(state.into());
-        let mut timeserieses = table.timeseries().filter(|ts| {
-            ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid)
-                && ts.fields.get(STATE_FIELD) == Some(&state)
-        });
+        let mut timeserieses =
+            table.timeseries.clone().into_iter().filter(|ts| {
+                ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid)
+                    && ts.fields.get(STATE_FIELD) == Some(&state)
+            });
         let timeseries = timeserieses.next().ok_or_else(|| {
             MetricsNotYet::new(format!(
                 "missing timeseries for instance {instance_id}, state {state}\n\
@@ -295,7 +298,7 @@ async fn test_instance_watcher_metrics(
             )
         }
         match timeseries.points.values(0) {
-            Some(ValueArray::Integer(ref vals)) => {
+            Some(ValueArray::Integer(vals)) => {
                 Ok(vals.iter().filter_map(|&v| v).sum())
             }
             x => panic!(
@@ -325,7 +328,7 @@ async fn test_instance_watcher_metrics(
         .system_timeseries_query_until(OXQL_QUERY, |metrics| {
             let checks = metrics
                 .iter()
-                .find(|t| t.name() == "virtual_machine:check")
+                .find(|t| t.name == "virtual_machine:check")
                 .ok_or_else(|| {
                     MetricsNotYet::new("missing virtual_machine:check")
                 })?;
@@ -348,7 +351,7 @@ async fn test_instance_watcher_metrics(
         .system_timeseries_query_until(OXQL_QUERY, |metrics| {
             let checks = metrics
                 .iter()
-                .find(|t| t.name() == "virtual_machine:check")
+                .find(|t| t.name == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
             let ts1 =
                 dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
@@ -371,7 +374,7 @@ async fn test_instance_watcher_metrics(
         .system_timeseries_query_until(OXQL_QUERY, |metrics| {
             let checks = metrics
                 .iter()
-                .find(|t| t.name() == "virtual_machine:check")
+                .find(|t| t.name == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
             let ts1_starting =
                 dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
@@ -402,7 +405,7 @@ async fn test_instance_watcher_metrics(
         .system_timeseries_query_until(OXQL_QUERY, |metrics| {
             let checks = metrics
                 .iter()
-                .find(|t| t.name() == "virtual_machine:check")
+                .find(|t| t.name == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
 
             let ts1_starting =
@@ -437,7 +440,7 @@ async fn test_instance_watcher_metrics(
         .system_timeseries_query_until(OXQL_QUERY, |metrics| {
             let checks = metrics
                 .iter()
-                .find(|t| t.name() == "virtual_machine:check")
+                .find(|t| t.name == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
             let ts1_starting =
                 dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
@@ -465,7 +468,7 @@ async fn test_project_timeseries_query(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await; // needed for instance create to work
+    create_default_ip_pools(&client).await; // needed for instance create to work
 
     // Create two projects
     let p1 = create_project(&client, "project1").await;
@@ -477,11 +480,11 @@ async fn test_project_timeseries_query(
     let i2p1 = create_instance(&client, "project1", "instance2").await;
     let _i3p2 = create_instance(&client, "project2", "instance3").await;
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // get the instance metrics to show up
     let _ =
-        activate_background_task(&internal_client, "instance_watcher").await;
+        activate_background_task(&lockstep_client, "instance_watcher").await;
 
     // Query with no project specified
     let q1 = "get virtual_machine:check";
@@ -497,7 +500,7 @@ async fn test_project_timeseries_query(
                 return Err(MetricsNotYet::new("waiting for table creation"));
             }
             assert_eq!(result.len(), 1);
-            if result[0].timeseries().len() == 0 {
+            if result[0].timeseries.is_empty() {
                 return Err(MetricsNotYet::new(
                     "waiting for timeseries population",
                 ));
@@ -511,11 +514,11 @@ async fn test_project_timeseries_query(
         .project_timeseries_query(&p1.identity.id.to_string(), q1)
         .await;
     assert_eq!(result.len(), 1);
-    assert!(result[0].timeseries().len() > 0);
+    assert!(!result[0].timeseries.is_empty());
 
     let result = metrics_querier.project_timeseries_query("project2", q1).await;
     assert_eq!(result.len(), 1);
-    assert!(result[0].timeseries().len() > 0);
+    assert!(!result[0].timeseries.is_empty());
 
     // with project specified
     let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
@@ -523,11 +526,11 @@ async fn test_project_timeseries_query(
     let result = metrics_querier.project_timeseries_query("project1", q2).await;
     assert_eq!(result.len(), 1);
     // we get 2 timeseries because there are two instances
-    assert!(result[0].timeseries().len() == 2);
+    assert!(result[0].timeseries.len() == 2);
 
     let result = metrics_querier.project_timeseries_query("project2", q2).await;
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].timeseries().len(), 0);
+    assert_eq!(result[0].timeseries.len(), 0);
 
     // with instance specified
     let q3 =
@@ -536,12 +539,12 @@ async fn test_project_timeseries_query(
     // project containing instance gives me something
     let result = metrics_querier.project_timeseries_query("project1", q3).await;
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].timeseries().len(), 1);
+    assert_eq!(result[0].timeseries.len(), 1);
 
     // should be empty or error
     let result = metrics_querier.project_timeseries_query("project2", q3).await;
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].timeseries().len(), 0);
+    assert_eq!(result[0].timeseries.len(), 0);
 
     // now let's test it with group_by
     let q4 = &format!(
@@ -550,7 +553,7 @@ async fn test_project_timeseries_query(
     );
     let result = metrics_querier.project_timeseries_query("project1", q4).await;
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].timeseries().len(), 2);
+    assert_eq!(result[0].timeseries.len(), 2);
 
     // test with a nested query
     let q5 = &format!(
@@ -565,21 +568,22 @@ async fn test_project_timeseries_query(
     // we get two results, each contains one timeseries, and the instance ID
     // on each corresponds to the one we requested
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].timeseries().len(), 1);
-    let timeseries = result[0].timeseries().next().unwrap();
+    assert_eq!(result[0].timeseries.len(), 1);
+    let timeseries = result[0].timeseries[0].clone();
     let instance_id = timeseries.fields.get("instance_id").unwrap().to_string();
     assert_eq!(instance_id, i1p1.identity.id.to_string());
 
-    assert_eq!(result[1].timeseries().len(), 1);
-    let timeseries = result[1].timeseries().next().unwrap();
+    assert_eq!(result[1].timeseries.len(), 1);
+    let timeseries = &result[1].timeseries[0];
     let instance_id = timeseries.fields.get("instance_id").unwrap().to_string();
     assert_eq!(instance_id, i2p1.identity.id.to_string());
 
     // expect error when querying a metric that has no project_id on it
     let q6 = "get integration_target:integration_metric";
     let url = "/v1/timeseries/query?project=project1";
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q6.to_string(),
+        include_summaries: false,
     };
     let result =
         object_create_error(client, url, &body, StatusCode::BAD_REQUEST).await;
@@ -598,8 +602,9 @@ async fn test_project_timeseries_query(
 
     // nonexistent project
     let url = "/v1/timeseries/query?project=nonexistent";
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q6.to_string(),
+        include_summaries: false,
     };
     let result =
         object_create_error(client, url, &body, StatusCode::NOT_FOUND).await;
@@ -607,8 +612,9 @@ async fn test_project_timeseries_query(
 
     // unprivileged user gets 404 on project that exists, but which they can't read
     let url = "/v1/timeseries/query?project=project1";
-    let body = nexus_types::external_api::params::TimeseriesQuery {
+    let body = timeseries::TimeseriesQuery {
         query: q1.to_string(),
+        include_summaries: false,
     };
 
     let request = RequestBuilder::new(client, Method::POST, url)
@@ -639,10 +645,28 @@ async fn test_project_timeseries_query(
         .expect_status(Some(StatusCode::OK));
     let result = NexusRequest::new(request)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<OxqlQueryResult>()
+        .execute_and_parse_unwrap::<oxql::OxqlQueryResult>()
         .await;
     assert_eq!(result.tables.len(), 1);
-    assert_eq!(result.tables[0].timeseries().len(), 2); // two instances
+    assert_eq!(result.tables[0].timeseries.len(), 2); // two instances
+    assert!(result.query_summaries.is_none());
+
+    // Request metrics again, this time with query summaries.
+    let body = timeseries::TimeseriesQuery {
+        query: q1.to_string(),
+        include_summaries: true,
+    };
+    let request = RequestBuilder::new(client, Method::POST, url)
+        .body(Some(&body))
+        .expect_status(Some(StatusCode::OK));
+    let result = NexusRequest::new(request)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<oxql::OxqlQueryResult>()
+        .await;
+    assert_eq!(result.tables.len(), 1);
+    assert_eq!(result.tables[0].timeseries.len(), 2); // two instances
+    assert!(result.query_summaries.is_some());
+    assert_eq!(result.query_summaries.unwrap().len(), 2);
 }
 
 #[nexus_test]
@@ -651,7 +675,9 @@ async fn test_mgs_metrics(
 ) {
     // Make a MGS
     let (mut mgs_config, sp_sim_config) =
-        gateway_test_utils::setup::load_test_config();
+        gateway_test_utils::setup::load_test_config(
+            DEFAULT_SP_SIM_CONFIG.into(),
+        );
     let mgs = {
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
@@ -780,7 +806,7 @@ async fn test_mgs_metrics(
         querier.system_timeseries_query_until(&query, |tables| {
             let table = tables
                 .into_iter()
-                .find(|t| t.name() == name)
+                .find(|t| t.name == *name)
                 .ok_or_else(|| {
                     MetricsNotYet::new(format!(
                         "failed to find table for {query}",
@@ -791,7 +817,7 @@ async fn test_mgs_metrics(
                 .keys()
                 .map(|serial| (serial.clone(), 0))
                 .collect::<HashMap<_, usize>>();
-            for timeseries in table.timeseries() {
+            for timeseries in &table.timeseries {
                 let fields = &timeseries.fields;
                 if timeseries.points.is_empty() {
                     return Err(MetricsNotYet::new(format!(

@@ -2,11 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeSet;
+
+use chrono::{DateTime, Utc};
+use indent_write::indentable::Indentable as _;
+use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
-use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::{ReconfiguratorSimOpUuid, ReconfiguratorSimStateUuid};
+use swrite::{SWrite, swriteln};
 use thiserror::Error;
 
-use crate::{BlueprintId, ResolvedBlueprintId};
+use crate::{
+    BlueprintId, CollectionId, ResolvedBlueprintId, ResolvedCollectionId,
+};
 
 /// The caller attempted to insert a duplicate key.
 #[derive(Clone, Debug, Error)]
@@ -20,7 +28,7 @@ impl DuplicateError {
         &self.id
     }
 
-    pub(crate) fn collection(id: CollectionUuid) -> Self {
+    pub(crate) fn collection(id: CollectionId) -> Self {
         Self { id: ObjectId::Collection(id) }
     }
 
@@ -43,8 +51,9 @@ impl DuplicateError {
 
 #[derive(Clone, Debug)]
 pub enum ObjectId {
-    Collection(CollectionUuid),
+    Collection(CollectionId),
     Blueprint(BlueprintId),
+    ResolvedCollection(ResolvedCollectionId),
     ResolvedBlueprint(ResolvedBlueprintId),
     InternalDns(Generation),
     ExternalDns(Generation),
@@ -54,7 +63,10 @@ pub enum ObjectId {
 impl ObjectId {
     fn to_error_string(&self) -> String {
         match self {
-            ObjectId::Collection(id) => {
+            ObjectId::Collection(CollectionId::Latest) => {
+                "no latest collection found".to_string()
+            }
+            ObjectId::Collection(CollectionId::Id(id)) => {
                 format!("collection ID {id}")
             }
             ObjectId::Blueprint(BlueprintId::Latest) => {
@@ -66,6 +78,7 @@ impl ObjectId {
             ObjectId::Blueprint(BlueprintId::Id(id)) => {
                 format!("blueprint ID {id}")
             }
+            ObjectId::ResolvedCollection(id) => id.to_string(),
             ObjectId::ResolvedBlueprint(id) => id.to_string(),
             ObjectId::InternalDns(generation) => {
                 format!("internal DNS at generation {generation}")
@@ -92,12 +105,12 @@ impl KeyError {
         &self.id
     }
 
-    pub(crate) fn collection(id: CollectionUuid) -> Self {
+    pub(crate) fn collection(id: CollectionId) -> Self {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: BlueprintId) -> Self {
-        Self { id: ObjectId::Blueprint(id) }
+    pub(crate) fn resolved_collection(id: ResolvedCollectionId) -> Self {
+        Self { id: ObjectId::ResolvedCollection(id) }
     }
 
     pub(crate) fn resolved_blueprint(id: ResolvedBlueprintId) -> Self {
@@ -127,4 +140,131 @@ impl NonEmptySystemError {
     pub(crate) fn new() -> Self {
         Self {}
     }
+}
+
+/// Unknown zone names were provided to `SimTufRepoSource::simulate_zone_error`.
+#[derive(Clone, Debug, Error)]
+#[error(
+    "unknown zone names `{}` (valid zone names: {})",
+    self.unknown.join(", "),
+    self.known.iter().join(", "),
+)]
+pub struct UnknownZoneNamesError {
+    /// The names of the unknown zones.
+    pub unknown: Vec<String>,
+
+    /// The set of known zone names.
+    pub known: BTreeSet<String>,
+}
+
+impl UnknownZoneNamesError {
+    pub(crate) fn new(unknown: Vec<String>, known: BTreeSet<String>) -> Self {
+        Self { unknown, known }
+    }
+}
+
+/// A state that matched a prefix query.
+#[derive(Clone, Debug)]
+pub struct StateMatch {
+    /// The state ID.
+    pub id: ReconfiguratorSimStateUuid,
+    /// The state generation.
+    pub generation: Generation,
+    /// The state description.
+    pub description: String,
+}
+
+/// Error when resolving a state ID.
+#[derive(Clone, Debug, Error)]
+pub enum StateIdResolveError {
+    /// No state found with the given prefix.
+    #[error("no state found with prefix '{0}'")]
+    NoMatch(String),
+
+    /// Multiple states found with the given prefix.
+    #[error("prefix '{prefix}' is ambiguous: matches {count} states\n{}", format_matches(.matches))]
+    Ambiguous { prefix: String, count: usize, matches: Vec<StateMatch> },
+
+    /// State not found by ID.
+    #[error("state not found: {0}")]
+    NotFound(ReconfiguratorSimStateUuid),
+}
+
+fn format_matches(matches: &[StateMatch]) -> String {
+    let mut output = String::new();
+    for state_match in matches {
+        swriteln!(
+            output,
+            "  - {} generation {}:",
+            state_match.id,
+            state_match.generation
+        );
+        swriteln!(
+            output,
+            "{}",
+            state_match.description.trim_end().indented("    ")
+        );
+    }
+    output
+}
+
+/// An operation that matched a prefix query.
+#[derive(Clone, Debug)]
+pub struct OpMatch {
+    /// The operation ID.
+    pub id: ReconfiguratorSimOpUuid,
+    /// The operation description.
+    pub description: String,
+    /// The operation timestamp.
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Error when resolving an operation ID.
+#[derive(Clone, Debug, Error)]
+pub enum OperationIdResolveError {
+    /// No operation found with the given prefix.
+    #[error("no operation found with prefix '{0}'")]
+    NoMatch(String),
+
+    /// Multiple operations found with the given prefix.
+    #[error("prefix '{prefix}' is ambiguous: matches {count} operations\n{}", format_op_matches(.matches))]
+    Ambiguous { prefix: String, count: usize, matches: Vec<OpMatch> },
+
+    /// Operation not found by ID.
+    #[error("operation not found: {0}")]
+    NotFound(ReconfiguratorSimOpUuid),
+}
+
+fn format_op_matches(matches: &[OpMatch]) -> String {
+    let mut output = String::new();
+    for op_match in matches {
+        swriteln!(
+            output,
+            "  - {} ({}): {}",
+            op_match.id,
+            op_match.timestamp,
+            op_match.description
+        );
+    }
+    output
+}
+
+/// Error when performing operation log operations (undo/redo/restore).
+#[derive(Clone, Debug, Error)]
+pub enum OperationError {
+    /// Operation not found.
+    #[error("operation not found: {0}")]
+    NotFound(ReconfiguratorSimOpUuid),
+
+    /// State not found.
+    #[error("state not found: {0}")]
+    StateNotFound(ReconfiguratorSimStateUuid),
+
+    /// Cannot undo: already at root operation.
+    #[error("cannot undo: already at root operation")]
+    AtRoot,
+
+    /// Cannot redo: no operation to redo to.
+    #[error("cannot redo: no redo available")]
+    NoRedo,
 }

@@ -101,6 +101,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
     let classes = [
         // Hand-written classes
         Action::get_polar_class(),
+        AuditLog::get_polar_class(),
         AnyActor::get_polar_class(),
         AuthenticatedActor::get_polar_class(),
         BlueprintConfig::get_polar_class(),
@@ -109,13 +110,23 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Fleet::get_polar_class(),
         Inventory::get_polar_class(),
         IpPoolList::get_polar_class(),
+        VpcList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
         DeviceAuthRequestList::get_polar_class(),
+        QuiesceState::get_polar_class(),
         SiloCertificateList::get_polar_class(),
+        SiloGroupList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
+        SiloUserSessionList::get_polar_class(),
+        SiloUserTokenList::get_polar_class(),
+        SubnetPoolList::get_polar_class(),
+        UpdateTrustRootList::get_polar_class(),
         TargetReleaseConfig::get_polar_class(),
         AlertClassList::get_polar_class(),
+        ScimClientBearerTokenList::get_polar_class(),
+        MulticastGroupList::get_polar_class(),
+        TrustQuorumConfig::get_polar_class(),
     ];
     for c in classes {
         oso_builder = oso_builder.register_class(c)?;
@@ -140,6 +151,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         RouterRoute::init(),
         VpcSubnet::init(),
         FloatingIp::init(),
+        ExternalSubnet::init(),
         // Silo-level resources
         Image::init(),
         SiloImage::init(),
@@ -153,7 +165,6 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         DeviceAccessToken::init(),
         PhysicalDisk::init(),
         Rack::init(),
-        RoleBuiltin::init(),
         SshKey::init(),
         Silo::init(),
         SiloUser::init(),
@@ -162,14 +173,18 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         IdentityProvider::init(),
         SamlIdentityProvider::init(),
         Sled::init(),
+        SubnetPool::init(),
         TufRepo::init(),
         TufArtifact::init(),
+        TufTrustRoot::init(),
         Alert::init(),
         AlertReceiver::init(),
         WebhookSecret::init(),
         Zpool::init(),
         Service::init(),
         UserBuiltin::init(),
+        ScimClientBearerToken::init(),
+        MulticastGroup::init(),
     ];
 
     for init in generated_inits {

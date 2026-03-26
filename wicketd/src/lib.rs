@@ -44,6 +44,7 @@ use std::{
 };
 use transceivers::Manager as TransceiverManager;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
+use wicketd_client::ClientInfo as _;
 
 /// Command line arguments for wicketd
 pub struct Args {
@@ -231,6 +232,12 @@ impl Server {
                 log,
             )
             .config(installinator_config)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    installinator_api::latest_version(),
+                ),
+            )))
             .start()
             .map_err(|err| {
                 anyhow!(err)

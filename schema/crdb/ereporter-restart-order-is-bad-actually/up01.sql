@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS lookup_ereporter_restart_generations_by_location;

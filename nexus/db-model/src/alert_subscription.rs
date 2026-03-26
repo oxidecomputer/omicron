@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::AlertClass;
-use crate::AlertClassParseError;
 use crate::SemverVersion;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{alert_glob, alert_subscription};
-use nexus_types::external_api::shared;
+use nexus_types::alert::AlertClassParseError;
+use nexus_types::external_api::alert;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{AlertReceiverKind, AlertReceiverUuid};
 use serde::{Deserialize, Serialize};
@@ -81,9 +81,12 @@ impl AlertSubscriptionKind {
             return Ok(Self::Glob(AlertGlob { regex, glob: value }));
         }
 
-        let class = value.parse().map_err(|e: AlertClassParseError| {
-            Error::invalid_value("alert_class", e.to_string())
-        })?;
+        let class: AlertClass = value
+            .parse::<nexus_types::alert::AlertClass>()
+            .map_err(|e: AlertClassParseError| {
+                Error::invalid_value("alert_class", e.to_string())
+            })?
+            .into();
 
         if class == AlertClass::Probe {
             return Err(Error::invalid_value(
@@ -96,7 +99,7 @@ impl AlertSubscriptionKind {
     }
 }
 
-impl TryFrom<AlertSubscriptionKind> for shared::AlertSubscription {
+impl TryFrom<AlertSubscriptionKind> for alert::AlertSubscription {
     type Error = Error;
     fn try_from(kind: AlertSubscriptionKind) -> Result<Self, Self::Error> {
         match kind {
@@ -113,10 +116,10 @@ impl TryFrom<AlertSubscriptionKind> for shared::AlertSubscription {
     }
 }
 
-impl TryFrom<shared::AlertSubscription> for AlertSubscriptionKind {
+impl TryFrom<alert::AlertSubscription> for AlertSubscriptionKind {
     type Error = Error;
     fn try_from(
-        subscription: shared::AlertSubscription,
+        subscription: alert::AlertSubscription,
     ) -> Result<Self, Self::Error> {
         Self::new(String::from(subscription))
     }

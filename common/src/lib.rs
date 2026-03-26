@@ -17,17 +17,15 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// TODO(#32): Remove this exception once resolved.
-#![allow(clippy::field_reassign_with_default)]
 
 pub mod address;
 pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod disk;
-pub mod ledger;
 pub mod policy;
 pub mod progenitor_operation_retry;
+pub mod resolvable_files;
 pub mod snake_case_result;
 pub mod update;
 pub mod vlan;
@@ -58,6 +56,19 @@ impl slog::KV for FileKv {
     }
 }
 
+/// Returns the current time, truncated to the previous microsecond.
+///
+/// This exists because the database doesn't store nanosecond-precision, so if
+/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
+/// when round-tripping through the database.  That's rather inconvenient.
+pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
+    let ts = chrono::Utc::now();
+    let nanosecs = ts.timestamp_subsec_nanos();
+    let micros = ts.timestamp_subsec_micros();
+    let only_nanos = nanosecs - micros * 1000;
+    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
+}
+
 pub const OMICRON_DPD_TAG: &str = "omicron";
 
 /// A wrapper struct that does nothing other than elide the inner value from
@@ -84,13 +95,50 @@ impl<T> std::fmt::Debug for NoDebug<T> {
     }
 }
 
+/// Produce an OpenAPI schema describing a hex string of a specific byte length.
+///
+/// Used by versioned sled-agent types to preserve schema compatibility. New
+/// code should use `byte_wrapper::HexArray<N>` which implements `JsonSchema`
+/// directly.
 pub fn hex_schema<const N: usize>(
-    gen: &mut schemars::SchemaGenerator,
+    generator: &mut schemars::SchemaGenerator,
 ) -> schemars::schema::Schema {
     use schemars::JsonSchema;
 
     let mut schema: schemars::schema::SchemaObject =
-        <String>::json_schema(gen).into();
+        <String>::json_schema(generator).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()
+}
+
+/// A simple wrapper around a byte slice that provides a [`std::fmt::Debug`]
+/// impl which writes the bytes as a hex string.
+///
+/// # Example
+///
+/// ```
+/// # use omicron_common::BytesToHexDebug;
+/// assert_eq!(
+///     format!("{:?}", BytesToHexDebug(&[1, 234, 56, 255, 11])),
+///     "01ea38ff0b",
+/// );
+/// assert_eq!(
+///     format!("{:?}", BytesToHexDebug("Hello World!".as_bytes())),
+///     "48656c6c6f20576f726c6421",
+/// );
+/// ```
+pub struct BytesToHexDebug<'a>(pub &'a [u8]);
+
+impl std::fmt::Debug for BytesToHexDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Write;
+        const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+        for b in self.0 {
+            let upper_nib = HEX_CHARS[(b >> 4) as usize] as char;
+            let lower_nib = HEX_CHARS[(b & 0xF) as usize] as char;
+            f.write_char(upper_nib)?;
+            f.write_char(lower_nib)?;
+        }
+        Ok(())
+    }
 }

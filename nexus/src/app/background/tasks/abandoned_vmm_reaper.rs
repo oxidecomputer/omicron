@@ -60,7 +60,10 @@ impl AbandonedVmmReaper {
         status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
     ) -> Result<(), anyhow::Error> {
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let vmms = self
                 .datastore
@@ -198,12 +201,12 @@ mod tests {
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
     use nexus_db_model::Vmm;
-    use nexus_db_model::VmmRuntimeState;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::InstanceUuid;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::SledUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -220,7 +223,7 @@ mod tests {
             datastore: &Arc<DataStore>,
             opctx: &OpContext,
         ) -> Self {
-            resource_helpers::create_default_ip_pool(&client).await;
+            resource_helpers::create_default_ip_pools(&client).await;
 
             let _project =
                 resource_helpers::create_project(client, PROJECT_NAME).await;
@@ -240,14 +243,13 @@ mod tests {
                         time_created: Utc::now(),
                         time_deleted: None,
                         instance_id: instance.identity.id,
-                        sled_id: Uuid::new_v4(),
+                        sled_id: SledUuid::new_v4().into(),
                         propolis_ip: "::1".parse().unwrap(),
                         propolis_port: 12345.into(),
-                        runtime: VmmRuntimeState {
-                            state: VmmState::Destroyed,
-                            time_state_updated: Utc::now(),
-                            gen: Generation::new(),
-                        }
+                        cpu_platform: VmmCpuPlatform::SledDefault,
+                        state: VmmState::Destroyed,
+                        time_state_updated: Utc::now(),
+                        generation: Generation::new(),
                     }),
                 )
                 .await
@@ -364,7 +366,10 @@ mod tests {
         // order to simulate a condition where the VMM record was deleted
         // between when the listing query was run and when the bg task attempted
         // to delete the VMM record.
-        let paginator = Paginator::new(SQL_BATCH_SIZE);
+        let paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())
@@ -411,7 +416,10 @@ mod tests {
         // order to simulate a condition where the sled reservation record was
         // deleted between when the listing query was run and when the bg task
         // attempted to delete the sled reservation..
-        let paginator = Paginator::new(SQL_BATCH_SIZE);
+        let paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())

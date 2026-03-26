@@ -1,0 +1,14 @@
+This migration changes the schema for ereports so that, rather than storing
+host OS and service processor ereports in separate `host_ereport` and
+`sp_ereport` tables, we instead store all ereports in a single `ereport` table.
+
+In particular, we:
+
+. Create the `ereporter_type` enum, which identifies whether an
+  ereport came from an SP or the host OS (`up01.sql`)
+. Create the `ereport` table (`up02.sql`)
+. Insert every non-deleted entry from the `sp_ereport` and `host_ereport`
+  tables into the new table (`up03.sql`)
+. Create a bunch of indices on the new table (`up04.sql`, `up05.sql`,
+  `up06.sql`, `up07.sql`)
+. Drop the old tables (`up08.sql`, `up09.sql`)

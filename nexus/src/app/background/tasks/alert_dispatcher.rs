@@ -129,7 +129,10 @@ impl AlertDispatcher {
         // haven't yet been updated may lack exact subscriptions to event
         // classes that match its globs but were added after the last time its
         // globs were reprocessed.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut globs_reprocessed = 0;
         let mut globs_failed = 0;
         let mut globs_already_reprocessed = 0;
@@ -449,13 +452,13 @@ mod test {
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
         let alert_id = AlertUuid::new_v4();
+        let alert = db::model::Alert::new(
+            alert_id,
+            db::model::AlertClass::TestQuuxBar,
+            serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
+        );
         datastore
-            .alert_create(
-                &opctx,
-                alert_id,
-                db::model::AlertClass::TestQuuxBar,
-                serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
-            )
+            .alert_create(&opctx, alert)
             .await
             .expect("creating the event should work");
 
@@ -527,7 +530,10 @@ mod test {
         // webhook_deliverator background task may have activated and might
         // attempt to deliver the event, making it no longer show up in the
         // "ready" query.
-        let mut paginator = Paginator::new(db::datastore::SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut deliveries = Vec::new();
         while let Some(p) = paginator.next() {
             let batch = datastore

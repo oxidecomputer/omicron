@@ -71,10 +71,11 @@ allow = "any"
 [rack_network_config]
 infra_ip_first = "172.30.0.1"
 infra_ip_last = "172.30.0.10"
+rack_subnet_address = "fd00:1122:3344:100::"
 
 [rack_network_config.switch0.port0]
 routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
-addresses = [{ address = "172.30.0.1/24" }]
+addresses = [{ address = "addrconf", vlan_id = 1 }]
 uplink_port_speed = "speed400_g"
 uplink_port_fec = "firecode"
 autoneg = true
@@ -82,7 +83,7 @@ autoneg = true
 [[rack_network_config.switch0.port0.bgp_peers]]
 asn = 47
 port = "port0"
-addr = "10.2.3.4"
+addr = "unnumbered"
 hold_time = 6
 idle_hold_time = 3
 delay_open = 0
@@ -128,7 +129,7 @@ post2 = 0
 
 [rack_network_config.switch1.port0]
 routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
-addresses = [{ address = "172.32.0.1/24" }]
+addresses = [{ address = "172.30.0.1/24" }]
 uplink_port_speed = "speed400_g"
 autoneg = true
 
@@ -164,3 +165,4 @@ post2 = 0
 [[rack_network_config.bgp]]
 asn = 47
 originate = ["10.0.0.0/16"]
+max_paths = 1

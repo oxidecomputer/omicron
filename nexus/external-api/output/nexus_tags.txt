@@ -35,7 +35,6 @@ disk_create                              POST     /v1/disks
 disk_delete                              DELETE   /v1/disks/{disk}
 disk_finalize_import                     POST     /v1/disks/{disk}/finalize
 disk_list                                GET      /v1/disks
-disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
 API operations found with tag "experimental"
@@ -50,10 +49,19 @@ affinity_group_member_list               GET      /v1/affinity-groups/{affinity_
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
+instance_multicast_group_join            PUT      /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_list            GET      /v1/instances/{instance}/multicast-groups
+multicast_group_list                     GET      /v1/multicast-groups
+multicast_group_member_list              GET      /v1/multicast-groups/{multicast_group}/members
+multicast_group_view                     GET      /v1/multicast-groups/{multicast_group}
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
 probe_view                               GET      /experimental/v1/probes/{probe}
+rack_membership_abort                    POST     /v1/system/hardware/racks/{rack_id}/membership/abort
+rack_membership_add_sleds                POST     /v1/system/hardware/racks/{rack_id}/membership/add
+rack_membership_status                   GET      /v1/system/hardware/racks/{rack_id}/membership
 support_bundle_create                    POST     /experimental/v1/system/support-bundles
 support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{bundle_id}
 support_bundle_download                  GET      /experimental/v1/system/support-bundles/{bundle_id}/download
@@ -62,12 +70,19 @@ support_bundle_head                      HEAD     /experimental/v1/system/suppor
 support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
+support_bundle_update                    PUT      /experimental/v1/system/support-bundles/{bundle_id}
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
-system_update_get_repository             GET      /v1/system/update/repository/{system_version}
-system_update_put_repository             PUT      /v1/system/update/repository
-target_release_update                    PUT      /v1/system/update/target-release
-target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
+
+API operations found with tag "external-subnets"
+OPERATION ID                             METHOD   URL PATH
+external_subnet_attach                   POST     /v1/external-subnets/{external_subnet}/attach
+external_subnet_create                   POST     /v1/external-subnets
+external_subnet_delete                   DELETE   /v1/external-subnets/{external_subnet}
+external_subnet_detach                   POST     /v1/external-subnets/{external_subnet}/detach
+external_subnet_list                     GET      /v1/external-subnets
+external_subnet_update                   PUT      /v1/external-subnets/{external_subnet}
+external_subnet_view                     GET      /v1/external-subnets/{external_subnet}
 
 API operations found with tag "floating-ips"
 OPERATION ID                             METHOD   URL PATH
@@ -99,6 +114,7 @@ instance_disk_list                       GET      /v1/instances/{instance}/disks
 instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/external-ips/ephemeral
 instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
+instance_external_subnet_list            GET      /v1/instances/{instance}/external-subnets
 instance_list                            GET      /v1/instances
 instance_network_interface_create        POST     /v1/network-interfaces
 instance_network_interface_delete        DELETE   /v1/network-interfaces/{interface}
@@ -113,6 +129,11 @@ instance_start                           POST     /v1/instances/{instance}/start
 instance_stop                            POST     /v1/instances/{instance}/stop
 instance_update                          PUT      /v1/instances/{instance}
 instance_view                            GET      /v1/instances/{instance}
+
+API operations found with tag "ip-pools"
+OPERATION ID                             METHOD   URL PATH
+ip_pool_list                             GET      /v1/ip-pools
+ip_pool_view                             GET      /v1/ip-pools/{pool}
 
 API operations found with tag "login"
 OPERATION ID                             METHOD   URL PATH
@@ -132,18 +153,11 @@ API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
-project_ip_pool_list                     GET      /v1/ip-pools
-project_ip_pool_view                     GET      /v1/ip-pools/{pool}
 project_list                             GET      /v1/projects
 project_policy_update                    PUT      /v1/projects/{project}/policy
 project_policy_view                      GET      /v1/projects/{project}/policy
 project_update                           PUT      /v1/projects/{project}
 project_view                             GET      /v1/projects/{project}
-
-API operations found with tag "roles"
-OPERATION ID                             METHOD   URL PATH
-role_list                                GET      /v1/system/roles
-role_view                                GET      /v1/system/roles/{role_name}
 
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
@@ -158,6 +172,10 @@ group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
+user_logout                              POST     /v1/users/{user_id}/logout
+user_session_list                        GET      /v1/users/{user_id}/sessions
+user_token_list                          GET      /v1/users/{user_id}/access-tokens
+user_view                                GET      /v1/users/{user_id}
 utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"
@@ -166,6 +184,11 @@ snapshot_create                          POST     /v1/snapshots
 snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
 snapshot_list                            GET      /v1/snapshots
 snapshot_view                            GET      /v1/snapshots/{snapshot}
+
+API operations found with tag "subnet-pools"
+OPERATION ID                             METHOD   URL PATH
+subnet_pool_list                         GET      /v1/subnet-pools
+subnet_pool_view                         GET      /v1/subnet-pools/{pool}
 
 API operations found with tag "system/alerts"
 OPERATION ID                             METHOD   URL PATH
@@ -184,6 +207,10 @@ webhook_secrets_add                      POST     /v1/webhook-secrets
 webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhook-secrets
 
+API operations found with tag "system/audit-log"
+OPERATION ID                             METHOD   URL PATH
+audit_log_list                           GET      /v1/system/audit-log
+
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
@@ -194,7 +221,6 @@ physical_disk_list                       GET      /v1/system/hardware/disks
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
-sled_add                                 POST     /v1/system/hardware/sleds
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
@@ -206,23 +232,23 @@ switch_view                              GET      /v1/system/hardware/switches/{
 
 API operations found with tag "system/ip-pools"
 OPERATION ID                             METHOD   URL PATH
-ip_pool_create                           POST     /v1/system/ip-pools
-ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
-ip_pool_list                             GET      /v1/system/ip-pools
-ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
-ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
-ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
-ip_pool_service_range_add                POST     /v1/system/ip-pools-service/ranges/add
-ip_pool_service_range_list               GET      /v1/system/ip-pools-service/ranges
-ip_pool_service_range_remove             POST     /v1/system/ip-pools-service/ranges/remove
-ip_pool_service_view                     GET      /v1/system/ip-pools-service
-ip_pool_silo_link                        POST     /v1/system/ip-pools/{pool}/silos
-ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/silos
-ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
-ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
-ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
-ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
-ip_pool_view                             GET      /v1/system/ip-pools/{pool}
+system_ip_pool_create                    POST     /v1/system/ip-pools
+system_ip_pool_delete                    DELETE   /v1/system/ip-pools/{pool}
+system_ip_pool_list                      GET      /v1/system/ip-pools
+system_ip_pool_range_add                 POST     /v1/system/ip-pools/{pool}/ranges/add
+system_ip_pool_range_list                GET      /v1/system/ip-pools/{pool}/ranges
+system_ip_pool_range_remove              POST     /v1/system/ip-pools/{pool}/ranges/remove
+system_ip_pool_service_range_add         POST     /v1/system/ip-pools-service/ranges/add
+system_ip_pool_service_range_list        GET      /v1/system/ip-pools-service/ranges
+system_ip_pool_service_range_remove      POST     /v1/system/ip-pools-service/ranges/remove
+system_ip_pool_service_view              GET      /v1/system/ip-pools-service
+system_ip_pool_silo_link                 POST     /v1/system/ip-pools/{pool}/silos
+system_ip_pool_silo_list                 GET      /v1/system/ip-pools/{pool}/silos
+system_ip_pool_silo_unlink               DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
+system_ip_pool_silo_update               PUT      /v1/system/ip-pools/{pool}/silos/{silo}
+system_ip_pool_update                    PUT      /v1/system/ip-pools/{pool}
+system_ip_pool_utilization_view          GET      /v1/system/ip-pools/{pool}/utilization
+system_ip_pool_view                      GET      /v1/system/ip-pools/{pool}
 
 API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH
@@ -236,6 +262,7 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_address_lot_view              GET      /v1/system/networking/address-lot/{address_lot}
 networking_allow_list_update             PUT      /v1/system/networking/allow-list
 networking_allow_list_view               GET      /v1/system/networking/allow-list
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
@@ -249,15 +276,17 @@ networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
 networking_bgp_exported                  GET      /v1/system/networking/bgp-exported
-networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_imported                  GET      /v1/system/networking/bgp-imported
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
+networking_inbound_icmp_update           PUT      /v1/system/networking/inbound-icmp
+networking_inbound_icmp_view             GET      /v1/system/networking/inbound-icmp
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
-networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
+networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address
 networking_switch_port_lldp_config_update POST     /v1/system/hardware/switch-port/{port}/lldp/config
 networking_switch_port_lldp_config_view  GET      /v1/system/hardware/switch-port/{port}/lldp/config
-networking_switch_port_lldp_neighbors    GET      /v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors
+networking_switch_port_lldp_neighbors    GET      /v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors
 networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
@@ -270,6 +299,10 @@ local_idp_user_delete                    DELETE   /v1/system/identity-providers/
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
 saml_identity_provider_create            POST     /v1/system/identity-providers/saml
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
+scim_token_create                        POST     /v1/system/scim/tokens
+scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
+scim_token_list                          GET      /v1/system/scim/tokens
+scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers
@@ -279,6 +312,7 @@ silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
 silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
 silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
+silo_subnet_pool_list                    GET      /v1/system/silos/{silo}/subnet-pools
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_utilization_list                    GET      /v1/system/utilization/silos
@@ -291,6 +325,35 @@ user_builtin_view                        GET      /v1/system/users-builtin/{user
 API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
+
+API operations found with tag "system/subnet-pools"
+OPERATION ID                             METHOD   URL PATH
+system_subnet_pool_create                POST     /v1/system/subnet-pools
+system_subnet_pool_delete                DELETE   /v1/system/subnet-pools/{pool}
+system_subnet_pool_list                  GET      /v1/system/subnet-pools
+system_subnet_pool_member_add            POST     /v1/system/subnet-pools/{pool}/members/add
+system_subnet_pool_member_list           GET      /v1/system/subnet-pools/{pool}/members
+system_subnet_pool_member_remove         POST     /v1/system/subnet-pools/{pool}/members/remove
+system_subnet_pool_silo_link             POST     /v1/system/subnet-pools/{pool}/silos
+system_subnet_pool_silo_list             GET      /v1/system/subnet-pools/{pool}/silos
+system_subnet_pool_silo_unlink           DELETE   /v1/system/subnet-pools/{pool}/silos/{silo}
+system_subnet_pool_silo_update           PUT      /v1/system/subnet-pools/{pool}/silos/{silo}
+system_subnet_pool_update                PUT      /v1/system/subnet-pools/{pool}
+system_subnet_pool_utilization_view      GET      /v1/system/subnet-pools/{pool}/utilization
+system_subnet_pool_view                  GET      /v1/system/subnet-pools/{pool}
+
+API operations found with tag "system/update"
+OPERATION ID                             METHOD   URL PATH
+system_update_recovery_finish            PUT      /v1/system/update/recovery-finish
+system_update_repository_list            GET      /v1/system/update/repositories
+system_update_repository_upload          PUT      /v1/system/update/repositories
+system_update_repository_view            GET      /v1/system/update/repositories/{system_version}
+system_update_status                     GET      /v1/system/update/status
+system_update_trust_root_create          POST     /v1/system/update/trust-roots
+system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
+system_update_trust_root_list            GET      /v1/system/update/trust-roots
+system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
+target_release_update                    PUT      /v1/system/update/target-release
 
 API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH

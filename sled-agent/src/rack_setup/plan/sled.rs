@@ -6,8 +6,6 @@
 
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_uuid_kinds::SledUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::sled::StartSledAgentRequestBody;
@@ -16,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug)]
 pub struct Plan {
     pub rack_id: Uuid,
     pub sleds: BTreeMap<SocketAddrV6, StartSledAgentRequest>,
@@ -62,8 +60,6 @@ impl Plan {
                 },
             )
         });
-
-        info!(log, "Serializing plan");
 
         let mut sleds = BTreeMap::new();
         for (addr, allocation) in allocations {

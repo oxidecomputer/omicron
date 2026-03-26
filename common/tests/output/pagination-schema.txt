@@ -19,7 +19,7 @@ schema for pagination parameters: scan parameters, scan by name only
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
       "oneOf": [
         {
-          "description": "sort in increasing order of \"name\"",
+          "description": "Sort in increasing order of \"name\"",
           "type": "string",
           "enum": [
             "name_ascending"
@@ -50,7 +50,7 @@ schema for pagination parameters: scan parameters, scan by id only
       "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
       "oneOf": [
         {
-          "description": "sort in increasing order of \"id\"",
+          "description": "Sort in increasing order of \"id\"",
           "type": "string",
           "enum": [
             "id_ascending"
@@ -81,21 +81,21 @@ schema for pagination parameters: scan parameters, scan by name or id
       "description": "Supported set of sort modes for scanning by name or id",
       "oneOf": [
         {
-          "description": "sort in increasing order of \"name\"",
+          "description": "Sort in increasing order of \"name\"",
           "type": "string",
           "enum": [
             "name_ascending"
           ]
         },
         {
-          "description": "sort in decreasing order of \"name\"",
+          "description": "Sort in decreasing order of \"name\"",
           "type": "string",
           "enum": [
             "name_descending"
           ]
         },
         {
-          "description": "sort in increasing order of \"id\"",
+          "description": "Sort in increasing order of \"id\"",
           "type": "string",
           "enum": [
             "id_ascending"
@@ -145,7 +145,7 @@ schema for pagination parameters: page selector, scan by name only
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
       "oneOf": [
         {
-          "description": "sort in increasing order of \"name\"",
+          "description": "Sort in increasing order of \"name\"",
           "type": "string",
           "enum": [
             "name_ascending"
@@ -184,7 +184,7 @@ schema for pagination parameters: page selector, scan by id only
       "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
       "oneOf": [
         {
-          "description": "sort in increasing order of \"id\"",
+          "description": "Sort in increasing order of \"id\"",
           "type": "string",
           "enum": [
             "id_ascending"
@@ -255,21 +255,21 @@ schema for pagination parameters: page selector, scan by name or id
       "description": "Supported set of sort modes for scanning by name or id",
       "oneOf": [
         {
-          "description": "sort in increasing order of \"name\"",
+          "description": "Sort in increasing order of \"name\"",
           "type": "string",
           "enum": [
             "name_ascending"
           ]
         },
         {
-          "description": "sort in decreasing order of \"name\"",
+          "description": "Sort in decreasing order of \"name\"",
           "type": "string",
           "enum": [
             "name_descending"
           ]
         },
         {
-          "description": "sort in increasing order of \"id\"",
+          "description": "Sort in increasing order of \"id\"",
           "type": "string",
           "enum": [
             "id_ascending"
@@ -306,7 +306,7 @@ schema for pagination parameters: page selector, scan by time and id
       "minItems": 2
     },
     "sort_by": {
-      "default": "ascending",
+      "default": "time_and_id_ascending",
       "allOf": [
         {
           "$ref": "#/definitions/TimeAndIdSortMode"
@@ -319,17 +319,17 @@ schema for pagination parameters: page selector, scan by time and id
       "description": "Supported set of sort modes for scanning by timestamp and ID",
       "oneOf": [
         {
-          "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+          "description": "Sort in increasing order of timestamp and ID, i.e., earliest first",
           "type": "string",
           "enum": [
-            "ascending"
+            "time_and_id_ascending"
           ]
         },
         {
-          "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+          "description": "Sort in increasing order of timestamp and ID, i.e., most recent first",
           "type": "string",
           "enum": [
-            "descending"
+            "time_and_id_descending"
           ]
         }
       ]

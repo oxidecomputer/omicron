@@ -7,8 +7,11 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use crate::DiskPaths;
+use crate::Partition;
+use crate::PooledDiskError;
 use crate::illumos::gpt;
-use crate::{DiskPaths, Partition, PooledDiskError};
+use crate::is_oxide_sled;
 use camino::Utf8Path;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
@@ -26,9 +29,14 @@ static DEFAULT_NVME_LBA_DATA_SIZE: u64 = 4096;
 /// NVMe device settings for a particular NVMe model.
 struct NvmeDeviceSettings {
     /// The desired disk size for dealing with overprovisioning.
-    size: u32,
+    resize: NvmeVendorResize,
     /// An override for the default 4k LBA formatting.
     lba_data_size_override: Option<u64>,
+}
+
+enum NvmeVendorResize {
+    Wdc(u32),
+    Unsupported,
 }
 
 /// A mapping from model to desired settings.
@@ -43,23 +51,45 @@ fn preferred_nvme_device_settings()
         HashMap::from([
             (
                 "WUS4C6432DSP3X3",
-                NvmeDeviceSettings { size: 3200, lba_data_size_override: None },
+                NvmeDeviceSettings {
+                    resize: NvmeVendorResize::Wdc(3200),
+                    lba_data_size_override: None,
+                },
             ),
             (
                 "WUS5EA138ESP7E1",
-                NvmeDeviceSettings { size: 3200, lba_data_size_override: None },
+                NvmeDeviceSettings {
+                    resize: NvmeVendorResize::Wdc(3200),
+                    lba_data_size_override: None,
+                },
             ),
             (
                 "WUS5EA138ESP7E3",
-                NvmeDeviceSettings { size: 3200, lba_data_size_override: None },
+                NvmeDeviceSettings {
+                    resize: NvmeVendorResize::Wdc(3200),
+                    lba_data_size_override: None,
+                },
             ),
             (
                 "WUS5EA176ESP7E1",
-                NvmeDeviceSettings { size: 6400, lba_data_size_override: None },
+                NvmeDeviceSettings {
+                    resize: NvmeVendorResize::Wdc(6400),
+                    lba_data_size_override: None,
+                },
             ),
             (
                 "WUS5EA176ESP7E3",
-                NvmeDeviceSettings { size: 6400, lba_data_size_override: None },
+                NvmeDeviceSettings {
+                    resize: NvmeVendorResize::Wdc(6400),
+                    lba_data_size_override: None,
+                },
+            ),
+            (
+                "SDS6BA138PSP9X3",
+                NvmeDeviceSettings {
+                    resize: NvmeVendorResize::Unsupported,
+                    lba_data_size_override: None,
+                },
             ),
         ])
     })
@@ -81,6 +111,8 @@ pub enum NvmeFormattingError {
     InfoError(#[from] libnvme::controller_info::NvmeInfoError),
     #[error("Could not find NVMe controller for disk with serial {0}")]
     NoController(String),
+    #[error("Could not determine if host is an Oxide sled: {0}")]
+    SystemDetection(#[source] anyhow::Error),
 }
 
 // The expected layout of an M.2 device within the Oxide rack.
@@ -267,101 +299,122 @@ fn ensure_size_and_formatting(
     use libnvme::Nvme;
     use libnvme::namespace::NamespaceDiscoveryLevel;
 
-    let mut controller_found = false;
-
-    if let Some(nvme_settings) =
-        preferred_nvme_device_settings().get(identity.model.as_str())
-    {
-        let nvme = Nvme::new()?;
-        for controller in nvme.controller_discovery()? {
-            let controller = controller?.write_lock().map_err(|(_, e)| e)?;
-            let controller_info = controller.get_info()?;
-            // Make sure we are operating on the correct NVMe device.
-            if controller_info.serial() != identity.serial {
-                continue;
-            };
-            controller_found = true;
-            let nsdisc = controller
-                .namespace_discovery(NamespaceDiscoveryLevel::Active)?;
-            let namespaces =
-                nsdisc.into_iter().collect::<Result<Vec<_>, _>>()?;
-            if namespaces.len() != 1 {
-                return Err(NvmeFormattingError::UnexpectedNamespaces(
-                    namespaces.len(),
-                ));
-            }
-            // Safe because verified there is exactly one namespace.
-            let namespace = namespaces.into_iter().next().unwrap();
-
-            // NB: Only some vendors such as WDC support adjusting the size
-            // of the disk to deal with overprovisioning. This will need to be
-            // abstracted away if/when we ever start using another vendor with
-            // this capability.
-            let size = controller.wdc_resize_get()?;
-
-            // First we need to detach blkdev from the namespace.
-            namespace.blkdev_detach()?;
-
-            // Resize the device if needed to ensure we get the expected
-            // durability level in terms of drive writes per day.
-            if size != nvme_settings.size {
-                controller.wdc_resize_set(nvme_settings.size)?;
-                info!(
-                    log,
-                    "Resized {} from {size} to {}",
-                    identity.serial,
-                    nvme_settings.size
-                )
-            }
-
-            // Find the LBA format we want to use for the device.
-            let wanted_data_size = nvme_settings
-                .lba_data_size_override
-                .unwrap_or(DEFAULT_NVME_LBA_DATA_SIZE);
-            let desired_lba = controller_info
-                .lba_formats()
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .find(|lba| {
-                    lba.meta_size() == NVME_LBA_META_SIZE
-                        && lba.data_size() == wanted_data_size
-                })
-                .ok_or_else(|| NvmeFormattingError::LbaFormatMissing)?;
-
-            // If the controller isn't formatted to our desired LBA we need to
-            // issue a format request.
-            let ns_info = namespace.get_info()?;
-            let current_lba = ns_info.current_format()?;
-            if current_lba.id() != desired_lba.id() {
-                controller
-                    .format_request()?
-                    .set_lbaf(desired_lba.id())?
-                    // TODO map this to libnvme::BROADCAST_NAMESPACE once added
-                    .set_nsid(u32::MAX)?
-                    // No secure erase
-                    .set_ses(0)?
-                    .execute()?;
-
-                info!(
-                    log,
-                    "Formatted disk with serial {} to an LBA with data size \
-                    {wanted_data_size}",
-                    identity.serial,
-                );
-            }
-
-            // Attach blkdev to the namespace again
-            namespace.blkdev_attach()?;
-        }
-    } else {
-        info!(
-            log,
-            "There are no preferred NVMe settings for disk model {}; nothing to\
-             do for disk with serial {}",
-            identity.model,
-            identity.serial
-        );
+    // Check that we are on real Oxide hardware so that we avoid:
+    // - Messing with NVMe devices in other environments
+    // - Failing tests which use zvols rather than real NVMe devices
+    // - Breaking virtual environments like a4x2 which likely don't expose or
+    //   implement changing the LBA on emulated devices.
+    if !is_oxide_sled().map_err(NvmeFormattingError::SystemDetection)? {
         return Ok(());
+    }
+
+    let mut controller_found = false;
+    let nvme = Nvme::new()?;
+
+    for controller in nvme.controller_discovery()? {
+        let controller = controller?.write_lock().map_err(|(_, e)| e)?;
+        let controller_info = controller.get_info()?;
+
+        // Make sure we are operating on the correct NVMe device.
+        if controller_info.serial() != identity.serial {
+            continue;
+        };
+        controller_found = true;
+        let nsdisc =
+            controller.namespace_discovery(NamespaceDiscoveryLevel::Active)?;
+        let namespaces = nsdisc.into_iter().collect::<Result<Vec<_>, _>>()?;
+
+        // We only want to continue if there is a single namespace associated
+        // with the device, so we accomplish this by pattern matching for it.
+        let [namespace] = namespaces.as_slice() else {
+            return Err(NvmeFormattingError::UnexpectedNamespaces(
+                namespaces.len(),
+            ));
+        };
+
+        // First we need to detach blkdev from the namespace.
+        namespace.blkdev_detach()?;
+
+        // Check for a known nvme drive and apply our desired configuration.
+        let mut wanted_data_size = DEFAULT_NVME_LBA_DATA_SIZE;
+        if let Some(nvme_settings) =
+            preferred_nvme_device_settings().get(identity.model.as_str())
+        {
+            match nvme_settings.resize {
+                NvmeVendorResize::Wdc(provisioning_size) => {
+                    let size = controller.wdc_resize_get()?;
+
+                    // Resize the device if needed to ensure we get the expected
+                    // durability level in terms of drive writes per day.
+                    if size != provisioning_size {
+                        controller.wdc_resize_set(provisioning_size)?;
+                        info!(
+                            log,
+                            "Resized {} from {size} to {provisioning_size}",
+                            identity.serial,
+                        )
+                    }
+                }
+                // This device doesn't have a vendor specific resize command to
+                // deal with overprovisioning so there's nothing to do.
+                NvmeVendorResize::Unsupported => (),
+            }
+
+            if let Some(lba_data_size_override) =
+                nvme_settings.lba_data_size_override
+            {
+                wanted_data_size = lba_data_size_override;
+            }
+        } else {
+            info!(
+                log,
+                "There are no preferred NVMe settings for disk model {};  will \
+                attempt to format to the default LBA data size for disk with \
+                serial {}",
+                identity.model,
+                identity.serial
+            );
+        }
+
+        // Find the LBA format we want to use for the device.
+        let desired_lba = controller_info
+            .lba_formats()
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .find(|lba| {
+                lba.meta_size() == NVME_LBA_META_SIZE
+                    && lba.data_size() == wanted_data_size
+            })
+            .ok_or_else(|| NvmeFormattingError::LbaFormatMissing)?;
+
+        // If the controller isn't formatted to our desired LBA we need to
+        // issue a format request.
+        let ns_info = namespace.get_info()?;
+        let current_lba = ns_info.current_format()?;
+        if current_lba.id() != desired_lba.id() {
+            controller
+                .format_request()?
+                .set_lbaf(desired_lba.id())?
+                // TODO map this to libnvme::BROADCAST_NAMESPACE once added
+                .set_nsid(u32::MAX)?
+                // No secure erase
+                .set_ses(0)?
+                .execute()?;
+
+            info!(
+                log,
+                "Formatted disk with serial {} to an LBA with data size \
+                    {wanted_data_size}",
+                identity.serial,
+            );
+        }
+
+        // Attach blkdev to the namespace again
+        namespace.blkdev_attach()?;
+
+        // We found the disk and applied the settings so there's no use scanning
+        // the rest of the devices.
+        break;
     }
 
     if !controller_found {

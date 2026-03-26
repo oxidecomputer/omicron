@@ -12,18 +12,28 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::create_affinity_group;
 use nexus_test_utils::resource_helpers::create_anti_affinity_group;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_vpc;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
-use nexus_types::external_api::views::Project;
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::project;
+use nexus_types::external_api::project::Project;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::snapshot;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
@@ -141,7 +151,7 @@ async fn test_project_deletion_with_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -154,7 +164,7 @@ async fn test_project_deletion_with_instance(
     let _: Instance = object_create(
         client,
         &format!("/v1/instances?project={}", name),
-        &params::InstanceCreate {
+        &instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-instance".parse().unwrap(),
                 description: "description".to_string(),
@@ -165,13 +175,15 @@ async fn test_project_deletion_with_instance(
             user_data: b"none".to_vec(),
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::None,
+                instance::InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
+            cpu_platform: None,
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         },
     )
     .await;
@@ -232,12 +244,22 @@ async fn test_project_deletion_with_floating_ip(
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
-    create_default_ip_pool(&client).await;
+    let (_v4_pool, v6_pool) = create_default_ip_pools(&client).await;
 
     create_project(&client, &name).await;
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;
-    let fip = create_floating_ip(&client, "my-fip", &name, None, None).await;
+    let fip = create_floating_ip(
+        &client,
+        "my-fip",
+        &name,
+        floating_ip::AddressAllocator::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
+    )
+    .await;
     assert_eq!(
         "project to be deleted contains a floating ip: my-fip",
         delete_project_expect_fail(&url, &client).await,
@@ -257,6 +279,8 @@ async fn test_project_deletion_with_floating_ip(
 async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    let _test = DiskTest::new(&cptestctx).await;
+
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
@@ -265,27 +289,10 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;
 
-    let image_create_params = params::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    };
-
-    let images_url = format!("/v1/images?project={}", name);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
-            .await;
+    let image = create_project_image(client, name, "not-alpine").await;
 
     assert_eq!(
-        "project to be deleted contains a project image: alpine-edge",
+        "project to be deleted contains a project image: not-alpine",
         delete_project_expect_fail(&url, &client).await,
     );
 
@@ -326,10 +333,10 @@ async fn test_project_deletion_with_snapshot(
     delete_project_default_vpc(&name, &client).await;
     create_disk(&client, &name, "my-disk").await;
 
-    let _: views::Snapshot = object_create(
+    let _: snapshot::Snapshot = object_create(
         client,
         &format!("/v1/snapshots?project={}", name),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-snapshot".parse().unwrap(),
                 description: "not attached to instance".into(),
@@ -462,4 +469,59 @@ async fn test_project_deletion_with_anti_affinity_group(
         .await
         .unwrap();
     delete_project(&project_url, &client).await;
+}
+
+#[nexus_test]
+async fn test_limited_collaborator_cannot_create_project(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a user with limited-collaborator role at silo level
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-project-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Attempt to create a project - should fail with 403 Forbidden
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/v1/projects")
+            .body(Some(&project::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-project".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(error.message, "Forbidden");
 }

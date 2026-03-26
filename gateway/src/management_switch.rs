@@ -14,6 +14,7 @@
 mod location_map;
 
 pub use self::location_map::LocationConfig;
+pub use self::location_map::LocationDescriptionConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
 pub use self::location_map::SwitchPortConfig;
@@ -89,34 +90,24 @@ fn default_ereport_listen_port() -> u16 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct SpIdentifier {
     pub typ: SpType,
-    pub slot: usize,
+    pub slot: u16,
 }
 
 impl SpIdentifier {
-    pub fn new(typ: SpType, slot: usize) -> Self {
+    pub fn new(typ: SpType, slot: u16) -> Self {
         Self { typ, slot }
     }
 }
 
 impl From<gateway_types::component::SpIdentifier> for SpIdentifier {
     fn from(id: gateway_types::component::SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot may come from an untrusted source, but usize >= 32 bits
-            // on any platform that will run this code, so unwrap is fine
-            slot: usize::try_from(id.slot).unwrap(),
-        }
+        Self { typ: id.typ.into(), slot: id.slot }
     }
 }
 
 impl From<SpIdentifier> for gateway_types::component::SpIdentifier {
     fn from(id: SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot comes from a trusted source (crate::management_switch)
-            // and will not exceed u32::MAX
-            slot: u32::try_from(id.slot).unwrap(),
-        }
+        Self { typ: id.typ.into(), slot: id.slot }
     }
 }
 
@@ -171,6 +162,8 @@ pub struct ManagementSwitch {
     // When it's dropped, it cancels the background tokio task that loops on
     // that socket receiving incoming packets.
     _shared_socket: Option<SharedSocket<shared_socket::SingleSpMessage>>,
+    // As above, we must also not drop the shared ereport socket.
+    _shared_ereport_socket: Option<SharedSocket<Vec<u8>>>,
     location_map: Arc<OnceLock<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
@@ -346,6 +339,7 @@ impl ManagementSwitch {
             local_ignition_controller_port,
             location_map,
             _shared_socket: shared_socket,
+            _shared_ereport_socket: ereport_socket,
             port_to_handle,
             port_to_ignition_target,
             discovery_task,
@@ -373,6 +367,32 @@ impl ManagementSwitch {
     pub fn local_switch(&self) -> Result<SpIdentifier, SpLookupError> {
         let location_map = self.location_map()?;
         Ok(location_map.port_to_id(self.local_ignition_controller_port))
+    }
+
+    /// Determine whether our configuration allows us to reset the specified SP.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if discovery is not yet complete (i.e., we don't
+    /// know the logical identifiers of any SP yet!).
+    pub fn allowed_to_reset_sp(
+        &self,
+        id: SpIdentifier,
+    ) -> Result<bool, SpLookupError> {
+        let location_map = self.location_map()?;
+
+        let allowed = match id.typ {
+            // We allow any non-sled reset.
+            SpType::Switch | SpType::Power => true,
+            SpType::Sled => {
+                // We allow resets to any sled that isn't our local sled...
+                id.slot != location_map.local_sled()
+                    // ... and resets to our local sled if configured to do so.
+                    || location_map.allow_local_sled_sp_reset()
+            }
+        };
+
+        Ok(allowed)
     }
 
     /// Get the handle for communicating with an SP by its switch port.

@@ -44,7 +44,7 @@ use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
 use nexus_db_schema::schema::webhook_secret::dsl as secret_dsl;
-use nexus_types::external_api::params;
+use nexus_types::external_api::alert;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::AlertGlobStatus;
 use omicron_common::api::external::CreateResult;
@@ -64,19 +64,15 @@ impl DataStore {
     pub async fn webhook_rx_create(
         &self,
         opctx: &OpContext,
-        params: params::WebhookCreate,
+        params: alert::WebhookCreate,
     ) -> CreateResult<WebhookReceiverConfig> {
         // TODO(eliza): someday we gotta allow creating webhooks with more
         // restrictive permissions...
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let params::WebhookCreate {
-            identity,
-            endpoint,
-            secrets,
-            subscriptions,
-        } = params;
+        let alert::WebhookCreate { identity, endpoint, secrets, subscriptions } =
+            params;
 
         let subscriptions = subscriptions
             .into_iter()
@@ -342,7 +338,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::AlertReceiver,
-        params: params::WebhookReceiverUpdate,
+        params: alert::WebhookReceiverUpdate,
     ) -> UpdateResult<AlertReceiver> {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -440,7 +436,10 @@ impl DataStore {
 
         // Before we can check whether the receiver is subscribed to the
         // provided event, ensure that its glob subscriptions are up to date.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .rx_list_reprocessable_globs_on_conn(
@@ -1168,6 +1167,7 @@ mod test {
     use super::*;
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::model::Alert;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1183,7 +1183,7 @@ mod test {
         datastore
             .webhook_rx_create(
                 opctx,
-                params::WebhookCreate {
+                alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.parse().unwrap(),
                         description: "it'sa  webhook".to_string(),
@@ -1201,14 +1201,17 @@ mod test {
             .expect("cant create ye webhook receiver!!!!")
     }
 
-    async fn create_event(
+    async fn create_alert(
         datastore: &DataStore,
         opctx: &OpContext,
         alert_class: AlertClass,
-    ) -> (authz::Alert, crate::db::model::Alert) {
+    ) -> (authz::Alert, Alert) {
         let id = AlertUuid::new_v4();
         datastore
-            .alert_create(opctx, id, alert_class, serde_json::json!({}))
+            .alert_create(
+                opctx,
+                Alert::new(id, alert_class, serde_json::json!({})),
+            )
             .await
             .expect("cant create ye event");
         LookupPath::new(opctx, datastore).alert_id(id).fetch().await.expect(
@@ -1297,7 +1300,10 @@ mod test {
         // event classes, we must generate exact subscriptions for their globs.
         // The webhook dispatcher background task does this prior to listing
         // subscribed receivers, so this simulates its behavior.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = datastore
                 .alert_glob_list_reprocessable(opctx, &p.current_pagparams())
@@ -1450,11 +1456,11 @@ mod test {
             .expect("cant get ye receiver");
 
         let (authz_foo, _) =
-            create_event(datastore, opctx, AlertClass::TestFoo).await;
+            create_alert(datastore, opctx, AlertClass::TestFoo).await;
         let (authz_foo_bar, _) =
-            create_event(datastore, opctx, AlertClass::TestFooBar).await;
+            create_alert(datastore, opctx, AlertClass::TestFooBar).await;
         let (authz_quux_bar, _) =
-            create_event(datastore, opctx, AlertClass::TestQuuxBar).await;
+            create_alert(datastore, opctx, AlertClass::TestQuuxBar).await;
 
         let is_subscribed_foo = datastore
             .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_foo)

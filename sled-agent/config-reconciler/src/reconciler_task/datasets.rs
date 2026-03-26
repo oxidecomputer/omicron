@@ -14,29 +14,44 @@
 use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
+use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::DatasetTaskHandle;
-use id_map::IdMap;
-use id_map::IdMappable;
+use crate::dataset_serialization_task::RekeyRequest;
+use crate::dataset_serialization_task::RekeyResult;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
+use trust_quorum_types::types::Epoch;
+
+/// Information about a managed disk for rekey filtering.
+///
+/// Used by `rekey_for_epoch` to determine which disks need key rotation
+/// based on their cached epoch. Disks with `cached_epoch < target` or
+/// `cached_epoch = None` (unknown) are candidates for rekeying.
+pub(super) struct DiskRekeyInfo<'a> {
+    pub disk: &'a Disk,
+    pub disk_id: PhysicalDiskUuid,
+    pub cached_epoch: Option<Epoch>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ZoneDatasetDependencyError {
@@ -52,14 +67,13 @@ pub(super) enum ZoneDatasetDependencyError {
 
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
-    datasets: IdMap<OmicronDataset>,
+    datasets: IdOrdMap<OmicronDataset>,
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
-    destroy_orphans: Arc<AtomicBool>,
 }
 
 impl OmicronDatasets {
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     pub(super) fn with_datasets<I>(datasets: I) -> Self
     where
         I: Iterator<Item = (DatasetConfig, Result<(), DatasetEnsureError>)>,
@@ -74,23 +88,14 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self {
-            datasets,
-            orphaned_datasets: IdOrdMap::new(),
-            dataset_task,
-            destroy_orphans: Arc::new(AtomicBool::new(false)),
-        }
+        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
     }
 
-    pub(super) fn new(
-        dataset_task: DatasetTaskHandle,
-        destroy_orphans: Arc<AtomicBool>,
-    ) -> Self {
+    pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
         Self {
-            datasets: IdMap::default(),
+            datasets: IdOrdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
-            destroy_orphans,
         }
     }
 
@@ -162,7 +167,7 @@ impl OmicronDatasets {
 
     pub(super) async fn remove_datasets_if_needed(
         &mut self,
-        datasets: &IdMap<DatasetConfig>,
+        datasets: &IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
@@ -200,16 +205,13 @@ impl OmicronDatasets {
             self.datasets.remove(&dataset_id);
         }
 
-        // Check against the filesystem for any orphaned datasets; this will
-        // attempt to destroy orphaned datasets if `self.destroy_orphans` is
-        // true. (It's false by default and must be enabled by an operator via
-        // `omdb`; making it true by default is tracked by omicron#6177.)
+        // Check against the filesystem for any orphaned datasets and attempt to
+        // destroy them.
         match self
             .dataset_task
-            .datasets_report_orphans(
+            .datasets_destroy_orphans(
                 datasets.clone(),
                 currently_managed_zpools,
-                self.destroy_orphans.load(Ordering::Relaxed),
             )
             .await
         {
@@ -251,7 +253,7 @@ impl OmicronDatasets {
 
     pub(super) async fn ensure_datasets_if_needed(
         &mut self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
@@ -279,7 +281,7 @@ impl OmicronDatasets {
                 Ok(()) => DatasetState::Ensured,
                 Err(err) => DatasetState::FailedToEnsure(err),
             };
-            self.datasets.insert(OmicronDataset { config, state });
+            self.datasets.insert_overwrite(OmicronDataset { config, state });
         }
     }
 
@@ -314,6 +316,14 @@ impl OmicronDatasets {
     pub(crate) fn orphaned_datasets(&self) -> &IdOrdMap<OrphanedDataset> {
         &self.orphaned_datasets
     }
+
+    /// Forward rekey requests to the dataset task.
+    pub(super) async fn rekey_datasets(
+        &self,
+        request: RekeyRequest,
+    ) -> Result<RekeyResult, DatasetTaskError> {
+        self.dataset_task.rekey_datasets(request).await
+    }
 }
 
 #[derive(Debug)]
@@ -322,16 +332,41 @@ struct OmicronDataset {
     state: DatasetState,
 }
 
-impl IdMappable for OmicronDataset {
-    type Id = DatasetUuid;
+impl IdOrdItem for OmicronDataset {
+    type Key<'a> = DatasetUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.config.id
     }
+
+    id_upcast!();
 }
 
 #[derive(Debug)]
 enum DatasetState {
     Ensured,
     FailedToEnsure(Arc<DatasetEnsureError>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dataset_serialization_task::RekeyResult;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn test_rekey_result_has_failures() {
+        let mut failed = BTreeSet::new();
+        failed.insert(PhysicalDiskUuid::new_v4());
+        let result = RekeyResult { succeeded: BTreeSet::new(), failed };
+        assert!(result.has_failures());
+
+        let mut succeeded = BTreeSet::new();
+        succeeded.insert(PhysicalDiskUuid::new_v4());
+        let result = RekeyResult { succeeded, failed: BTreeSet::new() };
+        assert!(!result.has_failures());
+
+        let result = RekeyResult::default();
+        assert!(!result.has_failures());
+    }
 }

@@ -7,25 +7,35 @@
 //! There is no separate tokio task here; our parent reconciler task owns this
 //! set of disks and is able to mutate it in place during reconciliation.
 
+use anyhow::Context;
 use futures::future;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
+use iddqd::id_upcast;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
+use illumos_utils::zpool::ZpoolHealth;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use rand::distr::{Alphanumeric, SampleString};
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::DatasetError;
+use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
 use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
+use slog::debug;
+use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -34,11 +44,17 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::watch;
+use trust_quorum_types::types::Epoch;
 
+use super::datasets::DiskRekeyInfo;
+use crate::dataset_serialization_task::RekeyResult;
+use crate::debug_collector::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
-use crate::raw_disks::RawDiskWithId;
+use camino::Utf8PathBuf;
+use illumos_utils::zfs::Mountpoint;
 
 /// Set of currently managed zpools.
 ///
@@ -172,7 +188,7 @@ impl CurrentlyManagedZpoolsReceiver {
     pub(crate) async fn to_inventory(
         &self,
         log: &Logger,
-    ) -> Vec<(ZpoolName, ByteCount)> {
+    ) -> Vec<(ZpoolName, ByteCount, ZpoolHealth)> {
         let current_zpools = self.current();
 
         let zpool_futs =
@@ -210,7 +226,7 @@ impl CurrentlyManagedZpoolsReceiver {
                         return None;
                     }
                 };
-                Some((zpool_name, total_size))
+                Some((zpool_name, total_size, info.health()))
             })
             .collect()
     }
@@ -218,7 +234,7 @@ impl CurrentlyManagedZpoolsReceiver {
 
 #[derive(Debug)]
 pub(super) struct ExternalDisks {
-    disks: IdMap<ExternalDiskState>,
+    disks: IdOrdMap<ExternalDiskState>,
     mount_config: Arc<MountConfig>,
 
     // Output channel for the set of zpools we're managing. Used by sled-agent
@@ -227,8 +243,11 @@ pub(super) struct ExternalDisks {
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
 
     // Output channel for the raw disks we're managing. This is only consumed
-    // within this crate by `DumpSetupTask` (for managing dump devices).
+    // within this crate by `DebugCollectorTask` (for managing dump devices).
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+
+    // For requesting archival of former zone root directories.
+    archiver: FormerZoneRootArchiver,
 }
 
 impl ExternalDisks {
@@ -236,12 +255,14 @@ impl ExternalDisks {
         mount_config: Arc<MountConfig>,
         currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
         external_disks_tx: watch::Sender<HashSet<Disk>>,
+        archiver: FormerZoneRootArchiver,
     ) -> Self {
         Self {
-            disks: IdMap::default(),
+            disks: IdOrdMap::default(),
             mount_config,
             currently_managed_zpools_tx,
             external_disks_tx,
+            archiver,
         }
     }
 
@@ -275,6 +296,33 @@ impl ExternalDisks {
         &self,
     ) -> Arc<CurrentlyManagedZpools> {
         Arc::clone(&*self.currently_managed_zpools_tx.borrow())
+    }
+
+    /// Returns rekey info for all managed disks.
+    pub(super) fn disk_rekey_info(
+        &self,
+    ) -> impl Iterator<Item = DiskRekeyInfo<'_>> {
+        self.disks.iter().filter_map(|disk_state| match &disk_state.state {
+            DiskState::Managed(disk) => Some(DiskRekeyInfo {
+                disk,
+                disk_id: disk_state.config.id,
+                cached_epoch: disk_state.epoch,
+            }),
+            DiskState::FailedToManage(_) => None,
+        })
+    }
+
+    /// Apply the results of a rekey operation, updating cached epochs for succeeded disks.
+    pub(super) fn apply_rekey_result(
+        &mut self,
+        result: &RekeyResult,
+        target_epoch: Epoch,
+    ) {
+        for &disk_id in &result.succeeded {
+            if let Some(mut disk_state) = self.disks.get_mut(&disk_id) {
+                disk_state.epoch = Some(target_epoch);
+            }
+        }
     }
 
     fn update_output_watch_channels(&self) {
@@ -316,8 +364,8 @@ impl ExternalDisks {
     /// set.
     pub(super) fn stop_managing_if_needed(
         &mut self,
-        raw_disks: &IdMap<RawDiskWithId>,
-        config: &IdMap<OmicronPhysicalDiskConfig>,
+        raw_disks: &IdOrdMap<RawDisk>,
+        config: &IdOrdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
     ) {
         let mut disk_ids_to_remove = Vec::new();
@@ -373,8 +421,8 @@ impl ExternalDisks {
     /// already managing.
     pub(super) async fn start_managing_if_needed(
         &mut self,
-        raw_disks: &IdMap<RawDiskWithId>,
-        config: &IdMap<OmicronPhysicalDiskConfig>,
+        raw_disks: &IdOrdMap<RawDisk>,
+        config: &IdOrdMap<OmicronPhysicalDiskConfig>,
         key_requester: &StorageKeyRequester,
         log: &Logger,
     ) {
@@ -389,8 +437,8 @@ impl ExternalDisks {
 
     async fn start_managing_if_needed_with_disk_adopter<T: DiskAdopter>(
         &mut self,
-        raw_disks: &IdMap<RawDiskWithId>,
-        config: &IdMap<OmicronPhysicalDiskConfig>,
+        raw_disks: &IdOrdMap<RawDisk>,
+        config: &IdOrdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
         disk_adopter: &T,
     ) {
@@ -444,15 +492,104 @@ impl ExternalDisks {
         // Run all the disk management futures concurrently...
         let disk_states = future::join_all(try_ensure_managed_futures).await;
 
-        // Then record the new states for each disk in `config`.
-        for disk_state in disk_states {
-            self.disks.insert(disk_state);
-        }
+        // Then record the new states for each disk in `config`, keeping track
+        // of which disks are newly-adopted so that we can archive and destroy
+        // any zone root datasets that we find on those.
         for disk_state in failed_disk_states {
-            self.disks.insert(disk_state);
+            self.disks.insert_overwrite(disk_state);
         }
 
+        let mut newly_adopted = Vec::new();
+        for disk_state in disk_states {
+            let disk_id = disk_state.key();
+            let newly_adopted_disk = match self.disks.entry(disk_id) {
+                Entry::Vacant(vacant) => {
+                    let new_state = vacant.insert(disk_state);
+                    match &new_state.state {
+                        DiskState::Managed(disk) => {
+                            Some((disk_id, *disk.zpool_name()))
+                        }
+                        DiskState::FailedToManage(..) => None,
+                    }
+                }
+                Entry::Occupied(mut occupied) => {
+                    let old_state = &occupied.insert(disk_state).state;
+                    let new_state = &occupied.get().state;
+                    match (old_state, new_state) {
+                        (DiskState::Managed(_), _) => None,
+                        (_, DiskState::FailedToManage(_)) => None,
+                        (
+                            DiskState::FailedToManage(_),
+                            DiskState::Managed(disk),
+                        ) => Some((disk_id, *disk.zpool_name())),
+                    }
+                }
+            };
+
+            if let Some(info) = newly_adopted_disk {
+                newly_adopted.push(info);
+            }
+        }
+
+        // Update the output channels now.  This is important to do before
+        // cleaning up former zone root datasets because that step will require
+        // that the archival task (DebugCollector) has seen the new disks and
+        // added any debug datasets found on them.
         self.update_output_watch_channels();
+
+        // For any newly-adopted disks, clean up any former zone root datasets
+        // that we find on them.
+        let mut failed = Vec::new();
+        for (disk_id, zpool_name) in newly_adopted {
+            if let Err(error) = disk_adopter
+                .archive_and_destroy_former_zone_roots(
+                    &zpool_name,
+                    &self.mount_config,
+                    &self.archiver,
+                    log,
+                )
+                .await
+            {
+                // This situation is really unfortunate.  We adopted the disk,
+                // but couldn't clean up its zone root.  We now want to go back
+                // and un-adopt it.
+                //
+                // You might ask: why didn't we do this step during adoption so
+                // that we could have failed at that point?  We can't: this
+                // process (archival and cleanup) depends on having already
+                // adopted some disks in order to use their debug datasets.
+                //
+                // The right long-term answer is to destroy these zone roots not
+                // here, during adoption, but when starting zones.  See
+                // oxidecomputer/omicron#8316.  This too is complicated.
+                //
+                // Fortunately, this case should be nearly impossible in
+                // practice.  But if we get here, mark the disk accordingly.
+                let error = InlineErrorChain::new(&*error);
+                error!(
+                    log,
+                    "failed to destroy former zone roots on pool";
+                    "pool" => %zpool_name,
+                    &error,
+                );
+                failed.push((disk_id, error.to_string()));
+            }
+        }
+
+        // Attempt to un-adopt any disks that we failed to clean up.
+        if !failed.is_empty() {
+            for (disk_id, message) in failed {
+                // unwrap(): We got these diskids from entries in the map
+                // above.
+                let mut disk = self.disks.get_mut(&disk_id).unwrap();
+                *disk = ExternalDiskState::failed(
+                    disk.config.clone(),
+                    DiskManagementError::Other(message),
+                );
+            }
+
+            self.update_output_watch_channels();
+        }
     }
 
     async fn try_ensure_disk_managed<T: DiskAdopter>(
@@ -463,14 +600,21 @@ impl ExternalDisks {
         disk_adopter: &T,
         log: &Logger,
     ) -> ExternalDiskState {
-        match current.map(|d| &d.state) {
+        match current {
             // If we're already managing this disk, check whether there are any
             // new properties to update.
-            Some(DiskState::Managed(disk)) => {
-                self.update_disk_properties(disk, config, raw_disk, log)
+            Some(ExternalDiskState {
+                state: DiskState::Managed(disk),
+                epoch,
+                ..
+            }) => {
+                self.update_disk_properties(disk, config, raw_disk, *epoch, log)
             }
             // If we previously failed to manage this disk, try again.
-            Some(DiskState::FailedToManage(prev_err)) => {
+            Some(ExternalDiskState {
+                state: DiskState::FailedToManage(prev_err),
+                ..
+            }) => {
                 info!(
                     log, "Retrying management of disk";
                     "disk_identity" => ?config.identity,
@@ -506,6 +650,7 @@ impl ExternalDisks {
         disk: &Disk,
         config: OmicronPhysicalDiskConfig,
         raw_disk: &RawDisk,
+        current_epoch: Option<Epoch>,
         log: &Logger,
     ) -> ExternalDiskState {
         // Make sure the incoming config's zpool ID matches our
@@ -532,7 +677,7 @@ impl ExternalDisks {
             MaybeUpdatedDisk::Unchanged => disk.clone(),
         };
 
-        ExternalDiskState::managed(config, disk)
+        ExternalDiskState::managed(config, disk, current_epoch)
     }
 
     async fn start_managing_disk<T: DiskAdopter>(
@@ -546,12 +691,13 @@ impl ExternalDisks {
             .adopt_disk(raw_disk, &self.mount_config, config.pool_id, log)
             .await
         {
-            Ok(disk) => {
+            Ok(AdoptedDisk { disk, epoch }) => {
                 info!(
                     log, "Successfully started management of disk";
                     "disk_identity" => ?config.identity,
+                    "epoch" => ?epoch,
                 );
-                ExternalDiskState::managed(config, disk)
+                ExternalDiskState::managed(config, disk, epoch)
             }
             Err(err) => {
                 warn!(
@@ -569,27 +715,36 @@ impl ExternalDisks {
 struct ExternalDiskState {
     config: OmicronPhysicalDiskConfig,
     state: DiskState,
+    /// The current encryption epoch for this disk's crypt dataset.
+    /// None if the disk is not yet managed or doesn't have encryption.
+    epoch: Option<Epoch>,
 }
 
 impl ExternalDiskState {
-    fn managed(config: OmicronPhysicalDiskConfig, disk: Disk) -> Self {
-        Self { config, state: DiskState::Managed(disk) }
+    fn managed(
+        config: OmicronPhysicalDiskConfig,
+        disk: Disk,
+        epoch: Option<Epoch>,
+    ) -> Self {
+        Self { config, state: DiskState::Managed(disk), epoch }
     }
 
     fn failed(
         config: OmicronPhysicalDiskConfig,
         err: DiskManagementError,
     ) -> Self {
-        Self { config, state: DiskState::FailedToManage(err) }
+        Self { config, state: DiskState::FailedToManage(err), epoch: None }
     }
 }
 
-impl IdMappable for ExternalDiskState {
-    type Id = PhysicalDiskUuid;
+impl IdOrdItem for ExternalDiskState {
+    type Key<'a> = PhysicalDiskUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.config.id
     }
+
+    id_upcast!();
 }
 
 #[derive(Debug)]
@@ -598,17 +753,39 @@ enum DiskState {
     FailedToManage(DiskManagementError),
 }
 
+/// Result of successfully adopting a disk.
+struct AdoptedDisk {
+    /// The adopted disk.
+    disk: Disk,
+    /// The current encryption epoch for this disk's crypt dataset.
+    /// None if the disk doesn't have encryption or the epoch could not be read.
+    epoch: Option<Epoch>,
+}
+
 /// Helper to allow unit tests to run without interacting with the real [`Disk`]
 /// implementation. In production, the only implementor of this trait is
 /// [`RealDiskAdopter`].
 trait DiskAdopter {
+    /// Adopt a disk, returning the disk and its current encryption epoch.
+    ///
+    /// The epoch is read from the oxide:epoch property on the crypt dataset
+    /// after successful adoption. Returns `None` for the epoch if the disk
+    /// is not encrypted or the epoch could not be read.
     fn adopt_disk(
         &self,
         raw_disk: RawDisk,
         mount_config: &MountConfig,
         pool_id: ZpoolUuid,
         log: &Logger,
-    ) -> impl Future<Output = Result<Disk, DiskManagementError>> + Send;
+    ) -> impl Future<Output = Result<AdoptedDisk, DiskManagementError>> + Send;
+
+    fn archive_and_destroy_former_zone_roots(
+        &self,
+        zpool_name: &ZpoolName,
+        mount_config: &MountConfig,
+        archiver: &FormerZoneRootArchiver,
+        log: &Logger,
+    ) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
 }
 
 struct RealDiskAdopter<'a> {
@@ -622,8 +799,8 @@ impl DiskAdopter for RealDiskAdopter<'_> {
         mount_config: &MountConfig,
         pool_id: ZpoolUuid,
         log: &Logger,
-    ) -> Result<Disk, DiskManagementError> {
-        Disk::new(
+    ) -> Result<AdoptedDisk, DiskManagementError> {
+        let disk = Disk::new(
             log,
             mount_config,
             raw_disk,
@@ -642,8 +819,233 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                 }
                 _ => DiskManagementError::Other(err_string),
             }
-        })
+        })?;
+
+        // Read the epoch from the crypt dataset after successful adoption.
+        // This tells us what encryption key the disk is currently using.
+        let crypt_dataset = format!("{}/{}", disk.zpool_name(), CRYPT_DATASET);
+        let epoch = match Zfs::get_oxide_value(&crypt_dataset, "epoch").await {
+            Ok(epoch_str) => match epoch_str.parse::<u64>() {
+                Ok(epoch_val) => {
+                    debug!(
+                        log,
+                        "Read epoch from adopted disk";
+                        "zpool" => %disk.zpool_name(),
+                        "epoch" => epoch_val,
+                    );
+                    // ZFS stores epoch as u64; we wrap it in the Epoch
+                    // newtype for type safety in the reconciler.
+                    Some(Epoch(epoch_val))
+                }
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to parse epoch from adopted disk";
+                        "zpool" => %disk.zpool_name(),
+                        "epoch_str" => &epoch_str,
+                        "error" => %e,
+                    );
+                    None
+                }
+            },
+            Err(e) => {
+                // This could happen if the disk doesn't have an encrypted
+                // crypt dataset (shouldn't happen in production) or if there
+                // was an error reading the property.
+                warn!(
+                    log,
+                    "Failed to read epoch from adopted disk";
+                    "zpool" => %disk.zpool_name(),
+                    InlineErrorChain::new(&e),
+                );
+                None
+            }
+        };
+
+        Ok(AdoptedDisk { disk, epoch })
     }
+
+    async fn archive_and_destroy_former_zone_roots(
+        &self,
+        zpool_name: &ZpoolName,
+        mount_config: &MountConfig,
+        archiver: &FormerZoneRootArchiver,
+        log: &Logger,
+    ) -> Result<(), anyhow::Error> {
+        // Attempt to archive and then wipe the contents of the zones dataset.
+        //
+        // There's a chain of design goals and compromises here:
+        //
+        // In general, across the control plane, we want to carefully manage
+        // persistent storage in a way that will ensure the system's fault
+        // tolerance.  Important data generally needs to be stored in
+        // CockroachDB or some other replicated storage, not the local
+        // filesystem.  We want some guard rails to prevent developers from
+        // accidentally using the local filesystem to store important data that
+        // really ought to be replicated.
+        //
+        // In an ideal world, we might make the root filesystem read-only
+        // altogether or at least isolate the parts that really need to be
+        // writeable (e.g., for logging) from the rest of it.  But that's a fair
+        // bit of work we haven't done yet.
+        //
+        // Instead, we make zone root filesystems transient, which is to say
+        // that their contents are not preserved after every kind of restart.
+        // But we still need to put the data somewhere, and it should be on disk
+        // rather than in memory, so we still use these ZFS pools for them.
+        // That means we have to wipe that data at some point.  And before
+        // wiping it, we want to archive any log files for debugging.
+        //
+        // So, when should we archive and wipe zone root filesystems?  In an
+        // ideal world, we'd do it each time the zone starts (to make sure we
+        // wipe them even if the sled reboots unexpectedly) as well as when the
+        // zone halts (to make sure we archive files from zones that will never
+        // start again).  See oxidecomputer/omicron#8316.  But this too is
+        // tricky and we haven't done this work yet.
+        //
+        // So instead, we take a pretty blunt hammer: the first time we adopt
+        // any disk in the lifetime of this sled agent process, we archive and
+        // destroy all the zone root filesystems on it.
+        //
+        // To determine whether we've already done this, we construct a unique
+        // value once in the lifetime of each sled agent process.  After we
+        // destroy and re-create the dataset, we'll set this property.
+        //
+        // ---
+        //
+        // It is also worth noting that it's conceivable that we find a zoneroot
+        // here for a zone that is still running.  This could happen if we're
+        // doing the first adoption of disks after sled agent restarts.  In that
+        // case, we will wind up archiving (and deleting) its log files out from
+        // under it.  We deem this okay because in this case, we're about to
+        // restart that zone anyway.
+        static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
+        let agent_local_value = AGENT_LOCAL_VALUE
+            .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
+
+        let zone_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
+        match Zfs::get_oxide_value(&zone_dataset_name, "agent").await {
+            Ok(v) if &v == agent_local_value => {
+                info!(
+                    log,
+                    "Skipping automatic archive/wipe of dataset: {}",
+                    zone_dataset_name
+                );
+            }
+            Ok(_) | Err(_) => {
+                info!(
+                    log,
+                    "Automatically archiving/wipe of dataset: {}",
+                    zone_dataset_name
+                );
+                cleanup_former_zone_roots(
+                    log,
+                    mount_config,
+                    archiver,
+                    &zpool_name,
+                )
+                .await?;
+                Zfs::set_oxide_value(
+                    &zone_dataset_name,
+                    "agent",
+                    agent_local_value,
+                )
+                .await
+                .context("setting \"agent\" dataset property")
+                .map_err(|error| {
+                    DiskManagementError::Other(
+                        InlineErrorChain::new(&*error).to_string(),
+                    )
+                })?;
+            }
+        };
+
+        Ok(())
+    }
+}
+
+/// Given a pool name, find any zone root filesystems, attempt to archive their
+/// log files, and destroy them.
+async fn cleanup_former_zone_roots(
+    log: &Logger,
+    mount_config: &MountConfig,
+    archiver: &FormerZoneRootArchiver,
+    zpool_name: &ZpoolName,
+) -> Result<(), DiskManagementError> {
+    // Within each pool, ZONE_DATASET is the name of the dataset that's the
+    // parent of all the zone root filesystems' datasets.
+    let parent_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
+    let child_datasets = Zfs::list_datasets(&parent_dataset_name)
+        .await
+        .context("listing datasets")
+        .map_err(|error| {
+            DiskManagementError::Other(
+                InlineErrorChain::new(&*error).to_string(),
+            )
+        })?;
+
+    for child_name in child_datasets {
+        // Determine the mountpoint of the child dataset.
+        // `dataset_mountpoint()` expects a path relative to the root of the
+        // pool.  We could chop off the zpool_name from `parent_dataset_name`,
+        // or (what we do here) construct the name we need directly.
+        //
+        // This works only because ZONE_DATASET itself is relative to the root
+        // of the pool.
+        let child_dataset_relative_to_pool =
+            format!("{}/{}", ZONE_DATASET, child_name);
+        let mountpoint = zpool_name.dataset_mountpoint(
+            &mount_config.root,
+            &child_dataset_relative_to_pool,
+        );
+
+        // We need this dataset to be mounted in order to archive its logs.
+        // On initial sled boot, it won't be mounted yet.  In other cases (e.g.,
+        // sled-agent restart), it may already be.
+        let child_dataset_name =
+            format!("{}/{}", parent_dataset_name, child_name);
+        debug!(
+            log,
+            "ensuring dataset mounted to archive former zone root";
+            "path" => %mountpoint,
+            "dataset" => &child_dataset_name,
+        );
+        Zfs::ensure_dataset_mounted_and_exists(
+            &child_dataset_name,
+            &Mountpoint(Utf8PathBuf::from(&mountpoint)),
+        )
+        .await
+        .with_context(|| format!("mounting {:?}", &child_dataset_name))
+        .map_err(|error| {
+            DiskManagementError::Other(
+                InlineErrorChain::new(&*error).to_string(),
+            )
+        })?;
+
+        // Attempt to archive this dataset as though it's a former zone root.
+        // This is best-effort.
+        info!(
+            log,
+            "archiving logs from former zone root";
+            "path" => %mountpoint
+        );
+        archiver.archive_former_zone_root(mountpoint).await;
+
+        // Finally, destroy it.  This preserves historical behavior of wiping
+        // these datasets when we adopt disks.
+        info!(
+            log,
+            "destroying former zone root";
+            "dataset_name" => &child_dataset_name,
+        );
+        Zfs::destroy_dataset(&child_dataset_name).await.map_err(|error| {
+            DiskManagementError::Other(
+                InlineErrorChain::new(&error).to_string(),
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -674,7 +1076,7 @@ mod tests {
             _mount_config: &MountConfig,
             pool_id: ZpoolUuid,
             _log: &Logger,
-        ) -> Result<Disk, DiskManagementError> {
+        ) -> Result<AdoptedDisk, DiskManagementError> {
             // ExternalDisks should only adopt U2 disks
             assert_eq!(raw_disk.variant(), DiskVariant::U2);
             let disk = Disk::Real(PooledDisk {
@@ -691,7 +1093,18 @@ mod tests {
                 firmware: raw_disk.firmware().clone(),
             });
             self.requests.lock().unwrap().push(raw_disk);
-            Ok(disk)
+            // In tests, use epoch 0 as the initial epoch
+            Ok(AdoptedDisk { disk, epoch: Some(Epoch(0)) })
+        }
+
+        async fn archive_and_destroy_former_zone_roots(
+            &self,
+            _zpool_name: &ZpoolName,
+            _mount_config: &MountConfig,
+            _archiver: &FormerZoneRootArchiver,
+            _log: &Logger,
+        ) -> Result<(), anyhow::Error> {
+            Ok(())
         }
     }
 
@@ -705,7 +1118,7 @@ mod tests {
         })
     }
 
-    fn make_raw_test_disk(variant: DiskVariant, serial: &str) -> RawDiskWithId {
+    fn make_raw_test_disk(variant: DiskVariant, serial: &str) -> RawDisk {
         RawDisk::Real(UnparsedDisk::new(
             "/test-devfs".into(),
             None,
@@ -719,7 +1132,6 @@ mod tests {
             false,
             DiskFirmware::new(0, None, false, 1, vec![]),
         ))
-        .into()
     }
 
     fn with_test_runtime<Fut, T>(fut: Fut) -> T
@@ -770,15 +1182,17 @@ mod tests {
         })
     }
 
-    async fn internal_disks_are_rejected_impl(raw_disks: IdMap<RawDiskWithId>) {
+    async fn internal_disks_are_rejected_impl(raw_disks: IdOrdMap<RawDisk>) {
         let logctx = dev::test_setup_log("internal_disks_are_rejected");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archiver,
         );
 
         // There should be no disks to start.
@@ -793,7 +1207,7 @@ mod tests {
                 id: PhysicalDiskUuid::new_v4(),
                 pool_id: ZpoolUuid::new_v4(),
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // This should partially succeed: we should adopt the U.2s and report
         // errors on the M.2s.
@@ -853,8 +1267,8 @@ mod tests {
     // Report errors for any requested disks that don't exist.
     #[proptest]
     fn fail_if_disk_not_present(disks: BTreeMap<String, bool>) {
-        let mut raw_disks = IdMap::default();
-        let mut config_disks = IdMap::default();
+        let mut raw_disks = IdOrdMap::default();
+        let mut config_disks = IdOrdMap::default();
         let mut not_present = BTreeSet::new();
 
         for (serial, is_present) in disks {
@@ -865,11 +1279,11 @@ mod tests {
                 pool_id: ZpoolUuid::new_v4(),
             };
             if is_present {
-                raw_disks.insert(raw_disk);
+                raw_disks.insert_overwrite(raw_disk);
             } else {
                 not_present.insert(config_disk.id);
             }
-            config_disks.insert(config_disk);
+            config_disks.insert_overwrite(config_disk);
         }
 
         with_test_runtime(async move {
@@ -879,18 +1293,20 @@ mod tests {
     }
 
     async fn fail_if_disk_not_present_impl(
-        raw_disks: IdMap<RawDiskWithId>,
-        config_disks: IdMap<OmicronPhysicalDiskConfig>,
+        raw_disks: IdOrdMap<RawDisk>,
+        config_disks: IdOrdMap<OmicronPhysicalDiskConfig>,
         not_present: BTreeSet<PhysicalDiskUuid>,
     ) {
         let logctx = dev::test_setup_log("fail_if_disk_not_present");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archiver,
         );
 
         // There should be no disks to start.
@@ -937,8 +1353,8 @@ mod tests {
     // Stop managing disks if so requested.
     #[proptest]
     fn firmware_updates_are_propagated(disks: BTreeMap<String, bool>) {
-        let mut raw_disks = IdMap::default();
-        let mut config_disks = IdMap::default();
+        let mut raw_disks = IdOrdMap::default();
+        let mut config_disks = IdOrdMap::default();
         let mut should_mutate_firmware = BTreeSet::new();
 
         for (serial, should_mutate) in disks {
@@ -951,8 +1367,8 @@ mod tests {
             if should_mutate {
                 should_mutate_firmware.insert(raw_disk.identity().clone());
             }
-            raw_disks.insert(raw_disk);
-            config_disks.insert(config_disk);
+            raw_disks.insert_overwrite(raw_disk);
+            config_disks.insert_overwrite(config_disk);
         }
 
         with_test_runtime(async move {
@@ -966,18 +1382,20 @@ mod tests {
     }
 
     async fn firmware_updates_are_propagated_impl(
-        mut raw_disks: IdMap<RawDiskWithId>,
-        config_disks: IdMap<OmicronPhysicalDiskConfig>,
+        mut raw_disks: IdOrdMap<RawDisk>,
+        config_disks: IdOrdMap<OmicronPhysicalDiskConfig>,
         should_mutate_firmware: BTreeSet<DiskIdentity>,
     ) {
         let logctx = dev::test_setup_log("firmware_updates_are_propagated");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archiver,
         );
 
         // There should be no disks to start.
@@ -1011,7 +1429,7 @@ mod tests {
         // Change the firmware on some subset of disks.
         for id in should_mutate_firmware {
             let mut entry = raw_disks.get_mut(&id).unwrap();
-            let mut raw_disk = RawDisk::from(entry.clone());
+            let mut raw_disk = entry.clone();
             let new_firmware = DiskFirmware::new(
                 raw_disk.firmware().active_slot().wrapping_add(1),
                 None,
@@ -1020,7 +1438,7 @@ mod tests {
                 Vec::new(),
             );
             *raw_disk.firmware_mut() = new_firmware;
-            *entry = raw_disk.into();
+            *entry = raw_disk;
         }
 
         // Attempt to adopt all the config disks again; we should pick up the
@@ -1059,8 +1477,8 @@ mod tests {
     // `ExternalDiskState`.
     #[proptest]
     fn remove_disks_not_in_config(disks: BTreeMap<String, bool>) {
-        let mut raw_disks = IdMap::default();
-        let mut config_disks = IdMap::default();
+        let mut raw_disks = IdOrdMap::default();
+        let mut config_disks = IdOrdMap::default();
         let mut should_remove_after_adding = BTreeSet::new();
 
         for (serial, should_remove) in disks {
@@ -1073,8 +1491,8 @@ mod tests {
             if should_remove {
                 should_remove_after_adding.insert(config_disk.id);
             }
-            raw_disks.insert(raw_disk);
-            config_disks.insert(config_disk);
+            raw_disks.insert_overwrite(raw_disk);
+            config_disks.insert_overwrite(config_disk);
         }
 
         with_test_runtime(async move {
@@ -1088,18 +1506,20 @@ mod tests {
     }
 
     async fn remove_disks_not_in_config_impl(
-        raw_disks: IdMap<RawDiskWithId>,
-        mut config_disks: IdMap<OmicronPhysicalDiskConfig>,
+        raw_disks: IdOrdMap<RawDisk>,
+        mut config_disks: IdOrdMap<OmicronPhysicalDiskConfig>,
         should_remove_after_adding: BTreeSet<PhysicalDiskUuid>,
     ) {
         let logctx = dev::test_setup_log("remove_disks_not_in_config");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archiver,
         );
 
         // There should be no disks to start.

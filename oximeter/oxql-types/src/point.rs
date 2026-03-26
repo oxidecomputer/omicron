@@ -1670,9 +1670,26 @@ pub struct Distribution<T: DistributionSupport> {
     max: Option<T>,
     sum_of_samples: T,
     squared_mean: f64,
+    #[serde(serialize_with = "serialize_quantile")]
+    #[schemars(with = "Option<f64>")]
     p50: Option<Quantile>,
+    #[serde(serialize_with = "serialize_quantile")]
+    #[schemars(with = "Option<f64>")]
     p90: Option<Quantile>,
+    #[serde(serialize_with = "serialize_quantile")]
+    #[schemars(with = "Option<f64>")]
     p99: Option<Quantile>,
+}
+
+/// Simplify quantiles to an estimate to abstract the details of the algorithm from the user.
+fn serialize_quantile<S>(
+    q: &Option<Quantile>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    q.and_then(|quantile| quantile.estimate().ok()).serialize(serializer)
 }
 
 impl<T> fmt::Display for Distribution<T>

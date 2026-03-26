@@ -5,8 +5,9 @@
 //! Shamir secret sharing over GF(2^8)
 
 use digest::Digest;
-use rand09::TryRngCore;
-use rand09::{Rng, rngs::OsRng};
+use rand::TryRngCore;
+use rand::{Rng, rngs::OsRng};
+use schemars::JsonSchema;
 use secrecy::SecretBox;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -15,7 +16,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::gf256::{self, Gf256};
 use crate::polynomial::Polynomial;
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum SplitError {
     #[error("splitting requires at least a threshold of 2")]
     ThresholdToSmall,
@@ -23,7 +25,19 @@ pub enum SplitError {
     TooFewTotalShares { n: u8, k: u8 },
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum CombineError {
     #[error("must be at least 2 shares to combine")]
     TooFewShares,
@@ -126,6 +140,16 @@ impl Share {
         ys.zeroize();
     }
 }
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for Share {
+    fn eq(&self, other: &Self) -> bool {
+        self.x_coordinate == other.x_coordinate
+            && self.y_coordinates == other.y_coordinates
+    }
+}
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for Share {}
 
 impl std::fmt::Debug for Share {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

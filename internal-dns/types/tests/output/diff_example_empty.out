@@ -1,5 +1,2 @@
   DNS zone: "dummy" (unchanged)
-    name: ex1                                                (records: 1)
-        A    127.0.0.1
-    name: ex2                                                (records: 1)
-        A    192.168.1.3
+    unchanged names: 2 (records: 2)

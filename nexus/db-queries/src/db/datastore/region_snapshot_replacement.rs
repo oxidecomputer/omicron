@@ -847,7 +847,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -989,7 +989,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut records = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let conn = self.pool_connection_authorized(opctx).await?;
 
         while let Some(p) = paginator.next() {
@@ -1203,7 +1206,7 @@ impl DataStore {
         })
         .await
         .map_err(|e| match err.take() {
-            Some(err) => err.into(),
+            Some(err) => err.into_public_ignore_retries(),
             None => public_error_from_diesel(e, ErrorHandler::Server),
         })
     }

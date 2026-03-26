@@ -4,12 +4,12 @@
 
 //! Oximeter-related functionality
 
-use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_types::external_api::metrics::ResourceMetrics;
 use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
@@ -201,8 +201,23 @@ pub(crate) async fn unassign_producer(
             "producer_id" => %id,
             "collector_id" => %collector_id,
         );
-        let oximeter_info =
-            datastore.oximeter_lookup(opctx, &collector_id).await?;
+
+        let Some(oximeter_info) =
+            datastore.oximeter_lookup(opctx, &collector_id).await?
+        else {
+            // If we can't look up the Oximeter info, it must have been
+            // expunged; that's sufficient to consider this producer
+            // "unassigned".
+            info!(
+                log,
+                "attempted to unassign metric producer, but Oximeter instance \
+                 not found - assuming it was expunged";
+                "producer_id" => %id,
+                "collector_id" => %collector_id,
+            );
+            return Ok(());
+        };
+
         let address =
             SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
         let client = build_oximeter_client(&log, &id, address);

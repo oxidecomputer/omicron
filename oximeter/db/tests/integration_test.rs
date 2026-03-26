@@ -5,6 +5,7 @@
 use anyhow::Context;
 use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
+use omicron_test_utils::dev::file_checksum;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter_db::oxql::query::QueryAuthzScope;
@@ -13,6 +14,7 @@ use oximeter_test_utils::wait_for_keepers;
 use slog::{Logger, info};
 use std::collections::BTreeSet;
 use std::default::Default;
+use std::path::PathBuf;
 use std::time::Duration;
 
 pub struct TestInput {
@@ -36,6 +38,44 @@ impl TestInput {
     fn n_points(&self) -> usize {
         self.n_projects * self.n_instances * self.n_cpus * self.n_samples
     }
+}
+
+/// Ensure the oximeter database schemas for both single node and replicated
+/// cluster are not modified.
+///
+/// Schema changes for the `oximeter` database are not allowed because there is
+/// no mechanism to apply them to existing systems. If we need to support schema
+/// changes at some point, we'll have to do the work to update them during
+/// automated update. See https://github.com/oxidecomputer/omicron/issues/8862
+/// for details.
+#[tokio::test]
+async fn test_schemas_are_not_modified() -> anyhow::Result<()> {
+    let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let single_node_schema_checksum =
+        file_checksum(cur_dir.as_path().join("schema/single-node/db-init.sql"))
+            .unwrap();
+    let replicated_schema_1_checksum = file_checksum(
+        cur_dir.as_path().join("schema/replicated/db-init-1.sql"),
+    )
+    .unwrap();
+    let replicated_schema_2_checksum = file_checksum(
+        cur_dir.as_path().join("schema/replicated/db-init-2.sql"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        "1422131e72b3410b7f4520bf72a213f0c3288ce8cd738a0010b1bf44edea480a",
+        single_node_schema_checksum
+    );
+    assert_eq!(
+        "038ca7fc66006d6c06243a6fa122cf2f0bfee6edf55227e13166a9b854169abb",
+        replicated_schema_1_checksum
+    );
+    assert_eq!(
+        "d78c49e5662a2bd211eba63cc71a33bffacca7c6a80d9090532329650c6baae0",
+        replicated_schema_2_checksum
+    );
+    Ok(())
 }
 
 /// Ensure `db-init-1.sql` and `db-init-2.sql` contain disjoint sets of tables.

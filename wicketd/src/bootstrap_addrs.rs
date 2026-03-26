@@ -128,7 +128,7 @@ async fn scan_for_peers(
 async fn possible_sled_agent_addrs(
     ddm_client: &DdmAdminClient,
     log: &Logger,
-) -> impl Iterator<Item = Ipv6Addr> {
+) -> impl Iterator<Item = Ipv6Addr> + use<> {
     // We're talking to a service's admin interface on localhost within our own
     // switch zone, and we're only asking for its current state. We use a retry
     // in a loop instead of `backoff`.
@@ -145,7 +145,7 @@ async fn possible_sled_agent_addrs(
             Err(err) => {
                 warn!(
                     log, "Failed to get prefixes from ddm";
-                    "err" => #%err,
+                    &err,
                 );
                 tokio::time::sleep(RETRY).await;
             }
@@ -164,7 +164,7 @@ async fn make_ddm_admin_client(log: &Logger) -> DdmAdminClient {
             Err(err) => {
                 warn!(
                     log, "Failed to construct DdmAdminClient";
-                    "err" => #%err,
+                    &err,
                 );
                 tokio::time::sleep(DDM_CONSTRUCT_RETRY).await;
             }

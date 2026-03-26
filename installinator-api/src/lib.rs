@@ -14,20 +14,20 @@ use dropshot::{
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     RequestContext, TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use hyper::header;
-use installinator_common::EventReport;
+use installinator_common_versions::latest;
 use omicron_uuid_kinds::MupdateUuid;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tufaceous_artifact::ArtifactHashId;
+use update_engine::{NestedSpec, events::EventReport};
+
+api_versions!([
+    // Do not create new versions of this client-side versioned API.
+    // https://github.com/oxidecomputer/omicron/issues/9290
+    (1, INITIAL),
+]);
 
 const PROGRESS_REPORT_MAX_BYTES: usize = 4 * 1024 * 1024;
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ReportQuery {
-    /// A unique identifier for the update.
-    pub update_id: MupdateUuid,
-}
 
 #[dropshot::api_description]
 pub trait InstallinatorApi {
@@ -56,8 +56,8 @@ pub trait InstallinatorApi {
     }]
     async fn report_progress(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ReportQuery>,
-        report: TypedBody<EventReport>,
+        path: Path<latest::report::ReportQuery>,
+        report: TypedBody<EventReport<NestedSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 

@@ -82,7 +82,7 @@ where
     // be more correct.
 
     let mut seeder = rand_seeder::Seeder::from((seed, extra));
-    seeder.make_rng::<R>()
+    seeder.into_rng::<R>()
 }
 
 /// Generates a new RNG from a parent RNG and a hashable seed.
@@ -95,7 +95,7 @@ where
     let rng_seed = parent_rng.next_u64();
 
     let mut seeder = rand_seeder::Seeder::from((rng_seed, seed));
-    seeder.make_rng::<R>()
+    seeder.into_rng::<R>()
 }
 
 /// An RNG that can be used to generate values of a single type.
@@ -114,7 +114,7 @@ pub struct TypedRng<T, R> {
 impl<T: Generatable> TypedRng<T, StdRng> {
     /// Returns a new typed RNG from entropy.
     pub fn from_entropy() -> Self {
-        Self::new(StdRng::from_entropy())
+        Self::new(StdRng::from_os_rng())
     }
 }
 
@@ -162,7 +162,7 @@ where
         H2: Hash,
     {
         let mut seeder = rand_seeder::Seeder::from((seed, extra));
-        Self::new(seeder.make_rng::<R>())
+        Self::new(seeder.into_rng::<R>())
     }
 
     /// Sets the seed for this RNG to the given value.
@@ -176,7 +176,7 @@ where
         H2: Hash,
     {
         let mut seeder = rand_seeder::Seeder::from((seed, extra));
-        self.rng = seeder.make_rng::<R>();
+        self.rng = seeder.into_rng::<R>();
     }
 
     /// Returns a mutable reference to the RNG inside.
@@ -262,6 +262,7 @@ mod tests {
     // Test that TypedRng<T, ...> is Send and Sync even if T isn't.
     const _: fn() = || {
         fn assert_send_sync<T: Send + Sync>() {}
+        #[expect(dead_code)]
         struct NotSendSync(*mut u8);
         assert_send_sync::<TypedRng<NotSendSync, StdRng>>();
     };

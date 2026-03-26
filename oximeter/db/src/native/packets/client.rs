@@ -8,7 +8,6 @@
 
 use super::server::ProfileInfo;
 use super::server::Progress;
-use crate::QuerySummary;
 use crate::native::block::Block;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -17,7 +16,7 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 /// A packet sent from client to server in the native protocol.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub enum Packet {
     /// The initial packet to the server, to say hello.
@@ -52,7 +51,7 @@ impl Packet {
 }
 
 /// The initial packet sent from client to server after connecting.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Hello {
     /// The name of the client.
     pub client_name: Cow<'static, str>,
@@ -95,7 +94,7 @@ pub static OXIMETER_HELLO: Hello = Hello {
 };
 
 /// A query sent from the client.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Query {
     /// An ID for the query. In our case, these are always UUIDs.
     pub id: Cow<'static, str>,
@@ -132,6 +131,8 @@ impl Query {
 pub struct QueryResult {
     /// The ID of the query.
     pub id: Uuid,
+    /// The raw SQL query.
+    pub query: String,
     /// The accumulated query progress for the whole query.
     pub progress: Progress,
     /// Any data returned by the query.
@@ -147,9 +148,10 @@ pub struct QueryResult {
 
 impl QueryResult {
     /// Return a query summary from the full query result.
-    pub fn query_summary(&self) -> QuerySummary {
-        QuerySummary {
+    pub fn query_summary(&self) -> oxql_types::QuerySummary {
+        oxql_types::QuerySummary {
             id: self.id,
+            query: self.query.clone(),
             elapsed: self.progress.query_time,
             io_summary: self.progress.into(),
         }
@@ -157,7 +159,7 @@ impl QueryResult {
 }
 
 /// The stage through which we run a query.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub enum Stage {
     /// Fetch the column names and types resulting from the query.
@@ -172,7 +174,7 @@ pub enum Stage {
 
 /// The details about the client, sent in each query.
 // Also mostly static data, no otel.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ClientInfo {
     /// Who initiated the query?
     pub query_kind: QueryKind,
@@ -254,7 +256,7 @@ impl ClientInfo {
 /// We always use TCP to talk to the server.
 pub const TCP_INTERFACE_KIND: u8 = 1;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct OtelState {
     pub trace_id: [u8; 16],
     pub span_id: [u8; 16],
@@ -263,7 +265,7 @@ pub struct OtelState {
 }
 
 /// Indicates who initiated the query.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub enum QueryKind {
     /// Default, unused value.
@@ -281,7 +283,7 @@ pub enum QueryKind {
 pub type Settings = BTreeMap<Cow<'static, str>, Setting>;
 
 /// A single setting in the settings map.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Setting {
     /// The value for the setting.
     pub value: Cow<'static, str>,

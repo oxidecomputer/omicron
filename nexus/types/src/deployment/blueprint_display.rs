@@ -44,6 +44,7 @@ pub mod constants {
     pub const EXTERNAL_DNS_VERSION: &str = "external DNS version";
     // Keep this a bit short to not make the key column too wide.
     pub const TARGET_RELEASE_MIN_GEN: &str = "target release min gen";
+    pub const NEXUS_GENERATION: &str = "nexus gen";
     pub const COMMENT: &str = "comment";
 
     pub const UNCHANGED_PARENS: &str = "(unchanged)";
@@ -52,6 +53,10 @@ pub mod constants {
         "(not present in collection)";
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
     pub const GENERATION: &str = "generation";
+    pub const STATE: &str = "state";
+    pub const CONFIG_GENERATION: &str = "config generation";
+    pub const SUBNET: &str = "subnet";
+    pub const LAST_ALLOCATED_IP: &str = "last allocated IP";
 }
 use constants::*;
 use std::fmt::Display;
@@ -344,6 +349,30 @@ impl fmt::Display for BpTable {
         }
 
         Ok(())
+    }
+}
+
+/// The [`BpTable`] schema for measurements
+pub struct BpMeasurementsTableSchema {}
+impl BpTableSchema for BpMeasurementsTableSchema {
+    fn table_name(&self) -> &'static str {
+        "measurements"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["hash", "version"]
+    }
+}
+
+/// The [`BpTable`] schema for desired host phase 2 contents
+pub struct BpHostPhase2TableSchema {}
+impl BpTableSchema for BpHostPhase2TableSchema {
+    fn table_name(&self) -> &'static str {
+        "host phase 2 contents"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["slot", "boot image source"]
     }
 }
 

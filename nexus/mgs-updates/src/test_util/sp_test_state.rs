@@ -3,18 +3,22 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::common_sp_update::error_means_caboose_is_invalid;
+use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
 use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
+use gateway_types::component::SpType;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
-use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use std::time::Duration;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
 pub type GatewayClientError =
@@ -44,11 +48,27 @@ pub struct SpTestState {
     /// This can be None if the caboose contents were not valid.
     pub caboose_rot_b: Option<SpComponentCaboose>,
 
+    /// caboose read from stage 0 (active slot for the RoT bootloader)
+    ///
+    /// This is not an `Option` because we never expect to fail to read this.
+    pub caboose_stage0: SpComponentCaboose,
+
+    /// caboose read from stage 0 next (inactive slot for the RoT bootloader)
+    ///
+    /// This can be None if the caboose contents were not valid.
+    pub caboose_stage0_next: Option<SpComponentCaboose>,
+
     /// Overall SP state
     pub sp_state: SpState,
 
     /// RoT boot information
     pub sp_boot_info: RotState,
+
+    /// Host phase 1 information; these are optional because they only exist for
+    /// `SpType::Sled` SPs.
+    pub host_phase_1_active_slot: Option<M2Slot>,
+    pub host_phase_1_slot_a_hash: Option<ArtifactHash>,
+    pub host_phase_1_slot_b_hash: Option<ArtifactHash>,
 }
 
 impl SpTestState {
@@ -56,11 +76,11 @@ impl SpTestState {
     pub async fn load(
         mgs_client: &gateway_client::Client,
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
     ) -> Result<SpTestState, GatewayClientError> {
         let caboose_sp_active = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 0,
@@ -69,7 +89,7 @@ impl SpTestState {
             .into_inner();
         let caboose_sp_inactive = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 1,
@@ -78,7 +98,7 @@ impl SpTestState {
             .map(|c| c.into_inner());
         let caboose_rot_a = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::ROT.const_as_str(),
                 0,
@@ -87,17 +107,35 @@ impl SpTestState {
             .map(|c| c.into_inner());
         let caboose_rot_b = mgs_client
             .sp_component_caboose_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::ROT.const_as_str(),
                 1,
             )
             .await
             .map(|c| c.into_inner());
-        let sp_info = mgs_client.sp_get(sp_type, sp_slot).await?.into_inner();
+        let caboose_stage0 = mgs_client
+            .sp_component_caboose_get(
+                &sp_type,
+                sp_slot,
+                SpComponent::STAGE0.const_as_str(),
+                0,
+            )
+            .await?
+            .into_inner();
+        let caboose_stage0_next = mgs_client
+            .sp_component_caboose_get(
+                &sp_type,
+                sp_slot,
+                SpComponent::STAGE0.const_as_str(),
+                1,
+            )
+            .await
+            .map(|c| c.into_inner());
+        let sp_info = mgs_client.sp_get(&sp_type, sp_slot).await?.into_inner();
         let sp_boot_info = mgs_client
             .sp_rot_boot_info(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -106,6 +144,70 @@ impl SpTestState {
             )
             .await?
             .into_inner();
+
+        // Read these values only for sleds.
+        let host_phase_1_active_slot;
+        let host_phase_1_slot_a_hash;
+        let host_phase_1_slot_b_hash;
+        if matches!(sp_type, SpType::Sled) {
+            host_phase_1_active_slot = Some(
+                M2Slot::from_mgs_firmware_slot(
+                    mgs_client
+                        .sp_component_active_slot_get(
+                            &sp_type,
+                            sp_slot,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await?
+                        .into_inner()
+                        .slot,
+                )
+                .expect("simulated SP always returns valid slot"),
+            );
+            host_phase_1_slot_a_hash = Some(
+                match mgs_client
+                    .host_phase_1_flash_hash_calculate_with_timeout(
+                        sp_type,
+                        sp_slot,
+                        0,
+                        Duration::from_secs(30),
+                    )
+                    .await
+                {
+                    Ok(hash) => ArtifactHash(hash),
+                    Err(HostPhase1HashError::RequestError { err, .. }) => {
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        panic!("unexpected error from simulator: {err}")
+                    }
+                },
+            );
+            host_phase_1_slot_b_hash = Some(
+                match mgs_client
+                    .host_phase_1_flash_hash_calculate_with_timeout(
+                        sp_type,
+                        sp_slot,
+                        1,
+                        Duration::from_secs(30),
+                    )
+                    .await
+                {
+                    Ok(hash) => ArtifactHash(hash),
+                    Err(HostPhase1HashError::RequestError { err, .. }) => {
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        panic!("unexpected error from simulator: {err}")
+                    }
+                },
+            );
+        } else {
+            host_phase_1_active_slot = None;
+            host_phase_1_slot_a_hash = None;
+            host_phase_1_slot_b_hash = None;
+        }
+
         Ok(SpTestState {
             caboose_sp_active,
             caboose_sp_inactive: ignore_invalid_caboose_error(
@@ -113,8 +215,15 @@ impl SpTestState {
             ),
             caboose_rot_a: ignore_invalid_caboose_error(caboose_rot_a),
             caboose_rot_b: ignore_invalid_caboose_error(caboose_rot_b),
+            caboose_stage0,
+            caboose_stage0_next: ignore_invalid_caboose_error(
+                caboose_stage0_next,
+            ),
             sp_state: sp_info,
             sp_boot_info,
+            host_phase_1_active_slot,
+            host_phase_1_slot_a_hash,
+            host_phase_1_slot_b_hash,
         })
     }
 
@@ -139,6 +248,14 @@ impl SpTestState {
             RotSlot::A => self.expect_caboose_rot_a(),
             RotSlot::B => self.expect_caboose_rot_b(),
         }
+    }
+
+    pub fn expect_caboose_stage0(&self) -> &SpComponentCaboose {
+        &self.caboose_stage0
+    }
+
+    pub fn expect_caboose_stage0_next(&self) -> &SpComponentCaboose {
+        self.caboose_stage0_next.as_ref().expect("stage0 next caboose")
     }
 
     pub fn expect_caboose_rot_inactive(&self) -> &SpComponentCaboose {
@@ -254,6 +371,45 @@ impl SpTestState {
                 None => ExpectedVersion::NoValidVersion,
             },
         }
+    }
+
+    pub fn expect_stage0_version(&self) -> ArtifactVersion {
+        self.expect_caboose_stage0()
+            .version
+            .parse()
+            .expect("valid artifact version")
+    }
+
+    pub fn expect_stage0_next_version(&self) -> ExpectedVersion {
+        match &self.caboose_stage0_next {
+            Some(v) => ExpectedVersion::Version(
+                v.version.parse().expect("valid stage0 next version"),
+            ),
+            None => ExpectedVersion::NoValidVersion,
+        }
+    }
+
+    pub fn expect_host_phase_1_active_slot(&self) -> M2Slot {
+        self.host_phase_1_active_slot
+            .expect("should be called only for sled SPs")
+    }
+
+    pub fn expect_host_phase_1_hash(&self, slot: M2Slot) -> ArtifactHash {
+        let hash = match slot {
+            M2Slot::A => self.host_phase_1_slot_a_hash,
+            M2Slot::B => self.host_phase_1_slot_b_hash,
+        };
+        hash.expect("should only be called for sled SPs")
+    }
+
+    pub fn expect_host_phase_1_active_hash(&self) -> ArtifactHash {
+        let active_slot = self.expect_host_phase_1_active_slot();
+        self.expect_host_phase_1_hash(active_slot)
+    }
+
+    pub fn expect_host_phase_1_inactive_hash(&self) -> ArtifactHash {
+        let inactive_slot = self.expect_host_phase_1_active_slot().toggled();
+        self.expect_host_phase_1_hash(inactive_slot)
     }
 }
 

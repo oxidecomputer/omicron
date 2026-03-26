@@ -5,37 +5,37 @@
 //! Background task for reconciling blueprints and inventory, updating
 //! Reconfigurator rendezvous tables
 
-use crate::app::background::BackgroundTask;
+use crate::app::background::{
+    BackgroundTask, tasks::blueprint_load::LoadedTargetBlueprint,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;
 use nexus_types::{
-    deployment::{Blueprint, BlueprintTarget},
-    internal_api::background::BlueprintRendezvousStatus,
+    internal_api::background::BlueprintRendezvousStatus, inventory::Collection,
 };
 use serde_json::json;
-use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// Background task that takes a [`Blueprint`] and an inventory `Collection`
+/// Background task that takes a `Blueprint` and an inventory `Collection`
 /// and updates any rendezvous tables to track resources under Reconfigurator's
 /// control for other parts of Nexus to consume.
 pub struct BlueprintRendezvous {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+    rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
 }
 
 impl BlueprintRendezvous {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+        rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
     ) -> Self {
-        Self { datastore, rx_blueprint }
+        Self { datastore, rx_blueprint, rx_inventory }
     }
 
     /// Implementation for `BackgroundTask::activate` for `BlueprintRendezvous`,
@@ -48,7 +48,8 @@ impl BlueprintRendezvous {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
-        let Some((_, blueprint)) = update.as_deref() else {
+        let Some(LoadedTargetBlueprint { blueprint, target: _ }) = update
+        else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no blueprint",
@@ -56,27 +57,12 @@ impl BlueprintRendezvous {
             return json!({"error": "no blueprint" });
         };
 
-        // Get the latest inventory collection
-        let maybe_collection = match self
-            .datastore
-            .inventory_get_latest_collection(opctx)
-            .await
-        {
-            Ok(maybe_collection) => maybe_collection,
-            Err(err) => {
-                let err = InlineErrorChain::new(&err);
-                warn!(
-                    &opctx.log, "Blueprint rendezvous: skipped";
-                    "reason" => "failed to read latest inventory collection",
-                    &err,
-                );
-                return json!({ "error":
-                    format!("failed reading inventory collection: {err}"),
-                });
-            }
-        };
-
-        let Some(collection) = maybe_collection else {
+        // Get the inventory most recently seen by the inventory loader
+        // background task. We clone the Arc to avoid keeping the channel locked
+        // for the rest of our execution.
+        let Some(collection) =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+        else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no inventory collection",
@@ -88,7 +74,7 @@ impl BlueprintRendezvous {
         let result = reconcile_blueprint_rendezvous_tables(
             opctx,
             &self.datastore,
-            blueprint,
+            &blueprint,
             &collection,
         )
         .await;

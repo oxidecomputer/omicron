@@ -13,6 +13,8 @@ use crate::app::saga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::{authn, authz};
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node, SagaResultErr};
 use uuid::Uuid;
@@ -107,9 +109,7 @@ async fn siu_lock_instance(
         // simply not start the real instance update saga, rather than having to unwind.
         Err(instance::UpdaterLockError::AlreadyLocked) => Ok(None),
         // Okay, that's a real error. Time to die!
-        Err(instance::UpdaterLockError::Query(e)) => {
-            Err(ActionError::action_failed(e))
-        }
+        Err(instance::UpdaterLockError::Query(e)) => Err(saga_action_failed(e)),
     }
 }
 
@@ -170,7 +170,7 @@ async fn siu_fetch_state_and_start_real_saga(
     let state = datastore
         .instance_fetch_all(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Determine what updates are required based on the instance's current
     // state snapshot. If there are updates to perform, execute the "real"
@@ -216,7 +216,7 @@ async fn siu_fetch_state_and_start_real_saga(
             // that we release the lock.
             .map_err(|e| {
                 nexus.background_tasks.task_instance_updater.activate();
-                ActionError::action_failed(e)
+                saga_action_failed(e)
             })?;
         let child_result = nexus
             .sagas
@@ -226,14 +226,14 @@ async fn siu_fetch_state_and_start_real_saga(
             // and release the lock.
             .map_err(|e| {
                 nexus.background_tasks.task_instance_updater.activate();
-                ActionError::action_failed(e)
+                saga_action_failed(e)
             })?
             .start()
             .await
             // And, if we can't start it, we need to unwind.
             .map_err(|e| {
                 nexus.background_tasks.task_instance_updater.activate();
-                ActionError::action_failed(e)
+                saga_action_failed(e)
             })?
             .wait_until_stopped()
             .await
@@ -265,9 +265,9 @@ async fn siu_fetch_state_and_start_real_saga(
                     // Otherwise, the child saga could not inherit the lock for
                     // some other reason. That means we MUST unwind to ensure
                     // the lock is released.
-                    return Err(ActionError::action_failed(
-                        "child saga failed to inherit lock".to_string(),
-                    ));
+                    return Err(saga_action_failed(Error::internal_error(
+                        "child saga failed to inherit lock",
+                    )));
                 }
             }
             Err(error) => {
@@ -301,7 +301,19 @@ async fn siu_fetch_state_and_start_real_saga(
         datastore
             .instance_updater_unlock(&opctx, &authz_instance, &orig_lock)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
+        // If we're releasing the lock, check if we should activate the
+        // instance reincarnation background task to reincarnate this
+        // instance. A previous activation may have not been able to
+        // reincarnate this instance because we held the lock, so poking the
+        // reincarnation task here should help ensure it sees a failed instance
+        // in a timely manner.
+        //
+        // This doesn't matter a whole lot in production systems, where the task
+        // will activate periodically regardless, but it should make the tests
+        // less flakey, and hopefully also decrease the latency with which
+        // failed instances are reincarnated a bit, maybe?
+        super::reincarnate_if_needed(osagactx, &state);
     }
 
     Ok(())

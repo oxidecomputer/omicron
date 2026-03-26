@@ -5,18 +5,8 @@
 // Copyright 2024 Oxide Computer Company
 
 use omicron_common::address;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::BgpPeerConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::PortFec;
-use omicron_common::api::internal::shared::PortSpeed;
-use omicron_common::api::internal::shared::RouteConfig;
-use omicron_common::api::internal::shared::TxEqConfig;
-use omicron_common::api::internal::shared::UplinkAddressConfig;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use oxnet::IpNet;
@@ -26,12 +16,26 @@ use serde::Serialize;
 use serde::Serializer;
 use sha2::Digest;
 use sha2::Sha256;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::early_networking::UplinkIpNet;
 use sled_hardware_types::Baseboard;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
@@ -65,7 +69,7 @@ pub struct PutRssUserConfigInsensitive {
     /// `wicketd` will map this back to sleds with the correct `SpIdentifier`
     /// based on the `bootstrap_sleds` it provides in
     /// `CurrentRssUserConfigInsensitive`.
-    pub bootstrap_sleds: BTreeSet<u32>,
+    pub bootstrap_sleds: BTreeSet<u16>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
@@ -94,13 +98,13 @@ pub struct BootstrapSledDescription {
     pub bootstrap_ip: Option<Ipv6Addr>,
 }
 
-/// User-specified parts of
-/// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
+/// User-specified parts of `RackNetworkConfig`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
-    pub infra_ip_first: Ipv4Addr,
-    pub infra_ip_last: Ipv4Addr,
+    pub rack_subnet_address: Option<Ipv6Addr>,
+    pub infra_ip_first: IpAddr,
+    pub infra_ip_last: IpAddr,
     // Map of switch -> port -> configuration, under the assumption that
     // (switch, port) is unique.
     pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,
@@ -121,11 +125,11 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns the port map for a particular switch location.
     pub fn port_map(
         &self,
-        switch: SwitchLocation,
+        switch: SwitchSlot,
     ) -> &BTreeMap<String, UserSpecifiedPortConfig> {
         match switch {
-            SwitchLocation::Switch0 => &self.switch0,
-            SwitchLocation::Switch1 => &self.switch1,
+            SwitchSlot::Switch0 => &self.switch0,
+            SwitchSlot::Switch1 => &self.switch1,
         }
     }
 
@@ -137,17 +141,17 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns an iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks(
         &self,
-    ) -> impl Iterator<Item = (SwitchLocation, &str, &UserSpecifiedPortConfig)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &UserSpecifiedPortConfig)>
     {
         let iter0 = self
             .switch0
             .iter()
-            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
         let iter1 = self
             .switch1
             .iter()
-            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }
@@ -155,34 +159,32 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns a mutable iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks_mut(
         &mut self,
-    ) -> impl Iterator<Item = (SwitchLocation, &str, &mut UserSpecifiedPortConfig)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &mut UserSpecifiedPortConfig)>
     {
         let iter0 = self
             .switch0
             .iter_mut()
-            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
         let iter1 = self
             .switch1
             .iter_mut()
-            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }
 }
 
-/// User-specified version of [`PortConfigV2`].
+/// User-specified version of `PortConfig`.
 ///
-/// All of [`PortConfigV2`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfigV2`]. So this has all of
+/// All of `PortConfig` is user-specified. But we expect the port name to
+/// be a key, rather than a field as in `PortConfig`. So this has all of
 /// the fields other than the port name.
-///
-/// [`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
-    pub addresses: Vec<UplinkAddressConfig>,
+    pub addresses: Vec<UserSpecifiedUplinkAddressConfig>,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: Option<PortFec>,
     pub autoneg: bool,
@@ -194,13 +196,97 @@ pub struct UserSpecifiedPortConfig {
     pub tx_eq: Option<TxEqConfig>,
 }
 
+/// User-specified version of
+/// [`sled_agent_types::early_networking::UplinkAddressConfig`].
+///
+/// This allows us to have a nicer TOML representation of [`UplinkAddress`].
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct UserSpecifiedUplinkAddressConfig {
+    /// The address to be used on the uplink.
+    // This type is used in both JSON (via OpenAPI) and TOML (for operator
+    // uploads to wicket). For the TOML case specifically, we want to use a more
+    // user-friendly representation, so we serialize/deserialize this field as a
+    // string. See the `uplink_address_serde` module below for the specific
+    // mapping.
+    #[serde(with = "uplink_address_serde")]
+    #[schemars(with = "String")]
+    pub address: UplinkAddress,
+
+    /// The VLAN id (if any) associated with this address.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+impl From<UserSpecifiedUplinkAddressConfig> for UplinkAddressConfig {
+    fn from(value: UserSpecifiedUplinkAddressConfig) -> Self {
+        Self { address: value.address, vlan_id: value.vlan_id }
+    }
+}
+
+impl UserSpecifiedUplinkAddressConfig {
+    /// String representation for [`UplinkAddress::AddrConf`] when
+    /// serializing/deserializing [`UserSpecifiedUplinkAddressConfig`].
+    pub const ADDR_CONF: &str = "addrconf";
+
+    /// Helper to construct a `UserSpecifiedUplinkAddressConfig` with a
+    /// specified IP net and no VLAN ID.
+    pub fn without_vlan(ip_net: UplinkIpNet) -> Self {
+        Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
+    }
+}
+
+/// Special handling to serialize/deserialize [`UplinkAddress`] as a flat
+/// string for a nicer TOML representation.
+mod uplink_address_serde {
+    use super::{UplinkAddress, UserSpecifiedUplinkAddressConfig};
+    use oxnet::IpNet;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use sled_agent_types::early_networking::UplinkIpNet;
+    use slog_error_chain::InlineErrorChain;
+
+    pub fn serialize<S: Serializer>(
+        addr: &UplinkAddress,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match addr {
+            UplinkAddress::AddrConf => {
+                s.serialize_str(UserSpecifiedUplinkAddressConfig::ADDR_CONF)
+            }
+            UplinkAddress::Static { ip_net } => {
+                s.serialize_str(&ip_net.to_string())
+            }
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<UplinkAddress, D::Error> {
+        let s = String::deserialize(d)?;
+        if s.eq_ignore_ascii_case(UserSpecifiedUplinkAddressConfig::ADDR_CONF) {
+            Ok(UplinkAddress::AddrConf)
+        } else {
+            let ip_net: IpNet = s.parse().map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "invalid uplink ipnet `{s}`: \
+                     expected `addrconf` or an IP network",
+                ))
+            })?;
+            let ip_net = UplinkIpNet::try_from(ip_net).map_err(|err| {
+                serde::de::Error::custom(InlineErrorChain::new(&err))
+            })?;
+            Ok(UplinkAddress::Static { ip_net })
+        }
+    }
+}
+
 /// User-specified version of [`BgpPeerConfig`].
 ///
 /// This is similar to [`BgpPeerConfig`], except it doesn't have the sensitive
 /// `md5_auth_key` parameter, instead requiring that the user provide the key
 /// separately.
-///
-/// [`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedBgpPeerConfig {
@@ -209,7 +295,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    pub addr: Ipv4Addr,
+    pub addr: UserSpecifiedRouterPeerAddr,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
@@ -255,6 +341,71 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    #[serde(default)]
+    pub router_lifetime: RouterLifetimeConfig,
+}
+
+// Type that allows either the string "unnumbered" or an IP address. Has custom
+// implementations of `JsonSchema`, `Serialize`, and `Deserialize` to support
+// this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum UserSpecifiedRouterPeerAddr {
+    Unnumbered,
+    Numbered(RouterPeerIpAddr),
+}
+
+impl UserSpecifiedRouterPeerAddr {
+    /// String representation for [`UserSpecifiedRouterPeerAddr::Unnumbered`] in
+    /// serialization.
+    pub const UNNUMBERED_PEER: &str = "unnumbered";
+}
+
+impl JsonSchema for UserSpecifiedRouterPeerAddr {
+    fn schema_name() -> String {
+        "UserSpecifiedRouterPeerAddr".to_string()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        String::json_schema(generator)
+    }
+}
+
+impl Serialize for UserSpecifiedRouterPeerAddr {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Unnumbered => s.serialize_str(Self::UNNUMBERED_PEER),
+            Self::Numbered(ip) => s.serialize_str(&ip.to_string()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.eq_ignore_ascii_case(Self::UNNUMBERED_PEER) {
+            Ok(Self::Unnumbered)
+        } else {
+            let ip: IpAddr = s.parse().map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "invalid router peer address `{s}`: \
+                     expected `unnumbered` or an IP address",
+                ))
+            })?;
+            let ip = RouterPeerIpAddr::try_from(ip).map_err(|err| {
+                serde::de::Error::custom(InlineErrorChain::new(&err))
+            })?;
+            Ok(Self::Numbered(ip))
+        }
+    }
 }
 
 impl UserSpecifiedBgpPeerConfig {
@@ -566,10 +717,10 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The above is equivalent to an Option<Vec<IpNet>>.
-        Option::<Vec<IpNet>>::json_schema(gen)
+        Option::<Vec<IpNet>>::json_schema(r#gen)
     }
 }
 
@@ -589,13 +740,13 @@ mod tests {
         ];
 
         for input in &inputs {
-            let input = Wrapper { policy: input.clone() };
+            let input = ImportExportPolicyWrapper { policy: input.clone() };
 
             eprintln!("** input: {:?}, testing JSON", input);
             // Check that serialization to JSON and back works.
             let serialized = serde_json::to_string(&input).unwrap();
             eprintln!("serialized JSON: {serialized}");
-            let deserialized: Wrapper =
+            let deserialized: ImportExportPolicyWrapper =
                 serde_json::from_str(&serialized).unwrap();
             assert_eq!(input, deserialized);
 
@@ -603,14 +754,163 @@ mod tests {
             // Check that serialization to TOML and back works.
             let serialized = toml::to_string(&input).unwrap();
             eprintln!("serialized TOML: {serialized}");
-            let deserialized: Wrapper = toml::from_str(&serialized).unwrap();
+            let deserialized: ImportExportPolicyWrapper =
+                toml::from_str(&serialized).unwrap();
             assert_eq!(input, deserialized);
         }
     }
 
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-    struct Wrapper {
+    struct ImportExportPolicyWrapper {
         #[serde(default)]
         policy: UserSpecifiedImportExportPolicy,
+    }
+
+    #[test]
+    fn roundtrip_router_peer_address() {
+        let inputs = [
+            (UserSpecifiedRouterPeerAddr::Unnumbered, "unnumbered"),
+            (
+                UserSpecifiedRouterPeerAddr::Numbered(
+                    "1.1.1.1".parse().unwrap(),
+                ),
+                "1.1.1.1",
+            ),
+            (
+                UserSpecifiedRouterPeerAddr::Numbered(
+                    "fd00::1".parse().unwrap(),
+                ),
+                "fd00::1",
+            ),
+        ];
+
+        for (input, expected_str) in inputs {
+            let input = RouterPeerAddressWrapper { addr: input };
+
+            eprintln!("** input: {:?}, testing JSON", input);
+            // Check that serialization to JSON and back works.
+            let serialized = serde_json::to_string(&input).unwrap();
+            eprintln!("serialized JSON: {serialized}");
+            let deserialized: RouterPeerAddressWrapper =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            eprintln!("** input: {:?}, testing TOML", input);
+            // Check that serialization to TOML and back works.
+            let serialized = toml::to_string(&input).unwrap();
+            eprintln!("serialized TOML: {serialized}");
+            let deserialized: RouterPeerAddressWrapper =
+                toml::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            assert_eq!(serialized, format!("addr = \"{expected_str}\"\n"));
+        }
+    }
+
+    #[test]
+    fn invalid_router_peer_address() {
+        let invalid_inputs = [
+            "0.0.0.0",
+            "::",
+            "foobar",
+            "127.0.0.1",
+            "255.255.255.255",
+            "ff02::1",
+            "fe80::1",
+        ];
+
+        for input in invalid_inputs {
+            let toml_input = format!("addr = \"{input}\"\n");
+            match toml::from_str::<RouterPeerAddressWrapper>(&toml_input) {
+                Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
+                Err(err) => {
+                    let err = err.to_string();
+                    assert!(
+                        err.contains(&format!(
+                            "invalid router peer address `{input}`"
+                        )),
+                        "unexpected error for input `{input}`: {err}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+    struct RouterPeerAddressWrapper {
+        pub addr: UserSpecifiedRouterPeerAddr,
+    }
+
+    #[test]
+    fn roundtrip_uplink_address() {
+        let inputs = [
+            (UplinkAddress::AddrConf, "addrconf"),
+            (
+                UplinkAddress::Static { ip_net: "1.1.1.0/24".parse().unwrap() },
+                "1.1.1.0/24",
+            ),
+            (
+                UplinkAddress::Static { ip_net: "fd00::/64".parse().unwrap() },
+                "fd00::/64",
+            ),
+        ];
+
+        for (input, expected_str) in inputs {
+            let input = UplinkAddressWrapper { addr: input };
+
+            eprintln!("** input: {:?}, testing JSON", input);
+            // Check that serialization to JSON and back works.
+            let serialized = serde_json::to_string(&input).unwrap();
+            eprintln!("serialized JSON: {serialized}");
+            let deserialized: UplinkAddressWrapper =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            eprintln!("** input: {:?}, testing TOML", input);
+            // Check that serialization to TOML and back works.
+            let serialized = toml::to_string(&input).unwrap();
+            eprintln!("serialized TOML: {serialized}");
+            let deserialized: UplinkAddressWrapper =
+                toml::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            assert_eq!(serialized, format!("addr = \"{expected_str}\"\n"));
+        }
+    }
+
+    #[test]
+    fn invalid_uplink_address() {
+        let invalid_inputs = [
+            "0.0.0.0/0",
+            "::/128",
+            "255.255.255.255/16",
+            "ff80::1/64",
+            "fe80::1/64",
+            "foobar",
+        ];
+
+        for input in invalid_inputs {
+            let toml_input = format!("addr = \"{input}\"\n");
+            match toml::from_str::<UplinkAddressWrapper>(&toml_input) {
+                Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
+                Err(err) => {
+                    let err = err.to_string();
+                    assert!(
+                        err.contains(&format!(
+                            "invalid uplink ipnet `{input}`"
+                        )),
+                        "unexpected error for input `{input}`: {err}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+    struct UplinkAddressWrapper {
+        // This attribute matches the one on
+        // `UserSpecifiedUplinkAddressConfig::address` above.
+        #[serde(with = "uplink_address_serde")]
+        pub addr: UplinkAddress,
     }
 }

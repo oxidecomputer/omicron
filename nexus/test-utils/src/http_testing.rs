@@ -15,6 +15,7 @@ use headers::authorization::Credentials;
 use http_body_util::BodyExt;
 use nexus_db_queries::authn::external::spoof;
 use nexus_db_queries::db::identity::Asset;
+use omicron_uuid_kinds::SiloUserUuid;
 use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -121,6 +122,11 @@ impl<'a> RequestBuilder<'a> {
             }
         }
         self
+    }
+
+    /// Return the current header map.
+    pub fn headers(&self) -> &http::HeaderMap {
+        &self.headers
     }
 
     /// Set the outgoing request body
@@ -546,8 +552,12 @@ impl TestResponse {
 pub enum AuthnMode {
     UnprivilegedUser,
     PrivilegedUser,
-    SiloUser(uuid::Uuid),
+    SiloUser(SiloUserUuid),
     Session(String),
+    DeviceToken(String),
+    /// SCIM bearer token authentication. The value is the raw token (the
+    /// `oxide-scim-` prefix is added automatically).
+    ScimToken(String),
 }
 
 impl AuthnMode {
@@ -577,6 +587,14 @@ impl AuthnMode {
             AuthnMode::Session(session_token) => {
                 let header_value = format!("session={}", session_token);
                 parse_header_pair(http::header::COOKIE, header_value)
+            }
+            AuthnMode::DeviceToken(token) => {
+                let header_value = format!("Bearer {}", token);
+                parse_header_pair(http::header::AUTHORIZATION, header_value)
+            }
+            AuthnMode::ScimToken(token) => {
+                let header_value = format!("Bearer oxide-scim-{}", token);
+                parse_header_pair(http::header::AUTHORIZATION, header_value)
             }
         }
     }
@@ -626,6 +644,12 @@ impl<'a> NexusRequest<'a> {
         self
     }
 
+    /// Allow non-Dropshot error responses (e.g., SCIM endpoints).
+    pub fn allow_non_dropshot_errors(mut self) -> Self {
+        self.request_builder = self.request_builder.allow_non_dropshot_errors();
+        self
+    }
+
     /// Tells the request builder to expect headers specific to console assets.
     pub fn console_asset(mut self) -> Self {
         self.request_builder = self.request_builder.expect_console_asset();
@@ -655,6 +679,17 @@ impl<'a> NexusRequest<'a> {
         NexusRequest::new(
             RequestBuilder::new(testctx, http::Method::POST, uri)
                 .body(Some(body))
+                .expect_status(Some(http::StatusCode::CREATED)),
+        )
+    }
+
+    /// Returns a new `NexusRequest` suitable for `POST $uri` with no body
+    pub fn objects_post_no_body(
+        testctx: &'a ClientTestContext,
+        uri: &str,
+    ) -> Self {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, http::Method::POST, uri)
                 .expect_status(Some(http::StatusCode::CREATED)),
         )
     }

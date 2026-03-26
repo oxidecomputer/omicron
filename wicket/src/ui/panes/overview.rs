@@ -465,7 +465,7 @@ impl Control for InventoryView {
     }
 }
 
-fn inventory_description(component: &Component) -> Text {
+fn inventory_description(component: &Component) -> Text<'_> {
     let sp = component.sp();
 
     let label_style = style::text_label();

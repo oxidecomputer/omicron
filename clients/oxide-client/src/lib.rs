@@ -17,7 +17,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 progenitor::generate_api!(
-    spec = "../../openapi/nexus.json",
+    spec = "../../openapi/nexus/nexus-latest.json",
     interface = Builder,
     tags = Separate,
 );
@@ -91,9 +91,9 @@ impl reqwest::dns::Resolve for CustomDnsResolver {
 
 #[derive(Debug, Error)]
 pub enum LoginError {
-    #[error("logging in: {0:#}")]
+    #[error("logging in")]
     RequestError(#[from] reqwest::Error),
-    #[error("logging in: {0:#}")]
+    #[error("logging in")]
     CatchAll(#[from] anyhow::Error),
 }
 

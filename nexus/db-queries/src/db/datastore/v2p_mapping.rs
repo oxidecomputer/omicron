@@ -36,7 +36,10 @@ impl DataStore {
 
         // Query for instance v2p mappings
         let mut mappings = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch: Vec<_> =
                 paginated(
@@ -79,11 +82,12 @@ impl DataStore {
                 .map(|(nic, sled, vpc): (NetworkInterface, Sled, Vpc)| {
                     V2PMappingView {
                         nic_id: nic.identity.id,
-                        sled_id: sled.identity.id,
+                        sled_id: sled.identity.id.into(),
                         sled_ip: sled.ip,
                         vni: vpc.vni,
                         mac: nic.mac,
-                        ip: nic.ip,
+                        ipv4: nic.ipv4,
+                        ipv6: nic.ipv6,
                     }
                 })
                 .collect();
@@ -93,7 +97,10 @@ impl DataStore {
         }
 
         // Query for probe v2p mappings
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch: Vec<_> =
                 paginated(
@@ -128,11 +135,12 @@ impl DataStore {
                 .map(|(nic, sled, vpc): (NetworkInterface, Sled, Vpc)| {
                     V2PMappingView {
                         nic_id: nic.identity.id,
-                        sled_id: sled.identity.id,
+                        sled_id: sled.identity.id.into(),
                         sled_ip: sled.ip,
                         vni: vpc.vni,
                         mac: nic.mac,
-                        ip: nic.ip,
+                        ipv4: nic.ipv4,
+                        ipv6: nic.ipv6,
                     }
                 })
                 .collect();

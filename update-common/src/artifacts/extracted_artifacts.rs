@@ -84,7 +84,7 @@ impl ExtractedArtifactDataHandle {
     /// removed the contents of our temporary directory).
     pub async fn reader_stream(
         &self,
-    ) -> anyhow::Result<ReaderStream<impl AsyncRead>> {
+    ) -> anyhow::Result<ReaderStream<impl AsyncRead + use<>>> {
         Ok(ReaderStream::new(self.file().await?))
     }
 }

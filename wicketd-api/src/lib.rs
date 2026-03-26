@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_client::types::RackOperationStatus;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -487,7 +487,7 @@ pub struct GetArtifactsAndEventReportsResponse {
     /// instead.
     pub artifacts: Vec<InstallableArtifacts>,
 
-    pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
+    pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -535,7 +535,7 @@ pub struct GetLocationResponse {
 pub struct PathSpIgnitionCommand {
     #[serde(rename = "type")]
     pub type_: SpType,
-    pub slot: u32,
+    pub slot: u16,
     pub command: IgnitionCommand,
 }
 

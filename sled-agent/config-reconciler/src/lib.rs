@@ -45,23 +45,17 @@
 //!   [`ConfigReconcilerHandle::timesync_status()`] and
 //!   [`ConfigReconcilerHandle::inventory()`].
 
-// TODO-cleanup Remove once we've filled in all the `unimplemented!()`s that
-// will make use of various arguments and fields.
-#![allow(dead_code)]
-
 mod dataset_serialization_task;
+mod debug_collector;
 mod disks_common;
-mod dump_setup_task;
 mod handle;
+mod host_phase_2;
 mod internal_disks;
 mod ledger;
+mod mupdate_override;
 mod raw_disks;
 mod reconciler_task;
 mod sled_agent_facilities;
-
-// TODO-cleanup Make this private once the reconciler uses it instead of
-// sled-agent proper.
-pub mod dump_setup;
 
 pub use dataset_serialization_task::DatasetTaskError;
 pub use dataset_serialization_task::NestedDatasetDestroyError;
@@ -74,12 +68,14 @@ pub use handle::ConfigReconcilerSpawnToken;
 pub use handle::InventoryError;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
+pub use host_phase_2::HostPhase2PreparedContents;
 pub use internal_disks::InternalDisks;
 pub use internal_disks::InternalDisksReceiver;
 pub use internal_disks::InternalDisksWithBootDisk;
 pub use ledger::LedgerArtifactConfigError;
 pub use ledger::LedgerNewConfigError;
 pub use ledger::LedgerTaskError;
+pub use mupdate_override::ResolverStatusExt;
 pub use raw_disks::RawDisksSender;
 pub use reconciler_task::CurrentlyManagedZpools;
 pub use reconciler_task::CurrentlyManagedZpoolsReceiver;
@@ -87,3 +83,6 @@ pub use reconciler_task::TimeSyncError;
 pub use reconciler_task::TimeSyncStatus;
 pub use sled_agent_facilities::SledAgentArtifactStore;
 pub use sled_agent_facilities::SledAgentFacilities;
+
+#[cfg(any(test, feature = "testing"))]
+pub use internal_disks::InternalDiskDetails;

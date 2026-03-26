@@ -11,9 +11,11 @@ use crate::app::sagas::{
     declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::VmmCpuPlatform;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
@@ -179,10 +181,57 @@ async fn sim_reserve_sled_resources(
     let params = sagactx.saga_params::<Params>()?;
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
+    let Some(compatible_sled_families) =
+        params.src_vmm.cpu_platform.compatible_sled_cpu_families()
+    else {
+        // If we're here there are no compatible sled families for the VMM's CPU
+        // platform. That means the VMM's CPU platform is "SledDefault" and we
+        // just don't know what sleds might be compatible with the CPU platform
+        // the VM has in practice. A VMM in this state implies two things:
+        // * The instance does not specify a CPU platform.
+        // * The instance was placed on a sled with an unknown CPU type.
+        //
+        // If the instance specified a CPU platform, it would have been placed
+        // on a sled with a known compatible CPU platform. So it must not have
+        // one.
+        //
+        // Since the instance was placed on a sled with an unknown CPU type, we
+        // have no idea if the migration target is actually safe to move it to.
+        // For all we know we could be asked to move VM from an AMD CPU to an
+        // ARM CPU.
+        //
+        // For now, refuse the migration in this circumstance. This probably
+        // impacts test environments in particular (sorry James!) and one might
+        // imagine a config option to allow such potentially-problematic
+        // migrations.
+        if params.src_vmm.cpu_platform != VmmCpuPlatform::SledDefault {
+            // Well, the claim about the VMM CPU platform was wrong, but the
+            // consequences still hold. This implies a broken case in
+            // `compatible_sled_cpu_families`. Log about the bug, but we still
+            // can't migrate this instance.
+            warn!(osagactx.log(),
+                "VMM has no compatible sled CPU families \
+                 but has a real CPU platform?!";
+                "instance_id" => %params.instance.id(),
+                "src_propolis_id" => %params.src_vmm.id,
+                "src_vmm_cpu_platform" => %params.src_vmm.cpu_platform);
+        }
+        return Err(saga_action_failed(Error::invalid_request(&format!(
+            "cannot migrate instance: {} nas no compatible sled families",
+            params.src_vmm.cpu_platform
+        ))));
+    };
+
     // Add a constraint that requires the allocator to reserve on the
     // migration's destination sled instead of a random sled.
+    //
+    // The destination sled ID is arbitrary (from the internal API), so it's
+    // possible that we were told to migrate to a sled that is incompatible with
+    // the VMM's CPU platform. Constrain by that so we'll fail to pick the
+    // destination sled if it's truly incompatible.
     let constraints = db::model::SledReservationConstraintBuilder::new()
         .must_select_from(&[params.migrate_params.dst_sled_id])
+        .cpu_families(compatible_sled_families)
         .build();
 
     let resource = super::instance_common::reserve_vmm_resources(
@@ -220,7 +269,7 @@ async fn sim_allocate_propolis_ip(
     allocate_vmm_ipv6(
         &opctx,
         sagactx.user_data().datastore(),
-        SledUuid::from_untyped_uuid(params.migrate_params.dst_sled_id),
+        params.migrate_params.dst_sled_id,
     )
     .await
 }
@@ -256,7 +305,7 @@ async fn sim_create_migration_record(
             ),
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn sim_fail_migration_record(
@@ -319,6 +368,7 @@ async fn sim_create_vmm_record(
         propolis_id,
         sled_id,
         propolis_ip,
+        params.src_vmm.cpu_platform,
     )
     .await
 }
@@ -377,7 +427,7 @@ async fn sim_set_migration_ids(
             dst_propolis_id,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn sim_ensure_destination_propolis(
@@ -404,7 +454,7 @@ async fn sim_ensure_destination_propolis(
             .instance_id(db_instance.id())
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
     let dst_propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
@@ -438,7 +488,7 @@ async fn sim_ensure_destination_propolis(
 
                 // Don't set the instance to Failed in this case. Instead, allow
                 // the saga to unwind, marking the VMM as SagaUnwound.
-                ActionError::action_failed(Error::from(inner))
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(
@@ -448,7 +498,7 @@ async fn sim_ensure_destination_propolis(
                     "dst_propolis_id" => %dst_propolis_id,
                     "error" => ?inner,
                 );
-                ActionError::action_failed(inner)
+                saga_action_failed(inner)
             }
         })
 }
@@ -549,9 +599,9 @@ async fn sim_instance_migrate(
                       "instance_id" => %db_instance.id(),
                       "error" => ?inner);
 
-            Err(ActionError::action_failed(
-                omicron_common::api::external::Error::from(inner),
-            ))
+            Err(saga_action_failed(omicron_common::api::external::Error::from(
+                inner,
+            )))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
@@ -559,7 +609,7 @@ async fn sim_instance_migrate(
                       "instance_id" => %db_instance.id(),
                       "error" => ?inner);
 
-            Err(ActionError::action_failed(inner))
+            Err(saga_action_failed(inner))
         }
     }
 }
@@ -568,12 +618,12 @@ async fn sim_instance_migrate(
 mod tests {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance as instance_types;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -585,7 +635,7 @@ mod tests {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -597,7 +647,7 @@ mod tests {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -608,13 +658,15 @@ mod tests {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await
@@ -638,15 +690,13 @@ mod tests {
         let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
         let dst_sled_id = cptestctx
-            .find_sled_agent(vmm.sled_id)
+            .find_sled_agent(vmm.sled_id())
             .expect("need at least one other sled");
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
             src_vmm: vmm.clone(),
-            migrate_params: InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            },
+            migrate_params: InstanceMigrateRequest { dst_sled_id },
         };
 
         nexus
@@ -697,7 +747,7 @@ mod tests {
                         .expect("instance should have a vmm before migrating");
 
                     let dst_sled_id = cptestctx
-                        .find_sled_agent(old_vmm.sled_id)
+                        .find_sled_agent(old_vmm.sled_id())
                         .expect("need at least one other sled");
 
                     info!(log, "setting up new migration saga";
@@ -711,9 +761,7 @@ mod tests {
                         ),
                         instance: old_instance.clone(),
                         src_vmm: old_vmm.clone(),
-                        migrate_params: InstanceMigrateRequest {
-                            dst_sled_id: dst_sled_id.into_untyped_uuid(),
-                        },
+                        migrate_params: InstanceMigrateRequest { dst_sled_id },
                     }
                 }
             })
@@ -755,7 +803,7 @@ mod tests {
                     // unwinding saga, that VMM must be in the `SagaUnwound` state.
                     if let Some(target_vmm) = new_state.target_vmm {
                         assert_eq!(
-                            target_vmm.runtime.state,
+                            target_vmm.state,
                             db::model::VmmState::SagaUnwound
                         );
                     }

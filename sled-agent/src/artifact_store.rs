@@ -34,14 +34,14 @@ use dropshot::{
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::ledger::Ledger;
+use omicron_ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
-use sled_agent_api::{
-    ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
-};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_config_reconciler::SledAgentArtifactStore;
+use sled_agent_types::artifact::ArtifactConfig;
+use sled_agent_types::artifact::{ArtifactListResponse, ArtifactPutResponse};
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
@@ -54,6 +54,22 @@ use tufaceous_artifact::ArtifactHash;
 // hexadecimal-encoded SHA-256 checksums.
 const LEDGER_PATH: &str = "artifact-config.json";
 const TEMP_SUBDIR: &str = "tmp";
+
+// Workaround wrapper for orphan rules.
+#[derive(Clone)]
+pub(crate) struct SledAgentArtifactStoreWrapper(
+    pub Arc<ArtifactStore<InternalDisksReceiver>>,
+);
+
+impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
+    async fn get_artifact(
+        &self,
+        artifact: ArtifactHash,
+    ) -> anyhow::Result<tokio::fs::File> {
+        let file = self.0.get(artifact).await?;
+        Ok(file)
+    }
+}
 
 /// Content-addressable local storage for software artifacts.
 ///
@@ -81,10 +97,6 @@ pub struct ArtifactStore<T: DatasetsManager> {
     ledger_tx: mpsc::Sender<LedgerManagerRequest>,
     config: watch::Receiver<Option<ArtifactConfig>>,
     pub(crate) storage: T,
-
-    /// Used for synchronization in unit tests.
-    #[cfg(test)]
-    delete_done: watch::Receiver<Generation>,
 }
 
 impl<T: DatasetsManager> ArtifactStore<T> {
@@ -136,14 +148,10 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             config_tx,
         ));
 
-        #[cfg(test)]
-        let (done_signal, delete_done) = watch::channel(0u32.into());
         tokio::task::spawn(delete_reconciler(
             log.clone(),
             storage.clone(),
             config.clone(),
-            #[cfg(test)]
-            done_signal,
         ));
 
         ArtifactStore {
@@ -155,9 +163,6 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             ledger_tx,
             config,
             storage,
-
-            #[cfg(test)]
-            delete_done,
         }
     }
 }
@@ -185,6 +190,12 @@ impl ArtifactStore<InternalDisksReceiver> {
             bind_address: depot_address.into(),
             ..dropshot_config.clone()
         })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                repo_depot_api::latest_version(),
+            ),
+        )))
         .start()
         .map_err(StartError::Dropshot)
     }
@@ -506,7 +517,6 @@ async fn delete_reconciler<T: DatasetsManager>(
     log: Logger,
     storage: T,
     mut receiver: watch::Receiver<Option<ArtifactConfig>>,
-    #[cfg(test)] done_signal: watch::Sender<Generation>,
 ) {
     while let Ok(()) = receiver.changed().await {
         let generation = match receiver.borrow_and_update().as_ref() {
@@ -580,12 +590,7 @@ async fn delete_reconciler<T: DatasetsManager>(
                 }
             }
         }
-        #[cfg(test)]
-        done_signal.send_if_modified(|old| {
-            let modified = *old != generation;
-            *old = generation;
-            modified
-        });
+        storage.signal_delete_done(generation);
     }
     warn!(log, "Delete reconciler sender dropped");
 }
@@ -602,6 +607,8 @@ pub trait DatasetsManager: Clone + Send + Sync + 'static {
     async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
         None
     }
+
+    fn signal_delete_done(&self, _generation: Generation) {}
 }
 
 impl DatasetsManager for InternalDisksReceiver {
@@ -778,9 +785,6 @@ pub enum Error {
     #[error("Error while reading request body")]
     Body(dropshot::HttpError),
 
-    #[error("Error retrieving dataset configuration")]
-    DatasetConfig(#[from] sled_storage::error::Error),
-
     #[error("Error fetching artifact {sha256} from depot at {base_url}")]
     DepotCopy {
         sha256: ArtifactHash,
@@ -832,7 +836,7 @@ pub enum Error {
     Join(#[source] tokio::task::JoinError),
 
     #[error("Failed to commit ledger")]
-    LedgerCommit(#[from] omicron_common::ledger::Error),
+    LedgerCommit(#[from] omicron_ledger::Error),
 
     #[error("Ledger manager task dropped its end of the channel")]
     LedgerChannel,
@@ -854,45 +858,37 @@ pub enum Error {
 
 impl From<Error> for HttpError {
     fn from(err: Error) -> HttpError {
+        let message = InlineErrorChain::new(&err).to_string();
         match err {
             // 4xx errors
             Error::HashMismatch { .. }
             | Error::InvalidPerSledConfig { .. }
             | Error::NoConfig
             | Error::NotInConfig { .. } => {
-                HttpError::for_bad_request(None, err.to_string())
+                HttpError::for_bad_request(None, message)
             }
-            Error::NotFound { .. } => {
-                HttpError::for_not_found(None, err.to_string())
-            }
+            Error::NotFound { .. } => HttpError::for_not_found(None, message),
             Error::GenerationConfig { .. } => HttpError::for_client_error(
                 Some("CONFIG_GENERATION".to_string()),
                 dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
+                message,
             ),
             Error::GenerationPut { .. } => HttpError::for_client_error(
                 None,
                 dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
+                message,
             ),
 
             // 5xx errors: ensure the error chain is logged
             Error::Body(inner) => inner,
-            Error::DatasetConfig(_) | Error::NoUpdateDataset => {
-                HttpError::for_unavail(
-                    None,
-                    InlineErrorChain::new(&err).to_string(),
-                )
-            }
+            Error::NoUpdateDataset => HttpError::for_unavail(None, message),
             Error::DepotCopy { .. }
             | Error::File { .. }
             | Error::Join(_)
             | Error::LedgerCommit(_)
             | Error::LedgerChannel
             | Error::CannotValidateAgainstSledConfig(_) => {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&err).to_string(),
-                )
+                HttpError::for_internal_error(message)
             }
         }
     }
@@ -908,16 +904,20 @@ mod test {
     use camino_tempfile::Utf8TempDir;
     use futures::stream::{self, StreamExt};
     use hex_literal::hex;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_api::ArtifactConfig;
+    use sled_agent_types::artifact::ArtifactConfig;
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
+    use tokio::sync::watch;
     use tufaceous_artifact::ArtifactHash;
 
     use super::{ArtifactStore, DatasetsManager, Error};
 
     #[derive(Clone)]
     struct TestBackend {
+        delete_done_tx: watch::Sender<Generation>,
+        delete_done_rx: watch::Receiver<Generation>,
         datasets: Vec<Utf8PathBuf>,
         _tempdir: Arc<Utf8TempDir>,
     }
@@ -934,7 +934,13 @@ mod test {
                 datasets.push(dataset)
             }
 
-            TestBackend { datasets, _tempdir: tempdir }
+            let (delete_done_tx, delete_done_rx) = watch::channel(0u32.into());
+            TestBackend {
+                delete_done_tx,
+                delete_done_rx,
+                datasets,
+                _tempdir: tempdir,
+            }
         }
     }
 
@@ -943,6 +949,14 @@ mod test {
             &self,
         ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
             self.datasets.iter().cloned()
+        }
+
+        fn signal_delete_done(&self, generation: Generation) {
+            self.delete_done_tx.send_if_modified(|old| {
+                let modified = *old != generation;
+                *old = generation;
+                modified
+            });
         }
     }
 
@@ -1121,7 +1135,7 @@ mod test {
         }
 
         // clear `delete_done` so we can synchronize with the delete reconciler
-        store.delete_done.mark_unchanged();
+        store.storage.delete_done_rx.mark_unchanged();
         // put a new config that says we don't want the artifact anymore.
         config.generation = config.generation.next();
         config.artifacts.remove(&TEST_HASH);
@@ -1130,7 +1144,7 @@ mod test {
         // has actually occurred yet
         assert!(store.list().await.unwrap().list.is_empty());
         // wait for deletion to actually complete
-        store.delete_done.changed().await.unwrap();
+        store.storage.delete_done_rx.changed().await.unwrap();
         // get fails, because it has been deleted
         assert!(matches!(
             store.get(TEST_HASH).await,

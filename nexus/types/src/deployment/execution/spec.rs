@@ -30,6 +30,7 @@ pub enum ExecutionComponent {
     ExternalNetworking,
     SupportBundles,
     SledList,
+    DeployNexusRecords,
     SledAgent,
     PhysicalDisks,
     OmicronZones,

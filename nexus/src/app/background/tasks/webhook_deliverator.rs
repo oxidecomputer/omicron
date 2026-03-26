@@ -149,8 +149,10 @@ impl WebhookDeliverator {
     ) -> Result<(), Error> {
         let mut tasks =
             ParallelTaskSet::new_with_parallelism(Self::MAX_CONCURRENT_RXS);
-        let mut paginator =
-            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let rxs = self
                 .datastore

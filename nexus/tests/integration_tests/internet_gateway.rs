@@ -11,20 +11,30 @@ use nexus_test_utils::{
         attach_ip_address_to_igw, attach_ip_pool_to_igw, create_floating_ip,
         create_instance_with, create_internet_gateway, create_ip_pool,
         create_local_user, create_project, create_route, create_router,
-        create_vpc, delete_internet_gateway, detach_ip_address_from_igw,
-        detach_ip_pool_from_igw, link_ip_pool, objects_list_page_authz,
-        test_params,
+        create_silo, create_vpc, delete_internet_gateway,
+        detach_ip_address_from_igw, detach_ip_pool_from_igw, grant_iam,
+        link_ip_pool, objects_list_page_authz, test_params,
     },
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{
-    params::{
-        self, ExternalIpCreate, InstanceNetworkInterfaceAttachment,
-        InstanceNetworkInterfaceCreate,
-    },
-    shared::SiloRole,
-    views::{InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool},
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::instance::{
+    ExternalIpCreate, InstanceNetworkInterfaceAttachment,
+    InstanceNetworkInterfaceCreate, PrivateIpStackCreate,
 };
+use nexus_types::external_api::internet_gateway::{
+    InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
+    InternetGatewayIpPoolCreate,
+};
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::ip_pool::IpPool;
+use nexus_types::external_api::ip_pool::IpPoolCreate;
+use nexus_types::external_api::ip_pool::IpVersion;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::project;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::silo::SiloIdentityMode;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use omicron_common::{
     address::{IpRange, Ipv4Range},
@@ -265,7 +275,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
 
     // Create a non-admin user
     let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
-    let silo: nexus_types::external_api::views::Silo =
+    let silo: Silo =
         nexus_test_utils::resource_helpers::object_get(c, &silo_url).await;
 
     let user = create_local_user(
@@ -300,7 +310,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
         "/v1/internet-gateway-ip-pools?project={}&vpc={}&gateway={}",
         PROJECT_NAME, VPC_NAME, IGW_NAME
     );
-    let params = params::InternetGatewayIpPoolCreate {
+    let params = InternetGatewayIpPoolCreate {
         identity: IdentityMetadataCreateParams {
             name: IP_POOL_ATTACHMENT_NAME.parse().unwrap(),
             description: "Test attachment".to_string(),
@@ -342,6 +352,272 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
     assert_eq!(igw_pools.len(), 0, "IP pool should not be attached");
 }
 
+/// Regression test for https://github.com/oxidecomputer/omicron/issues/10117.
+///
+/// When a VPC is created in a silo that has both an IPv4 and IPv6 default IP
+/// pool, the auto-created default internet gateway should have one IP pool
+/// attachment per IP version, named "default-v4" and "default-v6".
+#[nexus_test]
+async fn test_vpc_create_attaches_all_default_pools_to_igw(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create one IPv4 and one IPv6 pool.
+    let pool_v4: IpPool = NexusRequest::objects_post(
+        client,
+        "/v1/system/ip-pools",
+        &IpPoolCreate::new(
+            IdentityMetadataCreateParams {
+                name: "pool-v4".parse().unwrap(),
+                description: "IPv4 pool".to_string(),
+            },
+            IpVersion::V4,
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    let pool_v6: IpPool = NexusRequest::objects_post(
+        client,
+        "/v1/system/ip-pools",
+        &IpPoolCreate::new(
+            IdentityMetadataCreateParams {
+                name: "pool-v6".parse().unwrap(),
+                description: "IPv6 pool".to_string(),
+            },
+            IpVersion::V6,
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a silo and link both pools as silo defaults.
+    let silo =
+        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
+            .await;
+    link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
+    link_ip_pool(client, "pool-v6", &silo.identity.id, true).await;
+
+    // Create a local user with Collaborator role in the silo.
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    let silo_url = format!("/v1/system/silos/{}", silo.identity.name);
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a project and VPC as the silo user.
+    let _: project::Project = NexusRequest::objects_post(
+        client,
+        "/v1/projects",
+        &project::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-project".parse().unwrap(),
+                description: "".to_string(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    let _: vpc::Vpc = NexusRequest::objects_post(
+        client,
+        "/v1/vpcs?project=test-project",
+        &vpc::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-vpc".parse().unwrap(),
+                description: "".to_string(),
+            },
+            ipv6_prefix: None,
+            dns_name: "test-vpc".parse().unwrap(),
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    // The new VPC should have exactly one internet gateway (the default).
+    let igws: ResultsPage<InternetGateway> = NexusRequest::object_get(
+        client,
+        "/v1/internet-gateways?project=test-project&vpc=test-vpc",
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap()
+    .await;
+    assert_eq!(igws.items.len(), 1);
+    assert_eq!(igws.items[0].identity.name.as_str(), "default");
+
+    // The default internet gateway should have one IP pool per IP version.
+    let mut igw_pools: Vec<InternetGatewayIpPool> = NexusRequest::object_get(
+        client,
+        "/v1/internet-gateway-ip-pools\
+             ?project=test-project&vpc=test-vpc&gateway=default",
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap::<ResultsPage<InternetGatewayIpPool>>()
+    .await
+    .items;
+    assert_eq!(
+        igw_pools.len(),
+        2,
+        "default IGW should have one IP pool attached per silo-default IP version",
+    );
+
+    // Sort by name so the order is deterministic.
+    igw_pools.sort_by(|a, b| a.identity.name.cmp(&b.identity.name));
+
+    // The v4 attachment should be named "default-v4" and reference the v4 pool.
+    assert_eq!(igw_pools[0].identity.name.as_str(), "default-v4");
+    assert_eq!(igw_pools[0].ip_pool_id, pool_v4.identity.id);
+
+    // The v6 attachment should be named "default-v6" and reference the v6 pool.
+    assert_eq!(igw_pools[1].identity.name.as_str(), "default-v6");
+    assert_eq!(igw_pools[1].ip_pool_id, pool_v6.identity.id);
+}
+
+/// Regression test for https://github.com/oxidecomputer/omicron/issues/10117.
+///
+/// When a VPC is created in a silo that has only one default IP pool (IPv4),
+/// the auto-created default internet gateway should have exactly one IP pool
+/// attachment, named "default-v4".
+#[nexus_test]
+async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create one IPv4 and one IPv6 pool.
+    let pool_v4: IpPool = NexusRequest::objects_post(
+        client,
+        "/v1/system/ip-pools",
+        &IpPoolCreate::new(
+            IdentityMetadataCreateParams {
+                name: "pool-v4".parse().unwrap(),
+                description: "IPv4 pool".to_string(),
+            },
+            IpVersion::V4,
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    let _pool_v6: IpPool = NexusRequest::objects_post(
+        client,
+        "/v1/system/ip-pools",
+        &IpPoolCreate::new(
+            IdentityMetadataCreateParams {
+                name: "pool-v6".parse().unwrap(),
+                description: "IPv6 pool".to_string(),
+            },
+            IpVersion::V6,
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a silo and link both pools, but only the IPv4 pool as a default.
+    let silo =
+        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
+            .await;
+    link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
+    link_ip_pool(client, "pool-v6", &silo.identity.id, false).await;
+
+    // Create a local user with Collaborator role in the silo.
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    let silo_url = format!("/v1/system/silos/{}", silo.identity.name);
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a project and VPC as the silo user.
+    let _: project::Project = NexusRequest::objects_post(
+        client,
+        "/v1/projects",
+        &project::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-project".parse().unwrap(),
+                description: "".to_string(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    let _: vpc::Vpc = NexusRequest::objects_post(
+        client,
+        "/v1/vpcs?project=test-project",
+        &vpc::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-vpc".parse().unwrap(),
+                description: "".to_string(),
+            },
+            ipv6_prefix: None,
+            dns_name: "test-vpc".parse().unwrap(),
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    // The new VPC should have exactly one internet gateway (the default).
+    let igws: ResultsPage<InternetGateway> = NexusRequest::object_get(
+        client,
+        "/v1/internet-gateways?project=test-project&vpc=test-vpc",
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap()
+    .await;
+    assert_eq!(igws.items.len(), 1);
+    assert_eq!(igws.items[0].identity.name.as_str(), "default");
+
+    // The default internet gateway should have exactly one IP pool, for IPv4.
+    let igw_pools: Vec<InternetGatewayIpPool> = NexusRequest::object_get(
+        client,
+        "/v1/internet-gateway-ip-pools\
+             ?project=test-project&vpc=test-vpc&gateway=default",
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute_and_parse_unwrap::<ResultsPage<InternetGatewayIpPool>>()
+    .await
+    .items;
+    assert_eq!(
+        igw_pools.len(),
+        1,
+        "default IGW should have exactly one IP pool attached \
+        (only the IPv4 pool is a silo default)",
+    );
+    assert_eq!(igw_pools[0].identity.name.as_str(), "default-v4");
+    assert_eq!(igw_pools[0].ip_pool_id, pool_v4.identity.id);
+}
+
 async fn test_setup(c: &ClientTestContext) {
     // create a project and vpc to test with
     let _proj = create_project(&c, PROJECT_NAME).await;
@@ -360,8 +636,11 @@ async fn test_setup(c: &ClientTestContext) {
         c,
         FLOATING_IP_NAME,
         PROJECT_NAME,
-        None,
-        Some(IP_POOL_NAME),
+        floating_ip::AddressAllocator::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: NameOrId::Name(IP_POOL_NAME.parse().unwrap()),
+            },
+        },
     )
     .await;
     let nic_attach = InstanceNetworkInterfaceAttachment::Create(vec![
@@ -370,7 +649,7 @@ async fn test_setup(c: &ClientTestContext) {
                 description: String::from("description"),
                 name: "noname".parse().unwrap(),
             },
-            ip: None,
+            ip_config: PrivateIpStackCreate::auto_ipv4(),
             subnet_name: "default".parse().unwrap(),
             vpc_name: VPC_NAME.parse().unwrap(),
         },
@@ -386,6 +665,8 @@ async fn test_setup(c: &ClientTestContext) {
         }],
         true,
         None,
+        None,
+        Vec::new(),
     )
     .await;
 

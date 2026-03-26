@@ -195,3 +195,10 @@ pub async fn expectorate_query_contents<T: QueryFragment<Pg>>(
 
     expectorate::assert_contents(path, &s);
 }
+
+/// Type alias for the SQL type of a selectable expression.
+///
+/// This is useful for the return type of a query built using [`QueryBuilder`].
+pub type SelectableSql<T> = <
+    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
+>::SqlType;

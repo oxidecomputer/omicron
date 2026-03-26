@@ -7,30 +7,35 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// TODO(#40): Remove this exception once resolved.
-#![allow(clippy::unnecessary_wraps)]
 
 pub mod app; // Public for documentation examples
 mod cidata;
 mod context; // Public for documentation examples
 pub mod external_api; // Public for testing
 mod internal_api;
+mod lockstep_api;
 mod populate;
 mod saga_interface;
 
 pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use context::ApiContext;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
+use nexus_db_model::HwBaseboardId;
 use nexus_db_model::RendezvousDebugDataset;
+use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
+use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::internal_api::params::ExternalPortDiscovery;
+use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
@@ -39,20 +44,23 @@ use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
-use omicron_common::api::internal::shared::{
-    AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
-};
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid as _;
-use omicron_uuid_kinds::ZpoolUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::watch;
+use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -64,6 +72,8 @@ pub struct InternalServer {
     apictx: ApiContext,
     /// dropshot server for internal API
     http_server_internal: dropshot::HttpServer<ApiContext>,
+    /// dropshot server for lockstep API
+    http_server_lockstep: dropshot::HttpServer<ApiContext>,
     config: NexusConfig,
     log: Logger,
 }
@@ -86,6 +96,17 @@ impl InternalServer {
         )
         .await?;
 
+        if config.deployment.dropshot_internal.bind_address.ip()
+            != config.deployment.dropshot_lockstep.bind_address.ip()
+        {
+            return Err(format!(
+                "internal server IP ({}) does not equal \
+                lockstep server IP ({})",
+                config.deployment.dropshot_internal.bind_address.ip(),
+                config.deployment.dropshot_lockstep.bind_address.ip()
+            ));
+        }
+
         // Launch the internal server.
         let http_server_internal = match dropshot::ServerBuilder::new(
             internal_api(),
@@ -93,8 +114,32 @@ impl InternalServer {
             log.new(o!("component" => "dropshot_internal")),
         )
         .config(config.deployment.dropshot_internal.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                nexus_internal_api::latest_version(),
+            ),
+        )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
+        {
+            Ok(server) => server,
+            Err(err) => {
+                context.context.nexus.datastore().terminate().await;
+                return Err(err);
+            }
+        };
+
+        // Launch the lockstep server. This is launched at the same time as the
+        // internal server, before all the other servers.
+        let http_server_lockstep = match dropshot::ServerBuilder::new(
+            lockstep_api(),
+            context.clone(),
+            log.new(o!("component" => "dropshot_lockstep")),
+        )
+        .config(config.deployment.dropshot_lockstep.clone())
+        .start()
+        .map_err(|error| format!("initializing lockstep server: {}", error))
         {
             Ok(server) => server,
             Err(err) => {
@@ -106,9 +151,20 @@ impl InternalServer {
         Ok(Self {
             apictx: context,
             http_server_internal,
+            http_server_lockstep,
             config: config.clone(),
             log,
         })
+    }
+}
+
+impl nexus_test_interface::InternalServer for InternalServer {
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.http_server_internal.local_addr()
+    }
+
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.http_server_lockstep.local_addr()
     }
 }
 
@@ -125,6 +181,7 @@ impl Server {
     async fn start(internal: InternalServer) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
+        let http_server_lockstep = internal.http_server_lockstep;
         let log = internal.log;
         let config = internal.config;
 
@@ -136,6 +193,15 @@ impl Server {
         // definitely implemented our source IP allowlist for making requests to
         // the external server we're about to start.
         apictx.context.nexus.await_ip_allowlist_plumbing().await;
+
+        // Wait until Nexus has determined if sagas are supposed to be quiesced.
+        // This is not strictly necessary.  The goal here is to prevent 503
+        // errors to clients that reach this Nexus while it's starting up and
+        // before it's figured out that it doesn't need to quiesce.  The risk of
+        // doing this is that Nexus gets stuck here, but that should only happen
+        // if it's unable to load the current blueprint, in which case
+        // something's pretty wrong and it's likely pretty stuck anyway.
+        apictx.context.nexus.wait_for_saga_determination().await;
 
         // Launch the external server.
         let tls_config = apictx
@@ -167,6 +233,18 @@ impl Server {
                 log.new(o!("component" => "dropshot_external")),
             )
             .config(config.deployment.dropshot_external.dropshot.clone())
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    nexus_external_api::latest_version(),
+                )
+                // Since we don't have control over all clients to the external
+                // API, we allow the api-version header to not be specified
+                // (picking the latest version in that case). However, all
+                // clients that *are* under our control should specify the
+                // api-version header.
+                .on_missing(nexus_external_api::latest_version()),
+            )))
             .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
@@ -180,6 +258,18 @@ impl Server {
                 log.new(o!("component" => "dropshot_external_techport")),
             )
             .config(techport_server_config)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    nexus_external_api::latest_version(),
+                )
+                // Since we don't have control over all clients to the external
+                // API, we allow the api-version header to not be specified
+                // (picking the latest version in that case). However, all
+                // clients that *are* under our control should specify the
+                // api-version header.
+                .on_missing(nexus_external_api::latest_version()),
+            )))
             .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
@@ -202,6 +292,7 @@ impl Server {
                 http_server_external,
                 http_server_techport_external,
                 http_server_internal,
+                http_server_lockstep,
                 producer_server,
             )
             .await;
@@ -230,11 +321,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(InternalServer, SocketAddr), String> {
+    ) -> Result<InternalServer, String> {
         let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
-        let addr = internal_server.http_server_internal.local_addr();
-        Ok((internal_server, addr))
+        Ok(internal_server)
     }
 
     async fn stop_internal(internal_server: InternalServer) {
@@ -260,7 +350,7 @@ impl nexus_test_interface::NexusServer for Server {
         >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".
@@ -268,6 +358,41 @@ impl nexus_test_interface::NexusServer for Server {
         // However, RSS isn't running, so we'll do the handoff ourselves.
         let opctx =
             internal_server.apictx.context.nexus.opctx_for_internal_api();
+        let datastore = internal_server.apictx.context.nexus.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // We need to insert hw_baseboard_ids that match the fake hardware we
+        // use for our fake trust quorum configuration.
+        let tq_members = BTreeSet::from([
+            BaseboardId {
+                part_number: "_test_fake_tq_9adfa".into(),
+                serial_number: "a1".into(),
+            },
+            BaseboardId {
+                part_number: "_test_fake_9adfa".into(),
+                serial_number: "a2".into(),
+            },
+            BaseboardId {
+                part_number: "_test_fake_tq_9adfa".into(),
+                serial_number: "a3".into(),
+            },
+        ]);
+
+        let hw_baseboard_ids: Vec<_> = tq_members
+            .iter()
+            .cloned()
+            .map(|id| HwBaseboardId {
+                id: Uuid::new_v4(),
+                part_number: id.part_number,
+                serial_number: id.serial_number,
+            })
+            .collect();
+        use nexus_db_schema::schema::hw_baseboard_id::dsl;
+        diesel::insert_into(dsl::hw_baseboard_id)
+            .values(hw_baseboard_ids.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
 
         // Allocation of initial external IP addresses is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
@@ -276,7 +401,7 @@ impl nexus_test_interface::NexusServer for Server {
         // system services.  But here, we fake up IP pool ranges based on the
         // external addresses of services that we start or mock.
         let internal_services_ip_pool_ranges = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter_map(|(_, zc)| match &zc.zone_type {
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp { external_ip, .. },
@@ -310,41 +435,98 @@ impl nexus_test_interface::NexusServer for Server {
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
                     external_port_count: ExternalPortDiscovery::Static(
-                        HashMap::from([(
-                            SwitchLocation::Switch0,
-                            vec!["qsfp0".parse().unwrap()],
-                        )]),
+                        HashMap::from([
+                            (
+                                SwitchSlot::Switch0,
+                                vec!["qsfp0".parse().unwrap()],
+                            ),
+                            (
+                                SwitchSlot::Switch1,
+                                vec!["qsfp0".parse().unwrap()],
+                            ),
+                        ]),
                     ),
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: "fd00:1122:3344:0100::/56"
                             .parse()
                             .unwrap(),
-                        infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                        infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                        infra_ip_first: std::net::IpAddr::V4(
+                            Ipv4Addr::UNSPECIFIED,
+                        ),
+                        infra_ip_last: std::net::IpAddr::V4(
+                            Ipv4Addr::UNSPECIFIED,
+                        ),
                         ports: Vec::new(),
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    // Insert a fake trust quorum config such that existing
+                    // sleds will never be present.
+                    //
+                    // The purpose of this is solely for expunge testing. We
+                    // don't do any trust quorum testing in `NexusServer` based
+                    // tests, but we do test expunging sleds. The second part
+                    // of exunging a sled, as used in these tests, relies on
+                    // the sled not being part of the current trust quorum.
+                    // This gets checked in the production nexus code path. By
+                    // inserting an fake config as the latest committed config
+                    // we can ensure that no sled used by this test will every
+                    // be present in a trust quorum config and that the existing
+                    // expunge tests will pass.
+                    initial_trust_quorum_configuration: Some(
+                        InitialTrustQuorumConfig {
+                            // We need at least 3 members
+                            members: tq_members,
+                            // Coordinator must be one of the members
+                            coordinator: BaseboardId {
+                                part_number: "_test_fake_tq_9adfa".into(),
+                                serial_number: "a1".into(),
+                            },
+                        },
+                    ),
                 },
+                false, // blueprint_execution_enabled
             )
             .await
             .expect("Could not initialize rack");
+
+        // Now that we have a blueprint, determine whether sagas should be
+        // quiesced.  Wait for that so that tests can assume they can
+        // immediately kick off sagas.
+        internal_server
+            .apictx
+            .context
+            .nexus
+            .wait_for_saga_determination()
+            .await;
 
         // Start the Nexus external API.
         Server::start(internal_server).await.unwrap()
     }
 
-    async fn get_http_server_external_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_external_server_address().await.unwrap()
+    fn datastore(&self) -> &Arc<db::DataStore> {
+        self.apictx.context.nexus.datastore()
     }
 
-    async fn get_http_server_techport_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_techport_server_address().await.unwrap()
+    fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>> {
+        self.apictx.context.nexus.inventory_load_rx()
     }
 
-    async fn get_http_server_internal_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_internal_server_address().await.unwrap()
+    fn get_http_server_external_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_external_server_address().unwrap()
+    }
+
+    fn get_http_server_techport_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_techport_server_address().unwrap()
+    }
+
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_internal_server_address().unwrap()
+    }
+
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_lockstep_server_address().unwrap()
     }
 
     async fn upsert_test_dataset(
@@ -387,7 +569,23 @@ impl nexus_test_interface::NexusServer for Server {
                         &opctx,
                         RendezvousDebugDataset::new(
                             dataset_id,
-                            ZpoolUuid::from_untyped_uuid(zpool_id),
+                            zpool_id,
+                            BlueprintUuid::new_v4(),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+            }
+            DatasetKind::LocalStorageUnencrypted => {
+                self.apictx
+                    .context
+                    .nexus
+                    .datastore()
+                    .local_storage_unencrypted_dataset_insert_if_not_exists(
+                        &opctx,
+                        RendezvousLocalStorageUnencryptedDataset::new(
+                            dataset_id,
+                            zpool_id,
                             BlueprintUuid::new_v4(),
                         ),
                     )
@@ -425,12 +623,11 @@ impl nexus_test_interface::NexusServer for Server {
 /// Run an instance of the Nexus server.
 pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     use slog::Drain;
-    let (drain, registration) =
-        slog_dtrace::with_drain(
-            config.pkg.log.to_logger("nexus").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
+    let (drain, registration) = slog_dtrace::with_drain(
+        config.pkg.log.to_logger("nexus").map_err(|message| {
+            format!("initializing logger: {}", InlineErrorChain::new(&message))
+        })?,
+    );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

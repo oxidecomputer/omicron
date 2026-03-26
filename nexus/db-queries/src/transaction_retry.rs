@@ -9,7 +9,7 @@ use chrono::Utc;
 use diesel::result::Error as DieselError;
 use nexus_db_lookup::DbConnection;
 use oximeter::{MetricsError, types::Sample};
-use rand::{Rng, thread_rng};
+use rand::Rng;
 use slog::{Logger, info, warn};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -158,8 +158,8 @@ impl RetryHelper {
         // will keep track of the failing transaction and identify that it's a
         // high-priority target for CTE conversion.
         let duration = {
-            let mut rng = thread_rng();
-            rng.gen_range(MIN_RETRY_BACKOFF..MAX_RETRY_BACKOFF)
+            let mut rng = rand::rng();
+            rng.random_range(MIN_RETRY_BACKOFF..MAX_RETRY_BACKOFF)
         };
 
         warn!(

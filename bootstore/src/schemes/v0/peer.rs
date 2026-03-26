@@ -16,6 +16,7 @@ use camino::Utf8PathBuf;
 use derive_more::From;
 use sled_hardware_types::Baseboard;
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -42,11 +43,11 @@ pub enum NodeRequestError {
     #[error("only one request allowed at a time")]
     RequestAlreadyPending,
 
-    #[error("Fsm error: {0}")]
-    Fsm(ApiError),
+    #[error("Fsm error")]
+    Fsm(#[source] ApiError),
 
-    #[error("failed to receive response from node task: {0}")]
-    Recv(oneshot::error::RecvError),
+    #[error("failed to receive response from node task")]
+    Recv(#[source] oneshot::error::RecvError),
 
     #[error("failed to send request to node task")]
     Send,
@@ -60,14 +61,6 @@ pub enum NodeRequestError {
         attempted_update_generation: u64,
         current_generation: u64,
     },
-}
-
-impl From<NodeRequestError> for omicron_common::api::external::Error {
-    fn from(error: NodeRequestError) -> Self {
-        omicron_common::api::external::Error::internal_error(&format!(
-            "{error}"
-        ))
-    }
 }
 
 /// A request sent to the `Node` task from the `NodeHandle`
@@ -447,7 +440,7 @@ impl Node {
                 self.accepted_connections.insert(addr, handle);
             }
             Err(err) => {
-                error!(self.log, "Failed to accept a connection: {err:?}");
+                error!(self.log, "Failed to accept a connection"; InlineErrorChain::new(&err));
             }
         }
     }
@@ -676,12 +669,9 @@ impl Node {
         {
             warn!(
                 self.log,
-                concat!(
-                    "Failed to send network config to connection ",
-                    "management task for {} {:?}"
-                ),
-                peer_id,
-                e
+                "Failed to send network config to connection \
+                 management task for {peer_id}";
+                InlineErrorChain::new(&e),
             );
         }
     }
@@ -701,7 +691,10 @@ impl Node {
                     .send(MainToConnMsg::Msg(Msg::Fsm(envelope.msg)))
                     .await
                 {
-                    warn!(self.log, "Failed to send {e:?}");
+                    warn!(
+                        self.log, "Failed to send";
+                        InlineErrorChain::new(&e),
+                    );
                 }
             } else {
                 warn!(self.log, "Missing connection to {}", envelope.to);
@@ -771,7 +764,7 @@ impl Node {
 
     // Inform any callers (via outstanding responders) of errors.
     async fn handle_api_error(&mut self, err: ApiError) {
-        warn!(self.log, "Fsm error= {err:?}");
+        warn!(self.log, "Fsm error"; InlineErrorChain::new(&err));
         match err {
             ApiError::AlreadyInitialized | ApiError::RackInitTimeout { .. } => {
                 if let Some(responder) = self.init_responder.take() {
@@ -814,10 +807,8 @@ impl Node {
                 else {
                     warn!(
                         self.log,
-                        concat!(
-                            "Missing AcceptedConnHandle: ",
-                            "Stale ConnectedAcceptor msg"
-                        );
+                        "Missing AcceptedConnHandle: \
+                         Stale ConnectedAcceptor msg";
                         "accepted_addr" => accepted_addr.to_string(),
                         "addr" => addr.to_string(),
                         "remote_peer_id" => peer_id.to_string()

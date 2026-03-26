@@ -126,17 +126,19 @@ impl fmt::Debug for FetchedArtifact {
 pub(crate) struct FetchArtifactBackend {
     log: slog::Logger,
     imp: Box<dyn FetchArtifactImpl>,
-    timeout: Duration,
+    read_timeout: Duration,
+    preferred_peer: Option<PeerAddress>,
 }
 
 impl FetchArtifactBackend {
     pub(crate) fn new(
         log: &slog::Logger,
         imp: Box<dyn FetchArtifactImpl>,
-        timeout: Duration,
+        read_timeout: Duration,
+        preferred_peer: Option<PeerAddress>,
     ) -> Self {
         let log = log.new(slog::o!("component" => "Peers"));
-        Self { log, imp, timeout }
+        Self { log, imp, read_timeout, preferred_peer }
     }
 
     pub(crate) async fn fetch_artifact(
@@ -154,7 +156,7 @@ impl FetchArtifactBackend {
 
         slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
 
-        for &peer in peers.peers() {
+        for &peer in peers.iter_with_preferred(self.preferred_peer) {
             remaining_peers -= 1;
 
             slog::debug!(
@@ -227,7 +229,10 @@ impl FetchArtifactBackend {
             InstallinatorProgressMetadata::Download { peer: peer.address() };
 
         loop {
-            match tokio::time::timeout(self.timeout, receiver.recv()).await {
+            // This is the read timeout. See ArtifactClient::new for details
+            // about connect, read, and total timeouts.
+            match tokio::time::timeout(self.read_timeout, receiver.recv()).await
+            {
                 Ok(Some(Ok(bytes))) => {
                     slog::debug!(
                         &log,
@@ -270,14 +275,14 @@ impl FetchArtifactBackend {
                         metadata,
                         message: format!(
                             "operation timed out ({:?})",
-                            self.timeout
+                            self.read_timeout
                         )
                         .into(),
                     })
                     .await;
                     return Err(ArtifactFetchError::Timeout {
                         peer: peer.address(),
-                        timeout: self.timeout,
+                        timeout: self.read_timeout,
                         bytes_fetched: artifact_bytes.num_bytes(),
                     });
                 }

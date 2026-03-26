@@ -43,14 +43,19 @@ pub enum Error {
     #[error(transparent)]
     ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
 
-    #[error("Invalid IP configuration for port")]
-    InvalidPortIpConfig,
+    #[error("Invalid IP configuration for port: {0}")]
+    InvalidPortIpConfig(String),
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
     ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
     #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
     ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error(
+        "Tried to update multicast groups on non-existent port ({0}, {1:?})"
+    )]
+    MulticastUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
     #[error("Could not find Primary NIC")]
     NoPrimaryNic,
@@ -60,6 +65,11 @@ pub enum Error {
 
     #[error("No matching NIC found for port {0} at slot {1}.")]
     NoNicforPort(String, u32),
+
+    #[error(
+        "Tried to update attached subnets on non-existent port ({0}, {1:?})"
+    )]
+    AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 /// Delete all xde devices on the system.

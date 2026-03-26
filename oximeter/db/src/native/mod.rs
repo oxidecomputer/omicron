@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Low-level native client to the ClickHouse database.
 //!
@@ -121,47 +121,54 @@
 
 pub use connection::Connection;
 pub use connection::Pool;
+pub use io::packet::client::Encoder;
+pub use io::packet::server::Decoder;
+use packets::client::Packet as ClientPacket;
 pub use packets::client::QueryResult;
 pub use packets::server::Exception;
+use packets::server::Packet as ServerPacket;
 
 pub mod block;
 pub mod connection;
 mod io;
 mod packets;
-pub use io::packet::client::Encoder;
-pub use io::packet::server::Decoder;
 
 #[usdt::provider(provider = "clickhouse_io")]
 mod probes {
-    /// Emitted when we sent a packet to the server, with its kind.
-    fn packet__sent(kind: &str) {}
 
-    /// Emitted when we receive a packet from the server, with its kind.
-    fn packet__received(kind: &str) {}
-
-    /// Emitted when we learn we've been disconnected from the server.
-    fn disconnected() {}
-
-    /// Emitted when we receive a data packet, with details about the size and
-    /// data types for each column.
-    fn data__packet__received(
-        n_cols: usize,
-        n_rows: usize,
-        columns: Vec<(String, String)>,
+    /// Fires just before we send a packet.
+    fn packet__send__start(
+        addr: &str,
+        kind: &str,
+        packet: &crate::native::ClientPacket,
     ) {
     }
 
+    /// Fires just after we finish sending a packet.
+    fn packet__send__done(addr: &str) {}
+
+    /// Fires when we receive a packet from the server.
+    fn packet__received(
+        addr: &str,
+        kind: &str,
+        packet: &crate::native::ServerPacket,
+    ) {
+    }
+
+    /// Emitted when we learn we've been disconnected from the server.
+    fn disconnected(addr: &str) {}
+
     /// Emitted when we receive an unrecognized packet, with the kind and the
     /// length of the discarded buffer.
-    fn unrecognized__server__packet(kind: u64, len: usize) {}
+    fn unrecognized__server__packet(addr: &str, kind: u64, len: usize) {}
 
     /// Emitted when we receive an unexpected packet, based on the messages we've
     /// sent, with the received packet type.
-    fn unexpected__server__packet(kind: &str) {}
+    fn unexpected__server__packet(addr: &str, kind: &str) {}
 
     /// Emitted when we receive an invalid packet, with the kind we think it is
     /// supposed to be and the length of the discarded buffer.
-    fn invalid__packet(kind: &str, len: usize) {}
+    fn invalid__packet(addr: &str, kind: &str, len: usize) {}
 }
 
 /// An error interacting ClickHouse over the native protocol.

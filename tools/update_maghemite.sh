@@ -31,8 +31,7 @@ function update_openapi {
     TARGET_COMMIT="$1"
     DRY_RUN="$2"
     DAEMON="$3"
-    SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "${DAEMON}-admin.json" "openapi")
-    OUTPUT=$(printf "COMMIT=\"%s\"\nSHA2=\"%s\"\n" "$TARGET_COMMIT" "$SHA")
+    OUTPUT=$(printf "COMMIT=\"%s\"\n" "$TARGET_COMMIT")
 
     if [ -n "$DRY_RUN" ]; then
         OPENAPI_PATH="/dev/null"
