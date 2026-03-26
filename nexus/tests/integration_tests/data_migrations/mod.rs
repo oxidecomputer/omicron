@@ -12,9 +12,10 @@
 //! Each migration module exports a `pub(crate) fn checks() ->
 //! DataMigrationFns` that configures the before/after hooks.
 //!
-//! When advancing the schema baseline, delete the files whose migration
-//! names are older than the new baseline, and remove the corresponding
-//! `mod` and `register!` lines below.
+//! When advancing the schema baseline (the oldest-supported version of
+//! the schema in the database -- see schema/crdb/README.adoc for additional
+//! instructions), delete the files whose migration names are older than the new
+//! baseline, and remove the corresponding `mod` and `register!` lines below.
 
 use super::schema::DataMigrationFns;
 
@@ -42,22 +43,6 @@ mod route_config_rib_priority;
 mod vpc_firewall_icmp;
 mod zone_image_resolver_inventory;
 
-/// Registers a migration module in the checks map. The module name is
-/// converted to the migration directory name by replacing underscores
-/// with hyphens, then looked up in `versions` to get the version.
-macro_rules! register {
-    ($map:ident, $versions:ident, $mod:ident) => {
-        let name = stringify!($mod).replace('_', "-");
-        let version = $versions
-            .get(name.as_str())
-            .unwrap_or_else(|| {
-                panic!("migration {name:?} not found in KNOWN_VERSIONS")
-            })
-            .clone();
-        $map.insert(version, $mod::checks());
-    };
-}
-
 pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let versions: HashMap<&str, Version> = KNOWN_VERSIONS
         .iter()
@@ -65,24 +50,40 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         .collect();
     let mut map = BTreeMap::new();
 
-    register!(map, versions, zone_image_resolver_inventory);
-    register!(map, versions, vpc_firewall_icmp);
-    register!(map, versions, boot_partitions_inventory);
-    register!(map, versions, fix_leaked_bp_oximeter_read_policy_rows);
-    register!(map, versions, route_config_rib_priority);
-    register!(map, versions, inv_clear_mupdate_override);
-    register!(map, versions, populate_db_metadata_nexus);
-    register!(map, versions, positive_quotas);
-    register!(map, versions, disk_types);
-    register!(map, versions, one_big_ereport_table);
-    register!(map, versions, blueprint_sled_config_subnet);
-    register!(map, versions, blueprint_sled_last_used_ip);
-    register!(map, versions, audit_log_credential_id);
-    register!(map, versions, fix_session_token_column_order);
-    register!(map, versions, bgp_unnumbered_peers);
-    register!(map, versions, bgp_config_max_paths_not_null);
-    register!(map, versions, ereport_everyone_gets_a_slot);
-    register!(map, versions, rename_default_igw_ip_pool);
+    // Registers a migration module in the checks map. The module name is
+    // converted to the migration directory name by replacing underscores
+    // with hyphens, then looked up in `versions` to get the version.
+    macro_rules! register {
+        ($mod:ident) => {
+            let name = stringify!($mod).replace('_', "-");
+            let version = versions
+                .get(name.as_str())
+                .unwrap_or_else(|| {
+                    panic!("migration {name:?} not found in KNOWN_VERSIONS")
+                })
+                .clone();
+            map.insert(version, $mod::checks());
+        };
+    }
+
+    register!(zone_image_resolver_inventory);
+    register!(vpc_firewall_icmp);
+    register!(boot_partitions_inventory);
+    register!(fix_leaked_bp_oximeter_read_policy_rows);
+    register!(route_config_rib_priority);
+    register!(inv_clear_mupdate_override);
+    register!(populate_db_metadata_nexus);
+    register!(positive_quotas);
+    register!(disk_types);
+    register!(one_big_ereport_table);
+    register!(blueprint_sled_config_subnet);
+    register!(blueprint_sled_last_used_ip);
+    register!(audit_log_credential_id);
+    register!(fix_session_token_column_order);
+    register!(bgp_unnumbered_peers);
+    register!(bgp_config_max_paths_not_null);
+    register!(ereport_everyone_gets_a_slot);
+    register!(rename_default_igw_ip_pool);
 
     map
 }
