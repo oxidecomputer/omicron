@@ -248,7 +248,7 @@ impl Point<'_> {
             .map(|(datum, _)| datum.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        format!("{}{}", timestamp, values)
+        format!("{}[{}]", timestamp, values)
     }
 
     /// Write this point as a simple, unadorned string.
