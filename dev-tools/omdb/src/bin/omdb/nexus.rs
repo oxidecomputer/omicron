@@ -3549,22 +3549,39 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
 
 fn display_fm_ereport_marking_stats(stats: &FmEreportMarkingStats) {
     let FmEreportMarkingStats {
-        ereports_in_sitrep,
+        batch_size,
+        batches,
+        total_ereports_in_sitrep,
+        ereports_not_marked_in_sitrep,
         ereports_marked_seen,
         errors,
     } = stats;
-    let already_marked =
-        ereports_in_sitrep - ereports_marked_seen - errors.len();
-    pub const IN_SITREP: &str = "ereports in sitrep:";
-    pub const MARKED_SEEN: &str = "  marked seen this activation:";
+    pub const IN_SITREP: &str = "total ereports in sitrep:";
+    pub const NOT_ALREADY_MARKED: &str =
+        "not marked when the sitrep was loaded:";
+    pub const MARKED_SEEN: &str = "  marked seen by this activation:";
     pub const ALREADY_MARKED: &str = "  already marked seen:";
-    pub const ERRORS: &str = "  errors:";
-    pub const WIDTH: usize =
-        const_max_len(&[IN_SITREP, MARKED_SEEN, ALREADY_MARKED, ERRORS]) + 1;
+    pub const BATCH_SIZE: &str = "batch size:";
+    pub const BATCHES: &str = "batches:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize = const_max_len(&[
+        IN_SITREP,
+        MARKED_SEEN,
+        ALREADY_MARKED,
+        ERRORS,
+        BATCH_SIZE,
+        BATCHES,
+    ]) + 1;
     pub const NUM_WIDTH: usize = 4;
-    println!("    {IN_SITREP:<WIDTH$}{ereports_in_sitrep:>NUM_WIDTH$}");
+    println!("    {IN_SITREP:<WIDTH$}{total_ereports_in_sitrep:>NUM_WIDTH$}");
+    println!(
+        "    {NOT_ALREADY_MARKED:<WIDTH$}{ereports_not_marked_in_sitrep:>NUM_WIDTH$}"
+    );
     println!("    {MARKED_SEEN:<WIDTH$}{ereports_marked_seen:>NUM_WIDTH$}");
+    let already_marked = ereports_not_marked_in_sitrep - ereports_marked_seen;
     println!("    {ALREADY_MARKED:<WIDTH$}{already_marked:>NUM_WIDTH$}");
+    println!("    {BATCH_SIZE:<WIDTH$}{batch_size:>NUM_WIDTH$}");
+    println!("    {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
     println!(
         "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
         warn_if_nonzero(errors.len()),

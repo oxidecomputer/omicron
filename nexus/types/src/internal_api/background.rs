@@ -922,9 +922,18 @@ pub struct FmAlertStats {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FmEreportMarkingStats {
+    pub batch_size: usize,
+    pub batches: usize,
     /// The total number of ereports included in the current sitrep.
-    pub ereports_in_sitrep: usize,
+    pub total_ereports_in_sitrep: usize,
+    /// The number of ereports that were not already marked as seen.
+    pub ereports_not_marked_in_sitrep: usize,
     /// Ereports marked as seen during this activation.
+    ///
+    /// The difference between `ereports_not_already_marked` and
+    /// `ereports_marked_seen` is the number of ereports that were already
+    /// marked as seen by other activations of this task since the ereports were
+    /// loaded from the database.
     pub ereports_marked_seen: usize,
     /// Errors that occurred during this activation.
     pub errors: Vec<String>,

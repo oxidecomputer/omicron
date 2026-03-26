@@ -184,12 +184,14 @@ impl FmRendezvous {
         sitrep: &Arc<(SitrepVersion, Sitrep)>,
         opctx: &OpContext,
     ) -> EreportMarkingStats {
-        // TODO(eliza): make configurable?
-        let batch = 100;
+        const BATCH_SIZE: usize = 1000;
 
         let (_, ref sitrep) = **sitrep;
-        let mut status = EreportMarkingStats::default();
-        status.ereports_in_sitrep = sitrep.ereports_by_id.len();
+        let mut status = EreportMarkingStats {
+            batch_size: BATCH_SIZE,
+            total_ereports_in_sitrep: sitrep.ereports_by_id.len(),
+            ..EreportMarkingStats::default()
+        };
 
         let mut ereport_ids = sitrep
             .ereports_by_id
@@ -212,26 +214,41 @@ impl FmRendezvous {
                 }
             })
             .peekable();
+
         while ereport_ids.peek().is_some() {
+            let mut n_unmarked = 0;
+            status.batches += 1;
             match self
                 .datastore
                 .ereports_mark_seen(
                     opctx,
                     sitrep.id(),
-                    ereport_ids.by_ref().take(batch),
+                    ereport_ids
+                        .by_ref()
+                        .take(BATCH_SIZE)
+                        .inspect(|_| n_unmarked += 1),
                 )
                 .await
             {
-                Ok(n_marked) => status.ereports_marked_seen += n_marked,
+                Ok(n_marked) => {
+                    status.ereports_marked_seen += n_marked;
+                    if n_marked != 0 {
+                        slog::debug!(
+                            opctx.log,
+                            "marked {n_marked} of {n_unmarked} ereports as seen"
+                        );
+                    }
+                }
                 Err(err) => {
                     slog::error!(
                         opctx.log,
-                        "failed to mark some ereports as seen";
+                        "failed to mark {n_unmarked} ereports as seen";
                         &err
                     );
                     status.errors.push(InlineErrorChain::new(&err).to_string());
                 }
             }
+            status.ereports_not_marked_in_sitrep += n_unmarked;
         }
 
         status
@@ -737,7 +754,7 @@ mod tests {
         };
         assert_eq!(sitrep_id, sitrep1_id);
         assert_eq!(
-            marking.ereports_in_sitrep, 2,
+            marking.total_ereports_in_sitrep, 2,
             "sitrep should contain 2 ereports"
         );
         assert_eq!(
@@ -773,7 +790,7 @@ mod tests {
         };
         assert_eq!(sitrep_id2, sitrep1_id);
         assert_eq!(
-            marking2.ereports_in_sitrep, 2,
+            marking2.total_ereports_in_sitrep, 2,
             "sitrep still contains 2 ereports"
         );
         assert_eq!(
@@ -1057,7 +1074,7 @@ mod tests {
             panic!("task should have executed");
         };
         assert_eq!(
-            marking2.ereports_in_sitrep, 3,
+            marking2.total_ereports_in_sitrep, 3,
             "sitrep2 contains all 3 ereports"
         );
         assert_eq!(
