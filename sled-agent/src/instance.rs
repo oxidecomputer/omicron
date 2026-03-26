@@ -1432,7 +1432,6 @@ impl InstanceRunner {
                         cfg.ephemeral_ip = Some(*ipv4);
                     }
                 };
-                Ok(config)
             }
             InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
                 let cfg = config.v6.get_or_insert_with(Default::default);
@@ -1454,23 +1453,15 @@ impl InstanceRunner {
                         cfg.ephemeral_ip = Some(*ipv6);
                     }
                 };
-                Ok(config)
             }
             InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
-                let cfg = config.v4.get_or_insert_with(Default::default);
-                if !cfg.floating_ips.contains(ipv4) {
-                    cfg.floating_ips.push(*ipv4);
-                }
-                Ok(config)
+                config.v4.get_or_insert_default().floating_ips.insert(*ipv4);
             }
             InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
-                let cfg = config.v6.get_or_insert_with(Default::default);
-                if !cfg.floating_ips.contains(ipv6) {
-                    cfg.floating_ips.push(*ipv6);
-                }
-                Ok(config)
+                config.v6.get_or_insert_default().floating_ips.insert(*ipv6);
             }
         }
+        Ok(config)
     }
 
     fn add_external_ip_inner(
@@ -1537,24 +1528,12 @@ impl InstanceRunner {
             }
             InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
                 if let Some(cfg) = config.v4.as_mut() {
-                    let floating_index =
-                        cfg.floating_ips.iter().position(|v| v == ipv4);
-                    if let Some(pos) = floating_index {
-                        // Swap remove is valid here, OPTE is not sensitive
-                        // to Floating Ip ordering.
-                        cfg.floating_ips.swap_remove(pos);
-                    }
+                    cfg.floating_ips.remove(ipv4);
                 }
             }
             InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
                 if let Some(cfg) = config.v6.as_mut() {
-                    let floating_index =
-                        cfg.floating_ips.iter().position(|v| v == ipv6);
-                    if let Some(pos) = floating_index {
-                        // Swap remove is valid here, OPTE is not sensitive
-                        // to Floating Ip ordering.
-                        cfg.floating_ips.swap_remove(pos);
-                    }
+                    cfg.floating_ips.remove(ipv6);
                 }
             }
         }

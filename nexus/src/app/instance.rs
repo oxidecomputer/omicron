@@ -84,6 +84,7 @@ use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::IpAddr;
@@ -2664,7 +2665,7 @@ where
 {
     let mut source_nat = None;
     let mut ephemeral_ip = None;
-    let mut floating_ips = Vec::new();
+    let mut floating_ips = BTreeSet::new();
     for ip in ips.iter() {
         if ip.attach_state != IpAttachState::Attached {
             return Err(Error::unavail(
@@ -2699,7 +2700,9 @@ where
                     "Expected at most 1 Ephemeral IP for an instance",
                 ));
             }
-            IpKind::Floating => floating_ips.push(ip.ip),
+            IpKind::Floating => {
+                floating_ips.insert(ip.ip);
+            }
         }
     }
 

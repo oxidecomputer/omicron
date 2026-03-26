@@ -5287,7 +5287,8 @@
             "items": {
               "type": "string",
               "format": "ipv4"
-            }
+            },
+            "uniqueItems": true
           },
           "source_nat": {
             "nullable": true,
@@ -5318,7 +5319,8 @@
             "items": {
               "type": "string",
               "format": "ipv6"
-            }
+            },
+            "uniqueItems": true
           },
           "source_nat": {
             "nullable": true,

@@ -13,6 +13,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 
 /// An IP address and port range used for source NAT, i.e., making
 /// outbound network connections from guests or services.
@@ -110,6 +112,38 @@ impl SourceNatConfig {
     }
 }
 
+/// Frozen v1 IPv4 external IP configuration.
+///
+/// Preserved for compatibility with older sled-agent API versions.
+/// New code should use `ExternalIpv4Config` from the parent module.
+#[derive(
+    Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize,
+)]
+pub struct ExternalIpv4Config {
+    /// Source NAT configuration, for outbound-only connectivity.
+    pub source_nat: Option<super::SourceNatConfigV4>,
+    /// An Ephemeral address for in- and outbound connectivity.
+    pub ephemeral_ip: Option<Ipv4Addr>,
+    /// Additional Floating IPs for in- and outbound connectivity.
+    pub floating_ips: Vec<Ipv4Addr>,
+}
+
+/// Frozen v1 IPv6 external IP configuration.
+///
+/// Preserved for compatibility with older sled-agent API versions.
+/// New code should use `ExternalIpv6Config` from the parent module.
+#[derive(
+    Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize,
+)]
+pub struct ExternalIpv6Config {
+    /// Source NAT configuration, for outbound-only connectivity.
+    pub source_nat: Option<super::SourceNatConfigV6>,
+    /// An Ephemeral address for in- and outbound connectivity.
+    pub ephemeral_ip: Option<Ipv6Addr>,
+    /// Additional Floating IPs for in- and outbound connectivity.
+    pub floating_ips: Vec<Ipv6Addr>,
+}
+
 /// A single- or dual-stack external IP configuration.
 // This is version 1 of `ExternalIpConfig`, kept for compatibility with
 // older versions of the sled-agent API which used this format. New code
@@ -118,66 +152,26 @@ impl SourceNatConfig {
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ExternalIpConfig {
     /// Single-stack IPv4 external IP configuration.
-    V4(super::ExternalIpv4Config),
+    V4(ExternalIpv4Config),
     /// Single-stack IPv6 external IP configuration.
-    V6(super::ExternalIpv6Config),
+    V6(ExternalIpv6Config),
     /// Both IPv4 and IPv6 external IP configuration.
-    DualStack { v4: super::ExternalIpv4Config, v6: super::ExternalIpv6Config },
+    DualStack { v4: ExternalIpv4Config, v6: ExternalIpv6Config },
 }
 
-impl From<super::ExternalIpv4Config> for ExternalIpConfig {
-    fn from(cfg: super::ExternalIpv4Config) -> Self {
+impl From<ExternalIpv4Config> for ExternalIpConfig {
+    fn from(cfg: ExternalIpv4Config) -> Self {
         Self::V4(cfg)
     }
 }
 
-impl From<super::ExternalIpv6Config> for ExternalIpConfig {
-    fn from(cfg: super::ExternalIpv6Config) -> Self {
+impl From<ExternalIpv6Config> for ExternalIpConfig {
+    fn from(cfg: ExternalIpv6Config) -> Self {
         Self::V6(cfg)
     }
 }
 
 impl ExternalIpConfig {
-    /// Return the IPv4 configuration, if it exists.
-    pub fn ipv4_config(&self) -> Option<&super::ExternalIpv4Config> {
-        match self {
-            ExternalIpConfig::V4(v4)
-            | ExternalIpConfig::DualStack { v4, .. } => Some(v4),
-            ExternalIpConfig::V6(_) => None,
-        }
-    }
-
-    /// Return a mutable reference to the IPv4 configuration, if it exists.
-    pub fn ipv4_config_mut(
-        &mut self,
-    ) -> Option<&mut super::ExternalIpv4Config> {
-        match self {
-            ExternalIpConfig::V4(v4)
-            | ExternalIpConfig::DualStack { v4, .. } => Some(v4),
-            ExternalIpConfig::V6(_) => None,
-        }
-    }
-
-    /// Return the IPv6 configuration, if it exists.
-    pub fn ipv6_config(&self) -> Option<&super::ExternalIpv6Config> {
-        match self {
-            ExternalIpConfig::V6(v6)
-            | ExternalIpConfig::DualStack { v6, .. } => Some(v6),
-            ExternalIpConfig::V4(_) => None,
-        }
-    }
-
-    /// Return a mutable reference to the IPv6 configuration, if it exists.
-    pub fn ipv6_config_mut(
-        &mut self,
-    ) -> Option<&mut super::ExternalIpv6Config> {
-        match self {
-            ExternalIpConfig::V6(v6)
-            | ExternalIpConfig::DualStack { v6, .. } => Some(v6),
-            ExternalIpConfig::V4(_) => None,
-        }
-    }
-
     /// Attempt to convert from generic IP addressing information.
     ///
     /// This is used to convert older API versions which used version-agnostic
@@ -226,13 +220,13 @@ impl ExternalIpConfig {
             (None, None, None) => {
                 match (fips_v4.is_empty(), fips_v6.is_empty()) {
                     (true, true) => Err(ExternalIpsError::NoIps),
-                    (true, false) => Ok(super::ExternalIps {
+                    (true, false) => Ok(ExternalIpv6Config {
                         source_nat: None,
                         ephemeral_ip: None,
                         floating_ips: fips_v6,
                     }
                     .into()),
-                    (false, true) => Ok(super::ExternalIps {
+                    (false, true) => Ok(ExternalIpv4Config {
                         source_nat: None,
                         ephemeral_ip: None,
                         floating_ips: fips_v4,
@@ -245,7 +239,7 @@ impl ExternalIpConfig {
                 if !fips_v6.is_empty() {
                     return Err(ExternalIpsError::MixedIpVersions);
                 }
-                Ok(super::ExternalIps {
+                Ok(ExternalIpv4Config {
                     source_nat: None,
                     ephemeral_ip: Some(v4),
                     floating_ips: fips_v4,
@@ -256,7 +250,7 @@ impl ExternalIpConfig {
                 if !fips_v4.is_empty() {
                     return Err(ExternalIpsError::MixedIpVersions);
                 }
-                Ok(super::ExternalIps {
+                Ok(ExternalIpv6Config {
                     source_nat: None,
                     ephemeral_ip: Some(v6),
                     floating_ips: fips_v6,
@@ -267,7 +261,7 @@ impl ExternalIpConfig {
                 if !fips_v4.is_empty() {
                     return Err(ExternalIpsError::MixedIpVersions);
                 }
-                Ok(super::ExternalIps {
+                Ok(ExternalIpv6Config {
                     source_nat: Some(snat_v6),
                     ephemeral_ip: None,
                     floating_ips: fips_v6,
@@ -278,7 +272,7 @@ impl ExternalIpConfig {
                 if !fips_v4.is_empty() {
                     return Err(ExternalIpsError::MixedIpVersions);
                 }
-                Ok(super::ExternalIps {
+                Ok(ExternalIpv6Config {
                     source_nat: Some(snat_v6),
                     ephemeral_ip: Some(eip_v6),
                     floating_ips: fips_v6,
@@ -289,7 +283,7 @@ impl ExternalIpConfig {
                 if !fips_v6.is_empty() {
                     return Err(ExternalIpsError::MixedIpVersions);
                 }
-                Ok(super::ExternalIps {
+                Ok(ExternalIpv4Config {
                     source_nat: Some(snat_v4),
                     ephemeral_ip: None,
                     floating_ips: fips_v4,
@@ -300,7 +294,7 @@ impl ExternalIpConfig {
                 if !fips_v6.is_empty() {
                     return Err(ExternalIpsError::MixedIpVersions);
                 }
-                Ok(super::ExternalIps {
+                Ok(ExternalIpv4Config {
                     source_nat: Some(snat_v4),
                     ephemeral_ip: Some(eip_v4),
                     floating_ips: fips_v4,

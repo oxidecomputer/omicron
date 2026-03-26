@@ -727,7 +727,7 @@ impl PortManager {
         // The `SetExternalIpsReq` type uses an `Option` around the IP
         // configuration. However, `build_external_ipv{4,6}_config` accept an
         // option and "push" that into the returned configuration type, i.e.,
-        // it's fields are optional rather than returning an option.
+        // its fields are optional rather than returning an option.
         //
         // We map the option so we can get the `None` we need for the
         // `SetExternalIpsReq`. But that does mean we always call

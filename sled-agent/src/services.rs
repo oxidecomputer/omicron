@@ -81,8 +81,7 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIps, ExternalIpv4Config, ExternalIpv6Config,
-    PrivateIpConfig, SledIdentifiers,
+    ExternalIpConfig, ExternalIps, PrivateIpConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -1143,20 +1142,12 @@ impl ServiceManager {
                 zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
             ) => {
                 let eip = match external_ip {
-                    IpAddr::V4(ipv4) => ExternalIpConfig {
-                        v4: Some(ExternalIpv4Config {
-                            floating_ips: vec![*ipv4],
-                            ..Default::default()
-                        }),
-                        v6: None,
-                    },
-                    IpAddr::V6(ipv6) => ExternalIpConfig {
-                        v6: Some(ExternalIpv6Config {
-                            floating_ips: vec![*ipv6],
-                            ..Default::default()
-                        }),
-                        v4: None,
-                    },
+                    IpAddr::V4(ipv4) => {
+                        ExternalIpConfig::new_floating_ipv4(*ipv4)
+                    }
+                    IpAddr::V6(ipv6) => {
+                        ExternalIpConfig::new_floating_ipv6(*ipv6)
+                    }
                 };
                 (zone_type.kind(), nic, eip)
             }
@@ -1168,20 +1159,12 @@ impl ServiceManager {
                 },
             ) => {
                 let eip = match dns_address.ip() {
-                    IpAddr::V4(ipv4) => ExternalIpConfig {
-                        v4: Some(ExternalIpv4Config {
-                            floating_ips: vec![ipv4],
-                            ..Default::default()
-                        }),
-                        v6: None,
-                    },
-                    IpAddr::V6(ipv6) => ExternalIpConfig {
-                        v6: Some(ExternalIpv6Config {
-                            floating_ips: vec![ipv6],
-                            ..Default::default()
-                        }),
-                        v4: None,
-                    },
+                    IpAddr::V4(ipv4) => {
+                        ExternalIpConfig::new_floating_ipv4(ipv4)
+                    }
+                    IpAddr::V6(ipv6) => {
+                        ExternalIpConfig::new_floating_ipv6(ipv6)
+                    }
                 };
                 (zone_type.kind(), nic, eip)
             }
@@ -1191,21 +1174,9 @@ impl ServiceManager {
                 },
             ) => {
                 let eip = if let Some(snat) = snat_cfg.try_as_ipv4() {
-                    ExternalIpConfig {
-                        v4: Some(ExternalIpv4Config {
-                            source_nat: Some(snat),
-                            ..Default::default()
-                        }),
-                        v6: None,
-                    }
+                    ExternalIpConfig::new_ipv4_source_nat(snat)
                 } else if let Some(snat) = snat_cfg.try_as_ipv6() {
-                    ExternalIpConfig {
-                        v6: Some(ExternalIpv6Config {
-                            source_nat: Some(snat),
-                            ..Default::default()
-                        }),
-                        v4: None,
-                    }
+                    ExternalIpConfig::new_ipv6_source_nat(snat)
                 } else {
                     unreachable!("Generic SNAT IP must be IPv4 or IPv6");
                 };

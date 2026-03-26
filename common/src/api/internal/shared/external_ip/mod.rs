@@ -13,6 +13,7 @@ use daft::Diffable;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -259,12 +260,16 @@ where
     /// An Ephemeral address for in- and outbound connectivity.
     pub ephemeral_ip: Option<T>,
     /// Additional Floating IPs for in- and outbound connectivity.
-    pub floating_ips: Vec<T>,
+    pub floating_ips: BTreeSet<T>,
 }
 
 impl<T: ConcreteIp> Default for ExternalIps<T> {
     fn default() -> Self {
-        Self { source_nat: None, ephemeral_ip: None, floating_ips: Vec::new() }
+        Self {
+            source_nat: None,
+            ephemeral_ip: None,
+            floating_ips: BTreeSet::new(),
+        }
     }
 }
 
@@ -283,7 +288,7 @@ where
     /// An Ephemeral address for in- and outbound connectivity.
     ephemeral_ip: Option<T>,
     /// Additional Floating IPs for in- and outbound connectivity.
-    floating_ips: Vec<T>,
+    floating_ips: BTreeSet<T>,
 }
 
 impl JsonSchema for ExternalIpv4Config {
@@ -324,13 +329,83 @@ pub struct ExternalIpConfig {
     pub v6: Option<ExternalIpv6Config>,
 }
 
+impl ExternalIpConfig {
+    /// Create a new configuration with only a Floating IPv4 address.
+    pub fn new_floating_ipv4(ipv4: Ipv4Addr) -> Self {
+        Self {
+            v4: Some(ExternalIpv4Config {
+                floating_ips: BTreeSet::from([ipv4]),
+                ..Default::default()
+            }),
+            v6: None,
+        }
+    }
+
+    /// Create a new configuration with only an IPv4 SNAT address.
+    pub fn new_ipv4_source_nat(snat: SourceNatConfig<Ipv4Addr>) -> Self {
+        Self {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v6: None,
+        }
+    }
+
+    /// Create a new configuration with only a Floating IPv6 address.
+    pub fn new_floating_ipv6(ipv6: Ipv6Addr) -> Self {
+        Self {
+            v6: Some(ExternalIpv6Config {
+                floating_ips: BTreeSet::from([ipv6]),
+                ..Default::default()
+            }),
+            v4: None,
+        }
+    }
+
+    /// Create a new configuration with only an IPv6 SNAT address.
+    pub fn new_ipv6_source_nat(snat: SourceNatConfig<Ipv6Addr>) -> Self {
+        Self {
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v4: None,
+        }
+    }
+}
+
+impl From<v1::ExternalIpv4Config> for ExternalIpv4Config {
+    fn from(old: v1::ExternalIpv4Config) -> Self {
+        Self {
+            source_nat: old.source_nat,
+            ephemeral_ip: old.ephemeral_ip,
+            floating_ips: old.floating_ips.into_iter().collect(),
+        }
+    }
+}
+
+impl From<v1::ExternalIpv6Config> for ExternalIpv6Config {
+    fn from(old: v1::ExternalIpv6Config) -> Self {
+        Self {
+            source_nat: old.source_nat,
+            ephemeral_ip: old.ephemeral_ip,
+            floating_ips: old.floating_ips.into_iter().collect(),
+        }
+    }
+}
+
 impl From<v1::ExternalIpConfig> for ExternalIpConfig {
     fn from(old: v1::ExternalIpConfig) -> Self {
         match old {
-            v1::ExternalIpConfig::V4(v4) => Self { v4: Some(v4), v6: None },
-            v1::ExternalIpConfig::V6(v6) => Self { v4: None, v6: Some(v6) },
+            v1::ExternalIpConfig::V4(v4) => {
+                Self { v4: Some(v4.into()), v6: None }
+            }
+            v1::ExternalIpConfig::V6(v6) => {
+                Self { v4: None, v6: Some(v6.into()) }
+            }
             v1::ExternalIpConfig::DualStack { v4, v6 } => {
-                Self { v4: Some(v4), v6: Some(v6) }
+                Self { v4: Some(v4.into()), v6: Some(v6.into()) }
             }
         }
     }
