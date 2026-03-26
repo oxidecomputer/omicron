@@ -102,6 +102,14 @@ impl ServiceIpPools {
     }
 }
 
+/// Default unicast IP pools linked to the current silo, keyed by IP version.
+/// Each field is `None` if no default of that version is linked to the silo.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultIpPools {
+    pub v4: Option<(authz::IpPool, IpPool)>,
+    pub v6: Option<(authz::IpPool, IpPool)>,
+}
+
 // Error message emitted when a user attempts to link an IP Pool and internal
 // Silo, but the pool is already reserved for internal use, or vice versa.
 const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to external \
@@ -275,9 +283,9 @@ impl DataStore {
 
     /// Look up the default IP pool for the current silo by pool type.
     ///
-    /// Related to `ip_pools_fetch_default`, but this one allows you to specify
-    /// the pool type (unicast or multicast) to fetch the default pool of that
-    /// type.
+    /// Allows specifying the pool type (unicast or multicast) and optionally
+    /// the IP version. For fetching all default unicast pools across all IP
+    /// versions, see [`Self::ip_pools_fetch_all_unicast_defaults`].
     ///
     /// If `ip_version` is `None` and there are multiple default pools of
     /// different IP versions, this returns an error asking the caller to
@@ -454,19 +462,65 @@ impl DataStore {
         })
     }
 
-    /// Look up the default IP pool for the current silo. If there is no default
-    /// at silo scope, fall back to the next level up, namely the fleet default.
-    ///
-    /// There should always be a default pool at the fleet level, though this
-    /// query can theoretically fail if someone is able to delete that pool or
-    /// make another one the default and delete that.
-    pub async fn ip_pools_fetch_default(
+    /// Fetch all default unicast IP pools for the current silo, one per IP
+    /// version. Returns a [`DefaultIpPools`] where each version field is
+    /// `Some` if a default pool of that version is linked to the silo, or
+    /// `None` if no default of that version is linked.
+    pub async fn ip_pools_fetch_all_unicast_defaults(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
-        // Default to unicast pools (existing behavior), no version preference
-        self.ip_pools_fetch_default_by_type(opctx, IpPoolType::Unicast, None)
+    ) -> Result<DefaultIpPools, Error> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+
+        let pools: Vec<IpPool> = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(ip_pool_resource::is_default.eq(true))
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Unicast))
+            .select(IpPool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::IpPool,
+                    &LookupType::ByOther(
+                        "default unicast IP pools for current silo".into(),
+                    ),
+                )
+            })?;
+
+        let mut result = DefaultIpPools::default();
+        for pool in pools {
+            let version = pool.ip_version;
+            let authz_pool = authz::IpPool::new(
+                authz::FLEET,
+                pool.id(),
+                LookupType::ById(pool.id()),
+            );
+            let prev = match version {
+                IpVersion::V4 => result.v4.replace((authz_pool, pool)),
+                IpVersion::V6 => result.v6.replace((authz_pool, pool)),
+            };
+
+            // NOTE: This is also essentially a check that there are no more
+            // than 2 linked pools, since we'd fail if we have already set the
+            // field for any particular version.
+            if prev.is_some() {
+                return Err(Error::internal_error(&format!(
+                    "found multiple default {:?} unicast pools for silo {}",
+                    version, authz_silo_id,
+                )));
+            }
+        }
+        Ok(result)
     }
 
     /// Fetch the default IP Pool for the current silo of the provided version.
@@ -2506,9 +2560,12 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // we start out with no default pool, so we expect not found
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // we start out with no default pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         let pagparams_id = DataPageParams {
             marker: None,
@@ -2587,10 +2644,12 @@ mod test {
             .await
             .expect("Failed to associate IP pool with silo");
 
-        // because that one was not a default, when we ask for the silo default
-        // pool, we still get nothing
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // because that one was not a default, we still get no defaults
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // now it shows up in the silo list
         let silo_pools = datastore
@@ -2620,12 +2679,15 @@ mod test {
             .await
             .expect("Should be able to make pool default again");
 
-        // now when we ask for the default pool again, we get that one
-        let (authz_pool1_for_silo, ip_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // now when we ask for the default pools again, we get that one as v4
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect("Failed to get silo's default IP pool");
+            .expect("Failed to get silo's default IP pools");
+        let (authz_pool1_for_silo, ip_pool) =
+            pools.v4.expect("Expected v4 default pool");
         assert_eq!(ip_pool.name().as_str(), "pool1-for-silo");
+        assert!(pools.v6.is_none(), "Expected no v6 default pool");
 
         // and we can't create a second default pool for the silo
         let identity = IdentityMetadataCreateParams {
@@ -2698,9 +2760,12 @@ mod test {
                 .unwrap();
         println!("{q:#?}");
 
-        // no default
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // no defaults after unlinking
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // and silo pools list is empty again
         let silo_pools = datastore
@@ -3223,9 +3288,12 @@ mod test {
         assert_eq!(default_pool.1.id(), pool.id());
         assert_eq!(default_pool.1.pool_type, IpPoolType::Multicast);
 
-        // Regular default should still fail (no unicast pool)
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // Regular unicast default should be empty (no unicast pool)
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch unicast defaults");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -4839,9 +4907,9 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Test that ip_pools_fetch_default only returns unicast pools, even when
-    // multicast default pools also exist. This is important because ephemeral
-    // and floating IPs should only come from unicast pools.
+    // Test that ip_pools_fetch_all_unicast_defaults only returns unicast pools,
+    // even when multicast default pools also exist. This is important because
+    // ephemeral and floating IPs should only come from unicast pools.
     #[tokio::test]
     async fn test_fetch_default_returns_unicast_not_multicast() {
         let logctx = dev::test_setup_log(
@@ -4881,13 +4949,12 @@ mod test {
             .await
             .expect("Link multicast pool");
 
-        // At this point, only multicast default exists
-        // `fetch_default` should fail since there's no unicast default
-        let err = datastore
-            .ip_pools_fetch_default(&opctx)
+        // At this point, only multicast default exists; unicast defaults should be empty
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect_err("Should fail: no unicast default");
-        assert_matches!(err, Error::ObjectNotFound { .. });
+            .expect("Should fetch defaults");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // Now create and link a unicast pool as default
         let unicast_pool = datastore
@@ -4918,14 +4985,15 @@ mod test {
             .await
             .expect("Link unicast pool");
 
-        // Now fetch_default should return the unicast pool, not multicast
-        let (_, default_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // Now fetch should return the unicast pool as v4, not multicast
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
             .expect("Should find unicast default");
-
+        let (_, default_pool) = pools.v4.expect("Expected v4 default pool");
         assert_eq!(default_pool.id(), unicast_pool.id());
         assert_eq!(default_pool.pool_type, IpPoolType::Unicast);
+        assert!(pools.v6.is_none(), "Expected no v6 default pool");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -5011,14 +5079,18 @@ mod test {
             "Expected V4/V6 conflict error, got: {error}"
         );
 
-        // Also verify via `ip_pools_fetch_default` (which uses None for ip_version)
-        let error = datastore
-            .ip_pools_fetch_default(&opctx)
+        // But ip_pools_fetch_all_unicast_defaults should return both pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect_err("Should fail when both V4 and V6 defaults exist");
-        assert!(
-            error.to_string().contains("Multiple"),
-            "Expected V4/V6 conflict error, got: {error}"
+            .expect("Should return both defaults without error");
+        assert_eq!(
+            pools.v4.expect("the IPv4 pool to be populated").1.id(),
+            unicast_ipv4.id()
+        );
+        assert_eq!(
+            pools.v6.expect("the IPv6 pool to be populated").1.id(),
+            unicast_ipv6.id()
         );
 
         // Test explicit ip_version preference
@@ -5135,14 +5207,18 @@ mod test {
             "Expected V4/V6 conflict error, got: {error}"
         );
 
-        // Also verify via `ip_pools_fetch_default`
-        let error = datastore
-            .ip_pools_fetch_default(&opctx)
+        // But ip_pools_fetch_all_unicast_defaults should return both pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect_err("Should fail when both V4 and V6 defaults exist");
-        assert!(
-            error.to_string().contains("Multiple"),
-            "Expected V4/V6 conflict error, got: {error}"
+            .expect("Should return both defaults without error");
+        assert_eq!(
+            pools.v4.expect("the IPv4 pool to be populated").1.id(),
+            unicast_ipv4.id()
+        );
+        assert_eq!(
+            pools.v6.expect("the IPv6 pool to be populated").1.id(),
+            unicast_ipv6.id()
         );
 
         // Test explicit ip_version preference
@@ -5217,12 +5293,12 @@ mod test {
             .await
             .expect("Link v6");
 
-        // Should be able to fetch the default
-        let (_, default_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // Should be able to fetch the v6 default
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect("Fetch default");
-
+            .expect("Fetch defaults");
+        let (_, default_pool) = pools.v6.expect("Expected v6 default pool");
         assert_eq!(default_pool.id(), v6_pool.id());
         assert_eq!(default_pool.ip_version, IpVersion::V6);
 
