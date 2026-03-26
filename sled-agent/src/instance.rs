@@ -3856,13 +3856,8 @@ mod tests {
 
     #[test]
     fn add_floating_ip_with_no_ip_stack_at_all() {
-        let expected_stack = ExternalIpConfig {
-            v4: Some(ExternalIpv4Config {
-                floating_ips: vec![Ipv4Addr::new(10, 0, 0, 1)],
-                ..Default::default()
-            }),
-            v6: None,
-        };
+        let expected_stack =
+            ExternalIpConfig::new_floating_ipv4(Ipv4Addr::new(10, 0, 0, 1));
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
             ExternalIpConfig::default(),
             &InstanceExternalIpBody::Floating(
@@ -3878,7 +3873,7 @@ mod tests {
         let expected_stack = ExternalIpConfig {
             v4: Some(ExternalIpv4Config {
                 ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 2)),
-                floating_ips: vec![Ipv4Addr::new(10, 0, 0, 1)],
+                floating_ips: BTreeSet::from([Ipv4Addr::new(10, 0, 0, 1)]),
                 ..Default::default()
             }),
             v6: None,
@@ -3904,19 +3899,13 @@ mod tests {
         let expected_stack = ExternalIpConfig {
             v4: Some(ExternalIpv4Config {
                 ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 2)),
-                floating_ips: vec![Ipv4Addr::new(10, 0, 0, 1)],
+                floating_ips: BTreeSet::from([Ipv4Addr::new(10, 0, 0, 1)]),
                 ..Default::default()
             }),
             v6: None,
         };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            ExternalIpConfig {
-                v4: Some(ExternalIpv4Config {
-                    floating_ips: vec![Ipv4Addr::new(10, 0, 0, 1)],
-                    ..Default::default()
-                }),
-                v6: None,
-            },
+            ExternalIpConfig::new_floating_ipv4(Ipv4Addr::new(10, 0, 0, 1)),
             &InstanceExternalIpBody::Ephemeral(
                 Ipv4Addr::new(10, 0, 0, 2).into(),
             ),
@@ -3961,7 +3950,9 @@ mod tests {
                 ..Default::default()
             }),
             v6: Some(ExternalIpv6Config {
-                floating_ips: vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)],
+                floating_ips: BTreeSet::from([Ipv6Addr::new(
+                    0xfd00, 0, 0, 0, 0, 0, 0, 1,
+                )]),
                 ..Default::default()
             }),
         };
@@ -3983,19 +3974,15 @@ mod tests {
 
     #[test]
     fn add_new_floating_ip() {
-        let existing = ExternalIpConfig {
-            v6: Some(ExternalIpv6Config {
-                floating_ips: vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)],
-                ..Default::default()
-            }),
-            v4: None,
-        };
+        let existing = ExternalIpConfig::new_floating_ipv6(Ipv6Addr::new(
+            0xfd00, 0, 0, 0, 0, 0, 0, 1,
+        ));
         let expected_stack = ExternalIpConfig {
             v6: Some(ExternalIpv6Config {
-                floating_ips: vec![
+                floating_ips: BTreeSet::from([
                     Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
                     Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
-                ],
+                ]),
                 ..Default::default()
             }),
             v4: None,
@@ -4058,21 +4045,17 @@ mod tests {
     fn prune_existing_floating_ip() {
         let v6 = ExternalIpConfig {
             v6: Some(ExternalIpv6Config {
-                floating_ips: vec![
+                floating_ips: BTreeSet::from([
                     Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
                     Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
-                ],
+                ]),
                 ..Default::default()
             }),
             v4: None,
         };
-        let expected_stack = ExternalIpConfig {
-            v6: Some(ExternalIpv6Config {
-                floating_ips: vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)],
-                ..Default::default()
-            }),
-            v4: None,
-        };
+        let expected_stack = ExternalIpConfig::new_floating_ipv6(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+        );
         let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
             v6,
             &InstanceExternalIpBody::Floating(
