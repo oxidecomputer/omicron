@@ -24,6 +24,12 @@ pub enum OutputFormat {
     /// Human-readable formatted output, the default.
     #[default]
     HumanReadable,
+    /// Simple human-readable formatted output.
+    ///
+    /// This is the same format as "human readable", but without non-printable
+    /// style characters like bold or underline, or enclosing data points in
+    /// square brackets.
+    SimpleHumanReadable,
     /// Compact JSON format.
     Json,
     /// Prettified JSON format.
@@ -34,6 +40,7 @@ impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             OutputFormat::HumanReadable => "human-readable",
+            OutputFormat::SimpleHumanReadable => "simple",
             OutputFormat::Json => "json",
             OutputFormat::JsonPretty => "json-pretty",
         };
@@ -389,6 +396,7 @@ fn print_query_summary(
 fn print_tables(tables: &[Table], output_format: OutputFormat) {
     match output_format {
         OutputFormat::HumanReadable => print_human_readable_tables(tables),
+        OutputFormat::SimpleHumanReadable => print_simple_tables(tables),
         OutputFormat::Json => match serde_json::to_string(tables) {
             Ok(s) => println!("{s}"),
             Err(e) => eprintln!("failed to print tables to JSON: {e}"),
@@ -417,7 +425,26 @@ fn print_human_readable_tables(tables: &[Table]) {
                 println!(" {}: {}", name.as_str().bold(), value);
             }
             for point in timeseries.points.iter_points() {
-                println!("   {point}");
+                println!("   {}", point.to_string_pretty());
+            }
+        }
+    }
+}
+
+fn print_simple_tables(tables: &[Table]) {
+    for table in tables.iter() {
+        println!();
+        println!("{}", table.name());
+        for timeseries in table.iter() {
+            if timeseries.points.is_empty() {
+                continue;
+            }
+            println!();
+            for (name, value) in timeseries.fields.iter() {
+                println!(" {}: {}", name.as_str(), value);
+            }
+            for point in timeseries.points.iter_points() {
+                println!("   {}", point.to_string_simple());
             }
         }
     }
