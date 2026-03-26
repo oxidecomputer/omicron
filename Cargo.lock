@@ -13574,7 +13574,6 @@ dependencies = [
  "chrono",
  "daft",
  "iddqd",
- "illumos-utils",
  "indent_write",
  "omicron-common",
  "omicron-ledger",

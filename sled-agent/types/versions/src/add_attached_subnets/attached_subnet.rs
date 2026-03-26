@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use iddqd::IdOrdMap;
-use illumos_utils::opte::cidr_to_net;
-use illumos_utils::opte::net_to_cidr;
+//use illumos_utils::opte::cidr_to_net;
+//use illumos_utils::opte::net_to_cidr;
 use omicron_uuid_kinds::PropolisUuid;
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -36,6 +36,7 @@ impl iddqd::IdOrdItem for AttachedSubnet {
     iddqd::id_upcast!();
 }
 
+/*
 impl From<AttachedSubnet> for illumos_utils::opte::AttachedSubnet {
     fn from(value: AttachedSubnet) -> Self {
         Self { cidr: net_to_cidr(value.subnet), kind: value.kind.into() }
@@ -47,6 +48,7 @@ impl From<illumos_utils::opte::AttachedSubnet> for AttachedSubnet {
         Self { subnet: cidr_to_net(value.cidr), kind: value.kind.into() }
     }
 }
+*/
 
 /// The kind of attached subnet.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -58,6 +60,7 @@ pub enum AttachedSubnetKind {
     External,
 }
 
+/*
 impl From<AttachedSubnetKind> for illumos_utils::opte::AttachedSubnetKind {
     fn from(value: AttachedSubnetKind) -> Self {
         match value {
@@ -75,6 +78,7 @@ impl From<illumos_utils::opte::AttachedSubnetKind> for AttachedSubnetKind {
         }
     }
 }
+*/
 
 /// Path parameters for referring to a single subnet attached to an instance.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]

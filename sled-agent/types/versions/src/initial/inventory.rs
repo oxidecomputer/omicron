@@ -89,6 +89,7 @@ pub struct InventoryDataset {
     pub compression: String,
 }
 
+/*
 impl From<illumos_utils::zfs::DatasetProperties> for InventoryDataset {
     fn from(props: illumos_utils::zfs::DatasetProperties) -> Self {
         Self {
@@ -102,6 +103,7 @@ impl From<illumos_utils::zfs::DatasetProperties> for InventoryDataset {
         }
     }
 }
+*/
 
 /// Describes the role of the sled within the rack.
 ///

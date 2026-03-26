@@ -165,6 +165,7 @@ impl SvcsResult {
     }
 }
 
+/*
 /// Each service instance is always in a well-defined state based on its
 /// dependencies, the results of the execution of its methods, and its potential
 /// contracts events. See <https://illumos.org/man/7/smf> for more information.
@@ -233,6 +234,7 @@ pub struct Svc {
     zone: String,
     state: SvcState,
 }
+*/
 
 #[cfg(test)]
 mod tests {
