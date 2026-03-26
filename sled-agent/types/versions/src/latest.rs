@@ -108,9 +108,9 @@ pub mod instance {
 
     pub use crate::v29::instance::VmmSpec;
 
-    pub use crate::v31::instance::InstanceEnsureBody;
-    pub use crate::v31::instance::InstanceSledLocalConfig;
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
+    pub use crate::v32::instance::InstanceEnsureBody;
+    pub use crate::v32::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {

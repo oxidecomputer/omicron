@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "31.0.0"
+    "version": "32.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -5226,78 +5226,28 @@
         ]
       },
       "ExternalIpConfig": {
-        "description": "A single- or dual-stack external IP configuration.",
-        "oneOf": [
-          {
-            "description": "Single-stack IPv4 external IP configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "v4"
-                ]
-              },
-              "value": {
+        "description": "External IP address configuration.\n\nThis encapsulates all external addresses for an instance, with separate optional configurations for IPv4 and IPv6.",
+        "type": "object",
+        "properties": {
+          "v4": {
+            "nullable": true,
+            "description": "IPv4 external IP configuration.",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/ExternalIpv4Config"
               }
-            },
-            "required": [
-              "type",
-              "value"
             ]
           },
-          {
-            "description": "Single-stack IPv6 external IP configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "v6"
-                ]
-              },
-              "value": {
+          "v6": {
+            "nullable": true,
+            "description": "IPv6 external IP configuration.",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/ExternalIpv6Config"
               }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Both IPv4 and IPv6 external IP configuration.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dual_stack"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "v4": {
-                    "$ref": "#/components/schemas/ExternalIpv4Config"
-                  },
-                  "v6": {
-                    "$ref": "#/components/schemas/ExternalIpv6Config"
-                  }
-                },
-                "required": [
-                  "v4",
-                  "v6"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
             ]
           }
-        ]
+        }
       },
       "ExternalIpGatewayMap": {
         "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
@@ -5323,7 +5273,6 @@
         ]
       },
       "ExternalIpv4Config": {
-        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
         "type": "object",
         "properties": {
           "ephemeral_ip": {
@@ -5338,7 +5287,8 @@
             "items": {
               "type": "string",
               "format": "ipv4"
-            }
+            },
+            "uniqueItems": true
           },
           "source_nat": {
             "nullable": true,
@@ -5355,7 +5305,6 @@
         ]
       },
       "ExternalIpv6Config": {
-        "description": "External IP address configuration.\n\nThis encapsulates all the external addresses of a single IP version, including source NAT, Ephemeral, and Floating IPs. Note that not all of these need to be specified, but this type can only be constructed if _at least one_ of them is.",
         "type": "object",
         "properties": {
           "ephemeral_ip": {
@@ -5370,7 +5319,8 @@
             "items": {
               "type": "string",
               "format": "ipv6"
-            }
+            },
+            "uniqueItems": true
           },
           "source_nat": {
             "nullable": true,
@@ -5913,12 +5863,7 @@
             "$ref": "#/components/schemas/DhcpConfig"
           },
           "external_ips": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExternalIpConfig"
-              }
-            ]
+            "$ref": "#/components/schemas/ExternalIpConfig"
           },
           "firewall_rules": {
             "type": "array",
@@ -5946,6 +5891,7 @@
           "attached_subnets",
           "delegated_zvols",
           "dhcp_config",
+          "external_ips",
           "firewall_rules",
           "hostname",
           "multicast_groups",
