@@ -284,14 +284,8 @@ impl HardwareMonitor {
         };
 
         if should_activate {
-            if let Err(e) = service_manager
-                .activate_switch(
-                    self.sled_agent
-                        .as_ref()
-                        .map(|sa| sa.switch_zone_underlay_info()),
-                    self.baseboard.clone(),
-                )
-                .await
+            if let Err(e) =
+                service_manager.activate_switch(self.baseboard.clone()).await
             {
                 error!(self.log, "Failed to activate switch"; e);
             }

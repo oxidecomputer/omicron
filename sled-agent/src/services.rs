@@ -3271,12 +3271,9 @@ impl ServiceManager {
         }
     }
 
-    /// Ensures that a switch zone exists with the provided IP adddress.
+    /// Ensures that a switch zone exists.
     pub(crate) async fn activate_switch(
         &self,
-        // If we're reconfiguring the switch zone with an underlay address, we
-        // also need the rack network config to set tfport uplinks.
-        underlay_info: Option<UnderlayInfo>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -3363,18 +3360,17 @@ impl ServiceManager {
             }
         };
 
-        let mut addresses = if let Some(info) = &underlay_info {
-            vec![info.ip.into_ip()]
+        let maybe_underlay_ip =
+            self.inner.sled_info.get().map(|info| info.local_switch_zone_ip);
+        let mut addresses = if let Some(ip) = maybe_underlay_ip {
+            vec![ip.into_ip()]
         } else {
             vec![]
         };
         addresses.push(Ipv6Addr::LOCALHOST);
 
-        let request = SwitchZoneConfig {
-            id: Uuid::new_v4(),
-            addresses,
-            services,
-        };
+        let request =
+            SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
         self.ensure_switch_zone(Some(request), filesystems, data_links).await?;
 
