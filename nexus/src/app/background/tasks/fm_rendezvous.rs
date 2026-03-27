@@ -798,17 +798,17 @@ mod tests {
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
-            marking.details.total_ereports_in_sitrep, 2,
+            ereport_marking.details.total_ereports_in_sitrep, 2,
             "sitrep should contain 2 ereports"
         );
         assert_eq!(
-            marking.details.ereports_marked_seen, 2,
+            ereport_marking.details.ereports_marked_seen, 2,
             "both ereports should have been newly marked as seen"
         );
         assert!(
-            marking.details.errors.is_empty(),
+            ereport_marking.details.errors.is_empty(),
             "there should be no errors: {:?}",
-            marking.details.errors
+            ereport_marking.details.errors
         );
 
         // Verify the database records: ereport1 and ereport2 should have
@@ -830,18 +830,18 @@ mod tests {
         assert_eq!(sitrep_id, Some(sitrep1_id));
 
         assert_eq!(
-            marking.details.total_ereports_in_sitrep, 2,
+            ereport_marking.details.total_ereports_in_sitrep, 2,
             "sitrep still contains 2 ereports"
         );
         assert_eq!(
-            marking.details.ereports_marked_seen, 0,
+            ereport_marking.details.ereports_marked_seen, 0,
             "no ereports should be newly marked as seen on re-activation, \
              because both were already marked seen"
         );
         assert!(
-            marking.details.errors.is_empty(),
+            ereport_marking.details.errors.is_empty(),
             "there should be no errors on re-activation: {:?}",
-            marking.details.errors
+            ereport_marking.details.errors
         );
 
         // Verify the database records haven't changed: ereport1 and ereport2
@@ -1001,7 +1001,7 @@ mod tests {
         // Activate with sitrep 1 --- should mark only ereport1.
         let Status { ereport_marking, .. } =
             dbg!(task.actually_activate(opctx).await);
-        assert_eq!(marking.details.ereports_marked_seen, 1);
+        assert_eq!(ereport_marking.details.ereports_marked_seen, 1);
 
         // Verify DB state after sitrep 1.
         assert_ereports_seen_in(
@@ -1110,14 +1110,14 @@ mod tests {
         let Status { ereport_marking, .. } =
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(
-            marking.details.total_ereports_in_sitrep, 3,
+            ereport_marking.details.total_ereports_in_sitrep, 3,
             "sitrep2 contains all 3 ereports"
         );
         assert_eq!(
             marking.details.ereports_marked_seen, 2,
             "only ereport2 and ereport3 should be newly marked"
         );
-        assert!(marking.details.errors.is_empty());
+        assert!(ereport_marking.details.errors.is_empty());
         assert_ereports_seen_in(
             &datastore,
             opctx,
