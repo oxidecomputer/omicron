@@ -4,6 +4,7 @@
 
 //! Network setup required to bring up the control plane
 
+use crate::sled_agent::LocalSwitchZoneIpAddr;
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
@@ -45,7 +46,7 @@ use sled_agent_types::early_networking::{
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::time::sleep;
@@ -308,10 +309,10 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// zone it brought up.
     ///
     /// Returns the list of uplinks configured via DPD.
-    pub async fn init_switch_config(
+    pub(crate) async fn init_switch_config(
         &mut self,
         rack_network_config: &RackNetworkConfig,
-        switch_zone_underlay_ip: Ipv6Addr,
+        switch_zone_underlay_ip: LocalSwitchZoneIpAddr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
         info!(
@@ -426,10 +427,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
 
         let mgd = MgdClient::new(
-            &format!(
-                "http://{}",
-                &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
-            ),
+            &format!("http://[{switch_zone_underlay_ip}]:{MGD_PORT}"),
             self.log.clone(),
         );
 
