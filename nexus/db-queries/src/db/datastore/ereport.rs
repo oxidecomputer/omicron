@@ -360,6 +360,10 @@ impl DataStore {
         sitrep_id: SitrepUuid,
         ereport_ids: impl IntoIterator<Item = EreportId>,
     ) -> Result<usize, Error> {
+        // TODO(eliza): ereprots should probably be an authz resource someday, i
+        // guess...
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         Self::ereports_mark_seen_query(sitrep_id, ereport_ids)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
