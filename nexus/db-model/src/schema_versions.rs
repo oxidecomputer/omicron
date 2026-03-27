@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(245, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(246, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(246, "ereport-marked-seen"),
         KnownVersion::new(245, "rename-default-igw-ip-pool"),
         KnownVersion::new(244, "ereporter-restart-order-is-bad-actually"),
         KnownVersion::new(243, "ereporter-restart-order"),
@@ -138,6 +139,29 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
 /// this version should match the "base" schema we save in
 /// schema/crdb/dbinit-base.sql
 pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(148, 0, 0);
+
+/// Parse the schema version from the header of a `dbinit-base.sql` file.
+///
+/// Looks for a line of the form `-- Schema version: X.Y.Z` and returns the
+/// parsed version.
+pub fn parse_base_schema_version(
+    content: &str,
+) -> Result<Version, anyhow::Error> {
+    for line in content.lines() {
+        if line.starts_with("-- Schema version:") {
+            let version_str = line
+                .strip_prefix("-- Schema version:")
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Invalid schema version line format")
+                })?
+                .trim();
+            return Version::parse(version_str).with_context(|| {
+                format!("Failed to parse base schema version: {}", version_str)
+            });
+        }
+    }
+    bail!("Could not find schema version in base file header")
+}
 
 /// The version where "db_metadata_nexus" was added.
 pub const DB_METADATA_NEXUS_SCHEMA_VERSION: Version = Version::new(185, 0, 0);
