@@ -15,15 +15,15 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepVersion;
 use nexus_types::fm::case::AlertRequest;
-use nexus_types::internal_api::background::FmAlertStats as AlertStats;
-use nexus_types::internal_api::background::FmEreportMarkingStats as EreportMarkingStats;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
+use nexus_types::internal_api::background::fm_rendezvous::*;
 use omicron_common::api::external::Error;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+#[derive(Clone)]
 pub struct FmRendezvous {
     datastore: Arc<DataStore>,
     sitrep_watcher: watch::Receiver<CurrentSitrep>,
@@ -63,24 +63,74 @@ impl FmRendezvous {
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
         let Some(sitrep) = self.sitrep_watcher.borrow_and_update().clone()
         else {
-            return Status::NoSitrep;
+            return Status::default();
         };
 
-        // TODO(eliza): as we start doing other things (i.e. requesting support
-        // bundles, updating problems), consider spawning these in their own tasks...
-        let alerts = self.create_requested_alerts(&sitrep, opctx).await;
-        let marking = self.mark_ereports_seen(&sitrep, opctx).await;
+        let alerts = self.spawn_op(
+            &sitrep,
+            opctx,
+            "creating requested alerts",
+            Self::create_requested_alerts,
+        );
+        let marking = self.spawn_op(
+            &sitrep,
+            opctx,
+            "marking ereports as seen",
+            Self::mark_ereports_seen,
+        );
 
-        Status::Executed { sitrep_id: sitrep.1.id(), alerts, marking }
+        const TASKS_SHOULDNT_FAIL: &str = "\
+            rendezvous op tasks should never return a `JoinError`. Nexus is \
+            compiled with `panic = \"abort\"`, so if the spawned task has \
+            panicked the whole process should already have panicked. and, \
+            we never abort the tasks here, so we will never see a `JoinError` \
+            indicating that they were aborted.
+        ";
+
+        Status {
+            sitrep_id: Some(sitrep.1.id()),
+            alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
+            marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+        }
     }
 
-    async fn create_requested_alerts(
+    fn spawn_op<F>(
         &self,
         sitrep: &Arc<(SitrepVersion, Sitrep)>,
         opctx: &OpContext,
-    ) -> AlertStats {
-        let (_, ref sitrep) = **sitrep;
-        let mut status = AlertStats::default();
+        opname: impl ToString,
+        op: impl Fn(Self, Arc<(SitrepVersion, Sitrep)>, OpContext) -> F,
+    ) -> tokio::task::JoinHandle<OpStatus<F::Output>>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let this = self.clone();
+        let sitrep = sitrep.clone();
+        let opctx = opctx.child(
+            [
+                ("sitrep_id".to_string(), sitrep.1.id().to_string()),
+                ("rendezvous_op".to_string(), opname.to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let op = op(this, sitrep, opctx);
+        tokio::task::spawn(async move {
+            let start = chrono::Utc::now();
+            let details = op.await;
+            let end = chrono::Utc::now();
+            OpStatus { result: OpResult::Executed { start, end }, details }
+        })
+    }
+
+    async fn create_requested_alerts(
+        self,
+        sitrep: Arc<(SitrepVersion, Sitrep)>,
+        opctx: OpContext,
+    ) -> AlertCreationStatus {
+        let (_, ref sitrep) = *sitrep;
+        let mut status = AlertCreationStatus::default();
 
         // XXX(eliza): is it better to allocate all of these into a big array
         // and do a single `INSERT INTO` query, or iterate over them one by one
@@ -180,17 +230,17 @@ impl FmRendezvous {
     }
 
     async fn mark_ereports_seen(
-        &self,
-        sitrep: &Arc<(SitrepVersion, Sitrep)>,
-        opctx: &OpContext,
-    ) -> EreportMarkingStats {
+        self,
+        sitrep: Arc<(SitrepVersion, Sitrep)>,
+        opctx: OpContext,
+    ) -> EreportMarkingStatus {
         const BATCH_SIZE: usize = 1000;
 
-        let (_, ref sitrep) = **sitrep;
-        let mut status = EreportMarkingStats {
+        let (_, ref sitrep) = *sitrep;
+        let mut status = EreportMarkingStatus {
             batch_size: BATCH_SIZE,
             total_ereports_in_sitrep: sitrep.ereports_by_id.len(),
-            ..EreportMarkingStats::default()
+            ..EreportMarkingStatus::default()
         };
 
         let mut ereport_ids = sitrep
@@ -221,7 +271,7 @@ impl FmRendezvous {
             match self
                 .datastore
                 .ereports_mark_seen(
-                    opctx,
+                    &opctx,
                     sitrep.id(),
                     ereport_ids
                         .by_ref()
@@ -314,7 +364,7 @@ mod tests {
 
         // Initial activation should do nothing.
         let status = dbg!(task.actually_activate(opctx).await);
-        assert_eq!(status, Status::NoSitrep);
+        assert_eq!(status.sitrep_id, None);
 
         // Now, create a new sitrep with alert requests.
         let sitrep1_id = SitrepUuid::new_v4();
@@ -367,14 +417,12 @@ mod tests {
             ))))
             .unwrap();
 
-        let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, alerts, .. } = status else {
-            panic!("rendezvous should have executed, as there is a sitrep");
-        };
-        assert_eq!(sitrep_id, sitrep1_id);
+        let Status { sitrep_id, alerts, .. } =
+            dbg!(task.actually_activate(opctx).await);
+        assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
-            alerts,
-            AlertStats {
+            alerts.details,
+            AlertCreationStatus {
                 total_alerts_requested: 1,
                 current_sitrep_alerts_requested: 1,
                 alerts_created: 1,
@@ -456,13 +504,11 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, alerts, .. } = status else {
-            panic!("rendezvous should have executed, as there is a sitrep");
-        };
-        assert_eq!(sitrep_id, sitrep2_id);
+        let Status { sitrep_id, alerts, .. } = status;
+        assert_eq!(sitrep_id, Some(sitrep2_id));
         assert_eq!(
-            alerts,
-            AlertStats {
+            alerts.details,
+            AlertCreationStatus {
                 total_alerts_requested: 3,
                 current_sitrep_alerts_requested: 2,
                 alerts_created: 2,
@@ -748,23 +794,21 @@ mod tests {
             .unwrap();
 
         // First activation should mark ereport1 and ereport2 as seen
-        let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, marking, .. } = status else {
-            panic!("rendezvous should have executed, as there is a sitrep");
-        };
-        assert_eq!(sitrep_id, sitrep1_id);
+        let Status { sitrep_id, marking, .. } =
+            dbg!(task.actually_activate(opctx).await);
+        assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
-            marking.total_ereports_in_sitrep, 2,
+            marking.details.total_ereports_in_sitrep, 2,
             "sitrep should contain 2 ereports"
         );
         assert_eq!(
-            marking.ereports_marked_seen, 2,
+            marking.details.ereports_marked_seen, 2,
             "both ereports should have been newly marked as seen"
         );
         assert!(
-            marking.errors.is_empty(),
+            marking.details.errors.is_empty(),
             "there should be no errors: {:?}",
-            marking.errors
+            marking.details.errors
         );
 
         // Verify the database records: ereport1 and ereport2 should have
@@ -781,27 +825,23 @@ mod tests {
 
         // Second activation: ereport1 and ereport2 are already marked
         // seen in the sitrep, so they should NOT be marked again
-        let status2 = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed {
-            sitrep_id: sitrep_id2, marking: marking2, ..
-        } = status2
-        else {
-            panic!("rendezvous should have executed on second activation");
-        };
-        assert_eq!(sitrep_id2, sitrep1_id);
+        let Status { sitrep_id, marking, .. } =
+            dbg!(task.actually_activate(opctx).await);
+        assert_eq!(sitrep_id, Some(sitrep1_id));
+
         assert_eq!(
-            marking2.total_ereports_in_sitrep, 2,
+            marking.details.total_ereports_in_sitrep, 2,
             "sitrep still contains 2 ereports"
         );
         assert_eq!(
-            marking2.ereports_marked_seen, 0,
+            marking.details.ereports_marked_seen, 0,
             "no ereports should be newly marked as seen on re-activation, \
              because both were already marked seen"
         );
         assert!(
-            marking2.errors.is_empty(),
+            marking.details.errors.is_empty(),
             "there should be no errors on re-activation: {:?}",
-            marking2.errors
+            marking.details.errors
         );
 
         // Verify the database records haven't changed: ereport1 and ereport2
@@ -959,11 +999,8 @@ mod tests {
             .unwrap();
 
         // Activate with sitrep 1 --- should mark only ereport1.
-        let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { marking, .. } = status else {
-            panic!("task should have executed");
-        };
-        assert_eq!(marking.ereports_marked_seen, 1);
+        let Status { marking, .. } = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(marking.details.ereports_marked_seen, 1);
 
         // Verify DB state after sitrep 1.
         assert_ereports_seen_in(
@@ -1069,19 +1106,16 @@ mod tests {
         // Activate with sitrep 2 --- should mark ereport2 and ereport3, but
         // NOT re-mark ereport1 (it is already seen and filtered out before
         // the query).
-        let status2 = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { marking: marking2, .. } = status2 else {
-            panic!("task should have executed");
-        };
+        let Status { marking, .. } = dbg!(task.actually_activate(opctx).await);
         assert_eq!(
-            marking2.total_ereports_in_sitrep, 3,
+            marking.details.total_ereports_in_sitrep, 3,
             "sitrep2 contains all 3 ereports"
         );
         assert_eq!(
-            marking2.ereports_marked_seen, 2,
+            marking.details.ereports_marked_seen, 2,
             "only ereport2 and ereport3 should be newly marked"
         );
-        assert!(marking2.errors.is_empty());
+        assert!(marking.details.errors.is_empty());
         assert_ereports_seen_in(
             &datastore,
             opctx,

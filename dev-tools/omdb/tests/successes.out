@@ -691,7 +691,23 @@ task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    no FM situation report loaded
+(i) no FM situation report loaded, so rendezvous was not performed
+    creating requested alerts:
+(i)   note: this operation was not executed
+      alerts requested:                0
+        requested in this sitrep:      0
+        created in this activation:    0
+        already created:               0
+        errors:                        0
+    marking ereports as seen:
+(i)   note: this operation was not executed
+      total ereports in sitrep:            0
+      not marked when the sitrep was loaded:   0
+        marked seen by this activation:    0
+        already marked seen:               0
+      batch size:                          0
+      batches:                             0
+      errors:                              0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1308,7 +1324,23 @@ task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    no FM situation report loaded
+(i) no FM situation report loaded, so rendezvous was not performed
+    creating requested alerts:
+(i)   note: this operation was not executed
+      alerts requested:                0
+        requested in this sitrep:      0
+        created in this activation:    0
+        already created:               0
+        errors:                        0
+    marking ereports as seen:
+(i)   note: this operation was not executed
+      total ereports in sitrep:            0
+      not marked when the sitrep was loaded:   0
+        marked seen by this activation:    0
+        already marked seen:               0
+      batch size:                          0
+      batches:                             0
+      errors:                              0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
