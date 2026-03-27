@@ -71,6 +71,10 @@
         <default/>
     </quotas>
 
+    <backups>
+        <allowed_path>backup</allowed_path>
+    </backups>
+
     <merge_tree>
         <ratio_of_defaults_for_sparse_serialization>1.0</ratio_of_defaults_for_sparse_serialization>
     </merge_tree>
