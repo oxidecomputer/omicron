@@ -351,6 +351,9 @@ impl DataStore {
     /// If any ereports have already been marked as seen with another sitrep ID,
     /// they are unmodified. Otherwise, this query sets the `marked_seen_in`
     /// column to the provided sitrep ID.
+    ///
+    /// Returns the number of rows updated, which may be less than the number of
+    /// ereport IDs provided if some were already marked as seen.
     pub async fn ereports_mark_seen(
         &self,
         opctx: &OpContext,

@@ -100,6 +100,23 @@ pub struct Ereport {
     #[diesel(embed)]
     pub reporter: Reporter,
 
+    /// The sitrep ID of the sitrep which was being executed by `fm_rendezvous`
+    /// when this ereport was marked as "seen".
+    ///
+    /// If this is `Some`, the ereport has *definitely* been seen by at least
+    /// one committed sitrep at some point in time. If it is None`, the
+    /// ereport may or may not have been included in a sitrep, and you will
+    /// have to actually check the sitrep to find out.
+    ///
+    /// When this is `Some`, the value is the ID of the sitrep which the
+    /// `fm_rendezvous` task was executing when this ereport was marked as seen.
+    /// because execution may lag arbitrarily behind the generation of new
+    /// sitreps, this does *not* indicate that this was the *first* sitrep in
+    /// which this ereport was seen (which is why this is called "marked seen
+    /// in" rather than "first seen in" or similar) --- in general, this field
+    /// should basically just be treated as a `bool` and the actual value of the
+    /// sitrep ID is included only to provide *some* record for human-readable
+    /// debugging purposes.
     pub marked_seen_in: Option<DbTypedUuid<SitrepKind>>,
 }
 

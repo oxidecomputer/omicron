@@ -7221,10 +7221,20 @@ ON omicron.public.user_data_export (state);
     slot INT4,
 
     /*
-     * if this is `true`, the ereport has *definitely* been seen by at least
-     * one committed sitrep at some point in time. if it is `false`, the
+     * if this is non-NULL, the ereport has *definitely* been seen by at least
+     * one committed sitrep at some point in time. if it is `NULL`, the
      * ereport may or may not have been included in a sitrep, and you will
      * have to actually check the sitrep to find out.
+     *
+     * when this is non-NULL, the value is the ID of the sitrep which the
+     `fm_rendezvous` task was executing when this ereport was marked as seen.
+     * because execution may lag arbitrarily behind the generation of new
+     * sitreps, this does *not* indicate that this was the *first* sitrep in
+     * which this ereport was seen (which is why this is called "marked seen
+     * in" rather than "first seen in" or similar) --- in general, this field
+     * should basically just be treated as a `bool` (`true` if non-NULL,
+     * `false` if NULL), and the actual value of the sitrep ID is included
+    * only to provide *some* record for human-readable debugging purposes.
      *
      * have fun!
      */
