@@ -100,7 +100,7 @@ pub struct SupportBundleRequest {
     /// The sitrep in which this support bundle was requested.
     pub requested_sitrep_id: SitrepUuid,
     /// Which data to include in the support bundle. Use
-    /// [`BundleDataSelection::default()`] to request all default data.
+    /// [`BundleDataSelection::all()`] to request all data.
     pub data_selection: BundleDataSelection,
 }
 
@@ -431,7 +431,7 @@ mod tests {
             .insert_unique(SupportBundleRequest {
                 id: bundle2_id,
                 requested_sitrep_id: closed_sitrep_id,
-                data_selection: BundleDataSelection::default(),
+                data_selection: BundleDataSelection::all(),
             })
             .unwrap();
 
