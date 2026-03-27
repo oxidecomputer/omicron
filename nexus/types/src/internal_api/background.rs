@@ -902,7 +902,8 @@ pub struct SitrepGcStatus {
 pub struct FmRendezvousStatus {
     pub sitrep_id: Option<SitrepUuid>,
     pub alerts: fm_rendezvous::OpStatus<fm_rendezvous::AlertCreationStatus>,
-    pub marking: fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
+    pub ereport_marking:
+        fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
 }
 
 pub mod fm_rendezvous {

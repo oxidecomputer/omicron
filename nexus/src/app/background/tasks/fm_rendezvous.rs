@@ -90,7 +90,7 @@ impl FmRendezvous {
         Status {
             sitrep_id: Some(sitrep.1.id()),
             alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
-            marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+            ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
         }
     }
 
@@ -794,7 +794,7 @@ mod tests {
             .unwrap();
 
         // First activation should mark ereport1 and ereport2 as seen
-        let Status { sitrep_id, marking, .. } =
+        let Status { sitrep_id, ereport_marking, .. } =
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
@@ -825,7 +825,7 @@ mod tests {
 
         // Second activation: ereport1 and ereport2 are already marked
         // seen in the sitrep, so they should NOT be marked again
-        let Status { sitrep_id, marking, .. } =
+        let Status { sitrep_id, ereport_marking, .. } =
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(sitrep_id, Some(sitrep1_id));
 
@@ -999,7 +999,8 @@ mod tests {
             .unwrap();
 
         // Activate with sitrep 1 --- should mark only ereport1.
-        let Status { marking, .. } = dbg!(task.actually_activate(opctx).await);
+        let Status { ereport_marking, .. } =
+            dbg!(task.actually_activate(opctx).await);
         assert_eq!(marking.details.ereports_marked_seen, 1);
 
         // Verify DB state after sitrep 1.
@@ -1106,7 +1107,8 @@ mod tests {
         // Activate with sitrep 2 --- should mark ereport2 and ereport3, but
         // NOT re-mark ereport1 (it is already seen and filtered out before
         // the query).
-        let Status { marking, .. } = dbg!(task.actually_activate(opctx).await);
+        let Status { ereport_marking, .. } =
+            dbg!(task.actually_activate(opctx).await);
         assert_eq!(
             marking.details.total_ereports_in_sitrep, 3,
             "sitrep2 contains all 3 ereports"

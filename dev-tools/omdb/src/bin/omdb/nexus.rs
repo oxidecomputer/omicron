@@ -3520,7 +3520,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         print_details(&op.details)
     }
 
-    let FmRendezvousStatus { sitrep_id, alerts, marking } =
+    let FmRendezvousStatus { sitrep_id, alerts, ereport_marking: marking } =
         match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
             Err(error) => {
                 eprintln!(
