@@ -3578,7 +3578,15 @@ fn display_fm_ereport_marking_stats(stats: &FmEreportMarkingStats) {
         "    {NOT_ALREADY_MARKED:<WIDTH$}{ereports_not_marked_in_sitrep:>NUM_WIDTH$}"
     );
     println!("    {MARKED_SEEN:<WIDTH$}{ereports_marked_seen:>NUM_WIDTH$}");
-    let already_marked = ereports_not_marked_in_sitrep - ereports_marked_seen;
+    // This subtraction really shouldn't underflow, since
+    // `ereports_marked_seen`, which is the sum of records updated by the
+    // queries marking ereports as seen, will always be less than or equal to
+    // `ereports_not_marked_in_sitrep` which is the number of ereport IDs passed
+    // as *inputs* to those queries. But, since OMDB needs to basically work
+    // even in the face of Nexus bugs, we'll saturate here instead of panicking,
+    // just in case.
+    let already_marked =
+        ereports_not_marked_in_sitrep.saturating_sub(*ereports_marked_seen);
     println!("    {ALREADY_MARKED:<WIDTH$}{already_marked:>NUM_WIDTH$}");
     println!("    {BATCH_SIZE:<WIDTH$}{batch_size:>NUM_WIDTH$}");
     println!("    {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
