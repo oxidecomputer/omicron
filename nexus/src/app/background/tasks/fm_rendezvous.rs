@@ -12,8 +12,6 @@ use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_types::fm::Sitrep;
-use nexus_types::fm::SitrepVersion;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
@@ -26,7 +24,7 @@ use tokio::sync::watch;
 #[derive(Clone)]
 pub struct FmRendezvous {
     datastore: Arc<DataStore>,
-    sitrep_watcher: watch::Receiver<CurrentSitrep>,
+    sitrep_watcher: watch::Receiver<Option<CurrentSitrep>>,
     alert_dispatcher: Activator,
 }
 
@@ -54,7 +52,7 @@ impl BackgroundTask for FmRendezvous {
 impl FmRendezvous {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx: watch::Receiver<CurrentSitrep>,
+        rx: watch::Receiver<Option<CurrentSitrep>>,
         alert_dispatcher: Activator,
     ) -> Self {
         Self { datastore, sitrep_watcher: rx, alert_dispatcher }
@@ -96,10 +94,10 @@ impl FmRendezvous {
 
     fn spawn_op<F>(
         &self,
-        sitrep: &Arc<(SitrepVersion, Sitrep)>,
+        sitrep: &CurrentSitrep,
         opctx: &OpContext,
         opname: impl ToString,
-        op: impl Fn(Self, Arc<(SitrepVersion, Sitrep)>, OpContext) -> F,
+        op: impl Fn(Self, CurrentSitrep, OpContext) -> F,
     ) -> tokio::task::JoinHandle<OpStatus<F::Output>>
     where
         F: Future + Send + 'static,
@@ -126,7 +124,7 @@ impl FmRendezvous {
 
     async fn create_requested_alerts(
         self,
-        sitrep: Arc<(SitrepVersion, Sitrep)>,
+        sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> AlertCreationStatus {
         let (_, ref sitrep) = *sitrep;
@@ -231,7 +229,7 @@ impl FmRendezvous {
 
     async fn mark_ereports_seen(
         self,
-        sitrep: Arc<(SitrepVersion, Sitrep)>,
+        sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> EreportMarkingStatus {
         const BATCH_SIZE: usize = 1000;
@@ -1114,7 +1112,7 @@ mod tests {
             "sitrep2 contains all 3 ereports"
         );
         assert_eq!(
-            marking.details.ereports_marked_seen, 2,
+            ereport_marking.details.ereports_marked_seen, 2,
             "only ereport2 and ereport3 should be newly marked"
         );
         assert!(ereport_marking.details.errors.is_empty());
