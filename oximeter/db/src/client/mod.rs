@@ -1341,7 +1341,8 @@ impl Client {
                 let sql = format!(
                     "ALTER TABLE {}.{} \
                     {} \
-                    DELETE WHERE timeseries_name in ({})",
+                    DELETE WHERE timeseries_name IN ({}) \
+                    SETTINGS mutations_sync=2",
                     crate::DATABASE_NAME,
                     table,
                     maybe_on_cluster,
