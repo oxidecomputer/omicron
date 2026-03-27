@@ -139,6 +139,29 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
 /// schema/crdb/dbinit-base.sql
 pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(148, 0, 0);
 
+/// Parse the schema version from the header of a `dbinit-base.sql` file.
+///
+/// Looks for a line of the form `-- Schema version: X.Y.Z` and returns the
+/// parsed version.
+pub fn parse_base_schema_version(
+    content: &str,
+) -> Result<Version, anyhow::Error> {
+    for line in content.lines() {
+        if line.starts_with("-- Schema version:") {
+            let version_str = line
+                .strip_prefix("-- Schema version:")
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Invalid schema version line format")
+                })?
+                .trim();
+            return Version::parse(version_str).with_context(|| {
+                format!("Failed to parse base schema version: {}", version_str)
+            });
+        }
+    }
+    bail!("Could not find schema version in base file header")
+}
+
 /// The version where "db_metadata_nexus" was added.
 pub const DB_METADATA_NEXUS_SCHEMA_VERSION: Version = Version::new(185, 0, 0);
 

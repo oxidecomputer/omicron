@@ -862,16 +862,13 @@ impl InformationSchema {
     }
 }
 
-struct MigrationContext<'a> {
-    #[allow(dead_code)]
-    log: &'a Logger,
-
+struct MigrationContext {
     // Postgres connection to database
     client: Client,
 }
 
-type BeforeFn = for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
-type AfterFn = for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
+type BeforeFn = for<'a> fn(ctx: &'a MigrationContext) -> BoxFuture<'a, ()>;
+type AfterFn = for<'a> fn(ctx: &'a MigrationContext) -> BoxFuture<'a, ()>;
 
 // Describes the operations which we might take before and after
 // migrations to check that they worked.
@@ -898,7 +895,7 @@ impl DataMigrationFns {
 const VPC: Uuid = Uuid::from_u128(0x1111566c_5c3d_4647_83b0_8f3515da7be1);
 const FW_RULE: Uuid = Uuid::from_u128(0x11117213_5c3d_4647_83b0_8f3515da7be1);
 
-fn before_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_151_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create some fake inventory data to test the zone image resolver migration.
         // Insert a sled agent record without the new zone image resolver columns.
@@ -924,7 +921,7 @@ fn before_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_151_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Verify that the zone image resolver columns have been added with
         // correct defaults.
@@ -974,7 +971,7 @@ fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_155_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async {
         use nexus_db_queries::db::fixed_data::project::*;
         use nexus_db_queries::db::fixed_data::vpc::*;
@@ -1028,7 +1025,7 @@ fn before_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_155_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async {
         use nexus_db_queries::db::fixed_data::vpc::*;
         // Firstly -- has the new firewall rule been added?
@@ -1091,9 +1088,7 @@ mod migration_156 {
     const SLED_CONFIG_ID_2: &str = "695de2f0-9c09-42b0-a22a-1e5b783a38c0";
     const SLED_CONFIG_ID_3: &str = "50a8d074-879b-4c59-a2ef-700156e49a97";
 
-    pub(super) fn before<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn before<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             // Insert these tuples:
             //
@@ -1140,9 +1135,7 @@ mod migration_156 {
         })
     }
 
-    pub(super) fn after<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn after<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             // Verify that the new inv_sled_config_reconciler table has 3 rows
             // corresponding to the three inv_sled_agent rows that had a
@@ -1234,7 +1227,7 @@ const BP_OXIMETER_READ_POLICY_ID_3: &str =
 
 // Insert two blueprints and 4 oximeter read policies, two of which do not have
 // a corresponding blueprint
-fn before_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_164_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .batch_execute(
@@ -1264,7 +1257,7 @@ fn before_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 }
 
 // Validate that rows that do not have a corresponding blueprint are gone
-fn after_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_164_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let rows = ctx
             .client
@@ -1295,7 +1288,7 @@ const PORT_SETTINGS_ID_165_5: &str = "05df929f-1596-42f4-b78f-aebb5d7028c4";
 // database type is changed from INT8 to INT2. The receiving Rust type is u8
 // so 2 records are outside the u8 range, 2 records are at the edge of the u8
 // range, and 1 record is within the u8 range.
-fn before_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_165_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .batch_execute(&format!("
@@ -1329,7 +1322,7 @@ fn before_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
 // Query the records using the new `rib_priority` column and assert that the
 // values were correctly clamped within the u8 range.
-fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_165_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let rows = ctx
             .client
@@ -1362,7 +1355,7 @@ fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_171_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create test data in inv_sled_config_reconciler table before the new columns are added.
         ctx.client
@@ -1379,7 +1372,7 @@ fn before_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_171_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // After the migration, the new columns should exist and be NULL for existing rows.
         let rows = ctx
@@ -1467,7 +1460,7 @@ const OLD_NEXUS_ID_185_0: &str = "187433f9-1473-4ca2-b156-9670452985e0";
 const BP_ID_185_0: &str = "5a5ff941-3b5a-403b-9fda-db2049f4c736";
 const OLD_BP_ID_185_0: &str = "4a5ff941-3b5a-403b-9fda-db2049f4c736";
 
-fn before_185_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_185_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create a blueprint which contains a Nexus - we'll use this for the migration.
         //
@@ -1571,7 +1564,7 @@ fn before_185_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_185_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_185_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // After the migration, the new row should be created - only for Nexuses
         // in the latest blueprint.
@@ -1618,7 +1611,7 @@ const POSITIVE_QUOTA: Uuid =
 const MIXED_QUOTA: Uuid =
     Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f351dda7ce3);
 
-fn before_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_188_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .execute(
@@ -1643,7 +1636,7 @@ fn before_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_188_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let rows = ctx
             .client
@@ -1693,7 +1686,7 @@ fn after_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_207_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .execute(
@@ -1783,7 +1776,7 @@ fn before_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_207_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // first disk
 
@@ -2050,7 +2043,7 @@ const HOST_EREPORT_SLED_ID: Uuid =
 const EREPORT_SLED_SERIAL: &str = "BRM6900420";
 const GIMLET_PART_NUMBER: &str = "913-0000019";
 
-fn before_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_210_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .execute(
@@ -2121,7 +2114,7 @@ fn before_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_210_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let host_rows = ctx
             .client
@@ -2249,7 +2242,7 @@ mod migration_211 {
     const SLED_IP_2: &str = "05fb:7e45:22b1:8dfb:9a06:0dbf:22ab:3eb4";
     const SLED_IP_3: &str = "92a6:42c8:0cf2:7556:5ace:5bab:26e4:4dd1";
 
-    async fn before_impl(ctx: &MigrationContext<'_>) {
+    async fn before_impl(ctx: &MigrationContext) {
         ctx.client
             .batch_execute(&format!(
                 "
@@ -2289,7 +2282,7 @@ mod migration_211 {
             .expect("inserted pre-migration data");
     }
 
-    async fn after_impl(ctx: &MigrationContext<'_>) {
+    async fn after_impl(ctx: &MigrationContext) {
         let sled_id_1: Uuid = SLED_ID_1.parse().unwrap();
         let sled_id_2: Uuid = SLED_ID_2.parse().unwrap();
         let sled_id_3: Uuid = SLED_ID_3.parse().unwrap();
@@ -2335,15 +2328,11 @@ mod migration_211 {
         assert_eq!(expected, got);
     }
 
-    pub(super) fn before<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn before<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(before_impl(ctx))
     }
 
-    pub(super) fn after<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn after<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(after_impl(ctx))
     }
 }
@@ -2366,7 +2355,7 @@ mod migration_219 {
     const SLED_SUBNET_2: &str = "fd00:1122:3344:0102";
     const SLED_SUBNET_3: &str = "fd00:1122:3344:0103";
 
-    async fn before_impl(ctx: &MigrationContext<'_>) {
+    async fn before_impl(ctx: &MigrationContext) {
         // Blueprint 1: 2 sleds with 3 zones each, IPs with final hextet both
         // above and below ::20 (SLED_RESERVED_ADDRESSES).
         //
@@ -2530,7 +2519,7 @@ mod migration_219 {
             .expect("inserted pre-migration data");
     }
 
-    async fn after_impl(ctx: &MigrationContext<'_>) {
+    async fn after_impl(ctx: &MigrationContext) {
         let bp_id_1: Uuid = BP_ID_1.parse().unwrap();
         let bp_id_2: Uuid = BP_ID_2.parse().unwrap();
         let bp_id_3: Uuid = BP_ID_3.parse().unwrap();
@@ -2589,22 +2578,18 @@ mod migration_219 {
         assert_eq!(expected, got);
     }
 
-    pub(super) fn before<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn before<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(before_impl(ctx))
     }
 
-    pub(super) fn after<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn after<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(after_impl(ctx))
     }
 }
 
 // Test that the audit_log credential_id constraint migration (version 222)
 // handles existing rows with auth_method set but credential_id NULL.
-fn before_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_222_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Insert an audit_log entry with auth_method = 'session_cookie'.
         // After version 222's up1.sql adds credential_id, this row will have
@@ -2642,7 +2627,7 @@ fn before_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_222_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Clean up the test row
         ctx.client
@@ -2680,7 +2665,7 @@ const DEVICE_229_DEVICE_CODE: &str = "code-229-migration-test";
 const DEVICE_229_SILO_USER: Uuid =
     Uuid::from_u128(0x22900002_0000_0000_0000_000000000003);
 
-fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_229_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Insert test data into console_session and device_access_token.
         // These tables currently have "id" as the last column (from migration 145).
@@ -2713,7 +2698,7 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_229_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Verify data was preserved after the column reordering migration.
 
@@ -2817,7 +2802,7 @@ const BGP_CONFIG_231_EXPLICIT: Uuid =
 const BGP_CONFIG_231_NULL: Uuid =
     Uuid::from_u128(0x23100002_0000_0000_0000_000000000002);
 
-fn before_230_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_230_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Insert a bgp_announce_set (required FK) and a bgp_config row
         // BEFORE migration 230 adds the max_paths column.
@@ -2844,7 +2829,7 @@ fn before_230_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_231_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Now max_paths column exists (added by migration 230) but is nullable.
         // Insert one row with an explicit value and one with NULL.
@@ -2873,7 +2858,7 @@ fn before_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_231_0_0<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // The pre-230 row (no max_paths column when inserted) should now be 1.
         let rows = ctx
@@ -2996,9 +2981,7 @@ mod migration_242 {
     const COLLECTOR: Uuid =
         Uuid::from_u128(24200005_0000_0000_0000_000000000001);
 
-    pub(super) fn before<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn before<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             ctx.client
                 .batch_execute(&format!(
@@ -3115,9 +3098,7 @@ mod migration_242 {
         })
     }
 
-    pub(super) fn after<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn after<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             // Query all test ereport rows after the migration.
             let rows = ctx
@@ -3249,9 +3230,7 @@ mod migration_245 {
     const IGW_POOL_V6: Uuid =
         Uuid::from_u128(24300002_0000_0000_0000_000000000002);
 
-    pub(super) fn before<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn before<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             ctx.client
                 .batch_execute(&format!(
@@ -3280,9 +3259,7 @@ mod migration_245 {
         })
     }
 
-    pub(super) fn after<'a>(
-        ctx: &'a MigrationContext<'a>,
-    ) -> BoxFuture<'a, ()> {
+    pub(super) fn after<'a>(ctx: &'a MigrationContext) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let rows = ctx
                 .client
@@ -3419,7 +3396,6 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map
 }
 
-// Parse the dbinit-base.sql file to get starting version
 fn get_base_schema_version() -> Result<semver::Version, anyhow::Error> {
     let base_file = std::path::Path::new(SCHEMA_DIR).join("dbinit-base.sql");
     if !base_file.exists() {
@@ -3433,21 +3409,7 @@ fn get_base_schema_version() -> Result<semver::Version, anyhow::Error> {
         format!("Failed to read base schema file: {:?}", base_file)
     })?;
 
-    // Parse the base schema version from the header
-    for line in content.lines() {
-        if line.starts_with("-- Schema version:") {
-            let version_str = line
-                .strip_prefix("-- Schema version:")
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Invalid schema version line format")
-                })?
-                .trim();
-            return semver::Version::parse(version_str).with_context(|| {
-                format!("Failed to parse base schema version: {}", version_str)
-            });
-        }
-    }
-    anyhow::bail!("Could not find schema version in base file header")
+    nexus_db_model::parse_base_schema_version(&content)
 }
 
 // Load the base dbinit.sql for migration testing
@@ -3495,7 +3457,7 @@ async fn validate_data_migration_from_version_to_target(
     assert_eq!(base_version.to_string(), actual_version);
     let schema_setup = start.elapsed();
 
-    let ctx = MigrationContext { log, client };
+    let ctx = MigrationContext { client };
 
     let all_versions = read_all_schema_versions();
     let mut all_checks = get_migration_checks();
