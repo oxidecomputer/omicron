@@ -4085,7 +4085,7 @@ impl ServiceManager {
     async fn try_initialize_switch_zone(
         &self,
         sled_zone: &mut SwitchZoneState,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<SwitchZoneConfig>, Error> {
         let SwitchZoneState::Initializing {
             request,
             filesystems,
@@ -4093,7 +4093,7 @@ impl ServiceManager {
             worker,
         } = sled_zone
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         // The switch zone must use the ramdisk in order to receive requests
@@ -4118,13 +4118,14 @@ impl ServiceManager {
         // https://github.com/oxidecomputer/omicron/issues/8970 and
         // https://github.com/oxidecomputer/omicron/issues/9182 are strongly
         // related.
+        let request = request.clone();
         let worker = worker.take();
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
             worker,
         };
-        Ok(())
+        Ok(Some(request))
     }
 
     // Body of a tokio task responsible for running until the switch zone is
@@ -4140,11 +4141,18 @@ impl ServiceManager {
 
         // First, go into a loop to bring up the switch zone; retry until we
         // succeed or are told to give up via `exit_rx`.
-        loop {
+        let request_used_to_initialize = loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(()) => break,
+                    Ok(Some(request)) => break request,
+                    Ok(None) => {
+                        info!(
+                            self.inner.log,
+                            "switch zone already initialized",
+                        );
+                        return;
+                    }
                     Err(e) => {
                         warn!(
                             self.inner.log, "Failed to initialize switch zone";
@@ -4172,22 +4180,38 @@ impl ServiceManager {
                     continue;
                 }
             };
-        }
+        };
 
-        // If we have our underlay info, also go into a loop trying to configure
-        // our uplinks. As above, retry until we succeed or are told to stop.
+        // If we have our underlay info and we _had_ the underlay info when we
+        // initialized the switch zone above, also go into a loop trying to
+        // configure our uplinks. As above, retry until we succeed or are told
+        // to stop.
         let (switch_zone_ip, rack_network_config) =
             match self.inner.sled_info.get() {
                 Some(sled_info) => {
-                    info!(
-                        self.inner.log,
-                        "initialized switch zone (underlay info \
-                         available: will attempt uplink configuration)",
-                    );
-                    (
-                        sled_info.local_switch_zone_ip,
-                        sled_info.rack_network_config.clone(),
-                    )
+                    if request_used_to_initialize.addresses.contains(
+                        &Ipv6Addr::from(sled_info.local_switch_zone_ip),
+                    ) {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone (underlay info \
+                             available: will attempt uplink configuration)",
+                        );
+                        (
+                            sled_info.local_switch_zone_ip,
+                            sled_info.rack_network_config.clone(),
+                        )
+                    } else {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone - underlay info is \
+                             available now, but it wasn't when switch zone \
+                             initialization started; will not attempt uplink \
+                             configuration (but will reconfigure the switch \
+                             zone shortly)"
+                        );
+                        return;
+                    }
                 }
                 None => {
                     info!(
