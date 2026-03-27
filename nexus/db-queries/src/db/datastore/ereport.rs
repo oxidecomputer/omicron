@@ -649,6 +649,23 @@ mod tests {
             explanation
         );
 
+        // Okay, what happens if we don't actually ask for any ereports to be
+        // marked?
+        eprintln!(" --- empty vec time ---");
+        let query =
+            DataStore::ereports_mark_seen_query(SitrepUuid::new_v4(), vec![]);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
