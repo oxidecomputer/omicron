@@ -25,7 +25,6 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
@@ -68,7 +67,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
     InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
-    SingleMeasurementInventory, SledRole,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -221,10 +220,10 @@ impl SledAgent {
             metadata,
             ..
         } = instance;
-        let v1_spec = crate::instance::spec_v0_to_v1(vmm_spec.0.clone());
+        let spec = vmm_spec.0.clone();
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus = v1_spec.board.cpus;
+        let ncpus = spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
                 "could not allocate an instance: ran out of CPUs!",
@@ -302,7 +301,7 @@ impl SledAgent {
 
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    init: InstanceInitializationMethod::Spec { spec: v1_spec },
+                    init: InstanceInitializationMethod::Spec { spec },
                 };
 
                 // Try to create the instance

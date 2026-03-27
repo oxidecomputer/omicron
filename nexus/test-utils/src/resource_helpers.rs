@@ -14,7 +14,6 @@ use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::header;
-use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -93,6 +92,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -513,7 +513,7 @@ pub async fn create_external_subnet_in_pool(
     pool_name: &str,
     project_name: &str,
     subnet_name: &str,
-    prefix_len: u8,
+    prefix_length: u8,
 ) -> ExternalSubnet {
     let params = external_subnet::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -521,7 +521,7 @@ pub async fn create_external_subnet_in_pool(
             description: format!("external subnet {subnet_name}"),
         },
         allocator: external_subnet::ExternalSubnetAllocator::Auto {
-            prefix_len,
+            prefix_length,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: pool_name.parse::<Name>().unwrap().into(),
             },

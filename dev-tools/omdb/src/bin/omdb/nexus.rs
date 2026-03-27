@@ -52,6 +52,8 @@ use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
+use nexus_types::internal_api::background::AuditLogCleanupStatus;
+use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
@@ -1222,6 +1224,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "attached_subnet_manager" => {
             print_task_attached_subnet_manager_status(details);
         }
+        "audit_log_cleanup" => {
+            print_task_audit_log_cleanup(details);
+        }
+        "audit_log_timeout_incomplete" => {
+            print_task_audit_log_timeout_incomplete(details);
+        }
         "blueprint_planner" => {
             print_task_blueprint_planner(details);
         }
@@ -1272,6 +1280,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
+        }
+        "reconfigurator_config_watcher" => {
+            print_task_reconfigurator_config_watcher(details);
         }
         "region_replacement" => {
             print_task_region_replacement(details);
@@ -2323,6 +2334,16 @@ fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
     }
 }
 
+fn print_task_reconfigurator_config_watcher(details: &serde_json::Value) {
+    match details.get("config_updated").and_then(|v| v.as_bool()) {
+        Some(updated) => println!("    config updated: {updated}"),
+        None => eprintln!(
+            "warning: failed to interpret task details: {:?}",
+            details
+        ),
+    }
+}
+
 fn print_task_region_replacement(details: &serde_json::Value) {
     match serde_json::from_value::<RegionReplacementStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -2669,6 +2690,68 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
             }
         }
     }
+}
+
+fn print_task_audit_log_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<AuditLogCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "rows deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const MAX_DELETE: &str = "max deleted per activation:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, MAX_DELETE, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.rows_deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!(
+                "    {MAX_DELETE:<WIDTH$}{}",
+                status.max_deleted_per_activation
+            );
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
+fn print_task_audit_log_timeout_incomplete(details: &serde_json::Value) {
+    match serde_json::from_value::<AuditLogTimeoutIncompleteStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const TIMED_OUT: &str = "timed_out:";
+            const CUTOFF: &str = "cutoff:";
+            const MAX_UPDATE: &str = "max_timed_out_per_activation:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[TIMED_OUT, CUTOFF, MAX_UPDATE, ERROR]) + 1;
+
+            println!("    {TIMED_OUT:<WIDTH$}{}", status.timed_out);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!(
+                "    {MAX_UPDATE:<WIDTH$}{}",
+                status.max_timed_out_per_activation
+            );
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
 }
 
 fn print_task_session_cleanup(details: &serde_json::Value) {
@@ -4401,7 +4484,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     //    most recent inventory collection
     use nexus_db_queries::context::OpContext;
 
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
@@ -4511,7 +4594,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
 
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the disk so we can lookup identity information.
@@ -4732,7 +4815,7 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.

@@ -615,7 +615,6 @@ mod test {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
-    use illumos_utils::zpool::ZpoolHealth;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -623,6 +622,7 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::net::SocketAddrV6;
     use uuid::Uuid;
 

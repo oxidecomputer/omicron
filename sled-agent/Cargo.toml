@@ -88,7 +88,6 @@ reqwest = { workspace = true, features = ["rustls", "stream"] }
 reqwest012 = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
-serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 sha3.workspace = true

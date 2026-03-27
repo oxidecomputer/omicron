@@ -719,6 +719,15 @@ impl CollectionBuilder {
             metrics.get_metric_unsigned(CockroachMetric::RangesUnderreplicated);
         status.liveness_live_nodes =
             metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
+        self.found_cockroach_status(node_id, status);
+    }
+
+    /// Record pre-built status for a CockroachDB node
+    pub fn found_cockroach_status(
+        &mut self,
+        node_id: InternalNodeId,
+        status: CockroachStatus,
+    ) {
         self.cockroach_status.insert(node_id, status);
     }
 

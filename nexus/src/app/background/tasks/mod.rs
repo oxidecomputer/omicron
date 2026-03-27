@@ -7,6 +7,8 @@
 pub mod abandoned_vmm_reaper;
 pub mod alert_dispatcher;
 pub mod attached_subnets;
+pub mod audit_log_cleanup;
+pub mod audit_log_timeout_incomplete;
 pub mod bfd;
 pub mod blueprint_execution;
 pub mod blueprint_load;

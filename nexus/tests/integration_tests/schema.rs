@@ -423,14 +423,15 @@ async fn nexus_applies_update_on_boot() {
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
     //
-    // The timeout here is a bit longer than usual (120s vs 60s) because if
-    // lots of tests are running at the same time, there can be contention
-    // here.
+    // The timeout here is 180s (vs the usual 60s) because the full
+    // v1-to-latest migration is inherently slow.  Connection reuse in
+    // update_schema eliminates repeated pool-checkout overhead, but the
+    // raw SQL execution time still dominates.
     //
     // NOTE: If this grows excessively, we could break it into several smaller
     // tests.
     assert!(
-        timeout(Duration::from_secs(120), builder.start_nexus_internal())
+        timeout(Duration::from_secs(180), builder.start_nexus_internal())
             .await
             .is_ok(),
         "Nexus should have started"
@@ -2679,22 +2680,22 @@ mod migration_156 {
                         '{INV_COLLECTION_ID_1}', now(), 'test-source',
                         '{SLED_ID_1}', '192.168.1.1', 0, 'gimlet',
                         32, 68719476736, 1073741824, '{SLED_CONFIG_ID_1}',
-                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                        'not-yet-run', '/test', 'sled-agent', '/test'
                     ), (
                         '{INV_COLLECTION_ID_1}', now(), 'test-source',
                         '{SLED_ID_2}', '192.168.1.1', 0, 'gimlet',
                         32, 68719476736, 1073741824, NULL,
-                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                        'not-yet-run', '/test', 'sled-agent', '/test'
                     ), (
                         '{INV_COLLECTION_ID_2}', now(), 'test-source',
                         '{SLED_ID_1}', '192.168.1.1', 0, 'gimlet',
                         32, 68719476736, 1073741824, '{SLED_CONFIG_ID_2}',
-                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                        'not-yet-run', '/test', 'sled-agent', '/test'
                     ), (
                         '{INV_COLLECTION_ID_2}', now(), 'test-source',
                         '{SLED_ID_2}', '192.168.1.1', 0, 'gimlet',
                         32, 68719476736, 1073741824, '{SLED_CONFIG_ID_3}',
-                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                        'not-yet-run', '/test', 'sled-agent', '/test'
                     );
                     "
                 ))
@@ -4506,6 +4507,388 @@ fn after_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+// Migration 242 changes the `ereport` table to make the `slot` and `slot_type`
+// columns (formerly `sp_slot` and `sp_type`) allowed to be non-NULL for host OS
+// ereports in addition to SP ereports, and attempts to backfill these columns
+// when possible to do soo via the inventory.
+//
+// Tests that the migration correctly:
+//  1. Backfills `slot_type` from `sp_type` for SP reporters
+//  2. Backfills `slot_type` to 'sled' for host reporters
+//  3. Backfills `slot` from `sp_slot` for SP reporters
+//  4. Backfills `slot` for host reporters by joining through inventory
+//  5. Leaves `slot` NULL for hosts with no `hw_baseboard_id` or which don't
+//     exist in any inventory collection
+//  6. Picks the newest inventory collection containing a sled ID when
+//    multiple exist
+//  7. Drops the old `sp_type` and `sp_slot` columns
+mod migration_242 {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    // Two inventory collections with different timestamps to verify the
+    // migration picks the slot from the newest one.
+    const INV_COLL_OLDER: Uuid =
+        Uuid::from_u128(24200001_0000_0000_0000_000000000001);
+    const INV_COLL_NEWER: Uuid =
+        Uuid::from_u128(24200001_0000_0000_0000_000000000002);
+
+    // Baseboard ID associated with sled 1.
+    const BASEBOARD_1: Uuid =
+        Uuid::from_u128(24200002_0000_0000_0000_000000000001);
+
+    // Sled 1: present in inventory with a baseboard → SP slot determinable.
+    const SLED_1: Uuid = Uuid::from_u128(24200003_0000_0000_0000_000000000001);
+    // Sled 2: present in inventory but hw_baseboard_id is NULL.
+    const SLED_2: Uuid = Uuid::from_u128(24200003_0000_0000_0000_000000000002);
+    // Sled 3: not present in any inventory collection.
+    const SLED_3: Uuid = Uuid::from_u128(24200003_0000_0000_0000_000000000003);
+
+    // Ereport restart IDs — one per test case.
+    const SP_SLED: Uuid = Uuid::from_u128(24200004_0000_0000_0000_000000000001);
+    const SP_SWITCH: Uuid =
+        Uuid::from_u128(24200004_0000_0000_0000_000000000002);
+    const SP_POWER: Uuid =
+        Uuid::from_u128(24200004_0000_0000_0000_000000000003);
+    const HOST_WITH_INV: Uuid =
+        Uuid::from_u128(24200004_0000_0000_0000_000000000004);
+    const HOST_NO_BB: Uuid =
+        Uuid::from_u128(24200004_0000_0000_0000_000000000005);
+    const HOST_NO_INV: Uuid =
+        Uuid::from_u128(24200004_0000_0000_0000_000000000006);
+
+    const COLLECTOR: Uuid =
+        Uuid::from_u128(24200005_0000_0000_0000_000000000001);
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            ctx.client
+                .batch_execute(&format!(
+                    "
+                    -- Two inventory collections: older and newer.
+                    INSERT INTO omicron.public.inv_collection
+                        (id, time_started, time_done, collector)
+                    VALUES
+                        ('{INV_COLL_OLDER}',
+                         '2024-01-01 00:00:00+00',
+                         '2024-01-01 00:01:00+00',
+                         'test'),
+                        ('{INV_COLL_NEWER}',
+                         '2024-06-01 00:00:00+00',
+                         '2024-06-01 00:01:00+00',
+                         'test');
+
+                    -- A baseboard for sled 1.
+                    INSERT INTO omicron.public.hw_baseboard_id
+                        (id, part_number, serial_number)
+                    VALUES
+                        ('{BASEBOARD_1}', 'test-part', 'test-serial');
+
+                    -- Sled 1 in both collections (with baseboard).
+                    -- Sled 2 in only the newer collection (no baseboard).
+                    -- Sled 3 is deliberately absent from inventory.
+                    INSERT INTO omicron.public.inv_sled_agent (
+                        inv_collection_id, time_collected, source,
+                        sled_id, hw_baseboard_id,
+                        sled_agent_ip, sled_agent_port, sled_role,
+                        usable_hardware_threads, usable_physical_ram,
+                        reservoir_size, reconciler_status_kind,
+                        zone_manifest_boot_disk_path,
+                        zone_manifest_source,
+                        mupdate_override_boot_disk_path,
+                        cpu_family,
+                        measurement_manifest_boot_disk_path,
+                        measurement_manifest_source
+                    ) VALUES
+                        -- sled 1 in OLDER collection
+                        ('{INV_COLL_OLDER}', now(), 'test',
+                         '{SLED_1}', '{BASEBOARD_1}',
+                         '192.168.1.1', 8080, 'gimlet',
+                         32, 68719476736, 1073741824, 'not-yet-run',
+                         '/test', 'sled-agent', '/test', 'unknown',
+                         '/test', 'sled-agent'),
+                        -- sled 1 in NEWER collection
+                        ('{INV_COLL_NEWER}', now(), 'test',
+                         '{SLED_1}', '{BASEBOARD_1}',
+                         '192.168.1.1', 8080, 'gimlet',
+                         32, 68719476736, 1073741824, 'not-yet-run',
+                         '/test', 'sled-agent', '/test', 'unknown',
+                         '/test', 'sled-agent'),
+                        -- sled 2 in NEWER collection (no `hw_baseboard_id`)
+                        ('{INV_COLL_NEWER}', now(), 'test',
+                         '{SLED_2}', NULL,
+                         '192.168.1.1', 8080, 'gimlet',
+                         32, 68719476736, 1073741824, 'not-yet-run',
+                         '/test', 'sled-agent', '/test', 'unknown',
+                         '/test', 'sled-agent');
+
+                    -- SP records for sled 1 in both collections,
+                    -- with DIFFERENT slot numbers (3 vs 7) so we can
+                    -- verify the migration picks the newer one.
+                    --
+                    -- In REAL LIFE, this case doesn't actually happen.
+                    -- If the sled is removed from the rack and reinserted,
+                    -- it will have a different `inv_sled_agent` record with
+                    -- a different sled UUID. But, since the database *can*
+                    -- represent this via multiple inv collection rows, let's
+                    -- make sure that the migration tries to pick the newest
+                    -- just in case...
+                    INSERT INTO omicron.public.inv_service_processor (
+                        inv_collection_id, hw_baseboard_id,
+                        time_collected, source,
+                        sp_type, sp_slot,
+                        baseboard_revision, hubris_archive_id,
+                        power_state
+                    ) VALUES
+                        ('{INV_COLL_OLDER}', '{BASEBOARD_1}',
+                         now(), 'test', 'sled', 3, 1, 'test', 'A0'),
+                        ('{INV_COLL_NEWER}', '{BASEBOARD_1}',
+                         now(), 'test', 'sled', 7, 1, 'test', 'A0');
+
+                    -- Ereport rows for every test case.
+                    -- At schema version 241 the table still has sp_type
+                    -- and sp_slot.
+                    INSERT INTO omicron.public.ereport (
+                        restart_id, ena, time_collected, collector_id,
+                        report, reporter, sp_type, sp_slot, sled_id
+                    ) VALUES
+                        -- Case 1: SP sled reporter
+                        ('{SP_SLED}', 1, now(), '{COLLECTOR}',
+                         '{{}}', 'sp', 'sled', 0, NULL),
+                        -- Case 2: SP switch reporter
+                        ('{SP_SWITCH}', 1, now(), '{COLLECTOR}',
+                         '{{}}', 'sp', 'switch', 1, NULL),
+                        -- Case 3: SP power reporter
+                        ('{SP_POWER}', 1, now(), '{COLLECTOR}',
+                         '{{}}', 'sp', 'power', 2, NULL),
+                        -- Case 4: Host, sled in inventory with SP also in inventory
+                        ('{HOST_WITH_INV}', 1, now(), '{COLLECTOR}',
+                         '{{}}', 'host', NULL, NULL, '{SLED_1}'),
+                        -- Case 5: Host, sled in inventory, no `hw_baseboard_id`
+                        ('{HOST_NO_BB}', 1, now(), '{COLLECTOR}',
+                         '{{}}', 'host', NULL, NULL, '{SLED_2}'),
+                        -- Case 6: Host, sled not in inventory at all
+                        ('{HOST_NO_INV}', 1, now(), '{COLLECTOR}',
+                         '{{}}', 'host', NULL, NULL, '{SLED_3}');
+                    "
+                ))
+                .await
+                .expect("failed to insert test data for migration 242");
+        })
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            // Query all test ereport rows after the migration.
+            let rows = ctx
+                .client
+                .query(
+                    &format!(
+                        "SELECT restart_id, slot_type::text, slot
+                         FROM omicron.public.ereport
+                         WHERE restart_id IN (
+                             '{SP_SLED}', '{SP_SWITCH}', '{SP_POWER}',
+                             '{HOST_WITH_INV}', '{HOST_NO_BB}',
+                             '{HOST_NO_INV}'
+                         )"
+                    ),
+                    &[],
+                )
+                .await
+                .expect("failed to query migrated ereport rows");
+
+            assert_eq!(rows.len(), 6, "expected 6 test ereport rows");
+
+            let results: HashMap<Uuid, (String, Option<i32>)> = rows
+                .iter()
+                .map(|row| {
+                    let id: Uuid = row.get("restart_id");
+                    let slot_type: String = row.get("slot_type");
+                    let slot: Option<i32> = row.get("slot");
+                    (id, (slot_type, slot))
+                })
+                .collect();
+
+            // Case 1: SP sled → slot_type='sled', slot=0
+            let (st, s) = &results[&SP_SLED];
+            assert_eq!(st, "sled", "SP sled reporter slot_type");
+            assert_eq!(*s, Some(0), "SP sled reporter slot");
+
+            // Case 2: SP switch → slot_type='switch', slot=1
+            let (st, s) = &results[&SP_SWITCH];
+            assert_eq!(st, "switch", "SP switch reporter slot_type");
+            assert_eq!(*s, Some(1), "SP switch reporter slot");
+
+            // Case 3: SP power → slot_type='power', slot=2
+            let (st, s) = &results[&SP_POWER];
+            assert_eq!(st, "power", "SP power reporter slot_type");
+            assert_eq!(*s, Some(2), "SP power reporter slot");
+
+            // Case 4: Host with inventory + baseboard → slot_type='sled',
+            // slot=7 (from the newer collection, NOT 3 from the older one).
+            // This case really shouldn't happen, but let's test it anyway.
+            let (st, s) = &results[&HOST_WITH_INV];
+            assert_eq!(st, "sled", "host with inventory slot_type");
+            assert_eq!(
+                *s,
+                Some(7),
+                "should use SP slot from the newest inventory collection"
+            );
+
+            // Case 5: Host in inventory but no baseboard → slot NULL
+            let (st, s) = &results[&HOST_NO_BB];
+            assert_eq!(st, "sled", "host without baseboard slot_type");
+            assert_eq!(
+                *s, None,
+                "host without `hw_baseboard_id` should have NULL slot"
+            );
+
+            // Case 6: Host not in inventory at all → slot NULL
+            let (st, s) = &results[&HOST_NO_INV];
+            assert_eq!(st, "sled", "host not in inventory slot_type");
+            assert_eq!(*s, None, "host not in inventory should have NULL slot");
+
+            // Verify the old columns have been dropped.
+            let err = ctx
+                .client
+                .query(
+                    "SELECT sp_type FROM omicron.public.ereport LIMIT 0",
+                    &[],
+                )
+                .await;
+            assert!(err.is_err(), "sp_type column should have been dropped");
+
+            let err = ctx
+                .client
+                .query(
+                    "SELECT sp_slot FROM omicron.public.ereport LIMIT 0",
+                    &[],
+                )
+                .await;
+            assert!(err.is_err(), "sp_slot column should have been dropped");
+
+            // Clean up test data.
+            ctx.client
+                .batch_execute(&format!(
+                    "
+                    DELETE FROM omicron.public.ereport
+                        WHERE restart_id IN (
+                            '{SP_SLED}', '{SP_SWITCH}', '{SP_POWER}',
+                            '{HOST_WITH_INV}', '{HOST_NO_BB}',
+                            '{HOST_NO_INV}'
+                        );
+                    DELETE FROM omicron.public.inv_service_processor
+                        WHERE hw_baseboard_id = '{BASEBOARD_1}';
+                    DELETE FROM omicron.public.inv_sled_agent
+                        WHERE sled_id IN ('{SLED_1}', '{SLED_2}');
+                    DELETE FROM omicron.public.inv_collection
+                        WHERE id IN (
+                            '{INV_COLL_OLDER}', '{INV_COLL_NEWER}'
+                        );
+                    DELETE FROM omicron.public.hw_baseboard_id
+                        WHERE id = '{BASEBOARD_1}';
+                    "
+                ))
+                .await
+                .expect("failed to clean up migration 242 test data");
+        })
+    }
+}
+
+mod migration_245 {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    // A fake IPv4 pool and IGW IP pool row named "default" backed by it.
+    const POOL_V4: Uuid = Uuid::from_u128(24300001_0000_0000_0000_000000000001);
+    const IGW_POOL_V4: Uuid =
+        Uuid::from_u128(24300002_0000_0000_0000_000000000001);
+
+    // A fake IPv6 pool and IGW IP pool row named "default" backed by it.
+    const POOL_V6: Uuid = Uuid::from_u128(24300001_0000_0000_0000_000000000002);
+    const IGW_POOL_V6: Uuid =
+        Uuid::from_u128(24300002_0000_0000_0000_000000000002);
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            ctx.client
+                .batch_execute(&format!(
+                    "
+                    INSERT INTO omicron.public.ip_pool
+                        (id, name, description, time_created, time_modified,
+                         rcgen, ip_version, reservation_type, pool_type)
+                    VALUES
+                        ('{POOL_V4}', 'test-v4-pool-243', 'IPv4 pool',
+                         now(), now(), 0, 'v4', 'external_silos', 'unicast'),
+                        ('{POOL_V6}', 'test-v6-pool-243', 'IPv6 pool',
+                         now(), now(), 0, 'v6', 'external_silos', 'unicast');
+
+                    INSERT INTO omicron.public.internet_gateway_ip_pool
+                        (id, name, description, time_created, time_modified,
+                         internet_gateway_id, ip_pool_id)
+                    VALUES
+                        ('{IGW_POOL_V4}', 'default', 'default v4 pool',
+                         now(), now(), gen_random_uuid(), '{POOL_V4}'),
+                        ('{IGW_POOL_V6}', 'default', 'default v6 pool',
+                         now(), now(), gen_random_uuid(), '{POOL_V6}');
+                    "
+                ))
+                .await
+                .expect("failed to insert pre-migration rows for 243");
+        })
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            let rows = ctx
+                .client
+                .query(
+                    &format!(
+                        "SELECT name FROM omicron.public.internet_gateway_ip_pool
+                         WHERE id = '{IGW_POOL_V4}'"
+                    ),
+                    &[],
+                )
+                .await
+                .expect("failed to query internet_gateway_ip_pool after 243");
+            assert_eq!(rows.len(), 1);
+            let name: &str = rows[0].get("name");
+            assert_eq!(
+                name, "default-v4",
+                "IGW IP pool named 'default' backed by a v4 pool \
+                 should have been renamed to 'default-v4'"
+            );
+
+            let rows = ctx
+                .client
+                .query(
+                    &format!(
+                        "SELECT name FROM omicron.public.internet_gateway_ip_pool
+                         WHERE id = '{IGW_POOL_V6}'"
+                    ),
+                    &[],
+                )
+                .await
+                .expect("failed to query internet_gateway_ip_pool after 243");
+            assert_eq!(rows.len(), 1);
+            let name: &str = rows[0].get("name");
+            assert_eq!(
+                name, "default-v6",
+                "IGW IP pool named 'default' backed by a v6 pool \
+                 should have been renamed to 'default-v6'"
+            );
+        })
+    }
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -4647,6 +5030,18 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(231, 0, 0),
         DataMigrationFns::new().before(before_231_0_0).after(after_231_0_0),
+    );
+    map.insert(
+        Version::new(242, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_242::before)
+            .after(migration_242::after),
+    );
+    map.insert(
+        Version::new(245, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_245::before)
+            .after(migration_245::after),
     );
     map
 }

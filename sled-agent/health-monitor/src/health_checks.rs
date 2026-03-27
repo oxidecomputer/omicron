@@ -6,6 +6,7 @@
 
 use illumos_utils::svcs::Svcs;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use slog::Logger;
 use tokio::sync::watch;
 use tokio::time::Duration;
@@ -36,8 +37,9 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             // `send_if_modified()`.
             Err(e) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
-                    *status =
-                        SvcsEnabledNotOnlineResult::SvcsCmdError(e.into());
+                    *status = SvcsEnabledNotOnlineResult::SvcsCmdError(
+                        execution_err_to_svcs_error(e),
+                    )
                 })
             }
             Ok(svcs) => {
@@ -48,5 +50,25 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
                 })
             }
         };
+    }
+}
+
+fn execution_err_to_svcs_error(
+    err: illumos_utils::ExecutionError,
+) -> SvcsError {
+    match err {
+        illumos_utils::ExecutionError::ExecutionStart { command, err } => {
+            SvcsError::ExecutionStart { command, err: err.to_string() }
+        }
+        illumos_utils::ExecutionError::CommandFailure(e) => {
+            SvcsError::CommandFailure(e.to_string())
+        }
+        illumos_utils::ExecutionError::ContractFailure { msg, err } => {
+            SvcsError::ContractFailure { msg, err: err.to_string() }
+        }
+        illumos_utils::ExecutionError::ParseFailure(e) => {
+            SvcsError::ParseFailure(e)
+        }
+        illumos_utils::ExecutionError::NotRunning => SvcsError::NotRunning,
     }
 }

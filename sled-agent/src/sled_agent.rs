@@ -104,7 +104,7 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -566,10 +566,10 @@ impl SledAgent {
             }
         }
 
-        // Start tracking CPU metrics.
-        match metrics_manager.request_queue().track_cpu() {
+        // Start tracking sled-level stats (CPU, zones).
+        match metrics_manager.request_queue().track_sled_stats() {
             Ok(_) => {
-                debug!(log, "started tracking CPU metrics")
+                debug!(log, "started tracking sled stats")
             }
             Err(e) => error!(
                 log,
@@ -817,10 +817,16 @@ impl SledAgent {
         &self.inner.hardware_monitor
     }
 
-    pub(crate) fn rot_attestor(&self, rot: Rot) -> &RotAttestationHandle {
+    pub(crate) fn rot_attestor(
+        &self,
+        rot: Rot,
+        remote_addr: SocketAddr,
+    ) -> Result<&RotAttestationHandle, HttpError> {
         // We currently only support the LPC55 RoT
         let Rot::Oxide = rot;
-        &self.inner.rot_attestor
+        // And we only serve sled-local clients
+        self.ensure_sled_local_request(remote_addr)?;
+        Ok(&self.inner.rot_attestor)
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,
@@ -1120,6 +1126,30 @@ impl SledAgent {
             .ensure_scrimlet_host_ports(uplinks)
             .await
             .map_err(Error::from)
+    }
+
+    /// Validate if the given [`SocketAddr`] represents a peer on the same
+    /// underlay subnet as the current sled.
+    pub fn ensure_sled_local_request(
+        &self,
+        remote_addr: SocketAddr,
+    ) -> Result<(), HttpError> {
+        let SocketAddr::V6(remote_addr) = remote_addr else {
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
+                String::from("unexpected non-v6 request"),
+            ));
+        };
+        let underlay_subnet = self.inner.subnet.net();
+        if !underlay_subnet.contains(*remote_addr.ip()) {
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
+                String::from("non-sled-local request not allowed"),
+            ));
+        }
+        Ok(())
     }
 
     pub fn bootstore(&self) -> bootstore::NodeHandle {
@@ -1476,6 +1506,25 @@ impl SledAgent {
 
             DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
         };
+
+        // If you have a parent dataset that has a reservation, and a child
+        // dataset has a bunch of data, you can run into an out-of-space issue
+        // when deleting the child dataset if the pool is nearly full: when you
+        // delete the child dataset, it moves into a "to be deleted" area in the
+        // background, but the space is still used by the child (this amount can
+        // be accessed by querying for the `freeing` property of the pool).
+        //
+        // This, combined with a parent dataset that has a reservation, causes
+        // the amount of free space in the pool to go down, so before deleting
+        // the volume, remove the reservation set for the parent dataset if one
+        // exists.
+
+        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        // Then proceed with deleting the child volume dataset, then the parent
+        // dataset
 
         Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
             name: &delegated_zvol.volume_name(),

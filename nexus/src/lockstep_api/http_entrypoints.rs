@@ -23,6 +23,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
 use http::StatusCode;
+use nexus_db_queries::authz;
 use nexus_lockstep_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -1080,15 +1081,17 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path_params = path_params.into_inner();
-        let rack_id = RackUuid::from_untyped_uuid(path_params.rack_id);
         let epoch = query_params.into_inner().epoch;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
+            let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                RackUuid::from_untyped_uuid(path_params.rack_id),
+            );
             let config = if let Some(epoch) = epoch {
-                nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?
+                nexus.datastore().tq_get_config(&opctx, authz_tq, epoch).await?
             } else {
-                nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?
+                nexus.datastore().tq_get_latest_config(&opctx, authz_tq).await?
             };
             if let Some(config) = config {
                 Ok(HttpResponseOk(config))

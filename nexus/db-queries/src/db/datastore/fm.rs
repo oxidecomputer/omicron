@@ -6,7 +6,8 @@
 //! reports (sitreps).
 //!
 //! See [RFD 603](https://rfd.shared.oxide.computer/rfd/0603) for details on the
-//! fault management sitrep.
+//! fault management sitrep, and the [datastore module documentation](super) for
+//! general conventions.
 
 use super::DataStore;
 use crate::authz;
@@ -385,6 +386,7 @@ impl DataStore {
                         comment,
                         ereports,
                         alerts_requested,
+                        support_bundles_requested: iddqd::IdOrdMap::new(),
                     }
                 }));
             }
@@ -503,6 +505,13 @@ impl DataStore {
         // rather than doing smaller ones for each case in the sitrep. This uses
         // more memory in Nexus but reduces the number of small db queries we
         // perform.
+        //
+        // The ordering of inserts among case child records (ereports, alert
+        // requests) and case metadata doesn't matter: there are no foreign key
+        // constraints between these tables, and garbage collection is keyed on
+        // sitrep_id (which is inserted first above). If we crash partway
+        // through, orphaned child records will be cleaned up when the orphaned
+        // sitrep is garbage collected.
         let mut cases = Vec::with_capacity(sitrep.cases.len());
         let mut alerts_requested = Vec::new();
         let mut case_ereports = Vec::new();
@@ -1552,6 +1561,7 @@ mod tests {
                 de,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: _,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -1770,6 +1780,7 @@ mod tests {
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: iddqd::IdOrdMap::new(),
                 comment: "my cool case".to_string(),
             }
         };
@@ -1802,6 +1813,7 @@ mod tests {
                 de: fm::DiagnosisEngineKind::PowerShelf,
                 ereports,
                 alerts_requested,
+                support_bundles_requested: iddqd::IdOrdMap::new(),
                 comment: "break in case of emergency".to_string(),
             }
         };
