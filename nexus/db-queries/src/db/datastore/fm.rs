@@ -1906,7 +1906,6 @@ mod tests {
             .await
             .expect("failed to insert second sitrep");
 
-        // Delete the original sitrep
         // Verify the sitrep, cases, and ereport assignments exist
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
