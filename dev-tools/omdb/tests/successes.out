@@ -701,13 +701,13 @@ task: "fm_rendezvous"
         errors:                        0
     marking ereports as seen:
 (i)   note: this operation was not executed
-      total ereports in sitrep:            0
-      not marked when the sitrep was loaded:   0
-        marked seen by this activation:    0
-        already marked seen:               0
-      batch size:                          0
-      batches:                             0
-      errors:                              0
+      total ereports in sitrep:                 0
+      not marked when the sitrep was loaded:    0
+        marked seen by this activation:         0
+        already marked seen:                    0
+      batch size:                               0
+      batches:                                  0
+      errors:                                   0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1334,13 +1334,13 @@ task: "fm_rendezvous"
         errors:                        0
     marking ereports as seen:
 (i)   note: this operation was not executed
-      total ereports in sitrep:            0
-      not marked when the sitrep was loaded:   0
-        marked seen by this activation:    0
-        already marked seen:               0
-      batch size:                          0
-      batches:                             0
-      errors:                              0
+      total ereports in sitrep:                 0
+      not marked when the sitrep was loaded:    0
+        marked seen by this activation:         0
+        already marked seen:                    0
+      batch size:                               0
+      batches:                                  0
+      errors:                                   0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s

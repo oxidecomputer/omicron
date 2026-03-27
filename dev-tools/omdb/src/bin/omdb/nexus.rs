@@ -3604,6 +3604,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             const ERRORS: &str = "errors:";
             const WIDTH: usize = const_max_len(&[
                 IN_SITREP,
+                NOT_ALREADY_MARKED,
                 MARKED_SEEN,
                 ALREADY_MARKED,
                 ERRORS,
