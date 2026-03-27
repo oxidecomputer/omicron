@@ -2102,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=df76b7950b592cfc29464cfb3bde7ab8130890d7#df76b7950b592cfc29464cfb3bde7ab8130890d7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=b061cfe842392ce5e7c19f77cf3295600a6659b2#b061cfe842392ce5e7c19f77cf3295600a6659b2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2144,7 +2144,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=df76b7950b592cfc29464cfb3bde7ab8130890d7#df76b7950b592cfc29464cfb3bde7ab8130890d7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=b061cfe842392ce5e7c19f77cf3295600a6659b2#b061cfe842392ce5e7c19f77cf3295600a6659b2"
 dependencies = [
  "anyhow",
  "atty",
@@ -2174,7 +2174,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=df76b7950b592cfc29464cfb3bde7ab8130890d7#df76b7950b592cfc29464cfb3bde7ab8130890d7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=b061cfe842392ce5e7c19f77cf3295600a6659b2#b061cfe842392ce5e7c19f77cf3295600a6659b2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2191,7 +2191,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=df76b7950b592cfc29464cfb3bde7ab8130890d7#df76b7950b592cfc29464cfb3bde7ab8130890d7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=b061cfe842392ce5e7c19f77cf3295600a6659b2#b061cfe842392ce5e7c19f77cf3295600a6659b2"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
