@@ -72,7 +72,9 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
-use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfigEnvelope, RackNetworkConfig,
+};
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -101,6 +103,7 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 use illumos_utils::dladm::{Dladm, EtherstubVnic};
@@ -663,6 +666,22 @@ impl SledAgent {
             };
         };
 
+        // Spawn a task responsible for forwarding any changes to the rack
+        // network config from the bootstore back to us fully-deserialized.
+        //
+        // This is spiritually a "long-running task", but we can't spawn it with
+        // the other long-running tasks because it can't begin prior to this
+        // point: we must have already received and successfully deserialized a
+        // `RackNetworkConfig`.
+        let (rack_network_config_tx, rack_network_config_rx) =
+            watch::channel(rack_network_config);
+        tokio::spawn(rack_network_config_deserialization_task(
+            bootstore_network_config_rx,
+            rack_network_config_tx,
+            parent_log
+                .new(o!("component" => "RackNetworkConfigDeserializationTask")),
+        ));
+
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -689,7 +708,7 @@ impl SledAgent {
                 local_switch_zone_ip:
                     LocalSwitchZoneIpAddr::from_sled_agent_request(&request),
                 rack_id: request.body.rack_id,
-                rack_network_config,
+                rack_network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -1695,6 +1714,79 @@ pub async fn sled_add(
 
     info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
     Ok(())
+}
+
+// Long-running task that updates the contents of `rack_network_config_tx` any
+// time the contents of `bootstore_network_config_rx` changes.
+//
+// Assumes the caller already deserialized the current bootstore network config
+// and used the result to initialize `rack_network_config_tx`; this task starts
+// by waiting for any changes to `bootstore_network_config_rx`.
+async fn rack_network_config_deserialization_task(
+    mut bootstore_network_config_rx: watch::Receiver<
+        Option<bootstore::NetworkConfig>,
+    >,
+    rack_network_config_tx: watch::Sender<RackNetworkConfig>,
+    log: Logger,
+) {
+    loop {
+        // This should never happen - if it does, we're permanently dead.
+        if bootstore_network_config_rx.changed().await.is_err() {
+            error!(
+                log,
+                "bootstore task exited - \
+                 rack_network_config_deserialization_task exiting"
+            );
+            return;
+        }
+
+        let maybe_bootstore_network_config =
+            bootstore_network_config_rx.borrow_and_update().clone();
+
+        // We were only spawned if we had a bootstore network config; we never
+        // expect to go back to `None`. If we do, there isn't much we can do -
+        // log an error.
+        let Some(bootstore_network_config) = maybe_bootstore_network_config
+        else {
+            error!(
+                log,
+                "bootstore network config was previously `Some(_)` but is \
+                 now `None` - this should never happen!",
+            );
+            continue;
+        };
+
+        // We _should_ always be able to deserialize the raw config from the
+        // bootstore, but if we can't, log an error and wait for it to
+        // change; an operator may be able to fix it and push new contents.
+        match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+            &bootstore_network_config,
+        )
+        .and_then(|envelope| envelope.deserialize_body())
+        {
+            Ok(early_network_config) => {
+                let rack_network_config =
+                    early_network_config.rack_network_config;
+                info!(
+                    log,
+                    "received new RackNetworkConfig from bootstore";
+                    "generation" => %bootstore_network_config.generation,
+                );
+                rack_network_config_tx.send_modify(|c| {
+                    *c = rack_network_config;
+                });
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to deserialize network config from bootstore; \
+                     will wait for new config then try again - \
+                     this should never happen!";
+                    InlineErrorChain::new(&err),
+                );
+            }
+        }
+    }
 }
 
 struct ReconcilerFacilities {
