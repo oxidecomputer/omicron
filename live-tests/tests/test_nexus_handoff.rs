@@ -8,7 +8,7 @@ use crate::common::reconfigurator::blueprint_load_target_enabled;
 use crate::common::reconfigurator::blueprint_wait_sled_configs_propagated;
 use anyhow::Context;
 use common::LiveTestContext;
-use common::reconfigurator::blueprint_edit_current_target;
+use common::reconfigurator::blueprint_edit_current_target_enabled;
 use internal_dns_types::config::DnsRecord;
 use internal_dns_types::names::ServiceName;
 use live_tests_macros::live_test;
@@ -176,7 +176,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     .await
     .expect("planning input");
     let (_blueprint_initial, blueprint_new_nexus) =
-        blueprint_edit_current_target(
+        blueprint_edit_current_target_enabled(
             log,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
@@ -272,7 +272,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Now update the target blueprint to trigger a handoff.
     let (_blueprint_new_nexus, blueprint_handoff) =
-        blueprint_edit_current_target(
+        blueprint_edit_current_target_enabled(
             log,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
@@ -432,7 +432,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     let new_nexus =
         new_nexus_clients.values().next().expect("one new Nexus client");
     let (_blueprint_handoff, blueprint_cleanup) =
-        blueprint_edit_current_target(
+        blueprint_edit_current_target_enabled(
             log,
             new_nexus,
             &|builder: &mut BlueprintBuilder| {
