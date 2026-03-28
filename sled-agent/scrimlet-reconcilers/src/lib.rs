@@ -10,6 +10,7 @@ mod dpd_reconciler;
 mod handle;
 mod reconciler_task;
 mod status;
+mod switch_zone_slot;
 mod switch_zone_underlay_ip;
 
 pub use handle::ScrimletReconcilers;
