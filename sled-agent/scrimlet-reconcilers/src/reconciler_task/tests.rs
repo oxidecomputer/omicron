@@ -665,6 +665,66 @@ async fn channel_closure_rack_network_config_during_select() {
     logctx.cleanup_successful();
 }
 
+// Test: dropping the scrimlet_status sender while the task is in the
+// select! (after completing a reconciliation) causes the task to exit
+// with TaskExitedUnexpectedly. This is the sibling of
+// channel_closure_scrimlet_status_during_not_scrimlet_wait: that test
+// covers closure during wait_if_this_sled_is_not_a_scrimlet(), while
+// this one covers the scrimlet_status_rx.changed() arm of the select!.
+#[tokio::test(start_paused = true)]
+async fn channel_closure_scrimlet_status_during_select() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "channel_closure_scrimlet_status_during_select",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Provide all prereqs.
+    let _rack_network_config_tx = harness.provide_prereqs(
+        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
+    );
+    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+
+    // Complete one reconciliation so the task reaches the select!.
+    harness.wait_for_do_reconciliation_call_count(1).await;
+    harness.do_reconciliation_results_tx.send("done".to_string()).unwrap();
+    harness.wait_for_task_status_idle().await;
+
+    // Destructure the harness so we can drop the scrimlet_status sender
+    // while still holding the other pieces we need.
+    let Harness {
+        task,
+        scrimlet_status_tx,
+        do_reconciliation_results_tx,
+        do_reconciliation_calls,
+        ..
+    } = harness;
+
+    // Drop the scrimlet_status sender. This closes the watch channel,
+    // which causes the `scrimlet_status_rx.changed()` arm in the
+    // select! to return Err(RecvError), causing the task to exit.
+    mem::drop(scrimlet_status_tx);
+
+    // Wait for the task to exit and verify the final status.
+    task._task.await.expect("task didn't panic");
+    let final_status = task.status_rx.borrow();
+    assert_matches!(
+        final_status.current_status,
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::TaskExitedUnexpectedly
+        )
+    );
+
+    // do_reconciliation should have been called exactly once (the initial
+    // Startup reconciliation); no second call after the channel closed.
+    assert_eq!(do_reconciliation_calls.lock().unwrap().len(), 1);
+
+    // Explicitly drop after the task exits so we can't hit the .expect()
+    // in MockReconciler::do_reconciliation().
+    mem::drop(do_reconciliation_results_tx);
+
+    logctx.cleanup_successful();
+}
+
 // Test: dropping the scrimlet_status sender while the task is blocked
 // in wait_if_this_sled_is_not_a_scrimlet() causes the task to exit
 // with TaskExitedUnexpectedly.
