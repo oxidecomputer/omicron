@@ -5,24 +5,28 @@
 //! The general framework for one of the service-specific reconciler tasks
 //! implemented in this crate.
 //!
-//! Each reconciler follows the same general structure:
+//! Each reconciler follows the same structure:
 //!
-//! 1. Wait until we have enough information to begin: the `RackNetworkConfig`
-//!    and our sled's switch zone underlay IP, both of which must be provided by
-//!    `sled-agent`; neither is available until after RSS has completed (on
-//!    first setup) or the rack has unlocked (on cold boot).
-//! 2. Remain inert unless we are a scrimlet. `sled-agent` must notify us when
-//!    we become a scrimlet or stop being a scrimlet; this is directly
-//!    downstream from its hardware monitor notifying the presence or absence of
-//!    an attached switch.
-//! 3. Periodically or when the `RackNetworkConfig` changes, perform
+//! 1. Wait until `sled-agent` gives us the `RackNetworkConfig` and our sled's
+//!    switch zone underlay IP. Neither is available until after RSS has
+//!    completed (on first setup) or the rack has unlocked (on cold boot).
+//! 2. Wait to determine [`ThisSledSwitchSlot`]. This requires contacting MGS
+//!    within our switch zone. Non-scrimlet sleds will block forever at this
+//!    point.
+//! 3. If we ever stop being a scrimlet (i.e., the attached switch goes away),
+//!    go inert until we become a scrimlet again (i.e., the switch reappears).
+//!    This can happen during sidecar updates if it powers off briefly to reset
+//!    internal FPGAs, or in a variety of other less common and more rainy-day
+//!    situations.
+//! 4. Periodically or when the `RackNetworkConfig` changes, perform
 //!    service-specific reconciliation. This is provided by implementors of the
 //!    [`Reconciler`] trait elsewhere in this crate.
-//! 4. Report status of this task in an output watch channel, suitable for
+//! 5. Report status of this task in an output watch channel, suitable for
 //!    reporting in the sled-agent inventory.
 //!
-//! [`ReconcilerTask`] in this module handles 1, 2, and 4; service-specific
-//! implementations must provide 3.
+//! [`ReconcilerTaskHandle::spawn()`] handles 1 and 2, [`ReconcilerTask::run()`]
+//! handles 3 and 5, and service-specific implementations of [`Reconciler`] must
+//! provide 4.
 
 use crate::ScrimletReconcilersPrereqs;
 use crate::ThisSledSwitchZoneUnderlayIpAddr;
@@ -33,6 +37,7 @@ use crate::status::ReconcilerRunningStatus;
 use crate::status::ReconcilerStatus;
 use crate::status::ReconciliationCompletedStatus;
 use crate::status::ScrimletStatus;
+use crate::switch_zone_slot::ThisSledSwitchSlot;
 use chrono::Utc;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use slog::Logger;
@@ -57,9 +62,11 @@ pub(crate) trait Reconciler: Send + 'static {
     /// Construct a new instance of this `Reconciler`.
     ///
     /// Typically builds a client for the relevant service based on
-    /// `switch_zone_underlay_ip`.
+    /// `switch_zone_underlay_ip` and record `switch_slot` for use inside future
+    /// calls to `do_reconciliation()`.
     fn new(
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self;
 
@@ -89,11 +96,13 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     pub(crate) fn spawn(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
         prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
+        switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
         parent_log: &Logger,
     ) -> Self {
         Self::spawn_with_inner_constructor(
             scrimlet_status_rx,
             prereqs,
+            switch_slot,
             parent_log,
             T::new,
         )
@@ -105,11 +114,16 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     fn spawn_with_inner_constructor<F>(
         mut scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
         prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
+        switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
         parent_log: &Logger,
         inner_constructor: F,
     ) -> Self
     where
-        F: FnOnce(ThisSledSwitchZoneUnderlayIpAddr, &Logger) -> T
+        F: FnOnce(
+                ThisSledSwitchZoneUnderlayIpAddr,
+                ThisSledSwitchSlot,
+                &Logger,
+            ) -> T
             + Send
             + Sync
             + 'static,
@@ -143,50 +157,42 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             };
 
         let task = tokio::spawn(async move {
-            // Wait for sled-agent to give us our prereqs to really start this
-            // task. We also have to check for the `scrimlet_status_rx` channel
-            // being closed, which is our signal to exit.
-            info!(
-                log,
-                "task started; waiting for RackNetworkConfig and \
-                 switch zone underlay IP"
-            );
-            let prereqs = loop {
-                // Both arms are cancel-safe and we do not `.await` within the
-                // body of any arm, avoiding any opportunity for futurelock.
-                tokio::select! {
-                    prereqs = prereqs.wait() => {
-                        break prereqs.clone();
-                    }
-                    result = scrimlet_status_rx.changed() => {
-                        match result {
-                            Ok(()) => {
-                                // We can't do anything about the scrimlet
-                                // status changing yet, because we're still
-                                // waiting on prereqs. Keep waiting.
-                                continue;
-                            }
-                            Err(_recv_error) => {
-                                return log_task_exiting(&status_tx, &log);
-                            }
-                        }
-                    }
+            // Wait for all the information we need to construct a `T` (the
+            // actual reconciler).
+            let (prereqs, switch_slot) = match wait_for_all_prereqs::<T>(
+                &mut scrimlet_status_rx,
+                prereqs,
+                switch_slot,
+                &status_tx,
+                &log,
+            )
+            .await
+            {
+                Ok((prereqs, switch_slot)) => (prereqs, switch_slot),
+                Err(_recv_error) => {
+                    return log_task_exiting(&status_tx, &log);
                 }
             };
 
+            // Unpack the prereqs and create our inner reconciler.
             let ScrimletReconcilersPrereqs {
                 rack_network_config_rx,
                 switch_zone_underlay_ip,
             } = prereqs;
+            let inner = inner_constructor(
+                switch_zone_underlay_ip,
+                switch_slot,
+                &parent_log,
+            );
 
+            // Start reconciling.
             let mut inner_task = ReconcilerTask {
                 scrimlet_status_rx,
                 rack_network_config_rx,
                 status_tx,
-                inner: inner_constructor(switch_zone_underlay_ip, &parent_log),
+                inner,
                 log,
             };
-
             match inner_task.run().await {
                 // `inner_task.run()` runs forever...
                 Ok(never_returns) => match never_returns {},
@@ -209,6 +215,89 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     }
 }
 
+/// Wait for all prereqs: information that comes from sled-agent and information
+/// we fetch from MGS.
+///
+/// These inputs come in the shape of two independent `SetOnce<_>` values, but
+/// we know they can only be populated in order: `prereqs` must come first; once
+/// sled-agent passes those into our parent `ScrimletReconcilers`, it spawns a
+/// task that will subsequently populate `switch_slot`.
+///
+/// This function will block forever on non-scrimlet sleds, because
+/// `switch_slot` will never be populated.
+///
+/// # Errors
+///
+/// This method will return an error if one of its input channels is closed:
+/// either `scrimlet_status_rx`, or once `prereqs` have been received, if the
+/// `rack_network_config_rx` channel inside them is closed. Channel closures are
+/// only expected in tests; in sled-agent it keeps the sending half of these
+/// channels inside its long-running tasks.
+async fn wait_for_all_prereqs<T: Reconciler>(
+    scrimlet_status_rx: &mut watch::Receiver<ScrimletStatus>,
+    prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
+    switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
+    status_tx: &watch::Sender<ReconcilerStatus<T::Status>>,
+    log: &Logger,
+) -> Result<(ScrimletReconcilersPrereqs, ThisSledSwitchSlot), RecvError> {
+    // Wait for sled-agent to give us our prereqs. We also have to check for the
+    // `scrimlet_status_rx` channel being closed, which is our signal to bail.
+    info!(log, "task started; waiting for RackNetworkConfig and underlay IP");
+    let mut prereqs = loop {
+        // Both arms are cancel-safe and we do not `.await` within the
+        // body of any arm, avoiding any opportunity for futurelock.
+        tokio::select! {
+            prereqs = prereqs.wait() => {
+                break prereqs.clone();
+            }
+            result = scrimlet_status_rx.changed() => {
+                // We can't do anything about the scrimlet status changing yet,
+                // because we're still waiting on prereqs. Keep waiting.
+                () = result?;
+                continue;
+            }
+        }
+    };
+
+    // Now wait for `ThisSledSwitchSlot` to contact MGS and determine our slot.
+    // This will block forever on non-scrimlets.
+    //
+    // We also have to check for either input channel (`scrimlet_status_rx` or
+    // `prereqs.rack_network_config_rx`) being closed, upon which we bail.
+    info!(
+        log,
+        "received RackNetworkConfig and underlay IP; now waiting to determine \
+         our switch slot (will block forever if we are not a scrimlet)",
+    );
+    status_tx.send_modify(|status| {
+        status.current_status = ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::WaitingToDetermineSwitchSlot,
+        );
+    });
+    let switch_slot = loop {
+        // All arms are cancel-safe and we do not `.await` within the
+        // body of any arm, avoiding any opportunity for futurelock.
+        tokio::select! {
+            switch_slot = switch_slot.wait() => {
+                break *switch_slot;
+            }
+
+            // We can't do anything about either of these changing yet, because
+            // we're still waiting to find our slot. Keep waiting.
+            result = scrimlet_status_rx.changed() => {
+                () = result?;
+                continue;
+            }
+            result = prereqs.rack_network_config_rx.changed() => {
+                () = result?;
+                continue;
+            }
+        }
+    };
+
+    Ok((prereqs, switch_slot))
+}
+
 struct ReconcilerTask<T: Reconciler> {
     scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
     rack_network_config_rx: watch::Receiver<RackNetworkConfig>,
@@ -223,14 +312,12 @@ impl<T: Reconciler> ReconcilerTask<T> {
         let mut activation_count: u64 = 0;
 
         loop {
-            // Are we a scrimlet? Most sleds aren't; on those, this blocks
-            // indefinitely, leaving us in the inert status. On sleds that are
-            // scrimlets, this will either return immediately (if we already
-            // know we're a scrimlet) or as soon as we know we're a scrimlet;
-            // ultimately this comes from `sled-agent` noticing the presence of
-            // a switch and activating the switch zone (and these reconciler
-            // tasks).
-            self.wait_if_this_sled_is_not_a_scrimlet().await?;
+            // We know we _were_ a scrimlet at some point, because we determined
+            // our switch slot by contacting MGS within our own switch zone. But
+            // it's possible we could become "not a scrimlet" in the future
+            // (e.g., if the switch disappears out from under us). In such a
+            // case, block until it comes back.
+            self.wait_if_this_sled_is_no_longer_a_scrimlet().await?;
 
             // We _are_ a scrimlet; perform reconciliation.
             info!(
@@ -298,7 +385,7 @@ impl<T: Reconciler> ReconcilerTask<T> {
         }
     }
 
-    async fn wait_if_this_sled_is_not_a_scrimlet(
+    async fn wait_if_this_sled_is_no_longer_a_scrimlet(
         &mut self,
     ) -> Result<(), RecvError> {
         let mut logged_not_scrimlet = false;
@@ -319,7 +406,7 @@ impl<T: Reconciler> ReconcilerTask<T> {
                     }
                     self.status_tx.send_modify(|status| {
                         status.current_status = ReconcilerCurrentStatus::Inert(
-                            ReconcilerInertReason::NotAScrimlet,
+                            ReconcilerInertReason::NoLongerAScrimlet,
                         );
                     });
 

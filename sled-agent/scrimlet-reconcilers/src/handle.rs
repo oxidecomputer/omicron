@@ -53,6 +53,7 @@ impl ScrimletReconcilers {
         let dpd_reconciler = ReconcilerTaskHandle::<DpdReconciler>::spawn(
             scrimlet_status_rx.clone(),
             Arc::clone(&prereqs),
+            Arc::clone(&switch_slot),
             parent_log,
         );
 
