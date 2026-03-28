@@ -20,10 +20,10 @@ use tokio::sync::watch;
 
 pub struct SitrepLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<CurrentSitrep>,
+    tx: watch::Sender<Option<CurrentSitrep>>,
 }
 
-pub type CurrentSitrep = Option<Arc<(SitrepVersion, Sitrep)>>;
+pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
 
 impl BackgroundTask for SitrepLoader {
     fn activate<'a>(
@@ -49,13 +49,13 @@ impl BackgroundTask for SitrepLoader {
 impl SitrepLoader {
     pub fn new(
         datastore: Arc<DataStore>,
-        tx: watch::Sender<CurrentSitrep>,
+        tx: watch::Sender<Option<CurrentSitrep>>,
     ) -> Self {
         Self { datastore, tx }
     }
 
     #[allow(dead_code)] // subsequent PRs will consume this
-    pub fn watcher(&self) -> watch::Receiver<CurrentSitrep> {
+    pub fn watcher(&self) -> watch::Receiver<Option<CurrentSitrep>> {
         self.tx.subscribe()
     }
 

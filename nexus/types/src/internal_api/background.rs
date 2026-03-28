@@ -898,45 +898,63 @@ pub struct SitrepGcStatus {
 }
 
 /// The status of a `fm_rendezvous` background task activation.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum FmRendezvousStatus {
-    NoSitrep,
-    Executed {
-        sitrep_id: SitrepUuid,
-        alerts: FmAlertStats,
-        marking: FmEreportMarkingStats,
-    },
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FmRendezvousStatus {
+    pub sitrep_id: Option<SitrepUuid>,
+    pub alerts: fm_rendezvous::OpStatus<fm_rendezvous::AlertCreationStatus>,
+    pub ereport_marking:
+        fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct FmAlertStats {
-    /// The total number of alerts requested by the current sitrep.
-    pub total_alerts_requested: usize,
-    /// The total number of alerts which were *first* requested in the current sitrep.
-    pub current_sitrep_alerts_requested: usize,
-    /// The number of alerts created by this activation.
-    pub alerts_created: usize,
-    /// Errors that occurred during this activation.
-    pub errors: Vec<String>,
-}
+pub mod fm_rendezvous {
+    use super::*;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct FmEreportMarkingStats {
-    pub batch_size: usize,
-    pub batches: usize,
-    /// The total number of ereports included in the current sitrep.
-    pub total_ereports_in_sitrep: usize,
-    /// The number of ereports that were not already marked as seen.
-    pub ereports_not_marked_in_sitrep: usize,
-    /// Ereports marked as seen during this activation.
-    ///
-    /// The difference between `ereports_not_already_marked` and
-    /// `ereports_marked_seen` is the number of ereports that were already
-    /// marked as seen by other activations of this task since the ereports were
-    /// loaded from the database.
-    pub ereports_marked_seen: usize,
-    /// Errors that occurred during this activation.
-    pub errors: Vec<String>,
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct OpStatus<T> {
+        pub result: OpResult,
+        pub details: T,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum OpResult {
+        #[default]
+        Skipped,
+        Executed {
+            start: DateTime<Utc>,
+            end: DateTime<Utc>,
+        },
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct AlertCreationStatus {
+        /// The total number of alerts requested by the current sitrep.
+        pub total_alerts_requested: usize,
+        /// The total number of alerts which were *first* requested in the current sitrep.
+        pub current_sitrep_alerts_requested: usize,
+        /// The number of alerts created by this activation.
+        pub alerts_created: usize,
+        /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct EreportMarkingStatus {
+        pub batch_size: usize,
+        pub batches: usize,
+        /// The total number of ereports included in the current sitrep.
+        pub total_ereports_in_sitrep: usize,
+        /// The number of ereports that were not already marked as seen.
+        pub ereports_not_marked_in_sitrep: usize,
+        /// Ereports marked as seen during this activation.
+        ///
+        /// The difference between `ereports_not_already_marked` and
+        /// `ereports_marked_seen` is the number of ereports that were already
+        /// marked as seen by other activations of this task since the ereports were
+        /// loaded from the database.
+        pub ereports_marked_seen: usize,
+        /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
