@@ -45,7 +45,6 @@ use tokio::sync::SetOnce;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
 
 /// Trait that should be implemented by the service-specific reconciler tasks
 /// elsewhere in this crate.
@@ -223,17 +222,6 @@ struct ReconcilerTask<T: Reconciler> {
 
 impl<T: Reconciler> ReconcilerTask<T> {
     async fn run(&mut self) -> Result<Infallible, RecvError> {
-        // Set up our timer, but we won't poll it until after we've performed
-        // one reconciliation, so also reset it to not fire immediately.
-        let mut re_reconcile_interval =
-            tokio::time::interval(T::RE_RECONCILE_INTERVAL);
-        re_reconcile_interval.reset();
-
-        // If we miss a tick because the rack network config changed, just delay
-        // and wait the full re-reconciliation interval before firing again.
-        re_reconcile_interval
-            .set_missed_tick_behavior(MissedTickBehavior::Delay);
-
         let mut activation_reason = ReconcilerActivationReason::Startup;
         let mut activation_count: u64 = 0;
 
@@ -275,7 +263,7 @@ impl<T: Reconciler> ReconcilerTask<T> {
             info!(
                 self.log, "reconciliation attempt complete";
                 "activation_reason" => ?activation_reason,
-                "attempt_count" => activation_count,
+                "activation_count" => activation_count,
             );
             self.status_tx.send_modify(|status| {
                 status.current_status = ReconcilerCurrentStatus::Idle;
@@ -292,10 +280,10 @@ impl<T: Reconciler> ReconcilerTask<T> {
             // Wait until we should perform reconciliation again; either our
             // periodic timer fired or the rack network config changed.
             //
-            // Both arms are cancel-safe and we do not `.await` within the body
+            // All arms are cancel-safe and we do not `.await` within the body
             // of any arm, avoiding any opportunity for futurelock.
             activation_reason = tokio::select! {
-                _ = re_reconcile_interval.tick() => {
+                () = tokio::time::sleep(T::RE_RECONCILE_INTERVAL) => {
                     ReconcilerActivationReason::PeriodicTimer
                 }
 
@@ -315,6 +303,8 @@ impl<T: Reconciler> ReconcilerTask<T> {
     async fn wait_if_this_sled_is_not_a_scrimlet(
         &mut self,
     ) -> Result<(), RecvError> {
+        let mut logged_not_scrimlet = false;
+
         loop {
             let status = *self.scrimlet_status_rx.borrow_and_update();
             match status {
@@ -322,6 +312,13 @@ impl<T: Reconciler> ReconcilerTask<T> {
                     return Ok(());
                 }
                 ScrimletStatus::NotScrimlet => {
+                    if !logged_not_scrimlet {
+                        info!(
+                            self.log,
+                            "not a scrimlet - reconciler going inert"
+                        );
+                        logged_not_scrimlet = true;
+                    }
                     self.status_tx.send_modify(|status| {
                         status.current_status = ReconcilerCurrentStatus::Inert(
                             ReconcilerInertReason::NotAScrimlet,
