@@ -4,6 +4,7 @@
 
 use crate::ThisSledSwitchZoneUnderlayIpAddr;
 use crate::reconciler_task::Reconciler;
+use crate::switch_zone_slot::ThisSledSwitchSlot;
 use dpd_client::Client;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
@@ -24,6 +25,7 @@ impl Reconciler for DpdReconciler {
 
     fn new(
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        _switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
         let baseurl =

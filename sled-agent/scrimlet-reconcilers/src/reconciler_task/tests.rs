@@ -5,7 +5,6 @@
 use super::*;
 use assert_matches::assert_matches;
 use std::mem;
-use std::net::Ipv6Addr;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -23,6 +22,7 @@ impl Reconciler for MockReconciler {
 
     fn new(
         _switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        _switch_slot: ThisSledSwitchSlot,
         _parent_log: &Logger,
     ) -> Self {
         unimplemented!("not called by tests")
@@ -72,6 +72,7 @@ struct Harness {
     do_reconciliation_results_tx: mpsc::UnboundedSender<String>,
     do_reconciliation_calls: Arc<Mutex<Vec<RackNetworkConfig>>>,
     prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
+    switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
 }
 
 impl Harness {
@@ -79,6 +80,7 @@ impl Harness {
         let (scrimlet_status_tx, scrimlet_status_rx) =
             watch::channel(ScrimletStatus::NotScrimlet);
         let prereqs = Arc::new(SetOnce::new());
+        let switch_slot = Arc::new(SetOnce::new());
 
         let (do_reconciliation_results_tx, do_reconciliation_results) =
             mpsc::unbounded_channel();
@@ -89,8 +91,9 @@ impl Harness {
             ReconcilerTaskHandle::spawn_with_inner_constructor(
                 scrimlet_status_rx,
                 Arc::clone(&prereqs),
+                Arc::clone(&switch_slot),
                 log,
-                |_ip, _log| MockReconciler {
+                |_ip, _slot, _log| MockReconciler {
                     do_reconciliation_calls,
                     do_reconciliation_results,
                 },
@@ -103,20 +106,34 @@ impl Harness {
             do_reconciliation_results_tx,
             do_reconciliation_calls,
             prereqs,
+            switch_slot,
         }
     }
 
-    fn provide_prereqs(
-        &self,
-        ip: ThisSledSwitchZoneUnderlayIpAddr,
-    ) -> watch::Sender<RackNetworkConfig> {
+    fn provide_prereqs_only(&self) -> watch::Sender<RackNetworkConfig> {
         let (tx, rx) = watch::channel(test_rack_network_config_1());
         self.prereqs
             .set(ScrimletReconcilersPrereqs {
                 rack_network_config_rx: rx,
-                switch_zone_underlay_ip: ip,
+                switch_zone_underlay_ip:
+                    ThisSledSwitchZoneUnderlayIpAddr::TEST_FAKE,
             })
-            .expect("set_switch_zone_ip() called only once per harness");
+            .expect("provide_prereqs_only() called only once per harness");
+        tx
+    }
+
+    fn provide_switch_slot_only(&self) {
+        self.switch_slot
+            .set(ThisSledSwitchSlot::TEST_FAKE)
+            .expect("provide_switch_slot_only() called only once per harness");
+    }
+
+    fn provide_all_prereqs_and_become_scrimlet(
+        &self,
+    ) -> watch::Sender<RackNetworkConfig> {
+        let tx = self.provide_prereqs_only();
+        self.provide_switch_slot_only();
+        self.set_scrimlet_status(ScrimletStatus::Scrimlet);
         tx
     }
 
@@ -142,40 +159,64 @@ impl Harness {
         );
     }
 
-    async fn wait_for_task_status_not_a_scrimlet(
+    async fn wait_for_task_status<F>(
         &self,
-    ) -> ReconcilerStatus<String> {
+        description: &str,
+        matches: F,
+    ) -> ReconcilerStatus<String>
+    where
+        F: Fn(&ReconcilerCurrentStatus) -> bool,
+    {
         let mut status = self.task.status();
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
-            if matches!(
-                status.current_status,
-                ReconcilerCurrentStatus::Inert(
-                    ReconcilerInertReason::NotAScrimlet
-                )
-            ) {
+            if matches(&status.current_status) {
                 return status;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
             status = self.task.status();
         }
         panic!(
-            "timeout waiting for task status Inert(NotAScrimlet) \
-             (got {status:?})"
+            "timeout waiting for task status {description} (got {status:?})"
         );
     }
 
+    async fn wait_for_task_status_waiting_for_switch_slot(
+        &self,
+    ) -> ReconcilerStatus<String> {
+        self.wait_for_task_status(
+            "Inert(WaitingToDetermineSwitchSlot)",
+            |status| {
+                matches!(
+                    status,
+                    ReconcilerCurrentStatus::Inert(
+                        ReconcilerInertReason::WaitingToDetermineSwitchSlot
+                    )
+                )
+            },
+        )
+        .await
+    }
+
+    async fn wait_for_task_status_no_longer_a_scrimlet(
+        &self,
+    ) -> ReconcilerStatus<String> {
+        self.wait_for_task_status("Inert(NoLongerAScrimlet)", |status| {
+            matches!(
+                status,
+                ReconcilerCurrentStatus::Inert(
+                    ReconcilerInertReason::NoLongerAScrimlet
+                )
+            )
+        })
+        .await
+    }
+
     async fn wait_for_task_status_idle(&self) -> ReconcilerStatus<String> {
-        let mut status = self.task.status();
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
-            if matches!(status.current_status, ReconcilerCurrentStatus::Idle) {
-                return status;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            status = self.task.status();
-        }
-        panic!("timeout waiting for task status Idle (got {status:?})");
+        self.wait_for_task_status("Idle", |status| {
+            matches!(status, ReconcilerCurrentStatus::Idle)
+        })
+        .await
     }
 
     async fn shutdown_cleanly(self) {
@@ -227,9 +268,9 @@ async fn initial_status_is_waiting_for_prereqs() {
     logctx.cleanup_successful();
 }
 
-// Test: prereqs arrive while scrimlet status is NotScrimlet (the
-// default). The task should transition from WaitingForPrereqs to
-// Inert(NotAScrimlet) without ever calling do_reconciliation.
+// Test: prereqs arrive but we never get a switch slot (the typical flow for
+// non-scrimlet sleds). The task should transition from WaitingForPrereqs to
+// Inert(WaitingToDetermineSwitchSlot) without ever calling do_reconciliation.
 #[tokio::test(start_paused = true)]
 async fn prereqs_arrive_but_not_scrimlet() {
     let logctx = omicron_test_utils::dev::test_setup_log(
@@ -245,14 +286,11 @@ async fn prereqs_arrive_but_not_scrimlet() {
         )
     );
 
-    // Provide prereqs but leave scrimlet status as NotScrimlet (the
-    // default from Harness::new).
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
+    // Provide prereqs but don't provide a switch slot.
+    let _rack_network_config_tx = harness.provide_prereqs_only();
 
-    // Task should transition to Inert(NotAScrimlet).
-    harness.wait_for_task_status_not_a_scrimlet().await;
+    // Task should transition to Inert(WaitingToDetermineSwitchSlot).
+    harness.wait_for_task_status_waiting_for_switch_slot().await;
 
     // do_reconciliation should never have been called.
     assert_eq!(harness.do_reconciliation_calls.lock().unwrap().len(), 0);
@@ -261,9 +299,51 @@ async fn prereqs_arrive_but_not_scrimlet() {
     logctx.cleanup_successful();
 }
 
+// Test the expected startup control flow: prereqs arrive, the task transitions
+// from WaitingForPrereqs to Inert(WaitingToDetermineSwitchSlot), then the
+// switch slot arrives, and the task transitions to reconciling.
+#[tokio::test(start_paused = true)]
+async fn all_prereqs_arrive_in_order() {
+    let logctx =
+        omicron_test_utils::dev::test_setup_log("all_prereqs_arrive_in_order");
+    let harness = Harness::new(&logctx.log);
+
+    // Confirm we start in WaitingForPrereqs.
+    assert_matches!(
+        harness.task.status().current_status,
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::WaitingForPrereqs
+        )
+    );
+
+    // Provide prereqs but don't provide a switch slot.
+    let _rack_network_config_tx = harness.provide_prereqs_only();
+
+    // Task should transition to Inert(WaitingToDetermineSwitchSlot).
+    harness.wait_for_task_status_waiting_for_switch_slot().await;
+
+    // Simulate becoming a scrimlet and contacting MGS to identify the switch
+    // slot.
+    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    harness.provide_switch_slot_only();
+
+    // Task should now call do_reconciliation() for the first time.
+    harness.wait_for_do_reconciliation_call_count(1).await;
+    harness.do_reconciliation_results_tx.send("first".to_string()).unwrap();
+    let status = harness.wait_for_task_status_idle().await;
+
+    let completion =
+        status.last_completion.expect("last_completion should be preserved");
+    assert_eq!(completion.activation_count, 0);
+    assert_eq!(completion.status, "first");
+
+    harness.shutdown_cleanly().await;
+    logctx.cleanup_successful();
+}
+
 // Test: after completing a reconciliation and reaching the select!,
 // setting NotScrimlet causes the task to loop back to
-// wait_if_this_sled_is_not_a_scrimlet and go inert — without
+// wait_if_this_sled_is_no_longer_a_scrimlet and go inert — without
 // performing another reconciliation.
 #[tokio::test(start_paused = true)]
 async fn scrimlet_becomes_not_scrimlet_during_select() {
@@ -273,10 +353,8 @@ async fn scrimlet_becomes_not_scrimlet_during_select() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs as a scrimlet.
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let _rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete the first reconciliation so the task reaches the select!.
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -284,10 +362,10 @@ async fn scrimlet_becomes_not_scrimlet_during_select() {
     harness.wait_for_task_status_idle().await;
 
     // Become NotScrimlet → the select! fires with ScrimletStatusChanged,
-    // the loop goes back to wait_if_this_sled_is_not_a_scrimlet, and the
-    // task becomes Inert(NotAScrimlet).
+    // the loop goes back to wait_if_this_sled_is_no_longer_a_scrimlet, and the
+    // task becomes Inert(NoLongerAScrimlet).
     harness.set_scrimlet_status(ScrimletStatus::NotScrimlet);
-    let status = harness.wait_for_task_status_not_a_scrimlet().await;
+    let status = harness.wait_for_task_status_no_longer_a_scrimlet().await;
 
     // No additional do_reconciliation call should have happened: the
     // ScrimletStatusChanged activation saw NotScrimlet and went inert
@@ -315,10 +393,8 @@ async fn first_reconciliation_on_startup() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs to start the inner reconciler.
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let _rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Wait for do_reconciliation to be entered: the mock blocks on the
     // results channel, so once a call is recorded we know it's in-flight.
@@ -371,10 +447,8 @@ async fn rack_network_config_change_triggers_re_reconciliation() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Wait for the first do_reconciliation call (Startup).
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -439,10 +513,8 @@ async fn periodic_timer_triggers_re_reconciliation() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let _rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete the first reconciliation (Startup).
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -500,10 +572,8 @@ async fn config_change_during_inflight_reconciliation() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Wait for the first do_reconciliation call (Startup) to be entered.
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -566,10 +636,8 @@ async fn scrimlet_status_round_trip() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs as a scrimlet.
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let _rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // First reconciliation (Startup).
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -585,7 +653,7 @@ async fn scrimlet_status_round_trip() {
 
     // Become NotScrimlet → task should go inert.
     harness.set_scrimlet_status(ScrimletStatus::NotScrimlet);
-    harness.wait_for_task_status_not_a_scrimlet().await;
+    harness.wait_for_task_status_no_longer_a_scrimlet().await;
 
     // No additional do_reconciliation call should have happened.
     assert_eq!(harness.do_reconciliation_calls.lock().unwrap().len(), 1);
@@ -633,10 +701,8 @@ async fn channel_closure_rack_network_config_during_select() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete one reconciliation so the task reaches the select!.
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -669,7 +735,7 @@ async fn channel_closure_rack_network_config_during_select() {
 // select! (after completing a reconciliation) causes the task to exit
 // with TaskExitedUnexpectedly. This is the sibling of
 // channel_closure_scrimlet_status_during_not_scrimlet_wait: that test
-// covers closure during wait_if_this_sled_is_not_a_scrimlet(), while
+// covers closure during wait_if_this_sled_is_no_longer_a_scrimlet(), while
 // this one covers the scrimlet_status_rx.changed() arm of the select!.
 #[tokio::test(start_paused = true)]
 async fn channel_closure_scrimlet_status_during_select() {
@@ -679,10 +745,8 @@ async fn channel_closure_scrimlet_status_during_select() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
-    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    let _rack_network_config_tx =
+        harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete one reconciliation so the task reaches the select!.
     harness.wait_for_do_reconciliation_call_count(1).await;
@@ -726,24 +790,22 @@ async fn channel_closure_scrimlet_status_during_select() {
 }
 
 // Test: dropping the scrimlet_status sender while the task is blocked
-// in wait_if_this_sled_is_not_a_scrimlet() causes the task to exit
-// with TaskExitedUnexpectedly.
+// in wait_for_all_prereqs() waiting for the switch slot causes the task
+// to exit with TaskExitedUnexpectedly.
 #[tokio::test(start_paused = true)]
-async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
+async fn channel_closure_scrimlet_status_during_switch_slot_wait() {
     let logctx = omicron_test_utils::dev::test_setup_log(
-        "channel_closure_scrimlet_status_during_not_scrimlet_wait",
+        "channel_closure_scrimlet_status_during_switch_slot_wait",
     );
     let harness = Harness::new(&logctx.log);
 
-    // Provide config and IP prereqs, but leave scrimlet status as
-    // NotScrimlet (the default).
-    let _rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
+    // Provide prereqs but not the switch slot, so the task blocks in
+    // wait_for_all_prereqs()'s second phase.
+    let _rack_network_config_tx = harness.provide_prereqs_only();
 
-    // Wait for the task to reach Inert(NotAScrimlet), confirming it's
-    // blocked in wait_if_this_sled_is_not_a_scrimlet().
-    harness.wait_for_task_status_not_a_scrimlet().await;
+    // Wait for the task to reach Inert(WaitingToDetermineSwitchSlot),
+    // confirming it's blocked in the switch slot wait.
+    harness.wait_for_task_status_waiting_for_switch_slot().await;
 
     // Destructure the harness so we can drop the scrimlet_status sender
     // while still holding the other pieces we need.
@@ -757,7 +819,118 @@ async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
 
     // Drop the scrimlet_status sender. This closes the watch channel,
     // which causes scrimlet_status_rx.changed().await to return
-    // Err(RecvError) inside wait_if_this_sled_is_not_a_scrimlet(),
+    // Err(RecvError) inside wait_for_all_prereqs(), causing the task
+    // to exit.
+    mem::drop(scrimlet_status_tx);
+
+    // Wait for the task to exit and verify the final status.
+    task._task.await.expect("task didn't panic");
+    let final_status = task.status_rx.borrow();
+    assert_matches!(
+        final_status.current_status,
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::TaskExitedUnexpectedly
+        )
+    );
+
+    // do_reconciliation should never have been called: we never got
+    // past the switch slot wait.
+    assert_eq!(do_reconciliation_calls.lock().unwrap().len(), 0);
+
+    // Explicitly drop after the task exits so we can't hit the .expect()
+    // in MockReconciler::do_reconciliation().
+    mem::drop(do_reconciliation_results_tx);
+
+    logctx.cleanup_successful();
+}
+
+// Test: dropping the rack_network_config sender while the task is blocked
+// in wait_for_all_prereqs() waiting for the switch slot causes the task
+// to exit with TaskExitedUnexpectedly.
+#[tokio::test(start_paused = true)]
+async fn channel_closure_rack_network_config_during_switch_slot_wait() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "channel_closure_rack_network_config_during_switch_slot_wait",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Provide prereqs but not the switch slot, so the task blocks in
+    // wait_for_all_prereqs()'s second phase.
+    let rack_network_config_tx = harness.provide_prereqs_only();
+
+    // Wait for the task to reach Inert(WaitingToDetermineSwitchSlot),
+    // confirming it's blocked in the switch slot wait.
+    harness.wait_for_task_status_waiting_for_switch_slot().await;
+
+    // Destructure the harness so we can drop the rack_network_config
+    // sender while still holding the other pieces we need.
+    let Harness {
+        task,
+        do_reconciliation_results_tx,
+        do_reconciliation_calls,
+        ..
+    } = harness;
+
+    // Drop the rack_network_config sender. The task is currently blocked
+    // waiting for the switch slot, but also monitors this channel for
+    // closure; it should notice and exit.
+    mem::drop(rack_network_config_tx);
+
+    // Wait for the task to exit and verify the final status.
+    task._task.await.expect("task didn't panic");
+    let final_status = task.status_rx.borrow();
+    assert_matches!(
+        final_status.current_status,
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::TaskExitedUnexpectedly
+        )
+    );
+
+    // do_reconciliation should never have been called: we never got
+    // past the switch slot wait.
+    assert_eq!(do_reconciliation_calls.lock().unwrap().len(), 0);
+
+    // Explicitly drop after the task exits so we can't hit the .expect()
+    // in MockReconciler::do_reconciliation().
+    mem::drop(do_reconciliation_results_tx);
+
+    logctx.cleanup_successful();
+}
+
+// Test: dropping the scrimlet_status sender while the task is blocked
+// in wait_if_this_sled_is_no_longer_a_scrimlet() causes the task to exit
+// with TaskExitedUnexpectedly.
+#[tokio::test(start_paused = true)]
+async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "channel_closure_scrimlet_status_during_not_scrimlet_wait",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Provide config, IP, and switch slot prereqs, but leave scrimlet status as
+    // NotScrimlet (the default). This exact flow can't really happen (we'd have
+    // to become a scrimlet to get a switch slot), but emulates us becoming
+    // NotScrimlet immediately after finding our switch slot.
+    let _rack_network_config_tx = harness.provide_prereqs_only();
+    harness.provide_switch_slot_only();
+
+    // Wait for the task to reach Inert(NoLongerAScrimlet), confirming it's
+    // blocked in wait_if_this_sled_is_no_longer_a_scrimlet().
+    harness.wait_for_task_status_no_longer_a_scrimlet().await;
+
+    // Destructure the harness so we can drop the scrimlet_status sender
+    // while still holding the other pieces we need.
+    let Harness {
+        task,
+        scrimlet_status_tx,
+        do_reconciliation_results_tx,
+        do_reconciliation_calls,
+        ..
+    } = harness;
+
+    // Drop the scrimlet_status sender. This closes the watch channel,
+    // which causes scrimlet_status_rx.changed().await to return
+    // Err(RecvError) inside wait_if_this_sled_is_no_longer_a_scrimlet(),
     // propagating up through run() and causing the task to exit.
     mem::drop(scrimlet_status_tx);
 
@@ -783,7 +956,7 @@ async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
 }
 
 // Test: dropping the rack_network_config sender while the task is
-// blocked in wait_if_this_sled_is_not_a_scrimlet() causes the task to
+// blocked in wait_if_this_sled_is_no_longer_a_scrimlet() causes the task to
 // exit with TaskExitedUnexpectedly.
 #[tokio::test(start_paused = true)]
 async fn channel_closure_rack_network_config_during_not_scrimlet_wait() {
@@ -792,15 +965,16 @@ async fn channel_closure_rack_network_config_during_not_scrimlet_wait() {
     );
     let harness = Harness::new(&logctx.log);
 
-    // Provide config and IP prereqs, but leave scrimlet status as
-    // NotScrimlet (the default).
-    let rack_network_config_tx = harness.provide_prereqs(
-        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
-    );
+    // Provide config, IP, and switch slot prereqs, but leave scrimlet status as
+    // NotScrimlet (the default). This exact flow can't really happen (we'd have
+    // to become a scrimlet to get a switch slot), but emulates us becoming
+    // NotScrimlet immediately after finding our switch slot.
+    let rack_network_config_tx = harness.provide_prereqs_only();
+    harness.provide_switch_slot_only();
 
-    // Wait for the task to reach Inert(NotAScrimlet), confirming it's
-    // blocked in wait_if_this_sled_is_not_a_scrimlet().
-    harness.wait_for_task_status_not_a_scrimlet().await;
+    // Wait for the task to reach Inert(NoLongerAScrimlet), confirming it's
+    // blocked in wait_if_this_sled_is_no_longer_a_scrimlet().
+    harness.wait_for_task_status_no_longer_a_scrimlet().await;
 
     // Destructure the harness so we can drop the rack_network_config
     // sender while still holding the other pieces we need.
