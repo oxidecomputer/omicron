@@ -225,6 +225,81 @@ async fn initial_status_is_waiting_for_prereqs() {
     logctx.cleanup_successful();
 }
 
+// Test: prereqs arrive while scrimlet status is NotScrimlet (the
+// default). The task should transition from WaitingForPrereqs to
+// Inert(NotAScrimlet) without ever calling do_reconciliation.
+#[tokio::test(start_paused = true)]
+async fn prereqs_arrive_but_not_scrimlet() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "prereqs_arrive_but_not_scrimlet",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Confirm we start in WaitingForPrereqs.
+    assert_matches!(
+        harness.task.status().current_status,
+        ReconcilerCurrentStatus::Inert(ReconcilerInertReason::WaitingForPrereqs)
+    );
+
+    // Provide prereqs but leave scrimlet status as NotScrimlet (the
+    // default from Harness::new).
+    let _rack_network_config_tx = harness.provide_prereqs(
+        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
+    );
+
+    // Task should transition to Inert(NotAScrimlet).
+    harness.wait_for_task_status_not_a_scrimlet().await;
+
+    // do_reconciliation should never have been called.
+    assert_eq!(harness.do_reconciliation_calls.lock().unwrap().len(), 0);
+
+    harness.shutdown_cleanly().await;
+    logctx.cleanup_successful();
+}
+
+// Test: after completing a reconciliation and reaching the select!,
+// setting NotScrimlet causes the task to loop back to
+// wait_if_this_sled_is_not_a_scrimlet and go inert — without
+// performing another reconciliation.
+#[tokio::test(start_paused = true)]
+async fn scrimlet_becomes_not_scrimlet_during_select() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "scrimlet_becomes_not_scrimlet_during_select",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Provide all prereqs as a scrimlet.
+    let _rack_network_config_tx = harness.provide_prereqs(
+        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
+    );
+    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+
+    // Complete the first reconciliation so the task reaches the select!.
+    harness.wait_for_do_reconciliation_call_count(1).await;
+    harness.do_reconciliation_results_tx.send("first".to_string()).unwrap();
+    harness.wait_for_task_status_idle().await;
+
+    // Become NotScrimlet → the select! fires with ScrimletStatusChanged,
+    // the loop goes back to wait_if_this_sled_is_not_a_scrimlet, and the
+    // task becomes Inert(NotAScrimlet).
+    harness.set_scrimlet_status(ScrimletStatus::NotScrimlet);
+    let status = harness.wait_for_task_status_not_a_scrimlet().await;
+
+    // No additional do_reconciliation call should have happened: the
+    // ScrimletStatusChanged activation saw NotScrimlet and went inert
+    // instead of reconciling.
+    assert_eq!(harness.do_reconciliation_calls.lock().unwrap().len(), 1);
+
+    // last_completion from the prior run should still be present.
+    let completion =
+        status.last_completion.expect("last_completion should be preserved");
+    assert_eq!(completion.activation_count, 0);
+    assert_eq!(completion.status, "first");
+
+    harness.shutdown_cleanly().await;
+    logctx.cleanup_successful();
+}
+
 // Test: when the sled is already a scrimlet, the first reconciliation
 // runs with activation_reason = Startup and the result from
 // do_reconciliation appears in last_completion.
