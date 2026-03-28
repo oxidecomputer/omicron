@@ -124,6 +124,25 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             parent_log.new(slog::o!("component" => T::LOGGER_COMPONENT_NAME));
 
         let parent_log = parent_log.clone();
+
+        // Helper called when this reconciler exits unexpectedly (i.e., due to
+        // an input watch channel being closed). This can happen either while
+        // we're waiting for our prereqs or any time later while we're running.
+        let log_task_exiting =
+            |status_tx: &watch::Sender<ReconcilerStatus<T::Status>>,
+             log: &Logger| {
+                status_tx.send_modify(|status| {
+                    status.current_status = ReconcilerCurrentStatus::Inert(
+                        ReconcilerInertReason::TaskExitedUnexpectedly,
+                    );
+                });
+                error!(
+                    log,
+                    "exited due to watch channel closure \
+                     (unexpected except during shutdown in tests)"
+                );
+            };
+
         let task = tokio::spawn(async move {
             // Wait for sled-agent to give us our prereqs to really start this
             // task. We also have to check for the `scrimlet_status_rx` channel
@@ -149,8 +168,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
                                 continue;
                             }
                             Err(_recv_error) => {
-                                log_task_exiting::<T>(&status_tx, &log);
-                                return;
+                                return log_task_exiting(&status_tx, &log);
                             }
                         }
                     }
@@ -176,11 +194,10 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
 
                 // ... unless one of its input watch channels has closed.
                 Err(_recv_error) => {
-                    log_task_exiting::<T>(
+                    return log_task_exiting(
                         &inner_task.status_tx,
                         &inner_task.log,
                     );
-                    return;
                 }
             }
         });
@@ -191,25 +208,6 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     pub(crate) fn status(&self) -> ReconcilerStatus<T::Status> {
         self.status_rx.borrow().clone()
     }
-}
-
-// Helper called when this reconciler exits unexpectedly (i.e., due to an input
-// watch channel being closed). This can happen either while we're waiting for
-// our prereqs or any time later while we're running.
-fn log_task_exiting<T: Reconciler>(
-    status_tx: &watch::Sender<ReconcilerStatus<T::Status>>,
-    log: &Logger,
-) {
-    status_tx.send_modify(|status| {
-        status.current_status = ReconcilerCurrentStatus::Inert(
-            ReconcilerInertReason::TaskExitedUnexpectedly,
-        );
-    });
-    error!(
-        log,
-        "exited due to watch channel closure \
-                 (unexpected except during shutdown in tests)"
-    );
 }
 
 struct ReconcilerTask<T: Reconciler> {
@@ -277,8 +275,9 @@ impl<T: Reconciler> ReconcilerTask<T> {
             });
             activation_count = activation_count.wrapping_add(1);
 
-            // Wait until we should perform reconciliation again; either our
-            // periodic timer fired or the rack network config changed.
+            // Wait until we should perform reconciliation again: our
+            // re-reconciliation periodic timer fires or one of our input watch
+            // channels changes.
             //
             // All arms are cancel-safe and we do not `.await` within the body
             // of any arm, avoiding any opportunity for futurelock.
