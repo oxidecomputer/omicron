@@ -296,3 +296,6 @@ impl<T: Reconciler> ReconcilerTask<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
