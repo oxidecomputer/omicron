@@ -17,6 +17,9 @@ use std::net::Ipv6Addr;
 pub struct ThisSledSwitchZoneUnderlayIpAddr(Ipv6Addr);
 
 impl ThisSledSwitchZoneUnderlayIpAddr {
+    #[cfg(test)]
+    pub(crate) const TEST_FAKE: Self = Self(Ipv6Addr::LOCALHOST);
+
     /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
     /// start this sled agent.
     ///
@@ -30,11 +33,6 @@ impl ThisSledSwitchZoneUnderlayIpAddr {
         ThisSledSwitchZoneUnderlayIpAddr(get_switch_zone_address(
             request.body.subnet,
         ))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(ip: Ipv6Addr) -> Self {
-        ThisSledSwitchZoneUnderlayIpAddr(ip)
     }
 }
 

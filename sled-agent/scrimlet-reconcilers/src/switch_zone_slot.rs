@@ -30,6 +30,9 @@ use tokio::task::JoinHandle;
 pub(crate) struct ThisSledSwitchSlot(SwitchSlot);
 
 impl ThisSledSwitchSlot {
+    #[cfg(test)]
+    pub(crate) const TEST_FAKE: Self = Self(SwitchSlot::Switch0);
+
     pub(crate) fn spawn_task_to_determine(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,

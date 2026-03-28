@@ -18,7 +18,8 @@ pub enum ScrimletStatus {
 #[derive(Debug, Clone, Copy)]
 pub enum ReconcilerInertReason {
     WaitingForPrereqs,
-    NotAScrimlet,
+    WaitingToDetermineSwitchSlot,
+    NoLongerAScrimlet,
     TaskExitedUnexpectedly,
 }
 
