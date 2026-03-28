@@ -972,6 +972,10 @@ impl Default for MulticastGroupReconcilerConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
     /// period (in seconds) for periodic activations of the background task that
+    /// drives fault management analysis.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub analysis_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
@@ -989,6 +993,10 @@ pub struct FmTasksConfig {
 impl Default for FmTasksConfig {
     fn default() -> Self {
         Self {
+            // Analysis is generally triggered by changes in the current sitrep,
+            // inventory, or by the ereport ingester(s), so it need not be
+            // periodically activated all that frequently.
+            analysis_period_secs: Duration::from_secs(60),
             sitrep_load_period_secs: Duration::from_secs(15),
             // This need not be activated very frequently, as it's triggered any
             // time the current sitrep changes, and activating it more
@@ -1310,6 +1318,7 @@ mod test {
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
+            fm.analysis_period_secs = 52
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
@@ -1566,6 +1575,7 @@ mod test {
                             disable: false,
                         },
                         fm: FmTasksConfig {
+                            analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
                             rendezvous_period_secs: Duration::from_secs(51),

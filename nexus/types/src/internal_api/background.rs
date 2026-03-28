@@ -897,6 +897,41 @@ pub struct SitrepGcStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_analysis` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FmAnalysisStatus {
+    pub parent_sitrep_id: Option<SitrepUuid>,
+    pub inv_collection_id: Option<CollectionUuid>,
+    pub outcome: fm_analysis::Outcome,
+}
+
+pub mod fm_analysis {
+    use super::*;
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum Outcome {
+        /// Fault management analysis was not performed as no inventory
+        /// collection has been loaded.
+        WaitingForInventory,
+
+        /// An error occurred during analysis or while committing the current
+        /// sitrep.
+        Error(String),
+
+        /// Analysis produced a sitrep identical to the current sitrep,
+        /// so we threw it away and did nothing.
+        Unchanged,
+
+        /// Analysis produced a new sitrep, but we failed to make it
+        /// the current sitrep.
+        Analyzed { sitrep_id: SitrepUuid, error: String },
+
+        /// Analysis produced a new sitrep, which was saved and made the current
+        /// sitrep.
+        Committed { sitrep_id: SitrepUuid },
+    }
+}
+
 /// The status of a `fm_rendezvous` background task activation.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FmRendezvousStatus {
