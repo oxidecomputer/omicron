@@ -135,13 +135,20 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
                  switch zone underlay IP"
             );
             let prereqs = loop {
+                // Both arms are cancel-safe and we do not `.await` within the
+                // body of any arm, avoiding any opportunity for futurelock.
                 tokio::select! {
                     prereqs = prereqs.wait() => {
                         break prereqs.clone();
                     }
                     result = scrimlet_status_rx.changed() => {
                         match result {
-                            Ok(()) => continue,
+                            Ok(()) => {
+                                // We can't do anything about the scrimlet
+                                // status changing yet, because we're still
+                                // waiting on prereqs. Keep waiting.
+                                continue;
+                            }
                             Err(_recv_error) => {
                                 log_task_exiting::<T>(&status_tx, &log);
                                 return;
@@ -320,7 +327,24 @@ impl<T: Reconciler> ReconcilerTask<T> {
                             ReconcilerInertReason::NotAScrimlet,
                         );
                     });
-                    self.scrimlet_status_rx.changed().await?;
+
+                    // Select over both input channels so we can detect channel
+                    // closure and exit cleanly if either channel goes away. If
+                    // the rack network config changes here, we'll spuriously
+                    // loop around and reread the scrimlet status, but that's no
+                    // big deal.
+                    //
+                    // Both arms are cancel-safe and we do not `.await` within
+                    // the body of any arm, avoiding any opportunity for
+                    // futurelock.
+                    tokio::select! {
+                        result = self.scrimlet_status_rx.changed() => {
+                            () = result?;
+                        }
+                        result = self.rack_network_config_rx.changed() => {
+                            () = result?;
+                        }
+                    }
                 }
             }
         }

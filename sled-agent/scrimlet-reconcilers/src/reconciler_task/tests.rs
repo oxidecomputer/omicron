@@ -214,7 +214,9 @@ async fn initial_status_is_waiting_for_prereqs() {
     let status = harness.task.status();
     assert_matches!(
         status.current_status,
-        ReconcilerCurrentStatus::Inert(ReconcilerInertReason::WaitingForPrereqs)
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::WaitingForPrereqs
+        )
     );
     assert!(status.last_completion.is_none());
 
@@ -238,7 +240,9 @@ async fn prereqs_arrive_but_not_scrimlet() {
     // Confirm we start in WaitingForPrereqs.
     assert_matches!(
         harness.task.status().current_status,
-        ReconcilerCurrentStatus::Inert(ReconcilerInertReason::WaitingForPrereqs)
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::WaitingForPrereqs
+        )
     );
 
     // Provide prereqs but leave scrimlet status as NotScrimlet (the
@@ -629,6 +633,61 @@ async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
     // Err(RecvError) inside wait_if_this_sled_is_not_a_scrimlet(),
     // propagating up through run() and causing the task to exit.
     mem::drop(scrimlet_status_tx);
+
+    // Wait for the task to exit and verify the final status.
+    task._task.await.expect("task didn't panic");
+    let final_status = task.status_rx.borrow();
+    assert_matches!(
+        final_status.current_status,
+        ReconcilerCurrentStatus::Inert(
+            ReconcilerInertReason::TaskExitedUnexpectedly
+        )
+    );
+
+    // do_reconciliation should never have been called: we were never a
+    // scrimlet.
+    assert_eq!(do_reconciliation_calls.lock().unwrap().len(), 0);
+
+    // Explicitly drop after the task exits so we can't hit the .expect()
+    // in MockReconciler::do_reconciliation().
+    mem::drop(do_reconciliation_results_tx);
+
+    logctx.cleanup_successful();
+}
+
+// Test: dropping the rack_network_config sender while the task is
+// blocked in wait_if_this_sled_is_not_a_scrimlet() causes the task to
+// exit with TaskExitedUnexpectedly.
+#[tokio::test(start_paused = true)]
+async fn channel_closure_rack_network_config_during_not_scrimlet_wait() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "channel_closure_rack_network_config_during_not_scrimlet_wait",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Provide config and IP prereqs, but leave scrimlet status as
+    // NotScrimlet (the default).
+    let rack_network_config_tx = harness.provide_prereqs(
+        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
+    );
+
+    // Wait for the task to reach Inert(NotAScrimlet), confirming it's
+    // blocked in wait_if_this_sled_is_not_a_scrimlet().
+    harness.wait_for_task_status_not_a_scrimlet().await;
+
+    // Destructure the harness so we can drop the rack_network_config
+    // sender while still holding the other pieces we need.
+    let Harness {
+        task,
+        do_reconciliation_results_tx,
+        do_reconciliation_calls,
+        ..
+    } = harness;
+
+    // Drop the rack_network_config sender. The task is currently blocked
+    // waiting for scrimlet status, so it should also notice that this
+    // channel has closed and exit.
+    mem::drop(rack_network_config_tx);
 
     // Wait for the task to exit and verify the final status.
     task._task.await.expect("task didn't panic");
