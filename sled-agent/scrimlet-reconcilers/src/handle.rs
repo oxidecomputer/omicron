@@ -11,11 +11,13 @@ use crate::dpd_reconciler::DpdReconciler;
 use crate::reconciler_task::ReconcilerTaskHandle;
 use crate::status::ScrimletReconcilersStatus;
 use crate::status::ScrimletStatus;
+use crate::switch_zone_slot::ThisSledSwitchSlot;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use slog::Logger;
 use std::sync::Arc;
 use tokio::sync::SetOnce;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub struct ScrimletReconcilersPrereqs {
@@ -26,7 +28,19 @@ pub struct ScrimletReconcilersPrereqs {
 pub struct ScrimletReconcilers {
     scrimlet_status_tx: watch::Sender<ScrimletStatus>,
     prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
+    switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
     dpd_reconciler: ReconcilerTaskHandle<DpdReconciler>,
+
+    // Handle to the task to contact MGS and determine the slot of the attached
+    // switch, if we have one. This task exits on its own once it determines the
+    // slot (because the slot can never change once we've determined it); we
+    // don't await the task, but we wrap this in a `SetOnce` for two reasons:
+    //
+    // 1. We don't spawn it until we know our switch zone's IP.
+    // 2. It ensures the task is only spawned once.
+    switch_slot_determination_task: SetOnce<JoinHandle<()>>,
+
+    parent_log: Logger,
 }
 
 impl ScrimletReconcilers {
@@ -34,6 +48,7 @@ impl ScrimletReconcilers {
         let (scrimlet_status_tx, scrimlet_status_rx) =
             watch::channel(ScrimletStatus::NotScrimlet);
         let prereqs = Arc::new(SetOnce::new());
+        let switch_slot = Arc::new(SetOnce::new());
 
         let dpd_reconciler = ReconcilerTaskHandle::<DpdReconciler>::spawn(
             scrimlet_status_rx.clone(),
@@ -41,7 +56,14 @@ impl ScrimletReconcilers {
             parent_log,
         );
 
-        Self { scrimlet_status_tx, prereqs, dpd_reconciler }
+        Self {
+            scrimlet_status_tx,
+            prereqs,
+            switch_slot,
+            dpd_reconciler,
+            switch_slot_determination_task: SetOnce::new(),
+            parent_log: parent_log.clone(),
+        }
     }
 
     pub fn status(&self) -> ScrimletReconcilersStatus {
@@ -78,6 +100,8 @@ impl ScrimletReconcilers {
     /// channel is a sign of control flow gone very wrong, as all the tasks will
     /// already be operating based on the first channel received.)
     pub fn set_prereqs_once(&self, prereqs: ScrimletReconcilersPrereqs) {
+        let switch_zone_underlay_ip = prereqs.switch_zone_underlay_ip;
+
         if self.prereqs.set(prereqs).is_err() {
             panic!(
                 "set_prereqs_once() called more than once - scrimlet \
@@ -85,5 +109,16 @@ impl ScrimletReconcilers {
                  initial set of prereqs!"
             );
         }
+
+        // We now know this `.set()` can't fail; we just confirmed this is the
+        // one and only time we've been called.
+        self.switch_slot_determination_task
+            .set(ThisSledSwitchSlot::spawn_task_to_determine(
+                self.scrimlet_status_tx.subscribe(),
+                switch_zone_underlay_ip,
+                Arc::clone(&self.switch_slot),
+                &self.parent_log,
+            ))
+            .expect("SetOnce can only be filled once");
     }
 }

@@ -122,7 +122,6 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
         });
         let log =
             parent_log.new(slog::o!("component" => T::LOGGER_COMPONENT_NAME));
-
         let parent_log = parent_log.clone();
 
         // Helper called when this reconciler exits unexpectedly (i.e., due to
