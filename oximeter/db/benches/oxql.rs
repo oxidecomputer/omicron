@@ -18,9 +18,27 @@ use rand::seq::SliceRandom;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 const DEFAULT_CLICKHOUSE_PORT: u16 = 9000;
+
+/// The metric to benchmark.
+///
+/// Set via BENCH_METRIC env var. Defaults to wall clock latency.
+enum BenchMetric {
+    /// Wall clock latency.
+    Latency,
+    /// Total cpu time.
+    CpuTime,
+}
+
+fn bench_metric() -> BenchMetric {
+    match std::env::var("BENCH_METRIC").as_deref() {
+        Ok("cpu") => BenchMetric::CpuTime,
+        _ => BenchMetric::Latency,
+    }
+}
 
 /// Timeseries to benchmark, spanning a range of field table counts.
 const TIMESERIES_NAMES: &[&str] = &[
@@ -125,6 +143,8 @@ fn get_timeseries_info(rt: &tokio::runtime::Runtime) -> Vec<TimeseriesInfo> {
 // field lookup, and ignore measurements. Note that the user is responsible for
 // populating ClickHouse with test data.
 fn oxql_field_lookup(c: &mut Criterion) {
+    let metric = bench_metric();
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -158,16 +178,51 @@ fn oxql_field_lookup(c: &mut Criterion) {
 
         group.bench_function(
             BenchmarkId::new("field_lookup", &bench_id),
-            |bench| {
-                let client = client.clone();
-                let query = query.clone();
-                bench.to_async(&rt).iter(|| {
-                    let client = client.clone();
-                    let query = query.clone();
-                    async move {
-                        client.oxql_query(&query, QueryAuthzScope::Fleet).await
-                    }
-                })
+            |bench| match metric {
+                BenchMetric::CpuTime => {
+                    bench.to_async(&rt).iter_custom(|iters| {
+                        let client = client.clone();
+                        let query = query.clone();
+                        async move {
+                            let mut total = Duration::ZERO;
+                            for _ in 0..iters {
+                                let result = client
+                                    .oxql_query(&query, QueryAuthzScope::Fleet)
+                                    .await
+                                    .unwrap();
+                                let cpu_us: i64 = result
+                                    .query_summaries
+                                    .iter()
+                                    .map(|s| {
+                                        s.profile_summary
+                                            .get("UserTimeMicroseconds")
+                                            .copied()
+                                            .unwrap_or(0)
+                                            + s.profile_summary
+                                                .get("SystemTimeMicroseconds")
+                                                .copied()
+                                                .unwrap_or(0)
+                                    })
+                                    .sum();
+                                total +=
+                                    Duration::from_micros(cpu_us.max(0) as u64);
+                            }
+                            total
+                        }
+                    });
+                }
+                BenchMetric::Latency => {
+                    bench.to_async(&rt).iter(|| {
+                        let client = client.clone();
+                        let query = query.clone();
+                        async move {
+                            client
+                                .oxql_query(&query, QueryAuthzScope::Fleet)
+                                .await
+                                .unwrap()
+                        }
+                    });
+                }
             },
         );
     }
