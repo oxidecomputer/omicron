@@ -31,6 +31,11 @@ impl ThisSledSwitchZoneUnderlayIpAddr {
             request.body.subnet,
         ))
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(ip: Ipv6Addr) -> Self {
+        ThisSledSwitchZoneUnderlayIpAddr(ip)
+    }
 }
 
 // NOTE: We impl `From` only in this direction: constructing a
