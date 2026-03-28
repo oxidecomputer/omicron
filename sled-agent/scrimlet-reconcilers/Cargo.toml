@@ -1,6 +1,19 @@
 [package]
 name = "sled-agent-scrimlet-reconcilers"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
 
 [dependencies]
+chrono.workspace = true
+dpd-client.workspace = true
+omicron-common.workspace = true
+sled-agent-types.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+tokio.workspace = true
+
+omicron-workspace-hack.workspace = true
