@@ -80,9 +80,9 @@ impl ScrimletReconcilers {
     pub fn set_prereqs_once(&self, prereqs: ScrimletReconcilersPrereqs) {
         if self.prereqs.set(prereqs).is_err() {
             panic!(
-                "prereqs_once() called more than once - scrimlet reconcilers \
-                 are already set up and running based on the initial set of \
-                 prereqs!"
+                "set_prereqs_once() called more than once - scrimlet \
+                 reconcilers are already set up and running based on the \
+                 initial set of prereqs!"
             );
         }
     }
