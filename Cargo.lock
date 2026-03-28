@@ -13543,9 +13543,11 @@ dependencies = [
 name = "sled-agent-scrimlet-reconcilers"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "chrono",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "omicron-common",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "sled-agent-types",
  "slog",
