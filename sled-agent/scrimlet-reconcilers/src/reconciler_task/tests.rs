@@ -488,6 +488,73 @@ async fn periodic_timer_triggers_re_reconciliation() {
     logctx.cleanup_successful();
 }
 
+// Test: if the RackNetworkConfig changes while do_reconciliation is
+// in-flight, the task should notice when it reaches the select! and
+// immediately perform another reconciliation with
+// activation_reason = RackNetworkConfigChanged using the latest config.
+#[tokio::test(start_paused = true)]
+async fn config_change_during_inflight_reconciliation() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "config_change_during_inflight_reconciliation",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    // Provide all prereqs.
+    let rack_network_config_tx = harness.provide_prereqs(
+        ThisSledSwitchZoneUnderlayIpAddr::for_test(Ipv6Addr::LOCALHOST),
+    );
+    harness.set_scrimlet_status(ScrimletStatus::Scrimlet);
+
+    // Wait for the first do_reconciliation call (Startup) to be entered.
+    harness.wait_for_do_reconciliation_call_count(1).await;
+
+    // While the first reconciliation is still in-flight, change the
+    // config. The task won't see this until it finishes and hits the
+    // select!.
+    rack_network_config_tx.send(test_rack_network_config_2()).unwrap();
+
+    // Complete the first reconciliation.
+    harness.do_reconciliation_results_tx.send("first".to_string()).unwrap();
+
+    // The task should immediately start a second reconciliation because
+    // rack_network_config_rx.changed() fires in the select!.
+    harness.wait_for_do_reconciliation_call_count(2).await;
+
+    // The second call should have received the new config (via
+    // borrow_and_update()).
+    let received_configs =
+        harness.do_reconciliation_calls.lock().unwrap().clone();
+    assert_eq!(received_configs[0], test_rack_network_config_1());
+    assert_eq!(received_configs[1], test_rack_network_config_2());
+
+    // Status should be Running with RackNetworkConfigChanged.
+    let status = harness.task.status();
+    match &status.current_status {
+        ReconcilerCurrentStatus::Running(running) => {
+            assert_matches!(
+                running.activation_reason(),
+                ReconcilerActivationReason::RackNetworkConfigChanged
+            );
+        }
+        other => panic!("expected Running status, got {other:?}"),
+    }
+
+    // Complete the second reconciliation and verify.
+    harness.do_reconciliation_results_tx.send("second".to_string()).unwrap();
+    let status = harness.wait_for_task_status_idle().await;
+    let completion =
+        status.last_completion.expect("should have last_completion");
+    assert_matches!(
+        completion.activation_reason,
+        ReconcilerActivationReason::RackNetworkConfigChanged
+    );
+    assert_eq!(completion.activation_count, 1);
+    assert_eq!(completion.status, "second");
+
+    harness.shutdown_cleanly().await;
+    logctx.cleanup_successful();
+}
+
 // Test: full scrimlet status round-trip. Start as scrimlet, complete
 // reconciliation #0 (Startup). Set NotScrimlet → task goes inert. Set
 // Scrimlet again → reconciliation #1 fires with activation_reason =
