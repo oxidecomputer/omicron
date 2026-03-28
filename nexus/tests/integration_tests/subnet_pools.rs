@@ -8,6 +8,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::assert_subnet_pool_utilization;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
@@ -637,12 +638,21 @@ async fn cannot_link_multiple_times(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_subnet_pool_utilization_unimplemented(
+async fn test_ipv4_subnet_pool_utilization(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let url = format!("{}/test-pool/utilization", SUBNET_POOLS_URL);
-    object_get_error(client, &url, StatusCode::INTERNAL_SERVER_ERROR).await;
+
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4).await;
+
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 0.0).await;
+
+    // Add a /24 member (256 addresses).
+    let member_subnet: oxnet::IpNet = "10.0.0.0/24".parse().unwrap();
+    create_subnet_pool_member(client, SUBNET_POOL_NAME, member_subnet).await;
+
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 256.0).await;
 }
 
 /// Assert that the silo links for a pool match the expected set of
@@ -703,4 +713,24 @@ async fn assert_pools_for_silo(
             "silo {silo_name}, pool {pool_name}: expected is_default={is_default}"
         );
     }
+}
+
+#[nexus_test]
+async fn test_ipv6_subnet_pool_utilization(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
+
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 0.0).await;
+
+    // Add a /48 member (2^80 addresses).
+    let member_subnet: oxnet::IpNet = "2001:db8:1::/48".parse().unwrap();
+    create_subnet_pool_member(client, SUBNET_POOL_NAME, member_subnet).await;
+
+    let capacity = (1u128 << 80) as f64;
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, capacity)
+        .await;
 }
