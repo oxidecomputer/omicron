@@ -26,7 +26,9 @@ use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
-use sled_agent_types::instance::{InstanceEnsureBody, InstanceMulticastBody};
+use sled_agent_types::instance::{
+    InstanceEnsureBody, InstanceMulticastMembership,
+};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -308,14 +310,14 @@ impl InstanceManager {
     pub async fn join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        multicast_body: &InstanceMulticastBody,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
             .send(InstanceManagerRequest::JoinMulticastGroup {
                 propolis_id,
-                multicast_body: multicast_body.clone(),
+                membership: membership.clone(),
                 tx,
             })
             .await
@@ -327,14 +329,14 @@ impl InstanceManager {
     pub async fn leave_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        multicast_body: &InstanceMulticastBody,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
             .send(InstanceManagerRequest::LeaveMulticastGroup {
                 propolis_id,
-                multicast_body: multicast_body.clone(),
+                membership: membership.clone(),
                 tx,
             })
             .await
@@ -486,12 +488,12 @@ enum InstanceManagerRequest {
     },
     JoinMulticastGroup {
         propolis_id: PropolisUuid,
-        multicast_body: InstanceMulticastBody,
+        membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), Error>>,
     },
     LeaveMulticastGroup {
         propolis_id: PropolisUuid,
-        multicast_body: InstanceMulticastBody,
+        membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), Error>>,
     },
     GetState {
@@ -632,11 +634,11 @@ impl InstanceManagerRunner {
                         Some(RefreshExternalIps { tx }) => {
                             self.refresh_external_ips(tx)
                         },
-                        Some(JoinMulticastGroup { propolis_id, multicast_body, tx }) => {
-                            self.join_multicast_group(tx, propolis_id, &multicast_body)
+                        Some(JoinMulticastGroup { propolis_id, membership, tx }) => {
+                            self.join_multicast_group(tx, propolis_id, &membership)
                         },
-                        Some(LeaveMulticastGroup { propolis_id, multicast_body, tx }) => {
-                            self.leave_multicast_group(tx, propolis_id, &multicast_body)
+                        Some(LeaveMulticastGroup { propolis_id, membership, tx }) => {
+                            self.leave_multicast_group(tx, propolis_id, &membership)
                         }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
@@ -909,20 +911,12 @@ impl InstanceManagerRunner {
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
-        multicast_body: &InstanceMulticastBody,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
             return Err(Error::NoSuchVmm(propolis_id));
         };
-
-        match multicast_body {
-            InstanceMulticastBody::Join(membership) => {
-                instance.join_multicast_group(tx, membership)?;
-            }
-            InstanceMulticastBody::Leave(membership) => {
-                instance.leave_multicast_group(tx, membership)?;
-            }
-        }
+        instance.join_multicast_group(tx, membership)?;
         Ok(())
     }
 
@@ -930,20 +924,12 @@ impl InstanceManagerRunner {
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
-        multicast_body: &InstanceMulticastBody,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
             return Err(Error::NoSuchVmm(propolis_id));
         };
-
-        match multicast_body {
-            InstanceMulticastBody::Join(membership) => {
-                instance.join_multicast_group(tx, membership)?;
-            }
-            InstanceMulticastBody::Leave(membership) => {
-                instance.leave_multicast_group(tx, membership)?;
-            }
-        }
+        instance.leave_multicast_group(tx, membership)?;
         Ok(())
     }
 

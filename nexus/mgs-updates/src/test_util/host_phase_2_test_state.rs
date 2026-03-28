@@ -225,7 +225,7 @@ mod api_impl {
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
-    use sled_agent_types::instance::InstanceMulticastBody;
+    use sled_agent_types::instance::InstanceMulticastMembership;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;
@@ -249,6 +249,10 @@ mod api_impl {
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::multicast::{
+        ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
+        McastForwardingEntry,
+    };
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -627,45 +631,17 @@ mod api_impl {
         async fn vmm_join_multicast_group(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
-            body: TypedBody<InstanceMulticastBody>,
+            _body: TypedBody<InstanceMulticastMembership>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            let body_args = body.into_inner();
-            match body_args {
-                InstanceMulticastBody::Join(_) => {
-                    // MGS test utility - just return success for test compatibility
-                    Ok(HttpResponseUpdatedNoContent())
-                }
-                InstanceMulticastBody::Leave(_) => {
-                    // This endpoint is for joining - reject leave operations
-                    Err(HttpError::for_bad_request(
-                        None,
-                        "Join endpoint cannot process Leave operations"
-                            .to_string(),
-                    ))
-                }
-            }
+            unimplemented!()
         }
 
         async fn vmm_leave_multicast_group(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
-            body: TypedBody<InstanceMulticastBody>,
+            _body: TypedBody<InstanceMulticastMembership>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            let body_args = body.into_inner();
-            match body_args {
-                InstanceMulticastBody::Leave(_) => {
-                    // MGS test utility - just return success for test compatibility
-                    Ok(HttpResponseUpdatedNoContent())
-                }
-                InstanceMulticastBody::Join(_) => {
-                    // This endpoint is for leaving - reject join operations
-                    Err(HttpError::for_bad_request(
-                        None,
-                        "Leave endpoint cannot process Join operations"
-                            .to_string(),
-                    ))
-                }
-            }
+            unimplemented!()
         }
 
         async fn disk_put(
@@ -752,6 +728,47 @@ mod api_impl {
         async fn list_v2p(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>
+        {
+            unimplemented!()
+        }
+
+        async fn set_mcast_m2p(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<Mcast2PhysMapping>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn clear_mcast_m2p(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<ClearMcast2Phys>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn set_mcast_fwd(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<McastForwardingEntry>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn clear_mcast_fwd(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<ClearMcastForwarding>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn list_mcast_m2p(
+            _rqctx: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<Vec<Mcast2PhysMapping>>, HttpError> {
+            unimplemented!()
+        }
+
+        async fn list_mcast_fwd(
+            _rqctx: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<Vec<McastForwardingEntry>>, HttpError>
         {
             unimplemented!()
         }
