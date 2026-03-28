@@ -202,6 +202,29 @@ impl Harness {
     }
 }
 
+// Test: immediately after construction (before prereqs are provided),
+// the task's status is Inert(WaitingForPrereqs) with no last_completion.
+#[tokio::test(start_paused = true)]
+async fn initial_status_is_waiting_for_prereqs() {
+    let logctx = omicron_test_utils::dev::test_setup_log(
+        "initial_status_is_waiting_for_prereqs",
+    );
+    let harness = Harness::new(&logctx.log);
+
+    let status = harness.task.status();
+    assert_matches!(
+        status.current_status,
+        ReconcilerCurrentStatus::Inert(ReconcilerInertReason::WaitingForPrereqs)
+    );
+    assert!(status.last_completion.is_none());
+
+    // do_reconciliation should never have been called.
+    assert_eq!(harness.do_reconciliation_calls.lock().unwrap().len(), 0);
+
+    harness.shutdown_cleanly().await;
+    logctx.cleanup_successful();
+}
+
 // Test: when the sled is already a scrimlet, the first reconciliation
 // runs with activation_reason = Startup and the result from
 // do_reconciliation appears in last_completion.
