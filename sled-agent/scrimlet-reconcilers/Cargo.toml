@@ -17,3 +17,7 @@ slog-error-chain.workspace = true
 tokio.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+omicron-test-utils.workspace = true
