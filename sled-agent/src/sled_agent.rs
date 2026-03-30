@@ -432,8 +432,10 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_zone_ip(&self) -> LocalSwitchZoneIpAddr {
-        LocalSwitchZoneIpAddr::from_sled_agent_request(&self.start_request)
+    fn switch_zone_ip(&self) -> ThisSledSwitchZoneUnderlayIpAddr {
+        ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+            &self.start_request,
+        )
     }
 }
 
@@ -687,7 +689,9 @@ impl SledAgent {
                 )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip:
-                    LocalSwitchZoneIpAddr::from_sled_agent_request(&request),
+                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+                        &request,
+                    ),
                 rack_id: request.body.rack_id,
                 rack_network_config,
                 metrics_queue: metrics_manager.request_queue(),
@@ -783,7 +787,9 @@ impl SledAgent {
         )
     }
 
-    pub(crate) fn local_switch_zone_ip(&self) -> LocalSwitchZoneIpAddr {
+    pub(crate) fn local_switch_zone_ip(
+        &self,
+    ) -> ThisSledSwitchZoneUnderlayIpAddr {
         self.inner.switch_zone_ip()
     }
 
@@ -1763,9 +1769,11 @@ impl SledAgentFacilities for ReconcilerFacilities {
     }
 }
 
-/// Private module to enforce construction of [`LocalSwitchZoneIpAddr`] only
-/// happens via the constructors we define.
-pub(crate) use self::local_switch_zone_ip::LocalSwitchZoneIpAddr;
+pub(crate) use self::local_switch_zone_ip::ThisSledSwitchZoneUnderlayIpAddr;
+
+/// Private module to enforce construction of
+/// [`ThisSledSwitchZoneUnderlayIpAddr`] only happens via the constructors we
+/// define.
 mod local_switch_zone_ip {
     use omicron_common::address::get_switch_zone_address;
     use sled_agent_types::sled::StartSledAgentRequest;
@@ -1779,46 +1787,49 @@ mod local_switch_zone_ip {
     /// That switch zone will only exist if we are a scrimlet, but we always
     /// know what the IP would be.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub(crate) struct LocalSwitchZoneIpAddr(Ipv6Addr);
+    pub(crate) struct ThisSledSwitchZoneUnderlayIpAddr(Ipv6Addr);
 
-    impl LocalSwitchZoneIpAddr {
-        /// Construct a [`LocalSwitchZoneIpAddr`] from the request to start this
-        /// sled agent.
+    impl ThisSledSwitchZoneUnderlayIpAddr {
+        /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
+        /// start this sled agent.
         ///
         /// This takes a full request object instead of something smaller (like
         /// just a sled subnet) to put up a roadblock to accidentally
-        /// constructing a [`LocalSwitchZoneIpAddr`] that points to any address
-        /// other than our own. `sled-agent` has ready access to the subnets and
-        /// addresses of other sleds, but doesn't have ready access to other
-        /// sleds' [`StartSledAgentRequest`]s.
+        /// constructing a [`ThisSledSwitchZoneUnderlayIpAddr`] that points to
+        /// any address other than our own. `sled-agent` has ready access to the
+        /// subnets and addresses of other sleds, but doesn't have ready access
+        /// to other sleds' [`StartSledAgentRequest`]s.
         pub(crate) fn from_sled_agent_request(
             request: &StartSledAgentRequest,
         ) -> Self {
-            LocalSwitchZoneIpAddr(get_switch_zone_address(request.body.subnet))
+            ThisSledSwitchZoneUnderlayIpAddr(get_switch_zone_address(
+                request.body.subnet,
+            ))
         }
     }
 
     // NOTE: We impl `From` only in this direction: constructing a
-    // `LocalSwitchZoneIpAddr` must happen only via `from_sled_agent_request()`.
-    impl From<LocalSwitchZoneIpAddr> for Ipv6Addr {
-        fn from(value: LocalSwitchZoneIpAddr) -> Self {
+    // `ThisSledSwitchZoneUnderlayIpAddr` must happen only via
+    // `from_sled_agent_request()`.
+    impl From<ThisSledSwitchZoneUnderlayIpAddr> for Ipv6Addr {
+        fn from(value: ThisSledSwitchZoneUnderlayIpAddr) -> Self {
             value.0
         }
     }
 
-    impl PartialEq<IpAddr> for LocalSwitchZoneIpAddr {
+    impl PartialEq<IpAddr> for ThisSledSwitchZoneUnderlayIpAddr {
         fn eq(&self, other: &IpAddr) -> bool {
             self.0.eq(other)
         }
     }
 
-    impl PartialEq<LocalSwitchZoneIpAddr> for IpAddr {
-        fn eq(&self, other: &LocalSwitchZoneIpAddr) -> bool {
+    impl PartialEq<ThisSledSwitchZoneUnderlayIpAddr> for IpAddr {
+        fn eq(&self, other: &ThisSledSwitchZoneUnderlayIpAddr) -> bool {
             self.eq(&other.0)
         }
     }
 
-    impl fmt::Display for LocalSwitchZoneIpAddr {
+    impl fmt::Display for ThisSledSwitchZoneUnderlayIpAddr {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             self.0.fmt(f)
         }

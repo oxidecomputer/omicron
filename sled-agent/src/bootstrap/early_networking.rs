@@ -4,7 +4,7 @@
 
 //! Network setup required to bring up the control plane
 
-use crate::sled_agent::LocalSwitchZoneIpAddr;
+use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
@@ -312,7 +312,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     pub(crate) async fn init_switch_config(
         &mut self,
         rack_network_config: &RackNetworkConfig,
-        switch_zone_underlay_ip: LocalSwitchZoneIpAddr,
+        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
         info!(
