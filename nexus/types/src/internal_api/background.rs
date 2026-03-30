@@ -902,11 +902,21 @@ pub struct SitrepGcStatus {
 pub struct FmAnalysisStatus {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub inv_collection_id: Option<CollectionUuid>,
+    pub prep: fm_analysis::PreparationStatus,
     pub outcome: fm_analysis::Outcome,
 }
 
 pub mod fm_analysis {
     use super::*;
+    use ereport_types::EreportId;
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct PreparationStatus {
+        pub errors: Vec<String>,
+        pub new_ereports: BTreeSet<EreportId>,
+        pub ereports_in_parent_sitrep_not_marked: usize,
+    }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub enum Outcome {
