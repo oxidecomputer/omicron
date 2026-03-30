@@ -12682,6 +12682,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "schema"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "nexus-db-model",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "semver 1.0.27",
+]
+
+[[package]]
 name = "schemars"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"

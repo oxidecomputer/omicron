@@ -59,7 +59,6 @@ use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
-use nexus_types::internal_api::background::FmAlertStats;
 use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -85,6 +84,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -1171,12 +1171,7 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
                 last.iteration,
                 reason_str(&last.reason)
             );
-            print!(
-                "    started at {} ({}s ago) and ran for {:.3}ms\n",
-                humantime::format_rfc3339_millis(last.start_time.into()),
-                (Utc::now() - last.start_time).num_seconds(),
-                std::time::Duration::from(last.elapsed.clone()).as_millis(),
-            );
+            print_run_time(last.start_time, last.elapsed.clone().into(), 4)
         }
     };
 
@@ -1186,6 +1181,16 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     if let LastResult::Completed(completed) = &bgtask.last {
         print_task_details(&bgtask, &completed.details);
     }
+}
+
+fn print_run_time(start_time: DateTime<Utc>, elapsed: Duration, indent: usize) {
+    print!(
+        "{:>indent$}started at {} ({}s ago) and ran for {:.3}ms\n",
+        "",
+        humantime::format_rfc3339_millis(start_time.into()),
+        (Utc::now() - start_time).num_seconds(),
+        elapsed.as_millis(),
+    );
 }
 
 /// Interprets the unstable, schemaless output from each particular background
@@ -3488,61 +3493,160 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
 }
 
 fn print_task_fm_rendezvous(details: &serde_json::Value) {
-    match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
-        Err(error) => {
-            eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            );
-            return;
+    fn print_op<T>(
+        name: impl std::fmt::Display,
+        op: &fm_rendezvous::OpStatus<T>,
+        print_details: impl Fn(&T),
+    ) {
+        println!("    {name}:");
+        match op.result {
+            fm_rendezvous::OpResult::Skipped => {
+                println!("(i)   note: this operation was not executed")
+            }
+            fm_rendezvous::OpResult::Executed { start, end } => {
+                if let Ok(elapsed) = start.signed_duration_since(end).to_std() {
+                    print_run_time(start, elapsed, 6);
+                } else {
+                    println!(
+                        "      started at: {} (end time {} less than start time, \
+                        which seems weird?)",
+                        humantime::format_rfc3339_millis(start.into()),
+                        humantime::format_rfc3339_millis(end.into()),
+                    );
+                }
+            }
         }
-        Ok(FmRendezvousStatus::NoSitrep) => {
-            println!("    no FM situation report loaded");
-        }
-        Ok(FmRendezvousStatus::Executed { sitrep_id, alerts }) => {
-            println!("    current sitrep: {sitrep_id}");
-            display_fm_alert_stats(&alerts);
-        }
-    }
-}
 
-fn display_fm_alert_stats(stats: &FmAlertStats) {
-    let FmAlertStats {
-        total_alerts_requested,
-        current_sitrep_alerts_requested,
-        alerts_created,
-        errors,
-    } = stats;
-    let already_created =
-        total_alerts_requested - alerts_created - errors.len();
-    pub const REQUESTED: &str = "alerts requested:";
-    pub const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
-    pub const CREATED: &str = "  created in this activation:";
-    pub const ALREADY_CREATED: &str = "  already created:";
-    pub const ERRORS: &str = "  errors:";
-    pub const WIDTH: usize = const_max_len(&[
-        REQUESTED,
-        REQUESTED_THIS_SITREP,
-        CREATED,
-        ALREADY_CREATED,
-        ERRORS,
-    ]) + 1;
-    pub const NUM_WIDTH: usize = 4;
-    println!("    {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}");
-    println!(
-        "    {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
-        current_sitrep_alerts_requested
-    );
-    println!("    {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
-    println!("    {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}");
-    println!(
-        "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
-        warn_if_nonzero(errors.len()),
-        errors.len()
-    );
-    for error in errors {
-        println!("      > {error}");
+        print_details(&op.details)
     }
+
+    let FmRendezvousStatus { sitrep_id, alerts, ereport_marking: marking } =
+        match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+    match sitrep_id {
+        Some(id) => println!("    current sitrep: {id}"),
+        None => println!(
+            "(i) no FM situation report loaded, so rendezvous was not \
+             performed",
+        ),
+    }
+    print_op(
+        "creating requested alerts",
+        &alerts,
+        |fm_rendezvous::AlertCreationStatus {
+             total_alerts_requested,
+             current_sitrep_alerts_requested,
+             alerts_created,
+             errors,
+         }| {
+            let already_created =
+                total_alerts_requested - alerts_created - errors.len();
+            const REQUESTED: &str = "alerts requested:";
+            const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+            const CREATED: &str = "  created in this activation:";
+            const ALREADY_CREATED: &str = "  already created:";
+            const ERRORS: &str = "  errors:";
+            const WIDTH: usize = const_max_len(&[
+                REQUESTED,
+                REQUESTED_THIS_SITREP,
+                CREATED,
+                ALREADY_CREATED,
+                ERRORS,
+            ]) + 1;
+            pub const NUM_WIDTH: usize = 4;
+            println!(
+                "      {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+                current_sitrep_alerts_requested
+            );
+            println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
+            println!(
+                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+            );
+            println!(
+                "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                warn_if_nonzero(errors.len()),
+                errors.len()
+            );
+            for error in errors {
+                println!("        > {error}");
+            }
+        },
+    );
+    print_op(
+        "marking ereports as seen",
+        &marking,
+        |fm_rendezvous::EreportMarkingStatus {
+             batch_size,
+             batches,
+             total_ereports_in_sitrep,
+             ereports_not_marked_in_sitrep,
+             ereports_marked_seen,
+             errors,
+         }| {
+            const IN_SITREP: &str = "total ereports in sitrep:";
+            const NOT_ALREADY_MARKED: &str =
+                "not marked when the sitrep was loaded:";
+            const MARKED_SEEN: &str = "  marked seen by this activation:";
+            const ALREADY_MARKED: &str = "  already marked seen:";
+            const BATCH_SIZE: &str = "batch size:";
+            const BATCHES: &str = "batches:";
+            const ERRORS: &str = "errors:";
+            const WIDTH: usize = const_max_len(&[
+                IN_SITREP,
+                NOT_ALREADY_MARKED,
+                MARKED_SEEN,
+                ALREADY_MARKED,
+                ERRORS,
+                BATCH_SIZE,
+                BATCHES,
+            ]) + 1;
+            pub const NUM_WIDTH: usize = 4;
+            println!(
+                "      {IN_SITREP:<WIDTH$}{total_ereports_in_sitrep:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {NOT_ALREADY_MARKED:<WIDTH$}{ereports_not_marked_in_sitrep:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {MARKED_SEEN:<WIDTH$}{ereports_marked_seen:>NUM_WIDTH$}"
+            );
+            // This subtraction really shouldn't underflow, since
+            // `ereports_marked_seen`, which is the sum of records
+            // updated by the queries marking ereports as seen, will
+            // always be less than or equal to
+            // `ereports_not_marked_in_sitrep` which is the number of
+            // ereport IDs passed as *inputs* to those queries. But,
+            // since OMDB needs to basically work even in the face of
+            // Nexus bugs, we'll saturate here instead of panicking,
+            // just in case.
+            let already_marked = ereports_not_marked_in_sitrep
+                .saturating_sub(*ereports_marked_seen);
+            println!(
+                "      {ALREADY_MARKED:<WIDTH$}{already_marked:>NUM_WIDTH$}"
+            );
+            println!("      {BATCH_SIZE:<WIDTH$}{batch_size:>NUM_WIDTH$}");
+            println!("      {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+            println!(
+                "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                warn_if_nonzero(errors.len()),
+                errors.len()
+            );
+            for error in errors {
+                println!("        > {error}");
+            }
+        },
+    );
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {

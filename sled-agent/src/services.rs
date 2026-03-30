@@ -30,7 +30,7 @@ use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
-use crate::sled_agent::LocalSwitchZoneIpAddr;
+use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
@@ -626,7 +626,7 @@ pub(crate) struct SledAgentInfo {
     pub(crate) port_manager: PortManager,
     pub(crate) resolver: Resolver,
     pub(crate) underlay_address: Ipv6Addr,
-    pub(crate) local_switch_zone_ip: LocalSwitchZoneIpAddr,
+    pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
     pub(crate) rack_id: Uuid,
     pub(crate) rack_network_config_rx: watch::Receiver<RackNetworkConfig>,
     pub(crate) metrics_queue: MetricsRequestQueue,
@@ -3363,7 +3363,7 @@ impl ServiceManager {
     // <https://github.com/oxidecomputer/omicron/issues/8970> for details.
     async fn ensure_switch_zone_uplinks_configured_loop(
         &self,
-        switch_zone_ip: LocalSwitchZoneIpAddr,
+        switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
         rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
@@ -3421,7 +3421,7 @@ impl ServiceManager {
     // uplinks from `rack_network_config` to assign.
     async fn ensure_switch_zone_uplinks_configured(
         &self,
-        switch_zone_ip: LocalSwitchZoneIpAddr,
+        switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
         rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
