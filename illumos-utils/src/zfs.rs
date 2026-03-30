@@ -1792,7 +1792,7 @@ impl Zfs {
                 // No need to set volblocksize for raw zvols: either the default
                 // record size will be used, or after stlouis#915 integrates an
                 // optimized allocation size will be automatically selected no
-                // matter what volblocksize is set (in this case, volblockset
+                // matter what volblocksize is set (in this case, volblocksize
                 // sets the minimum allowed record size).
                 name.to_string(),
             ],
