@@ -1122,17 +1122,41 @@ impl DatasetMountInfo {
 }
 
 /// Arguments to [Zfs::ensure_dataset_volume]
-pub struct DatasetVolumeEnsureArgs<'a> {
-    /// The full path of the volume
-    pub name: &'a str,
+pub enum DatasetVolumeEnsureArgs<'a> {
+    /// A raw zvol
+    Raw {
+        /// The full path of the volume
+        name: &'a str,
 
-    pub size: ByteCount,
+        size: ByteCount,
+    },
 
-    /// Create a raw zvol instead of a regular one
-    pub raw: bool,
+    /// A regular zvol
+    Regular {
+        /// The full path of the volume
+        name: &'a str,
 
-    /// Optionally set the volblocksize
-    pub volblocksize: Option<u32>,
+        size: ByteCount,
+
+        /// Optionally set the volblocksize
+        volblocksize: Option<u32>,
+    },
+}
+
+impl<'a> DatasetVolumeEnsureArgs<'a> {
+    pub fn name(&self) -> &'a str {
+        match &self {
+            DatasetVolumeEnsureArgs::Raw { name, .. }
+            | DatasetVolumeEnsureArgs::Regular { name, .. } => name,
+        }
+    }
+
+    pub fn size(&self) -> &ByteCount {
+        match &self {
+            DatasetVolumeEnsureArgs::Raw { size, .. }
+            | DatasetVolumeEnsureArgs::Regular { size, .. } => size,
+        }
+    }
 }
 
 /// Arguments to [Zfs::delete_dataset_volume]
@@ -1760,19 +1784,27 @@ impl Zfs {
         let cmd = command.args(&[ZFS, "create"]);
 
         let mut args: Vec<String> =
-            vec!["-V".to_string(), params.size.to_bytes().to_string()];
+            vec!["-V".to_string(), params.size().to_bytes().to_string()];
 
-        if params.raw {
-            args.push("-o".to_string());
-            args.push("rawvol=on".to_string());
+        match &params {
+            DatasetVolumeEnsureArgs::Raw { .. } => {
+                args.push("-o".to_string());
+                args.push("rawvol=on".to_string());
+
+                // No need to set volblocksize: either the default record size
+                // will be used, or (after stlouis#915 integrates) an optimized
+                // allocation size will be automatically selected.
+            }
+
+            DatasetVolumeEnsureArgs::Regular { volblocksize, .. } => {
+                if let Some(volblocksize) = &volblocksize {
+                    args.push("-o".to_string());
+                    args.push(format!("volblocksize={}", volblocksize));
+                }
+            }
         }
 
-        if let Some(volblocksize) = &params.volblocksize {
-            args.push("-o".to_string());
-            args.push(format!("volblocksize={}", volblocksize));
-        }
-
-        args.push(params.name.to_string());
+        args.push(params.name().to_string());
 
         cmd.args(&args);
 
@@ -1793,21 +1825,21 @@ impl Zfs {
                 // created.
 
                 let [actual_size, actual_volblocksize] = Self::get_values(
-                    params.name,
+                    params.name(),
                     &["volsize", "volblocksize"],
                     None,
                 )
                 .await
                 .map_err(|err| {
                     EnsureDatasetVolumeError::get_value(
-                        params.name.to_string(),
+                        params.name().to_string(),
                         err,
                     )
                 })?;
 
                 let actual_size: u64 = actual_size.parse().map_err(|_| {
                     EnsureDatasetVolumeError::value_parse(
-                        params.name.to_string(),
+                        params.name().to_string(),
                         String::from("volsize"),
                         actual_size,
                     )
@@ -1816,168 +1848,190 @@ impl Zfs {
                 let actual_volblocksize: u32 =
                     actual_volblocksize.parse().map_err(|_| {
                         EnsureDatasetVolumeError::value_parse(
-                            params.name.to_string(),
+                            params.name().to_string(),
                             String::from("volblocksize"),
                             actual_volblocksize,
                         )
                     })?;
 
-                if actual_size != params.size.to_bytes() {
+                if actual_size != params.size().to_bytes() {
                     return Err(EnsureDatasetVolumeError::value_mismatch(
-                        params.name.to_string(),
+                        params.name().to_string(),
                         String::from("volsize"),
-                        params.size.to_bytes(),
+                        params.size().to_bytes(),
                         actual_size,
                     ));
                 }
 
-                if let Some(volblocksize) = &params.volblocksize {
-                    if actual_volblocksize != *volblocksize {
-                        return Err(EnsureDatasetVolumeError::value_mismatch(
-                            params.name.to_string(),
-                            String::from("volblocksize"),
-                            u64::from(*volblocksize),
-                            u64::from(actual_volblocksize),
-                        ));
+                match &params {
+                    DatasetVolumeEnsureArgs::Regular {
+                        volblocksize, ..
+                    } => {
+                        if let Some(volblocksize) = &volblocksize {
+                            if actual_volblocksize != *volblocksize {
+                                return Err(
+                                    EnsureDatasetVolumeError::value_mismatch(
+                                        params.name().to_string(),
+                                        String::from("volblocksize"),
+                                        u64::from(*volblocksize),
+                                        u64::from(actual_volblocksize),
+                                    ),
+                                );
+                            }
+                        }
                     }
+
+                    DatasetVolumeEnsureArgs::Raw { .. } => {}
                 }
             }
 
             Err(err) => {
                 return Err(EnsureDatasetVolumeError::execution(
-                    params.name.to_string(),
+                    params.name().to_string(),
                     err,
                 ));
             }
         }
 
-        if params.raw {
-            let path = format!("/dev/zvol/rdsk/{}", params.name);
+        match &params {
+            DatasetVolumeEnsureArgs::Regular { .. } => {}
 
-            let fd = rustix::fs::open(
-                path,
-                rustix::fs::OFlags::RDONLY,
-                rustix::fs::Mode::empty(),
-            )
-            .map_err(|e| {
-                EnsureDatasetVolumeError::from_rustix_errno(
-                    params.name.to_string(),
-                    e,
+            DatasetVolumeEnsureArgs::Raw { name, .. } => {
+                let path = format!("/dev/zvol/rdsk/{}", name);
+
+                let fd = rustix::fs::open(
+                    path,
+                    rustix::fs::OFlags::RDONLY,
+                    rustix::fs::Mode::empty(),
                 )
-            })?;
-
-            // Raw zvols error for arbitrarily sized reads, so read the first 4k
-            let mut buf = [0u8; 4096];
-            match rustix::io::read(&fd, &mut buf) {
-                Ok(_) => {
-                    // Done initializing
-                    return Ok(());
-                }
-
-                Err(rustix::io::Errno::INPROGRESS) => {
-                    // The zero initialization thread is still running, fall
-                    // through to check the status ioctl.
-                }
-
-                Err(e) => {
-                    // Any other error should be bubbled up
-                    return Err(EnsureDatasetVolumeError::from_rustix_errno(
-                        params.name.to_string(),
+                .map_err(|e| {
+                    EnsureDatasetVolumeError::from_rustix_errno(
+                        name.to_string(),
                         e,
-                    ));
-                }
-            }
-
-            // Check the values from the status ioctl. We have to wait until the
-            // zero initialization thread is complete before the vol can be
-            // used.
-            let mut status = dk_rawvol_status::default();
-
-            // Retry if EINTR is seen
-            for i in 0..2 {
-                // Safety: We are issuing the `DKIOCRAWVOLSTATUS` ioctl which is
-                // documented to take a struct of type `dk_rawvol_status`. Assuming
-                // our type definitions are correct, this call is safe.
-                if unsafe {
-                    libc::ioctl(
-                        fd.as_raw_fd(),
-                        DKIOCRAWVOLSTATUS as _,
-                        &mut status,
                     )
-                } == -1
-                {
-                    let err = std::io::Error::last_os_error();
-                    match err.raw_os_error().unwrap() {
-                        libc::ENOTSUP => {
-                            // ENOTSUP is returned when this ioctl is issued against
-                            // a non-raw zvol
-                            return Err(
-                                EnsureDatasetVolumeError::not_a_raw_zvol(
-                                    params.name.to_string(),
-                                ),
-                            );
-                        }
+                })?;
 
-                        libc::EINTR if i == 0 => {
-                            // Retry once if EINTR is seen
-                            continue;
-                        }
+                // Raw zvols error for arbitrarily sized reads, so read the
+                // first 4k
+                let mut buf = [0u8; 4096];
+                match rustix::io::read(&fd, &mut buf) {
+                    Ok(_) => {
+                        // Done initializing
+                        return Ok(());
+                    }
 
-                        e => {
-                            // Unexpected error, return up the stack
-                            return Err(
-                                EnsureDatasetVolumeError::getting_status(
-                                    params.name.to_string(),
-                                    e,
-                                ),
-                            );
+                    Err(rustix::io::Errno::INPROGRESS) => {
+                        // The zero initialization thread is still running, fall
+                        // through to check the status ioctl.
+                    }
+
+                    Err(e) => {
+                        // Any other error should be bubbled up
+                        return Err(
+                            EnsureDatasetVolumeError::from_rustix_errno(
+                                name.to_string(),
+                                e,
+                            ),
+                        );
+                    }
+                }
+
+                // Check the values from the status ioctl. We have to wait until
+                // the zero initialization thread is complete before the vol can
+                // be used.
+                let mut status = dk_rawvol_status::default();
+
+                // Retry if EINTR is seen
+                for i in 0..2 {
+                    // Safety: We are issuing the `DKIOCRAWVOLSTATUS` ioctl
+                    // which is documented to take a struct of type
+                    // `dk_rawvol_status`. Assuming our type definitions are
+                    // correct, this call is safe.
+                    if unsafe {
+                        libc::ioctl(
+                            fd.as_raw_fd(),
+                            DKIOCRAWVOLSTATUS as _,
+                            &mut status,
+                        )
+                    } == -1
+                    {
+                        let err = std::io::Error::last_os_error();
+                        match err.raw_os_error().unwrap() {
+                            libc::ENOTSUP => {
+                                // ENOTSUP is returned when this ioctl is issued
+                                // against a non-raw zvol
+                                return Err(
+                                    EnsureDatasetVolumeError::not_a_raw_zvol(
+                                        name.to_string(),
+                                    ),
+                                );
+                            }
+
+                            libc::EINTR if i == 0 => {
+                                // Retry once if EINTR is seen
+                                continue;
+                            }
+
+                            e => {
+                                // Unexpected error, return up the stack
+                                return Err(
+                                    EnsureDatasetVolumeError::getting_status(
+                                        name.to_string(),
+                                        e,
+                                    ),
+                                );
+                            }
                         }
                     }
                 }
-            }
 
-            match status.drs_status {
-                0 => {
-                    // The zero init thread was not running - because we saw
-                    // EINPROGRESS before from the read, and now see 0, that
-                    // means it finished in the time between the read and that
-                    // ioctl.
-                    return Ok(());
-                }
+                match status.drs_status {
+                    0 => {
+                        // The zero init thread was not running - because we saw
+                        // EINPROGRESS before from the read, and now see 0, that
+                        // means it finished in the time between the read and
+                        // that ioctl.
+                        return Ok(());
+                    }
 
-                libc::EINTR => {
-                    // The zero init thread was running but was interrupted.
-                    return Err(
-                        EnsureDatasetVolumeError::allocation_interrupted(
-                            params.name.to_string(),
-                        ),
-                    );
-                }
+                    libc::EINTR => {
+                        // The zero init thread was running but was interrupted.
+                        return Err(
+                            EnsureDatasetVolumeError::allocation_interrupted(
+                                name.to_string(),
+                            ),
+                        );
+                    }
 
-                libc::EINPROGRESS => {
-                    // The zero init thread is currently running
-                    return Err(EnsureDatasetVolumeError::still_initializing(
-                        params.name.to_string(),
-                    ));
-                }
+                    libc::EINPROGRESS => {
+                        // The zero init thread is currently running
+                        return Err(
+                            EnsureDatasetVolumeError::still_initializing(
+                                name.to_string(),
+                            ),
+                        );
+                    }
 
-                // usr/src/uts/common/fs/zfs/sys/zio.h defines EFRAGS == EBADR
-                #[cfg(target_os = "illumos")]
-                libc::EBADR => {
-                    // EFRAGS means the zero init thread encountered an error
-                    // allocating a record. This is fatal! The pool is too
-                    // fragmented to continue.
-                    return Err(EnsureDatasetVolumeError::too_fragmented(
-                        params.name.to_string(),
-                    ));
-                }
+                    // common/fs/zfs/sys/zio.h defines EFRAGS == EBADR
+                    #[cfg(target_os = "illumos")]
+                    libc::EBADR => {
+                        // EFRAGS means the zero init thread encountered an
+                        // error allocating a record. This is fatal! The pool is
+                        // too fragmented to continue.
+                        return Err(EnsureDatasetVolumeError::too_fragmented(
+                            name.to_string(),
+                        ));
+                    }
 
-                e => {
-                    // Any other error should be bubbled up
-                    return Err(EnsureDatasetVolumeError::allocation_error(
-                        params.name.to_string(),
-                        e,
-                    ));
+                    e => {
+                        // Any other error should be bubbled up
+                        return Err(
+                            EnsureDatasetVolumeError::allocation_error(
+                                name.to_string(),
+                                e,
+                            ),
+                        );
+                    }
                 }
             }
         }
