@@ -7,7 +7,9 @@
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
+use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::KNOWN_VERSIONS;
+use nexus_db_model::parse_base_schema_version;
 use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
@@ -45,23 +47,36 @@ fn main() -> Result<()> {
 }
 
 fn find_workspace_root() -> Result<Utf8PathBuf> {
-    let current_dir =
-        std::env::current_dir().context("Failed to get current directory")?;
-    let current_dir = Utf8PathBuf::try_from(current_dir)
-        .context("Current directory path is not valid UTF-8")?;
-
-    current_dir
-        .ancestors()
-        .find(|p| p.join("Cargo.toml").exists() && p.join(".git").exists())
+    let cargo = std::env::var("CARGO");
+    let cargo = cargo.as_deref().unwrap_or("cargo");
+    let output = std::process::Command::new(cargo)
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format")
+        .arg("plain")
+        .output()
+        .context("Failed to run `cargo locate-project --workspace`")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "cargo locate-project failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let manifest_path = Utf8PathBuf::from(
+        String::from_utf8(output.stdout)
+            .context("cargo locate-project output is not UTF-8")?
+            .trim(),
+    );
+    manifest_path
+        .parent()
         .map(|p| p.to_path_buf())
-        .ok_or_else(|| anyhow::anyhow!("Could not find workspace root"))
+        .ok_or_else(|| anyhow::anyhow!("workspace manifest has no parent"))
 }
 
 fn get_schema_version_from_commit(
     workspace_root: &Utf8Path,
     commit_hash: &str,
-) -> Result<Option<semver::Version>> {
-    // Try the new location first (schema_versions.rs)
+) -> Result<semver::Version> {
     let show_output = Command::new("git")
         .current_dir(workspace_root)
         .args([
@@ -82,29 +97,30 @@ fn get_schema_version_from_commit(
         if line.contains("pub const SCHEMA_VERSION")
             && line.contains("Version::new(")
         {
-            let version_part = line.split("Version::new(").nth(1);
-
-            if let Some(version_part) = version_part {
-                if let Some(version_nums) = version_part.split(')').next() {
-                    let parts: Vec<&str> = version_nums.split(',').collect();
-                    if parts.len() >= 3 {
-                        if let (Ok(major), Ok(minor), Ok(patch)) = (
-                            parts[0].trim().parse::<u64>(),
-                            parts[1].trim().parse::<u64>(),
-                            parts[2].trim().parse::<u64>(),
-                        ) {
-                            return Ok(Some(semver::Version::new(
-                                major, minor, patch,
-                            )));
-                        }
-                    }
-                }
-            }
-            break;
+            let version_part = line
+                .split("Version::new(")
+                .nth(1)
+                .context("malformed SCHEMA_VERSION line")?;
+            let version_nums = version_part
+                .split(')')
+                .next()
+                .context("malformed SCHEMA_VERSION line")?;
+            let parts: Vec<&str> = version_nums.split(',').collect();
+            anyhow::ensure!(
+                parts.len() >= 3,
+                "expected at least 3 version components in SCHEMA_VERSION"
+            );
+            let major = parts[0].trim().parse::<u64>()?;
+            let minor = parts[1].trim().parse::<u64>()?;
+            let patch = parts[2].trim().parse::<u64>()?;
+            return Ok(semver::Version::new(major, minor, patch));
         }
     }
 
-    Ok(None)
+    anyhow::bail!(
+        "Could not find SCHEMA_VERSION in schema_versions.rs at commit {}",
+        commit_hash
+    )
 }
 
 fn get_dbinit_from_commit(
@@ -139,13 +155,7 @@ fn generate_base_schema(commit_or_tag: &str) -> Result<()> {
 
     // Get the schema version from that commit to include in the header
     let schema_version =
-        get_schema_version_from_commit(&workspace_root, &commit_hash)?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine schema version from commit {}",
-                    commit_hash
-                )
-            })?;
+        get_schema_version_from_commit(&workspace_root, &commit_hash)?;
 
     // Create the base schema directory
     let base_schema_dir = workspace_root.join("schema/crdb");
@@ -196,6 +206,15 @@ fn manage_old_migrations(remove: bool) -> Result<()> {
 
     let base_version = parse_base_schema_version(&base_content)?;
     println!("Base schema version: {}", base_version);
+
+    if EARLIEST_SUPPORTED_VERSION != base_version {
+        anyhow::bail!(
+            "EARLIEST_SUPPORTED_VERSION ({}) does not match base schema version ({}). \
+             Update EARLIEST_SUPPORTED_VERSION in nexus/db-model/src/schema_versions.rs.",
+            EARLIEST_SUPPORTED_VERSION,
+            base_version,
+        );
+    }
 
     // Find all migrations that are older than the base version (from KNOWN_VERSIONS)
     let mut old_migrations = Vec::new();
@@ -262,9 +281,6 @@ fn manage_old_migrations(remove: bool) -> Result<()> {
                 "  - Delete the orphaned directories (use --remove flag to do this automatically)"
             );
         }
-        println!(
-            "  - Update EARLIEST_SUPPORTED_VERSION in schema_versions.rs if needed"
-        );
         println!("  - Run tests to ensure everything still works");
 
         anyhow::bail!("Old migration artifacts still exist");
@@ -367,21 +383,4 @@ fn resolve_commit_or_tag(
     let commit_hash = String::from_utf8(output.stdout)?.trim().to_string();
 
     Ok(commit_hash)
-}
-
-fn parse_base_schema_version(content: &str) -> Result<semver::Version> {
-    for line in content.lines() {
-        if line.starts_with("-- Schema version:") {
-            let version_str = line
-                .strip_prefix("-- Schema version:")
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Invalid schema version line format")
-                })?
-                .trim();
-            return semver::Version::parse(version_str).with_context(|| {
-                format!("Failed to parse schema version: {}", version_str)
-            });
-        }
-    }
-    anyhow::bail!("Could not find schema version in base file header")
 }

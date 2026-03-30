@@ -259,6 +259,7 @@ async fn cmd_db_ereport_info(
     const SLED_ID: &str = "  sled ID";
     const PART_NUMBER: &str = "  part number";
     const SERIAL_NUMBER: &str = "  serial number";
+    const MARKED_SEEN_IN: &str = "marked seen in sitrep";
     const WIDTH: usize = const_max_len(&[
         CLASS,
         TIME_COLLECTED,
@@ -268,6 +269,7 @@ async fn cmd_db_ereport_info(
         SLED_ID,
         PART_NUMBER,
         SERIAL_NUMBER,
+        MARKED_SEEN_IN,
     ]);
     let db::model::Ereport {
         ena: DbEna(ena),
@@ -280,6 +282,7 @@ async fn cmd_db_ereport_info(
         ref class,
         ref report,
         reporter,
+        marked_seen_in,
     } = ereport;
     println!("\n{:=<80}", "== EREPORT METADATA ");
     println!("    {ENA:>WIDTH$}: {ena}");
@@ -319,6 +322,7 @@ async fn cmd_db_ereport_info(
         "    {SERIAL_NUMBER:>WIDTH$}: {}",
         serial_number.as_deref().unwrap_or("<unknown>")
     );
+    println!("    {MARKED_SEEN_IN:>WIDTH$}: {marked_seen_in:?}",);
 
     println!("\n{:=<80}", "== EREPORT ");
     serde_json::to_writer_pretty(std::io::stdout(), &report)

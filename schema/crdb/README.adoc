@@ -146,7 +146,7 @@ Three things must stay in sync:
 ==== Updating the baseline after a release
 
 After each Omicron release, update the baseline to match the previous release.
-The "baseline" will become the new "earlist supported CockroachDB schema version",
+The "baseline" will become the new "earliest supported CockroachDB schema version",
 so it will limit the scope of backwards compatibility.
 
 . Generate the new base file from the release tag

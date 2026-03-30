@@ -905,21 +905,7 @@ fn get_base_schema_version() -> Result<semver::Version, anyhow::Error> {
         format!("Failed to read base schema file: {:?}", base_file)
     })?;
 
-    // Parse the base schema version from the header
-    for line in content.lines() {
-        if line.starts_with("-- Schema version:") {
-            let version_str = line
-                .strip_prefix("-- Schema version:")
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Invalid schema version line format")
-                })?
-                .trim();
-            return semver::Version::parse(version_str).with_context(|| {
-                format!("Failed to parse base schema version: {}", version_str)
-            });
-        }
-    }
-    anyhow::bail!("Could not find schema version in base file header")
+    nexus_db_model::parse_base_schema_version(&content)
 }
 
 // Load the base dbinit.sql for migration testing
