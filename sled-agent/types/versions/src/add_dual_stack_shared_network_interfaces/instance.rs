@@ -2,14 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
+use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
@@ -22,6 +23,49 @@ use crate::v7::instance::InstanceMulticastMembership;
 use crate::v9::instance::DelegatedZvol;
 
 use crate::v9;
+
+/// The protocols that may be specified in a firewall rule's filter.
+//
+// This is the version of the enum without `Icmp6`, for versions up through
+// `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+pub enum VpcFirewallRuleProtocol {
+    Tcp,
+    Udp,
+    Icmp(Option<external::VpcFirewallIcmpFilter>),
+}
+
+impl From<crate::v1::instance::VpcFirewallRuleProtocol>
+    for VpcFirewallRuleProtocol
+{
+    fn from(v1: crate::v1::instance::VpcFirewallRuleProtocol) -> Self {
+        match v1 {
+            crate::v1::instance::VpcFirewallRuleProtocol::Tcp => Self::Tcp,
+            crate::v1::instance::VpcFirewallRuleProtocol::Udp => Self::Udp,
+            crate::v1::instance::VpcFirewallRuleProtocol::Icmp(f) => {
+                Self::Icmp(f)
+            }
+        }
+    }
+}
+
+/// VPC firewall rule after object name resolution has been performed by Nexus.
+//
+// This is the version of the struct without `Icmp6` in the protocol filter,
+// for versions up through `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct ResolvedVpcFirewallRule {
+    pub status: external::VpcFirewallRuleStatus,
+    pub direction: external::VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    pub filter_hosts: Option<HashSet<HostIdentifier>>,
+    pub filter_ports: Option<Vec<external::L4PortRange>>,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+    pub action: external::VpcFirewallRuleAction,
+    pub priority: external::VpcFirewallRulePriority,
+}
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
@@ -138,7 +182,9 @@ impl TryFrom<crate::v1::instance::ResolvedVpcFirewallRule>
                 .collect::<Result<_, _>>()?,
             filter_hosts: v1.filter_hosts,
             filter_ports: v1.filter_ports,
-            filter_protocols: v1.filter_protocols,
+            filter_protocols: v1.filter_protocols.map(|ps| {
+                ps.into_iter().map(VpcFirewallRuleProtocol::from).collect()
+            }),
             action: v1.action,
             priority: v1.priority,
         })

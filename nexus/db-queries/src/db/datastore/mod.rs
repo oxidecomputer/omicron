@@ -3,6 +3,28 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Primary control plane interface for database read and write operations
+//!
+//! ## Method naming conventions
+//!
+//! Almost all database queries in this crate are defined as methods on
+//! [`DataStore`], so everything is called as `datastore.method()` rather than
+//! being namespaced in a module. Because of this, methods follow a naming
+//! convention with the resource/object name _first_, followed by the verb:
+//! `disk_list` rather than `list_disks`, `instance_fetch` rather than
+//! `fetch_instance`, and so on. This reads less like natural English but makes
+//! it easy to find all operations on a given resource by searching for the
+//! prefix.
+//!
+//! Many methods also have a public entry point that acquires a database
+//! connection from the pool, paired with a private `_on_conn` (or
+//! `_on_connection`) helper that takes an explicit connection parameter. The
+//! helper exists so that multiple queries can share the same connection without
+//! re-acquiring one from the pool for each step of a multi-query operation.
+//!
+//! A related convention is `_in_txn` (or `_in_transaction`), for helpers that
+//! run inside an explicit database transaction. These typically take an
+//! [`OptionalError`](nexus_db_errors::OptionalError) so they can bail
+//! out of the entire transaction on application-level errors.
 
 // TODO-scalability review all queries for use of indexes (may need
 // "time_deleted IS NOT NULL" conditions) Figure out how to automate this.
@@ -658,7 +680,6 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::StreamExt;
     use futures::stream;
-    use illumos_utils::zpool::ZpoolHealth;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_lookup::LookupPath;
@@ -683,6 +704,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};

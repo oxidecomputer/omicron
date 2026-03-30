@@ -256,16 +256,20 @@ async fn cmd_db_ereport_info(
     const CLASS: &str = "class";
     const REPORTER: &str = "reported by";
     const RESTART_ID: &str = "restart ID";
+    const SLED_ID: &str = "  sled ID";
     const PART_NUMBER: &str = "  part number";
     const SERIAL_NUMBER: &str = "  serial number";
+    const MARKED_SEEN_IN: &str = "marked seen in sitrep";
     const WIDTH: usize = const_max_len(&[
         CLASS,
         TIME_COLLECTED,
         TIME_DELETED,
         COLLECTOR_ID,
         REPORTER,
+        SLED_ID,
         PART_NUMBER,
         SERIAL_NUMBER,
+        MARKED_SEEN_IN,
     ]);
     let db::model::Ereport {
         ena: DbEna(ena),
@@ -278,6 +282,7 @@ async fn cmd_db_ereport_info(
         ref class,
         ref report,
         reporter,
+        marked_seen_in,
     } = ereport;
     println!("\n{:=<80}", "== EREPORT METADATA ");
     println!("    {ENA:>WIDTH$}: {ena}");
@@ -297,8 +302,15 @@ async fn cmd_db_ereport_info(
                 "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} (service processor)"
             )
         }
-        Ok(Reporter::HostOs { sled }) => {
-            println!("    {REPORTER:>WIDTH$}: sled {sled:?} (host OS)");
+        Ok(Reporter::HostOs { sled, slot }) => {
+            if let Some(slot) = slot {
+                println!("    {REPORTER:>WIDTH$}: sled {slot} (host OS)");
+            } else {
+                println!(
+                    "    {REPORTER:>WIDTH$}: <unknown sled slot> (host OS)"
+                );
+            }
+            println!("    {SLED_ID:>WIDTH$}: {sled:?}")
         }
     }
     println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
@@ -310,6 +322,7 @@ async fn cmd_db_ereport_info(
         "    {SERIAL_NUMBER:>WIDTH$}: {}",
         serial_number.as_deref().unwrap_or("<unknown>")
     );
+    println!("    {MARKED_SEEN_IN:>WIDTH$}: {marked_seen_in:?}",);
 
     println!("\n{:=<80}", "== EREPORT ");
     serde_json::to_writer_pretty(std::io::stdout(), &report)
@@ -361,8 +374,8 @@ async fn cmd_db_ereporters(
                     dsl::restart_id,
                     dsl::reporter,
                     dsl::sled_id,
-                    dsl::sp_slot,
-                    dsl::sp_type,
+                    dsl::slot_type,
+                    dsl::slot,
                     dsl::serial_number,
                     dsl::part_number
                 ))
@@ -379,7 +392,7 @@ async fn cmd_db_ereporters(
             if let Some(slot) = slot {
                 if slot_type.is_some() {
                     query = query
-                        .filter(dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
+                        .filter(dsl::slot.eq(db::model::SqlU16::new(slot)));
                 } else {
                     anyhow::bail!(
                         "cannot filter reporters by slot without a value for `--type`"
@@ -389,7 +402,7 @@ async fn cmd_db_ereporters(
 
             if let Some(slot_type) = slot_type {
                 query = query
-                    .filter(dsl::sp_type.eq(slot_type));
+                    .filter(dsl::slot_type.eq(slot_type));
             }
 
             if let Some(serial) = serial {

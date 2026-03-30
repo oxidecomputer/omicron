@@ -38,6 +38,14 @@ pub struct OxqlArgs {
     /// Print the total elapsed query duration.
     #[clap(long = "elapsed")]
     print_elapsed: bool,
+
+    /// Execute the query and exit.
+    #[clap(long, short, value_name = "QUERY")]
+    execute: Option<String>,
+
+    /// The format for printing the result of queries.
+    #[clap(short = 'f', default_value_t = Default::default())]
+    output_format: oxql::OutputFormat,
 }
 
 impl OxqlArgs {
@@ -52,15 +60,27 @@ impl OxqlArgs {
         let opts = ShellOptions {
             print_summaries: self.print_summaries,
             print_elapsed: self.print_elapsed,
+            output_format: self.output_format,
         };
 
-        oxql::shell(
-            native_addr.ip(),
-            native_addr.port(),
-            log.new(slog::o!("component" => "clickhouse-client")),
-            opts,
-        )
-        .await
+        if let Some(query) = &self.execute {
+            oxql::exec_query(
+                native_addr.ip(),
+                native_addr.port(),
+                log.new(slog::o!("component" => "clickhouse-client")),
+                opts,
+                query.to_owned(),
+            )
+            .await
+        } else {
+            oxql::shell(
+                native_addr.ip(),
+                native_addr.port(),
+                log.new(slog::o!("component" => "clickhouse-client")),
+                opts,
+            )
+            .await
+        }
     }
 
     /// Resolve the ClickHouse native TCP socket address.

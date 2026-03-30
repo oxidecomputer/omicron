@@ -56,14 +56,17 @@ use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
@@ -468,7 +471,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
                 // calculate and apply switch zone SMF changes
                 //
-                let uplinks = uplinks(&changes);
+                let uplinks = uplinks(&changes, &log);
 
                 // yeet the messages
                 for (switch_slot, config) in &uplinks {
@@ -1097,6 +1100,34 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 log,
                                 "failed to convert database peer configs to \
                                  API peer configs";
+                                "switch_slot" => ?switch_slot,
+                                "port" => &port.port_name.to_string(),
+                                InlineErrorChain::new(&err),
+                            );
+                            continue;
+                        }
+                    };
+
+                    let addresses = match info
+                        .addresses
+                        .iter()
+                        .map(|a| {
+                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
+                             Ok(UplinkAddressConfig {
+                                 address,
+                                 vlan_id: a.vlan_id
+                             })
+                        })
+                        .collect::<Result<_, InvalidIpAddrError>>()
+                    {
+                        Ok(addresses) => addresses,
+                        Err(err) => {
+                            error!(
+                                log,
+                                "failed to convert database uplink addresses \
+                                 to API uplink addresses";
+                                "switch_slot" => ?switch_slot,
+                                "port" => &port.port_name.to_string(),
                                 InlineErrorChain::new(&err),
                             );
                             continue;
@@ -1104,15 +1135,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let mut port_config = PortConfig {
-                        addresses: info
-                            .addresses
-                            .iter()
-                            .map(|a|
-                                 UplinkAddressConfig {
-                                     address: if a.address.addr().is_unspecified() {None} else {Some(a.address)},
-                                     vlan_id: a.vlan_id
-                                 }
-                            ).collect(),
+                        addresses,
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1162,11 +1185,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
-                        // For unnumbered peers (addr is UNSPECIFIED), pass None
-                        let peer_addr_for_lookup = if peer.addr.is_unspecified() {
-                            None
-                        } else {
-                            Some(peer.addr)
+                        // For unnumbered peers, pass None
+                        //
+                        // TODO-cleanup Push `RouterPeerAddress` down to all the
+                        // datastore methods below instead of an `Option`.
+                        let peer_addr_for_lookup = match peer.addr {
+                            RouterPeerType::Unnumbered { .. } => None,
+                            RouterPeerType::Numbered { ip } => {
+                                Some(IpAddr::from(ip))
+                            }
                         };
 
                         peer.communities = match self
@@ -1679,6 +1706,7 @@ async fn switch_loopback_addresses(
 
 fn uplinks(
     changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
+    log: &slog::Logger,
 ) -> HashMap<SwitchSlot, Vec<HostPortConfig>> {
     let mut uplinks: HashMap<SwitchSlot, Vec<HostPortConfig>> = HashMap::new();
     for (switch_slot, port, change) in changes {
@@ -1720,20 +1748,35 @@ fn uplinks(
             None
         };
 
+        let addrs = match config
+            .addresses
+            .iter()
+            .map(|a| {
+                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
+                 Ok(UplinkAddressConfig {
+                     address,
+                     vlan_id: a.vlan_id
+                 })
+            })
+            .collect::<Result<_, InvalidIpAddrError>>()
+        {
+            Ok(addresses) => addresses,
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to convert database uplink addresses to \
+                     API uplink addresses";
+                    "switch_slot" => ?switch_slot,
+                    "port" => &port.port_name.to_string(),
+                    InlineErrorChain::new(&err),
+                );
+                continue;
+            }
+        };
+
         let config = HostPortConfig {
             port: port.port_name.to_string(),
-            addrs: config
-                .addresses
-                .iter()
-                .map(|a| UplinkAddressConfig {
-                    address: if a.address.addr().is_unspecified() {
-                        None
-                    } else {
-                        Some(a.address)
-                    },
-                    vlan_id: a.vlan_id,
-                })
-                .collect(),
+            addrs,
             lldp,
             tx_eq,
         };

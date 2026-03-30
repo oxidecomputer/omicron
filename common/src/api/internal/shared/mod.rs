@@ -39,7 +39,6 @@ pub use network_interface::*;
 
 // Re-export latest version of the external IP types.
 pub use external_ip::ExternalIpConfig;
-pub use external_ip::ExternalIpConfigBuilder;
 pub use external_ip::ExternalIps;
 pub use external_ip::ExternalIpv4Config;
 pub use external_ip::ExternalIpv6Config;

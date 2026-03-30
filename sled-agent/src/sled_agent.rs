@@ -54,9 +54,6 @@ use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcFirewallRule, ResolvedVpcRouteSet,
     ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
 };
-use omicron_common::backoff::{
-    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
-};
 use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
@@ -404,7 +401,7 @@ struct SledAgentInner {
     // A handle to the RoT for attestation requests.
     rot_attestor: RotAttestationHandle,
 
-    // The rack network config provided at RSS time.
+    // The current rack network config from the replicated bootstore.
     rack_network_config: RackNetworkConfig,
 
     // Object managing zone bundles.
@@ -627,49 +624,49 @@ impl SledAgent {
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
         // correctly set up services.
-        let get_network_config = || async {
-            let serialized_config = long_running_task_handles
-                .bootstore
-                .get_network_config()
-                .await
-                .map_err(|err| {
-                    BackoffError::transient(
-                        InlineErrorChain::new(&err).to_string(),
-                    )
-                })?
-                .ok_or_else(|| {
-                    BackoffError::transient(
-                        "Missing early network config in bootstore".to_string(),
-                    )
-                })?;
+        let mut bootstore_network_config_rx =
+            long_running_task_handles.bootstore.network_config_subscribe();
+        let rack_network_config = loop {
+            let maybe_serialized_config =
+                bootstore_network_config_rx.borrow_and_update().clone();
 
-            let early_network_config =
-                EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
-                    &serialized_config,
-                )
-                .and_then(|envelope| envelope.deserialize_body())
-                .map_err(|err| BackoffError::transient(err.to_string()))?;
+            // If we don't have a network config at all yet, wait until the
+            // watch channel changes then try again.
+            let Some(serialized_config) = maybe_serialized_config else {
+                warn!(log, "Waiting for early network config from bootstore");
+                bootstore_network_config_rx
+                    .changed()
+                    .await
+                    .expect("bootstore task never exits");
+                continue;
+            };
 
-            Ok(early_network_config.rack_network_config)
-        };
-        let rack_network_config: RackNetworkConfig =
-            retry_notify::<_, String, _, _, _, _>(
-                retry_policy_internal_service_aggressive(),
-                get_network_config,
-                |error, delay| {
+            // We _should_ always be able to deserialize the raw config from the
+            // bootstore, but if we can't, log an error and wait for it to
+            // change; an operator may be able to fix it and push new contents.
+            match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+                &serialized_config,
+            )
+            .and_then(|envelope| envelope.deserialize_body())
+            {
+                Ok(early_network_config) => {
+                    break early_network_config.rack_network_config;
+                }
+                Err(err) => {
                     warn!(
                         log,
-                        "failed to get network config from bootstore";
-                        "error" => ?error,
-                        "retry_after" => ?delay,
+                        "failed to deserialize network config from bootstore; \
+                         will wait for new config then try again";
+                        InlineErrorChain::new(&err),
                     );
-                },
-            )
-            .await
-            .expect(
-                "Expected an infinite retry loop getting \
-                 network config from bootstore",
-            );
+                    bootstore_network_config_rx
+                        .changed()
+                        .await
+                        .expect("bootstore task never exits");
+                    continue;
+                }
+            };
+        };
 
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
@@ -1506,6 +1503,25 @@ impl SledAgent {
 
             DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
         };
+
+        // If you have a parent dataset that has a reservation, and a child
+        // dataset has a bunch of data, you can run into an out-of-space issue
+        // when deleting the child dataset if the pool is nearly full: when you
+        // delete the child dataset, it moves into a "to be deleted" area in the
+        // background, but the space is still used by the child (this amount can
+        // be accessed by querying for the `freeing` property of the pool).
+        //
+        // This, combined with a parent dataset that has a reservation, causes
+        // the amount of free space in the pool to go down, so before deleting
+        // the volume, remove the reservation set for the parent dataset if one
+        // exists.
+
+        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        // Then proceed with deleting the child volume dataset, then the parent
+        // dataset
 
         Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
             name: &delegated_zvol.volume_name(),

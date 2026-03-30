@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,9 +23,15 @@ pub struct Ereport {
     pub data: EreportData,
     #[serde(flatten)]
     pub reporter: Reporter,
+
+    pub marked_seen_in: Option<SitrepUuid>,
 }
 
 impl Ereport {
+    pub fn new(data: EreportData, reporter: Reporter) -> Self {
+        Self { data, reporter, marked_seen_in: None }
+    }
+
     pub fn id(&self) -> &EreportId {
         &self.data.id
     }
@@ -160,7 +167,7 @@ impl EreportData {
 #[serde(tag = "reporter")]
 pub enum Reporter {
     Sp { sp_type: SpType, slot: u16 },
-    HostOs { sled: SledUuid },
+    HostOs { sled: SledUuid, slot: Option<u16> },
 }
 
 impl fmt::Display for Reporter {
@@ -171,8 +178,11 @@ impl fmt::Display for Reporter {
             Self::Sp { sp_type: sp_type @ SpType::Sled, slot } => {
                 write!(f, "{sp_type} {slot:<2} (SP)")
             }
-            Self::HostOs { sled } => {
-                write!(f, "{} {sled:?} (OS)", SpType::Sled)
+            Self::HostOs { sled, slot: Some(slot) } => {
+                write!(f, "{} {slot:<2} (OS) ({sled})", SpType::Sled)
+            }
+            Self::HostOs { sled, slot: None } => {
+                write!(f, "{} ?? (OS) ({sled})", SpType::Sled)
             }
             Self::Sp { sp_type, slot } => {
                 write!(f, "{sp_type} {slot}")

@@ -28,6 +28,8 @@ use oxnet::IpNet;
 use sled_agent_types::early_networking::PortFec as OmicronPortFec;
 use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
 use slog::o;
@@ -308,7 +310,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 let uplink_property =
                     UplinkProperty(format!("uplinks/{}_0", port));
 
-                for addr in &uplink.addresses {
+                for &addr in &uplink.addresses {
+                    let addr = UplinkAddressConfig::from(addr);
+
                     // count current number of link-local addresses
                     let addrconf_count = match execute_command(&[
                         IPADM,
@@ -378,7 +382,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     'waiting_for_addr: loop {
                         match addr.address {
                             // When we are using numbered uplinks
-                            Some(uplink_cidr) => {
+                            UplinkAddress::Static { ip_net: uplink_cidr } => {
                                 let ipadm_out = match execute_command(&[
                                     IPADM,
                                     "show-addr",
@@ -410,7 +414,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 }
                             }
                             // unnumbered uplinks
-                            None => {
+                            UplinkAddress::AddrConf => {
                                 // look for a new unnumbered uplink
                                 let new_count = match execute_command(&[
                                     IPADM,
@@ -838,7 +842,11 @@ fn build_port_settings(
 
     let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
+    let addrs = uplink
+        .addresses
+        .iter()
+        .map(|a| a.address.ip_squashing_addrconf_to_unspecified())
+        .collect();
 
     port_settings.links.insert(
         link_id.to_string(),
