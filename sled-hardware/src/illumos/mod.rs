@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DiskFirmware;
-use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
+use crate::HardwareView;
+use crate::TofinoSnapshot;
+use crate::TofinoView;
+use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
@@ -17,9 +20,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 mod gpt;
@@ -88,26 +89,6 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(OxideSled::try_from_root_node_name(&root.node_name()).is_some())
 }
 
-// A snapshot of information about the underlying Tofino device.
-//
-// This snapshot tells us whether there is a tofino visible to Illumos and
-// accessible to us in userspace.  We would expect both to be true or both to be
-// false.
-//
-// Note: this doesn't specifically tell us whether there is a sidecar connected
-// to the system, but it tells us if there is a sidecar we can use.  The
-// distinction largely comes down to whether the driver has successfully
-// recognized the device and initialized itself.  The three-way relationship
-// between PCI hotplug, device driver management, and zones is fragile enough
-// that we can get stuck in a state that requires a gimlet reboot to fix.
-#[derive(Copy, Clone)]
-struct TofinoSnapshot {
-    // Is there a Tofino ASIC visible in the device tree
-    exists: bool,
-    // Are we able to access the ASIC through the device driver
-    available: bool,
-}
-
 impl TofinoSnapshot {
     fn new() -> Self {
         Self { exists: false, available: false }
@@ -134,6 +115,7 @@ impl TryFrom<i64> for BootStorageUnit {
 }
 
 // A snapshot of information about the underlying hardware
+#[derive(Debug, Clone)]
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
@@ -203,132 +185,25 @@ impl HardwareSnapshot {
     }
 }
 
-// Describes a view of the Tofino switch.
-enum TofinoView {
-    // The view of the Tofino switch exactly matches the snapshot of hardware.
-    Real(TofinoSnapshot),
-    // The Tofino switch has been "stubbed out", and the underlying hardware is
-    // being ignored.
-    Stub { active: bool },
-}
-
-// A cached copy of "our latest view of what hardware exists".
-//
-// This struct can be expanded arbitrarily, as it's useful for the Sled Agent
-// to perceive hardware.
-//
-// Q: Why bother caching this information at all? Why not rely on devinfo for
-// all queries?
-// A: By keeping an in-memory representation, we can "diff" with the information
-// reported from libdevinfo to decide when to send notifications and change
-// which services are currently executing.
-struct HardwareView {
-    tofino: TofinoView,
-    disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Option<Baseboard>,
-    online_processor_count: u32,
-    usable_physical_pages: u64,
-    usable_physical_ram_bytes: u64,
-}
-
 impl HardwareView {
-    // TODO: We should populate these constructors with real data from the
-    // first attempt at polling hardware.
-    //
-    // Otherwise, values that we really expect to be static will need to be
-    // nullable.
-    fn new() -> Result<Self, Error> {
+    // TODO-cleanup: We construct a mostly-empty `HardwareView` and rely on our
+    // caller (`HardwareManager::new()`) filling in several of these fields with
+    // correct values by calling `poll_device_tree()` _before_ it ever exposes a
+    // `HardwareView` to its consumers. This isn't ideal (we leave a window open
+    // where we return a mostly-empty view) but is not trivial to rework.
+    fn new(
+        tofino: TofinoView,
+        cpu_family: SledCpuFamily,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            tofino: TofinoView::Real(TofinoSnapshot::new()),
+            tofino,
             disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
+            cpu_family,
         })
-    }
-
-    fn new_stub_tofino(active: bool) -> Result<Self, Error> {
-        Ok(Self {
-            tofino: TofinoView::Stub { active },
-            disks: HashMap::new(),
-            baseboard: None,
-            online_processor_count: sysconf::online_processor_count()?,
-            usable_physical_pages: sysconf::usable_physical_pages()?,
-            usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
-        })
-    }
-
-    // Updates our view of the Tofino switch against a snapshot.
-    fn update_tofino(
-        &mut self,
-        polled_hw: &HardwareSnapshot,
-        updates: &mut Vec<HardwareUpdate>,
-    ) {
-        match self.tofino {
-            TofinoView::Real(TofinoSnapshot { available, exists }) => {
-                use HardwareUpdate::*;
-                // Identify if the Tofino device changed power states.
-                if exists != polled_hw.tofino.exists {
-                    updates.push(TofinoDeviceChange);
-                }
-
-                // Identify if the Tofino asic recently became available or
-                // unavailable.
-                match (available, polled_hw.tofino.available) {
-                    (false, true) => updates.push(TofinoAvailable),
-                    (true, false) => updates.push(TofinoUnavailable),
-                    _ => (),
-                };
-
-                // Update our view of the underlying hardware
-                self.tofino = TofinoView::Real(polled_hw.tofino);
-            }
-            TofinoView::Stub { .. } => (),
-        }
-    }
-
-    // Updates our view of block devices against a snapshot.
-    fn update_blkdev(
-        &mut self,
-        polled_hw: &HardwareSnapshot,
-        updates: &mut Vec<HardwareUpdate>,
-    ) {
-        let mut added = Vec::new();
-        let mut removed = Vec::new();
-        let mut updated = Vec::new();
-
-        // Find new or updated disks.
-        for (key, value) in &polled_hw.disks {
-            match self.disks.get(&key) {
-                Some(found) => {
-                    if value != found {
-                        updated.push(value.clone());
-                    }
-                }
-                None => added.push(value.clone()),
-            }
-        }
-
-        // Find disks which have been removed.
-        for (key, value) in &self.disks {
-            if !polled_hw.disks.contains_key(key) {
-                removed.push(value.clone());
-            }
-        }
-
-        use HardwareUpdate::{DiskAdded, DiskRemoved, DiskUpdated};
-        for disk in removed {
-            updates.push(DiskRemoved(disk));
-        }
-        for disk in added {
-            updates.push(DiskAdded(disk));
-        }
-        for disk in updated {
-            updates.push(DiskUpdated(disk));
-        }
-
-        self.disks.clone_from(&polled_hw.disks);
     }
 }
 
@@ -624,13 +499,12 @@ fn poll_blkdev_node(
     Ok(())
 }
 
-// Performs a single walk of the device info tree, updating our view of hardware
-// and sending notifications to any subscribers.
+// Performs a single walk of the device info tree, updating the view of hardware
+// kept in the `hardware_view_tx` watch channel if anything has changed.
 fn poll_device_tree(
     log: &Logger,
-    inner: &Arc<Mutex<HardwareView>>,
+    hardware_view_tx: &watch::Sender<HardwareView>,
     nonsled_observed_disks: &[UnparsedDisk],
-    tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
     let polled_hw = match HardwareSnapshot::new(log) {
@@ -638,60 +512,109 @@ fn poll_device_tree(
 
         Err(e) => {
             if let Error::NotAnOxideSled(root_node) = &e {
-                let mut inner = inner.lock().unwrap();
+                hardware_view_tx.send_if_modified(|inner| {
+                    let mut did_modify = false;
 
-                if root_node.as_str() == "i86pc" {
-                    // If on i86pc, generate some baseboard information before
-                    // returning this error. Each sled agent has to be uniquely
-                    // identified for multiple non-sleds to work.
-                    if inner.baseboard.is_none() {
-                        inner.baseboard =
-                            Some(get_pc_baseboard(log, root_node.as_str()));
+                    if root_node.as_str() == "i86pc" {
+                        // If on i86pc, generate some baseboard information
+                        // before returning this error. Each sled agent has to
+                        // be uniquely identified for multiple non-sleds to
+                        // work.
+                        if inner.baseboard.is_none() {
+                            inner.baseboard =
+                                Some(get_pc_baseboard(log, root_node.as_str()));
+                            did_modify = true;
+                        }
                     }
-                }
 
-                // For platforms that don't support the HardwareSnapshot
-                // functionality, sled-agent can be supplied a fixed list of
-                // UnparsedDisks. Add those to the HardwareSnapshot here if they
-                // are missing (which they will be for non-sleds).
-                for observed_disk in nonsled_observed_disks {
-                    let identity = observed_disk.identity();
-                    if !inner.disks.contains_key(identity) {
-                        inner
-                            .disks
-                            .insert(identity.clone(), observed_disk.clone());
+                    // For platforms that don't support the HardwareSnapshot
+                    // functionality, sled-agent can be supplied a fixed list of
+                    // UnparsedDisks. Add those to the HardwareSnapshot here if they
+                    // are missing (which they will be for non-sleds).
+                    for observed_disk in nonsled_observed_disks {
+                        let identity = observed_disk.identity();
+                        if !inner.disks.contains_key(identity) {
+                            inner.disks.insert(
+                                identity.clone(),
+                                observed_disk.clone(),
+                            );
+                            did_modify = true;
+                        }
                     }
-                }
+
+                    did_modify
+                });
             }
 
             return Err(e);
         }
     };
 
-    // After inspecting the device tree, diff with the old view, and provide
-    // necessary updates.
-    let mut updates = vec![];
-    {
-        let mut inner = inner.lock().unwrap();
-        inner.update_tofino(&polled_hw, &mut updates);
-        inner.update_blkdev(&polled_hw, &mut updates);
-        inner.baseboard = Some(polled_hw.baseboard);
-    };
+    let HardwareSnapshot {
+        tofino: polled_tofino,
+        disks: polled_disks,
+        baseboard: polled_baseboard,
+    } = polled_hw.clone();
 
-    if updates.is_empty() {
-        debug!(log, "No updates from polling device tree");
+    // Check for any changes since the last view.
+    let mut did_modify_tofino = false;
+    let mut did_modify_baseboard = false;
+    let mut did_modify_disks = false;
+    hardware_view_tx.send_if_modified(|inner| {
+        did_modify_tofino = match &mut inner.tofino {
+            TofinoView::Real(inner_snapshot) => {
+                if *inner_snapshot == polled_tofino {
+                    false
+                } else {
+                    *inner_snapshot = polled_tofino;
+                    true
+                }
+            }
+            TofinoView::Stub { .. } => false,
+        };
+
+        did_modify_baseboard =
+            if inner.baseboard.as_ref() == Some(&polled_baseboard) {
+                false
+            } else {
+                inner.baseboard = Some(polled_baseboard);
+                true
+            };
+
+        did_modify_disks = if inner.disks == polled_disks {
+            false
+        } else {
+            inner.disks = polled_disks;
+            true
+        };
+
+        did_modify_tofino || did_modify_baseboard || did_modify_disks
+    });
+
+    info!(
+        log, "Completed poll of device tree";
+        "did_modify_tofino" => did_modify_tofino,
+        "did_modify_baseboard" => did_modify_baseboard,
+        "did_modify_disks" => did_modify_disks,
+    );
+    if did_modify_tofino {
+        info!(log, "Updated tofino"; "tofino" => ?polled_hw.tofino);
     }
-
-    for update in updates.into_iter() {
-        info!(log, "Update from polling device tree: {:?}", update);
-        let _ = tx.send(update);
+    if did_modify_baseboard {
+        info!(log, "Updated baseboard"; "baseboard" => ?polled_hw.baseboard);
+    }
+    if did_modify_disks {
+        info!(log, "Updated disks"; "disks" => ?polled_hw.disks);
     }
 
     Ok(())
 }
 
 // Using an external process, watch for the disappearance of a tofino device.
-fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
+fn monitor_tofino(
+    log: slog::Logger,
+    hardware_view_tx: watch::Sender<HardwareView>,
+) {
     match std::fs::exists(TOFINO_MONITOR) {
         Err(_) | Ok(false) => {
             error!(&log, "tofino monitor tool not found at {}", TOFINO_MONITOR);
@@ -729,7 +652,20 @@ fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
             Err(e) => error!(&log, "failed to collect exit status: {e:?}"),
             Ok(s) => info!(&log, "child exited with code: {:?}", s.code()),
         }
-        let _ = tx.send(HardwareUpdate::TofinoUnavailable);
+        hardware_view_tx.send_if_modified(|inner| {
+            match &mut inner.tofino {
+                TofinoView::Real(snapshot) => {
+                    if snapshot.available {
+                        snapshot.available = false;
+                        true // we did modify the value
+                    } else {
+                        // tofino already unavailable; no changes
+                        false
+                    }
+                }
+                TofinoView::Stub { .. } => false,
+            }
+        });
 
         // By the time we get here, the switch zone should be gone and the
         // device tree cleaned up.  Still, it doesn't hurt to give things a
@@ -810,12 +746,12 @@ fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
 
 fn hardware_tracking_task(
     log: Logger,
-    inner: Arc<Mutex<HardwareView>>,
+    hardware_view_tx: watch::Sender<HardwareView>,
     nonsled_observed_disks: Vec<UnparsedDisk>,
-    tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
-        match poll_device_tree(&log, &inner, &nonsled_observed_disks, &tx) {
+        match poll_device_tree(&log, &hardware_view_tx, &nonsled_observed_disks)
+        {
             // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
@@ -829,13 +765,13 @@ fn hardware_tracking_task(
 
 /// A representation of the underlying hardware.
 ///
-/// This structure provides interfaces for both querying and for receiving new
-/// events.
+/// This is a wrapper around a watch channel, mostly for historical reasons. We
+/// provide various methods that delegate down to the inner value. For callers
+/// that need real access to a watch channel (e.g., to monitor for `changed()`
+/// events), use [`HardwareManager::subscribe()`].
 #[derive(Clone)]
 pub struct HardwareManager {
-    log: Logger,
-    inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<HardwareUpdate>,
+    hardware_view_rx: watch::Receiver<HardwareView>,
 }
 
 impl HardwareManager {
@@ -853,29 +789,31 @@ impl HardwareManager {
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
+        let cpu_family = crate::detect_cpu_family(&log);
 
-        // The size of the broadcast channel is arbitrary, but bounded.
-        // If the channel fills up, old notifications will be dropped, and the
-        // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
-        // error, indicating they should re-scan the hardware themselves.
-        let (tx, _) = broadcast::channel(1024);
         let hw =
             match sled_mode {
                 // Treat as a possible scrimlet and setup to scan for real Tofino device.
                 SledMode::Auto
                 | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
-                    HardwareView::new()
+                    HardwareView::new(
+                        TofinoView::Real(TofinoSnapshot::new()),
+                        cpu_family,
+                    )
                 }
 
                 // Treat sled as gimlet and ignore any attached Tofino device.
-                SledMode::Sled => HardwareView::new_stub_tofino(
-                    // active=
-                    false,
+                SledMode::Sled => HardwareView::new(
+                    TofinoView::Stub { active: false },
+                    cpu_family,
                 ),
 
                 // Treat as scrimlet and use the stub Tofino device.
                 SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
-                    HardwareView::new_stub_tofino(true)
+                    HardwareView::new(
+                        TofinoView::Stub { active: true },
+                        cpu_family,
+                    )
                 }
 
                 // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
@@ -887,16 +825,20 @@ impl HardwareManager {
                     asic:
                         DendriteAsic::SoftNpuZone
                         | DendriteAsic::SoftNpuPropolisDevice,
-                } => HardwareView::new_stub_tofino(true),
+                } => HardwareView::new(
+                    TofinoView::Stub { active: true },
+                    cpu_family,
+                ),
             }
             .map_err(|e| e.to_string())?;
-        let inner = Arc::new(Mutex::new(hw));
+        let (hardware_view_tx, hardware_view_rx) = watch::channel(hw);
 
         // Force the device tree to be polled at least once before returning.
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &inner, &nonsled_observed_disks, &tx) {
+        match poll_device_tree(&log, &hardware_view_tx, &nonsled_observed_disks)
+        {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -914,79 +856,55 @@ impl HardwareManager {
         // We poll the device tree to detect new tofinos and disks.  This
         // polling also detects devices that have gone away, but we need to
         // respond to a tofino disappearance more quickly than a regular polling
-        // interval will allow.  To that end, we fire off a task that maintains a
-        // device contract with the kernel to handle those disappearances.
+        // interval will allow.  To that end, we fire off a task that maintains
+        // a device contract with the kernel to handle those disappearances.
         let log2 = log.clone();
-        let tx2 = tx.clone();
+        let tx2 = hardware_view_tx.clone();
         std::thread::spawn(move || {
             monitor_tofino(log2, tx2);
         });
 
-        let log2 = log.clone();
-        let inner2 = inner.clone();
-        let tx2 = tx.clone();
         std::thread::spawn(move || {
-            hardware_tracking_task(log2, inner2, nonsled_observed_disks, tx2);
+            hardware_tracking_task(
+                log,
+                hardware_view_tx,
+                nonsled_observed_disks,
+            );
         });
 
-        Ok(Self { log, inner, tx })
+        Ok(Self { hardware_view_rx })
     }
 
     pub fn baseboard(&self) -> Baseboard {
-        self.inner
-            .lock()
-            .unwrap()
-            .baseboard
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| Baseboard::unknown())
+        self.hardware_view_rx.borrow().baseboard()
     }
 
     pub fn cpu_family(&self) -> SledCpuFamily {
-        let log = self.log.new(slog::o!("component" => "detect_cpu_family"));
-        crate::detect_cpu_family(&log)
+        self.hardware_view_rx.borrow().cpu_family()
     }
 
     pub fn online_processor_count(&self) -> u32 {
-        self.inner.lock().unwrap().online_processor_count
+        self.hardware_view_rx.borrow().online_processor_count()
     }
 
     pub fn usable_physical_pages(&self) -> u64 {
-        self.inner.lock().unwrap().usable_physical_pages
+        self.hardware_view_rx.borrow().usable_physical_pages()
     }
 
     pub fn usable_physical_ram_bytes(&self) -> u64 {
-        self.inner.lock().unwrap().usable_physical_ram_bytes
+        self.hardware_view_rx.borrow().usable_physical_ram_bytes()
     }
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
-        self.inner.lock().unwrap().disks.clone()
+        self.hardware_view_rx.borrow().disks()
     }
 
     pub fn is_scrimlet(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        match inner.tofino {
-            TofinoView::Real(TofinoSnapshot { exists, .. }) => exists,
-            TofinoView::Stub { active } => active,
-        }
+        self.hardware_view_rx.borrow().is_scrimlet()
     }
 
-    pub fn is_scrimlet_asic_available(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        match inner.tofino {
-            TofinoView::Real(TofinoSnapshot { available, .. }) => available,
-            TofinoView::Stub { active } => active,
-        }
-    }
-
-    pub fn monitor(&self) -> broadcast::Receiver<HardwareUpdate> {
-        info!(self.log, "Monitoring for hardware updates");
-        self.tx.subscribe()
-        // TODO: Do we want to send initial messages, based on the existing
-        // state? Or should we leave this responsibility to the caller, to
-        // start monitoring, and then query for the initial state?
-        //
-        // This could simplify the `SledAgent::monitor` function?
+    pub fn subscribe(&self) -> watch::Receiver<HardwareView> {
+        self.hardware_view_rx.clone()
     }
 }
 
