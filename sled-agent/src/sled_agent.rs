@@ -17,7 +17,7 @@ use crate::nexus::{
 };
 use crate::probe_manager::ProbeManager;
 use crate::rot::{RotAttestationHandle, RotAttestationTask};
-use crate::services::{self, ServiceManager, UnderlayInfo};
+use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -43,10 +43,9 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
-use omicron_common::address::{
-    Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
-};
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::DelegatedZvol;
@@ -74,7 +73,6 @@ use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -101,7 +99,7 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -401,9 +399,6 @@ struct SledAgentInner {
     // A handle to the RoT for attestation requests.
     rot_attestor: RotAttestationHandle,
 
-    // The current rack network config from the replicated bootstore.
-    rack_network_config: RackNetworkConfig,
-
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
 
@@ -437,8 +432,10 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_zone_ip(&self) -> Ipv6Addr {
-        get_switch_zone_address(self.subnet)
+    fn switch_zone_ip(&self) -> ThisSledSwitchZoneUnderlayIpAddr {
+        ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+            &self.start_request,
+        )
     }
 }
 
@@ -683,14 +680,22 @@ impl SledAgent {
         );
 
         services
-            .sled_agent_started(
-                svc_config,
-                port_manager.clone(),
-                *sled_address.ip(),
-                request.body.rack_id,
-                rack_network_config.clone(),
-                metrics_manager.request_queue(),
-            )
+            .sled_agent_started(SledAgentInfo {
+                config: svc_config,
+                port_manager: port_manager.clone(),
+                resolver: Resolver::new_from_ip(
+                    parent_log.new(o!("component" => "DnsResolver")),
+                    *sled_address.ip(),
+                )?,
+                underlay_address: *sled_address.ip(),
+                local_switch_zone_ip:
+                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+                        &request,
+                    ),
+                rack_id: request.body.rack_id,
+                rack_network_config,
+                metrics_queue: metrics_manager.request_queue(),
+            })
             .await?;
 
         let repo_depot = long_running_task_handles
@@ -743,7 +748,6 @@ impl SledAgent {
                 services,
                 nexus_notifier: nexus_notifier_handle,
                 rot_attestor: rot_attest_handle,
-                rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 trust_quorum: long_running_task_handles.trust_quorum.clone(),
@@ -783,11 +787,10 @@ impl SledAgent {
         )
     }
 
-    pub(crate) fn switch_zone_underlay_info(&self) -> UnderlayInfo {
-        UnderlayInfo {
-            ip: self.inner.switch_zone_ip(),
-            rack_network_config: self.inner.rack_network_config.clone(),
-        }
+    pub(crate) fn local_switch_zone_ip(
+        &self,
+    ) -> ThisSledSwitchZoneUnderlayIpAddr {
+        self.inner.switch_zone_ip()
     }
 
     pub fn id(&self) -> SledUuid {
@@ -1763,5 +1766,72 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
+    }
+}
+
+pub(crate) use self::local_switch_zone_ip::ThisSledSwitchZoneUnderlayIpAddr;
+
+/// Private module to enforce construction of
+/// [`ThisSledSwitchZoneUnderlayIpAddr`] only happens via the constructors we
+/// define.
+mod local_switch_zone_ip {
+    use omicron_common::address::get_switch_zone_address;
+    use sled_agent_types::sled::StartSledAgentRequest;
+    use std::fmt;
+    use std::net::IpAddr;
+    use std::net::Ipv6Addr;
+
+    /// Newtype wrapper around [`Ipv6Addr`]. This type is always the IP address
+    /// of our own, local switch zone.
+    ///
+    /// That switch zone will only exist if we are a scrimlet, but we always
+    /// know what the IP would be.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub(crate) struct ThisSledSwitchZoneUnderlayIpAddr(Ipv6Addr);
+
+    impl ThisSledSwitchZoneUnderlayIpAddr {
+        /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
+        /// start this sled agent.
+        ///
+        /// This takes a full request object instead of something smaller (like
+        /// just a sled subnet) to put up a roadblock to accidentally
+        /// constructing a [`ThisSledSwitchZoneUnderlayIpAddr`] that points to
+        /// any address other than our own. `sled-agent` has ready access to the
+        /// subnets and addresses of other sleds, but doesn't have ready access
+        /// to other sleds' [`StartSledAgentRequest`]s.
+        pub(crate) fn from_sled_agent_request(
+            request: &StartSledAgentRequest,
+        ) -> Self {
+            ThisSledSwitchZoneUnderlayIpAddr(get_switch_zone_address(
+                request.body.subnet,
+            ))
+        }
+    }
+
+    // NOTE: We impl `From` only in this direction: constructing a
+    // `ThisSledSwitchZoneUnderlayIpAddr` must happen only via
+    // `from_sled_agent_request()`.
+    impl From<ThisSledSwitchZoneUnderlayIpAddr> for Ipv6Addr {
+        fn from(value: ThisSledSwitchZoneUnderlayIpAddr) -> Self {
+            value.0
+        }
+    }
+
+    impl PartialEq<IpAddr> for ThisSledSwitchZoneUnderlayIpAddr {
+        fn eq(&self, other: &IpAddr) -> bool {
+            self.0.eq(other)
+        }
+    }
+
+    impl PartialEq<ThisSledSwitchZoneUnderlayIpAddr> for IpAddr {
+        fn eq(&self, other: &ThisSledSwitchZoneUnderlayIpAddr) -> bool {
+            self.eq(&other.0)
+        }
+    }
+
+    impl fmt::Display for ThisSledSwitchZoneUnderlayIpAddr {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.fmt(f)
+        }
     }
 }
