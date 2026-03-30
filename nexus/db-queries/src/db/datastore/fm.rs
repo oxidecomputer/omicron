@@ -48,58 +48,68 @@ use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Identifies a child table of `fm_sitrep` for use in orphan-deletion
-/// queries. Using an enum (rather than raw strings) ensures the table and
-/// column names are known at compile time, preventing SQL injection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SitrepChildTable {
-    CaseEreport,
-    AlertRequest,
-    Case,
+/// Declares the [`SitrepChildTable`] enum and its associated table/column
+/// metadata. To add a new child table to the sitrep GC, just add a line
+/// here — the GC loop, omdb display, and completeness test all adapt
+/// automatically.
+macro_rules! sitrep_child_tables {
+    ($(
+        $(#[$meta:meta])*
+        $variant:ident => { table: $table:literal, sitrep_id: $col:literal }
+    ),* $(,)?) => {
+        /// Identifies a child table of `fm_sitrep` for use in
+        /// orphan-deletion queries. Using an enum (rather than raw strings)
+        /// ensures the table and column names are known at compile time,
+        /// preventing SQL injection.
+        #[derive(
+            Clone, Copy, Debug,
+            PartialEq, Eq, PartialOrd, Ord,
+            strum::VariantArray,
+        )]
+        pub enum SitrepChildTable {
+            $( $(#[$meta])* $variant, )*
+        }
+
+        impl SitrepChildTable {
+            pub const ALL: &[SitrepChildTable] =
+                <Self as strum::VariantArray>::VARIANTS;
+
+            pub const fn table_name(&self) -> &'static str {
+                match self { $( Self::$variant => $table, )* }
+            }
+
+            pub(crate) const fn sitrep_id_column(&self) -> &'static str {
+                match self { $( Self::$variant => $col, )* }
+            }
+        }
+    };
 }
 
-impl SitrepChildTable {
-    /// All child tables. Used by the GC loop and by tests to ensure
-    /// completeness. If you add a new variant, add it here — the GC
-    /// loop will fail to compile until you handle it.
-    pub const ALL: &[SitrepChildTable] =
-        &[Self::CaseEreport, Self::AlertRequest, Self::Case];
+sitrep_child_tables! {
+    CaseEreport => { table: "fm_ereport_in_case", sitrep_id: "sitrep_id" },
+    AlertRequest => { table: "fm_alert_request", sitrep_id: "sitrep_id" },
+    Case => { table: "fm_case", sitrep_id: "sitrep_id" },
 }
 
-impl SitrepChildTable {
-    pub const fn table_name(&self) -> &'static str {
-        match self {
-            Self::CaseEreport => "fm_ereport_in_case",
-            Self::AlertRequest => "fm_alert_request",
-            Self::Case => "fm_case",
-        }
-    }
-
-    pub(crate) const fn sitrep_id_column(&self) -> &'static str {
-        match self {
-            Self::CaseEreport => "sitrep_id",
-            Self::AlertRequest => "sitrep_id",
-            Self::Case => "sitrep_id",
-        }
-    }
+/// Per-child-table statistics from a single GC pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ChildTableGcStats {
+    pub rows_deleted: usize,
+    pub batches: usize,
 }
 
 /// Result of [`DataStore::fm_sitrep_gc_orphans`], containing the number of
 /// rows deleted from each table.
 pub struct GcOrphansResult {
     pub sitreps_deleted: usize,
-    pub cases_deleted: usize,
-    pub case_ereports_deleted: usize,
-    pub alert_requests_deleted: usize,
-    pub batch_size: u32,
     pub sitrep_metadata_batches: usize,
-    pub case_batches: usize,
-    pub case_ereport_batches: usize,
-    pub alert_request_batches: usize,
+    pub batch_size: u32,
+    pub child_tables: BTreeMap<SitrepChildTable, ChildTableGcStats>,
 }
 
 impl DataStore {
@@ -981,30 +991,14 @@ impl DataStore {
                     // Step 2: For each child table, paginate through and
                     // delete rows whose sitrep_id no longer exists in
                     // fm_sitrep.
-                    let mut cases_deleted = 0usize;
-                    let mut case_ereports_deleted = 0usize;
-                    let mut alert_requests_deleted = 0usize;
-                    let mut case_batches = 0usize;
-                    let mut case_ereport_batches = 0usize;
-                    let mut alert_request_batches = 0usize;
-
+                    let mut child_tables = BTreeMap::new();
                     for &table in SitrepChildTable::ALL {
-                        let (counter, batch_counter) = match table {
-                            SitrepChildTable::CaseEreport => (
-                                &mut case_ereports_deleted,
-                                &mut case_ereport_batches,
-                            ),
-                            SitrepChildTable::AlertRequest => (
-                                &mut alert_requests_deleted,
-                                &mut alert_request_batches,
-                            ),
-                            SitrepChildTable::Case => {
-                                (&mut cases_deleted, &mut case_batches)
-                            }
-                        };
+                        let stats = child_tables
+                            .entry(table)
+                            .or_insert(ChildTableGcStats::default());
                         let mut marker = SitrepUuid::nil();
                         loop {
-                            *batch_counter += 1;
+                            stats.batches += 1;
                             let (rows_deleted, next_marker) =
                                 Self::deeply_orphaned_batch_query(
                                     table,
@@ -1013,7 +1007,7 @@ impl DataStore {
                                 )
                                 .get_result_async::<(i64, Option<Uuid>)>(&conn)
                                 .await?;
-                            *counter += rows_deleted as usize;
+                            stats.rows_deleted += rows_deleted as usize;
 
                             match next_marker {
                                 Some(m) => {
@@ -1026,14 +1020,9 @@ impl DataStore {
 
                     Ok(GcOrphansResult {
                         sitreps_deleted,
-                        cases_deleted,
-                        case_ereports_deleted,
-                        alert_requests_deleted,
-                        batch_size: SQL_BATCH_SIZE.get(),
                         sitrep_metadata_batches,
-                        case_batches,
-                        case_ereport_batches,
-                        alert_request_batches,
+                        batch_size: SQL_BATCH_SIZE.get(),
+                        child_tables,
                     })
                 }
             })
@@ -1044,9 +1033,7 @@ impl DataStore {
             &opctx.log,
             "sitrep GC completed";
             "sitreps_deleted" => result.sitreps_deleted,
-            "cases_deleted" => result.cases_deleted,
-            "case_ereports_deleted" => result.case_ereports_deleted,
-            "alert_requests_deleted" => result.alert_requests_deleted,
+            "child_tables" => ?result.child_tables,
         );
 
         Ok(result)
@@ -2333,9 +2320,18 @@ mod tests {
         // children (and any normal orphans too).
         let result =
             datastore.fm_sitrep_gc_orphans(opctx).await.expect("GC orphans");
-        assert_eq!(result.cases_deleted, 1);
-        assert_eq!(result.alert_requests_deleted, 1);
-        assert_eq!(result.case_ereports_deleted, 0); // we didn't insert any
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::Case].rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::AlertRequest].rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::CaseEreport].rows_deleted,
+            0, // we didn't insert any
+        );
 
         // Verify the rows are gone.
         let cases_after: i64 = case_dsl::fm_case

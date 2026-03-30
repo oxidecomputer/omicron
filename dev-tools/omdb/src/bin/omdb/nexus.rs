@@ -3460,14 +3460,9 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
         orphaned_sitreps_deleted,
-        orphaned_cases_deleted,
-        orphaned_case_ereports_deleted,
-        orphaned_alert_requests_deleted,
-        batch_size,
         sitrep_metadata_batches,
-        case_batches,
-        case_ereport_batches,
-        alert_request_batches,
+        batch_size,
+        child_tables,
         errors,
     } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
         Err(error) => {
@@ -3480,53 +3475,43 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
-    pub const BATCH_SIZE: &str = "batch size:";
-    pub const SITREPS_DELETED: &str = "orphaned sitreps deleted:";
-    pub const SITREP_BATCHES: &str = "  batches:";
-    pub const CASES_DELETED: &str = "orphaned cases deleted:";
-    pub const CASE_BATCHES: &str = "  batches:";
-    pub const EREPORTS_DELETED: &str = "orphaned case ereports deleted:";
-    pub const EREPORT_BATCHES: &str = "  batches:";
-    pub const ALERTS_DELETED: &str = "orphaned alert requests deleted:";
-    pub const ALERT_BATCHES: &str = "  batches:";
-    pub const ERRORS: &str = "errors:";
-    pub const WIDTH: usize = const_max_len(&[
-        ERRORS,
-        BATCH_SIZE,
-        SITREPS_DELETED,
-        SITREP_BATCHES,
-        CASES_DELETED,
-        CASE_BATCHES,
-        EREPORTS_DELETED,
-        EREPORT_BATCHES,
-        ALERTS_DELETED,
-        ALERT_BATCHES,
-    ]) + 1;
-    pub const NUM_WIDTH: usize = 4;
+    const BASE_WIDTH: usize = 40;
+    const NUM_WIDTH: usize = 4;
+
+    // Ensure columns stay aligned even if a child table name is long.
+    let width = child_tables
+        .keys()
+        .map(|name| "orphaned  rows deleted:".len() + name.len() + 1)
+        .fold(BASE_WIDTH, |w, l| w.max(l));
+
     if !errors.is_empty() {
-        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!(
+            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
+            "errors:",
+            errors.len()
+        );
         for error in errors {
             println!("      > {error}")
         }
     }
 
-    println!("    {BATCH_SIZE:<WIDTH$}{batch_size:>NUM_WIDTH$}");
+    println!("    {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
     println!(
-        "    {SITREPS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+        "    {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
+        "orphaned sitreps deleted:"
     );
     println!(
-        "    {SITREP_BATCHES:<WIDTH$}{sitrep_metadata_batches:>NUM_WIDTH$}"
+        "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
+        "  batches:"
     );
-    println!("    {CASES_DELETED:<WIDTH$}{orphaned_cases_deleted:>NUM_WIDTH$}");
-    println!("    {CASE_BATCHES:<WIDTH$}{case_batches:>NUM_WIDTH$}");
-    println!(
-        "    {EREPORTS_DELETED:<WIDTH$}{orphaned_case_ereports_deleted:>NUM_WIDTH$}"
-    );
-    println!("    {EREPORT_BATCHES:<WIDTH$}{case_ereport_batches:>NUM_WIDTH$}");
-    println!(
-        "    {ALERTS_DELETED:<WIDTH$}{orphaned_alert_requests_deleted:>NUM_WIDTH$}"
-    );
-    println!("    {ALERT_BATCHES:<WIDTH$}{alert_request_batches:>NUM_WIDTH$}");
+    for (table_name, stats) in &child_tables {
+        println!(
+            "    {:<width$}{:>NUM_WIDTH$}",
+            format!("orphaned {table_name} rows deleted:"),
+            stats.rows_deleted,
+        );
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+    }
 }
 
 fn print_task_fm_rendezvous(details: &serde_json::Value) {

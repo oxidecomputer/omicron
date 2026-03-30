@@ -49,16 +49,21 @@ impl SitrepGc {
         match self.datastore.fm_sitrep_gc_orphans(&opctx).await {
             Ok(result) => {
                 status.orphaned_sitreps_deleted = result.sitreps_deleted;
-                status.orphaned_cases_deleted = result.cases_deleted;
-                status.orphaned_case_ereports_deleted =
-                    result.case_ereports_deleted;
-                status.orphaned_alert_requests_deleted =
-                    result.alert_requests_deleted;
-                status.batch_size = result.batch_size;
                 status.sitrep_metadata_batches = result.sitrep_metadata_batches;
-                status.case_batches = result.case_batches;
-                status.case_ereport_batches = result.case_ereport_batches;
-                status.alert_request_batches = result.alert_request_batches;
+                status.batch_size = result.batch_size;
+                status.child_tables = result
+                    .child_tables
+                    .into_iter()
+                    .map(|(table, stats)| {
+                        (
+                            table.table_name().to_string(),
+                            nexus_types::internal_api::background::ChildTableGcStats {
+                                rows_deleted: stats.rows_deleted,
+                                batches: stats.batches,
+                            },
+                        )
+                    })
+                    .collect();
             }
             Err(err) => {
                 let err = InlineErrorChain::new(&err);
