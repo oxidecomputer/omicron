@@ -1338,6 +1338,10 @@ impl Client {
                 "n_timeseries" => chunk.len(),
             );
             for table in tables.iter() {
+                // NOTE: The settings on this query make it fully synchronous
+                // across the entire cluster. That is, wait for all deletions on
+                // every node to complete. This is slow, but we don't run this
+                // out of tests right now.
                 let sql = format!(
                     "ALTER TABLE {}.{} \
                     {} \
