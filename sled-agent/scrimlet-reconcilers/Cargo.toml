@@ -12,6 +12,7 @@ chrono.workspace = true
 dpd-client.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
+mg-admin-client.workspace = true
 omicron-common.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
