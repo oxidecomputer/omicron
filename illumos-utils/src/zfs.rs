@@ -1783,28 +1783,34 @@ impl Zfs {
         let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
 
-        let mut args: Vec<String> =
-            vec!["-V".to_string(), params.size().to_bytes().to_string()];
+        let args: Vec<String> = match &params {
+            DatasetVolumeEnsureArgs::Raw { name, size } => vec![
+                "-V".to_string(),
+                size.to_bytes().to_string(),
+                "-o".to_string(),
+                "rawvol=on".to_string(),
+                // No need to set volblocksize for raw zvols: either the default
+                // record size will be used, or after stlouis#915 integrates an
+                // optimized allocation size will be automatically selected no
+                // matter what volblocksize is set (in this case, volblockset
+                // sets the minimum allowed record size).
+                name.to_string(),
+            ],
 
-        match &params {
-            DatasetVolumeEnsureArgs::Raw { .. } => {
-                args.push("-o".to_string());
-                args.push("rawvol=on".to_string());
+            DatasetVolumeEnsureArgs::Regular { name, size, volblocksize } => {
+                let mut args =
+                    vec!["-V".to_string(), size.to_bytes().to_string()];
 
-                // No need to set volblocksize: either the default record size
-                // will be used, or (after stlouis#915 integrates) an optimized
-                // allocation size will be automatically selected.
-            }
-
-            DatasetVolumeEnsureArgs::Regular { volblocksize, .. } => {
                 if let Some(volblocksize) = &volblocksize {
                     args.push("-o".to_string());
                     args.push(format!("volblocksize={}", volblocksize));
                 }
-            }
-        }
 
-        args.push(params.name().to_string());
+                args.push(name.to_string());
+
+                args
+            }
+        };
 
         cmd.args(&args);
 
