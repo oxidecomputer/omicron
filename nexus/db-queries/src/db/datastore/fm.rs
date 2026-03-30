@@ -60,7 +60,7 @@ use uuid::Uuid;
 macro_rules! sitrep_child_tables {
     ($(
         $(#[$meta:meta])*
-        $variant:ident => { table: $table:literal, sitrep_id: $col:literal }
+        $variant:ident => { table: $table:literal $(, sitrep_id: $col:literal)? }
     ),* $(,)?) => {
         /// Identifies a child table of `fm_sitrep` for use in
         /// orphan-deletion queries. Using an enum (rather than raw strings)
@@ -84,16 +84,25 @@ macro_rules! sitrep_child_tables {
             }
 
             pub(crate) const fn sitrep_id_column(&self) -> &'static str {
-                match self { $( Self::$variant => $col, )* }
+                match self {
+                    $( Self::$variant =>
+                        sitrep_child_tables!(@sitrep_id $($col)?),
+                    )*
+                }
             }
         }
     };
+
+    // Default column name when none is specified.
+    (@sitrep_id) => { "sitrep_id" };
+    // Explicit column name override.
+    (@sitrep_id $col:literal) => { $col };
 }
 
 sitrep_child_tables! {
-    CaseEreport => { table: "fm_ereport_in_case", sitrep_id: "sitrep_id" },
-    AlertRequest => { table: "fm_alert_request", sitrep_id: "sitrep_id" },
-    Case => { table: "fm_case", sitrep_id: "sitrep_id" },
+    CaseEreport => { table: "fm_ereport_in_case" },
+    AlertRequest => { table: "fm_alert_request" },
+    Case => { table: "fm_case" },
 }
 
 /// Per-child-table statistics from a single GC pass.
