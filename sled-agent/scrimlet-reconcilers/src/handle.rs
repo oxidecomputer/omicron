@@ -8,6 +8,7 @@
 
 use crate::ThisSledSwitchZoneUnderlayIpAddr;
 use crate::dpd_reconciler::DpdReconciler;
+use crate::mgd_reconciler::MgdReconciler;
 use crate::reconciler_task::ReconcilerTaskHandle;
 use crate::status::ScrimletReconcilersStatus;
 use crate::status::ScrimletStatus;
@@ -30,6 +31,7 @@ pub struct ScrimletReconcilers {
     prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
     switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
     dpd_reconciler: ReconcilerTaskHandle<DpdReconciler>,
+    mgd_reconciler: ReconcilerTaskHandle<MgdReconciler>,
 
     // Handle to the task to contact MGS and determine the slot of the attached
     // switch, if we have one. This task exits on its own once it determines the
@@ -56,12 +58,19 @@ impl ScrimletReconcilers {
             Arc::clone(&switch_slot),
             parent_log,
         );
+        let mgd_reconciler = ReconcilerTaskHandle::<MgdReconciler>::spawn(
+            scrimlet_status_rx.clone(),
+            Arc::clone(&prereqs),
+            Arc::clone(&switch_slot),
+            parent_log,
+        );
 
         Self {
             scrimlet_status_tx,
             prereqs,
             switch_slot,
             dpd_reconciler,
+            mgd_reconciler,
             switch_slot_determination_task: SetOnce::new(),
             parent_log: parent_log.clone(),
         }
@@ -70,6 +79,7 @@ impl ScrimletReconcilers {
     pub fn status(&self) -> ScrimletReconcilersStatus {
         ScrimletReconcilersStatus {
             dpd_reconciler: self.dpd_reconciler.status(),
+            mgd_reconciler: self.mgd_reconciler.status(),
         }
     }
 

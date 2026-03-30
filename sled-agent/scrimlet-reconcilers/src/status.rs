@@ -4,6 +4,8 @@
 
 //! Types for the status and results of the reconcilers in this crate.
 
+use crate::DpdReconcilerStatus;
+use crate::MgdReconcilerStatus;
 use chrono::DateTime;
 use chrono::Utc;
 use std::time::Duration;
@@ -87,5 +89,6 @@ pub struct ReconcilerStatus<T> {
 
 #[derive(Debug, Clone)]
 pub struct ScrimletReconcilersStatus {
-    pub dpd_reconciler: ReconcilerStatus<()>,
+    pub dpd_reconciler: ReconcilerStatus<DpdReconcilerStatus>,
+    pub mgd_reconciler: ReconcilerStatus<MgdReconcilerStatus>,
 }

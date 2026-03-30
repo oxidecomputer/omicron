@@ -13584,6 +13584,7 @@ dependencies = [
  "gateway-client",
  "gateway-types",
  "httpmock",
+ "mg-admin-client",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
