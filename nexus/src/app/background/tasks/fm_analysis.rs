@@ -5,14 +5,14 @@
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
+use anyhow::Context;
 use futures::future::BoxFuture;
-use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_types::fm;
+use nexus_fm as fm;
 use nexus_types::internal_api::background::FmAnalysisStatus;
-use nexus_types::internal_api::background::fm_analysis;
+use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
@@ -73,8 +73,7 @@ impl FmAnalysis {
             return FmAnalysisStatus {
                 parent_sitrep_id,
                 inv_collection_id: None,
-                prep: fm_analysis::PreparationStatus::default(),
-                outcome: fm_analysis::Outcome::WaitingForInventory,
+                outcome: status::Outcome::WaitingForInventory,
             };
         };
         let inv_collection_id = inv.id;
@@ -93,60 +92,76 @@ impl FmAnalysis {
             .collect(),
         );
 
-        let mut prep_status = fm_analysis::PreparationStatus::default();
-        let new_ereports = match self
-            .load_new_ereports(
-                &opctx,
-                parent_sitrep.as_ref().map(|s| &s.1),
-                &mut prep_status,
-            )
+        // Prepare analysis inputs.
+        let (inputs, prep_status) = match self
+            .prepare_inputs(&opctx, parent_sitrep, inv)
             .await
         {
-            Ok(ereports) => ereports,
+            Ok(inputs) => inputs,
             Err(err) => {
                 let error = InlineErrorChain::new(&*err);
-                slog::error!(opctx.log, "failed to load new ereports!"; &error);
+                slog::error!(opctx.log, "preparing analysis inputs failed"; &error);
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
-                    prep: prep_status,
-                    outcome: fm_analysis::Outcome::Error(format!(
-                        "failed to load new ereports: {error}"
-                    )),
+                    outcome: status::Outcome::PreparationError(
+                        error.to_string(),
+                    ),
                 };
             }
         };
 
+        // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
-            .analyze(&opctx, parent_sitrep, inv, new_ereports)
+            .analyze(&opctx, inputs)
             .await
             .unwrap_or_else(|err| {
                 let error = InlineErrorChain::new(&*err);
                 slog::error!(opctx.log, "fault management analysis failed!"; &error);
-                fm_analysis::Outcome::Error(error.to_string())
+                status::AnalysisOutcome::Error(error.to_string())
             });
+
+        if let status::AnalysisOutcome::Committed { .. } = &outcome {
+            // If we commmitted a new sitrep, we ought to go ahead and load it
+            // now...
+            self.sitrep_loader.activate();
+        }
 
         FmAnalysisStatus {
             parent_sitrep_id,
             inv_collection_id: Some(inv_collection_id),
-            prep: prep_status,
-            outcome,
+            outcome: status::Outcome::RanAnalysis { prep_status, outcome },
         }
+    }
+
+    async fn prepare_inputs(
+        &mut self,
+        opctx: &OpContext,
+        parent_sitrep: Option<CurrentSitrep>,
+        inv: Arc<inventory::Collection>,
+    ) -> anyhow::Result<(fm::analysis::Input, status::PreparationStatus)> {
+        let mut builder = fm::analysis::Input::builder(parent_sitrep, inv);
+        let mut errors = Vec::new();
+        self.load_new_ereports(opctx, &mut builder, &mut errors)
+            .await
+            .context("failed to load new ereports")?;
+
+        let (input, report) = builder.finish();
+        Ok((input, status::PreparationStatus { errors, report }))
     }
 
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,
-        parent_sitrep: Option<&fm::Sitrep>,
-        prep_status: &mut fm_analysis::PreparationStatus,
-    ) -> anyhow::Result<IdOrdMap<fm::Ereport>> {
-        let mut ereports = IdOrdMap::default();
+        builder: &mut fm::analysis::InputBuilder,
+        errors: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
         let mut paginator = Paginator::new(
             nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
         );
         while let Some(p) = paginator.next() {
-            let prev_total = ereports.len();
+            let prev_total = builder.num_ereports();
             let batch = self
                 .datastore
                 .ereports_list_unseen(opctx, &p.current_pagparams())
@@ -156,27 +171,20 @@ impl FmAnalysis {
             });
             let loaded = batch.len();
             let mut invalid = 0;
-            ereports.extend(batch.into_iter().filter_map(|ereport| {
+            builder.add_new_ereports(batch.into_iter().filter_map(|ereport| {
                 let ereport = match fm::Ereport::try_from(ereport) {
                     Ok(ereport) => ereport,
                     Err(e) => {
                         invalid += 1;
-                        prep_status.errors.push(e.to_string());
+                        errors.push(e.to_string());
                         return None;
                     }
                 };
 
-                if let Some(sitrep) = parent_sitrep {
-                    if sitrep.ereports_by_id.contains_key(ereport.id()) {
-                        prep_status.ereports_in_parent_sitrep_not_marked += 1;
-                        return None;
-                    }
-                }
-                prep_status.new_ereports.insert(*ereport.id());
                 Some(ereport)
             }));
 
-            let total = ereports.len();
+            let total = builder.num_ereports();
             let new = total - prev_total;
             if invalid > 0 {
                 slog::warn!(
@@ -188,16 +196,14 @@ impl FmAnalysis {
             }
         }
 
-        Ok(ereports)
+        Ok(())
     }
 
     async fn analyze(
         &mut self,
         _opctx: &OpContext,
-        _parent_sitrep: Option<CurrentSitrep>,
-        _inv: Arc<inventory::Collection>,
-        _new_ereports: IdOrdMap<fm::Ereport>,
-    ) -> anyhow::Result<fm_analysis::Outcome> {
+        _inputs: fm::analysis::Input,
+    ) -> anyhow::Result<status::AnalysisOutcome> {
         anyhow::bail!("FM analysis is not yet implemented")
     }
 }

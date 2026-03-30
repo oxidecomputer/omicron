@@ -448,8 +448,12 @@ mod tests {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
+
         let fm_analysis_activator = Activator::new();
-        fm_analysis_activator.mark_wired_up();
+        // in order to test that we actually activate the analysis task, we must
+        // wire this up now so that using it does not panic.
+        fm_analysis_activator.mark_wired_up().unwrap();
+
         let mut ingester = SpEreportIngester::new(
             datastore.clone(),
             nexus.internal_resolver.clone(),

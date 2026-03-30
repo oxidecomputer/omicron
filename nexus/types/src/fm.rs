@@ -19,6 +19,7 @@ use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
@@ -151,4 +152,14 @@ pub struct SitrepVersion {
 #[strum(serialize_all = "snake_case")]
 pub enum DiagnosisEngineKind {
     PowerShelf,
+}
+
+/// Summarizes the inputs to sitrep analysis.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnalysisInputReport {
+    pub parent_sitrep_id: Option<SitrepUuid>,
+    pub parent_inv_id: Option<CollectionUuid>,
+    pub inv_id: CollectionUuid,
+    pub new_ereport_ids: BTreeSet<EreportId>,
+    pub already_seen_ereport_ids: BTreeSet<EreportId>,
 }
