@@ -57,6 +57,8 @@ members = [
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
+    "dns-server/dnsadm",
+    "dns-server/transient",
     "end-to-end-tests",
     "ereport/types",
     "gateway",
@@ -237,6 +239,8 @@ default-members = [
     # See omicron#4392.
     "dns-server",
     "dns-server-api",
+    "dns-server/dnsadm",
+    "dns-server/transient",
     "end-to-end-tests",
     "ereport/types",
     "gateway",
@@ -832,6 +836,7 @@ toml = "0.8.23"
 toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
+transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }

@@ -67,6 +67,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
+use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -361,9 +362,9 @@ pub async fn run_standalone_server(
 
     // Start the Internal DNS server
     let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
-        dns_server::TransientServer::new_with_address(&log, addr.into()).await?
+        TransientDnsServer::new_with_address(&log, addr.into()).await?
     } else {
-        dns_server::TransientServer::new(&log).await?
+        TransientDnsServer::new(&log).await?
     };
     let mut dns_config_builder = DnsConfigBuilder::new();
 

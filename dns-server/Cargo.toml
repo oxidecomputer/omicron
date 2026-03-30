@@ -13,7 +13,6 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 dns-server-api.workspace = true
-dns-service-client.workspace = true
 dropshot.workspace = true
 hickory-client.workspace = true
 hickory-proto.workspace = true
@@ -34,7 +33,6 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 slog.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
@@ -47,6 +45,7 @@ git-stub-vcs.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
+dns-service-client.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
 openapiv3.workspace = true
