@@ -49,6 +49,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::watch;
 use tokio::time::sleep;
 
 const BGP_SESSION_RESOLUTION: u64 = 100;
@@ -123,38 +124,39 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// Dynamically looks up (via internal DNS and queries to MGS) the underlay
     /// addresses of the switch zone(s) that have uplinks configured.
     ///
-    /// If `rack_network_config` does not contain any uplinks, returns an empty
-    /// set. Otherwise:
+    /// If the `RackNetworkConfig` inside `config_rx` does not contain any
+    /// uplinks, returns an empty set. Otherwise:
     ///
-    /// * If `rack_network_config` specifies only one switch with an uplink,
-    ///   blocks until we can find that switch zone's underlay address.
-    /// * If `rack_network_config` specifies two switches with uplinks, we will
-    ///   block up to the `wait_for_at_least_one` duration trying to find both
+    /// * If the config specifies only one switch with an uplink, blocks until
+    ///   we can find that switch zone's underlay address.
+    /// * If the config specifies two switches with uplinks, we will block up
+    ///   to the `wait_for_at_least_one` duration trying to find both
     ///   corresponding switch zones. If we pass the deadline without having
     ///   found both, we will return as soon after that as we can find one of
     ///   the switch zone's addresses.
     pub async fn lookup_uplinked_switch_zone_underlay_addrs(
         &self,
         resolver: &DnsResolver,
-        config: &RackNetworkConfig,
+        config_rx: &watch::Receiver<RackNetworkConfig>,
         wait_for_at_least_one: Duration,
     ) -> HashMap<SwitchSlot, Ipv6Addr> {
-        // Which switches have configured ports?
-        let uplinked_switches = config
-            .ports
-            .iter()
-            .map(|port_config| port_config.switch)
-            .collect::<HashSet<SwitchSlot>>();
-
-        // If we have no uplinks, we have nothing to look up.
-        if uplinked_switches.is_empty() {
-            return HashMap::new();
-        }
-
         let query_start = Instant::now();
         let uplinked_switch_zone_addrs = retry_notify(
             retry_policy_switch_mapping(),
             || async {
+                // Which switches have configured ports?
+                let uplinked_switches = config_rx
+                    .borrow()
+                    .ports
+                    .iter()
+                    .map(|port_config| port_config.switch)
+                    .collect::<HashSet<SwitchSlot>>();
+
+                // If we have no uplinks, we have nothing to look up.
+                if uplinked_switches.is_empty() {
+                    return Ok(HashMap::new());
+                }
+
                 match self
                     .lookup_switch_zone_underlay_addrs_one_attempt(
                         resolver,
@@ -311,7 +313,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// Returns the list of uplinks configured via DPD.
     pub(crate) async fn init_switch_config(
         &mut self,
-        rack_network_config: &RackNetworkConfig,
+        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
@@ -347,6 +349,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                 )));
             }
         };
+
+        // Take a snapshot of the current `RackNetworkConfig` at this point so
+        // we use one consistent config throughout the rest of this function.
+        let rack_network_config = rack_network_config_rx.borrow().clone();
 
         // We now know which switch we are: filter the uplinks to just ours.
         let our_ports = rack_network_config
