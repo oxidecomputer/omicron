@@ -195,6 +195,8 @@ sp_ereport_ingester.period_secs = 30
 # How frequently to check for a new fault management sitrep (made by any Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+# How frequently to run analysis from the current sitrep.
+fm.analysis_period_secs = 120
 # Sitrep GC, on the other hand, does not need to be activated very frequently,
 # as it does not impact the responsiveness of the fault management system, and
 # is activated every time the current sitrep changes. Periodic activations are

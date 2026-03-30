@@ -20,6 +20,7 @@ use omicron_uuid_kinds::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::fmt;
 use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
@@ -162,4 +163,85 @@ pub struct AnalysisInputReport {
     pub inv_id: CollectionUuid,
     pub new_ereport_ids: BTreeSet<EreportId>,
     pub already_seen_ereport_ids: BTreeSet<EreportId>,
+}
+
+impl AnalysisInputReport {
+    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
+        InputReportMultilineDisplay { report: self, indent }
+    }
+}
+
+struct InputReportMultilineDisplay<'report> {
+    report: &'report AnalysisInputReport,
+    indent: usize,
+}
+
+impl fmt::Display for InputReportMultilineDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            report:
+                AnalysisInputReport {
+                    parent_sitrep_id,
+                    parent_inv_id,
+                    inv_id,
+                    new_ereport_ids,
+                    already_seen_ereport_ids,
+                },
+            indent,
+        } = self;
+
+        writeln!(f, "{:indent$}fault management analysis inputs", "")?;
+        writeln!(f, "{:indent$}----- ---------- -------- ------", "")?;
+        writeln!(
+            f,
+            "{:indent$}parent sitrep:        {parent_sitrep_id:?}",
+            "",
+        )?;
+        writeln!(f, "{:indent$}inventory collection: {inv_id:?}", "",)?;
+        if Some(inv_id) == parent_inv_id.as_ref() {
+            writeln!(f, "{:indent$} --> same collection as parent sitrep", "",)?;
+        } else if let Some(parent_inv_id) = parent_inv_id {
+            writeln!(
+                f,
+                "{:indent$} --> different from parent sitrep \
+                 (collection {parent_inv_id})",
+                "",
+            )?;
+        }
+        writeln!(f)?;
+        writeln!(
+            f,
+            "{:indent$}new ereports ({} total):",
+            "",
+            new_ereport_ids.len()
+        )?;
+        for ereport_id in new_ereport_ids {
+            writeln!(f, "{:indent$}- {ereport_id}", "")?;
+        }
+        if !already_seen_ereport_ids.is_empty() {
+            writeln!(f)?;
+            if let Some(parent_id) = parent_sitrep_id {
+                writeln!(
+                    f,
+                    "{:indent$}ereports already seen in {parent_id} but not \
+                     marked ({} total):",
+                    "",
+                    already_seen_ereport_ids.len()
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "{:<indent$}this is weird: there's no parent sitrep, but\n\
+                     {:<indent$} {} ereports were (allegedly) seen but not marked",
+                    "/!\\",
+                    "",
+                    already_seen_ereport_ids.len()
+                )?;
+            }
+            for ereport_id in already_seen_ereport_ids {
+                writeln!(f, "{:indent$}- {ereport_id}", "")?;
+            }
+        }
+        Ok(())
+    }
 }
