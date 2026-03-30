@@ -37,6 +37,13 @@ pub struct BundleRequest {
 }
 
 impl BundleRequest {
+    pub fn all() -> Self {
+        Self {
+            transfer_chunk_size: CHUNK_SIZE,
+            data_selection: BundleDataSelection::all(),
+        }
+    }
+
     pub fn include_reconfigurator_data(&self) -> bool {
         self.data_selection.contains(BundleDataCategory::Reconfigurator)
     }
@@ -68,14 +75,5 @@ impl BundleRequest {
 
     pub fn include_sp_dumps(&self) -> bool {
         self.data_selection.contains(BundleDataCategory::SpDumps)
-    }
-}
-
-impl Default for BundleRequest {
-    fn default() -> Self {
-        Self {
-            transfer_chunk_size: CHUNK_SIZE,
-            data_selection: BundleDataSelection::default(),
-        }
     }
 }

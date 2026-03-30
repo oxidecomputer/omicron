@@ -86,6 +86,18 @@ impl<'a> SitrepBuilder<'a> {
         creator_id: OmicronZoneUuid,
         time_created: chrono::DateTime<chrono::Utc>,
     ) -> fm::Sitrep {
+        let mut ereports_by_id = iddqd::IdOrdMap::new();
+        let cases = self
+            .cases
+            .cases
+            .into_iter()
+            .map(|case| {
+                let case = fm::Case::from(case);
+                ereports_by_id
+                    .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
+                case
+            })
+            .collect();
         fm::Sitrep {
             metadata: fm::SitrepMetadata {
                 id: self.sitrep_id,
@@ -95,7 +107,8 @@ impl<'a> SitrepBuilder<'a> {
                 comment: self.comment,
                 time_created,
             },
-            cases: self.cases.cases.into_iter().map(fm::Case::from).collect(),
+            cases,
+            ereports_by_id,
         }
     }
 }
