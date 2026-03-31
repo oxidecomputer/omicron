@@ -54,9 +54,12 @@ members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
+    "dev-tools/schema",
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
+    "dns-server/dnsadm",
+    "dns-server/transient",
     "end-to-end-tests",
     "ereport/types",
     "gateway",
@@ -94,6 +97,7 @@ members = [
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
+    "nexus/fm",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -231,11 +235,14 @@ default-members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
+    "dev-tools/schema",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
     "dns-server-api",
+    "dns-server/dnsadm",
+    "dns-server/transient",
     "end-to-end-tests",
     "ereport/types",
     "gateway",
@@ -273,6 +280,7 @@ default-members = [
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
+    "nexus/fm",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -423,6 +431,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
+byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }
 bytes = "1.10.1"
 camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"
@@ -604,6 +613,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
+nexus-fm = { path = "nexus/fm" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-lockstep-api = { path = "nexus/lockstep-api" }
@@ -704,10 +714,11 @@ progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "368a2225b79328514ce0ea9181d8f874019edaa2" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -750,7 +761,6 @@ semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
-serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.145"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -829,6 +839,7 @@ toml = "0.8.23"
 toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
+transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }

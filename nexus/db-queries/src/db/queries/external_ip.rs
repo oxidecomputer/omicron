@@ -1110,9 +1110,12 @@ mod tests {
             let (.., pool) = self
                 .db
                 .datastore()
-                .ip_pools_fetch_default(self.db.opctx())
+                .ip_pools_fetch_default_by_version(
+                    self.db.opctx(),
+                    nexus_db_model::IpVersion::V4,
+                )
                 .await
-                .expect("Failed to lookup default ip pool");
+                .expect("Failed to lookup default IPv4 ip pool");
             pool.identity.id
         }
 

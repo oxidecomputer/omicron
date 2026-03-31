@@ -268,7 +268,11 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: ntp_admin_api_mod::stub_api_description,
             ident: "ntp-admin",
-        }),
+        })
+        // The NTP Admin API is client-side-versioned and currently frozen. We
+        // allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Oximeter API",
             versions: Versions::new_versioned(

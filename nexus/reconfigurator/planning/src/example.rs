@@ -45,8 +45,10 @@ use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
@@ -407,6 +409,28 @@ impl ExampleSystemBuilder {
     pub fn clickhouse_policy(mut self, policy: ClickhousePolicy) -> Self {
         self.clickhouse_policy = policy;
         self
+    }
+
+    /// Configure the example system to deploy all supported zone types.
+    ///
+    /// This sets up 5 sleds with enough of each service to cover every
+    /// `ZoneKind` variant, including oximeter, CockroachDB, boundary NTP,
+    /// external DNS, and replicated ClickHouse.
+    pub fn all_zone_types(self) -> anyhow::Result<Self> {
+        Ok(self
+            .nsleds(5)
+            .oximeter_count(OXIMETER_REDUNDANCY)
+            .cockroachdb_count(COCKROACHDB_REDUNDANCY)
+            .boundary_ntp_count(2)
+            .external_dns_count(1)?
+            .clickhouse_policy(ClickhousePolicy {
+                version: 0,
+                mode: ClickhouseMode::Both {
+                    target_servers: 2,
+                    target_keepers: 3,
+                },
+                time_created: Utc::now(),
+            }))
     }
 
     /// Create zones in the example system.
@@ -1283,12 +1307,11 @@ mod tests {
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
-    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-    use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
     use strum::IntoEnumIterator;
+    use transient_dns_server::TransientDnsServer;
 
     use super::*;
 
@@ -1549,20 +1572,8 @@ mod tests {
         // Build an example system with all supported zone types.
         let (_example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(5)
-                .oximeter_count(OXIMETER_REDUNDANCY)
-                .cockroachdb_count(COCKROACHDB_REDUNDANCY)
-                .boundary_ntp_count(2)
-                .external_dns_count(1)
+                .all_zone_types()
                 .unwrap()
-                .clickhouse_policy(ClickhousePolicy {
-                    version: 0,
-                    mode: ClickhouseMode::Both {
-                        target_servers: 2,
-                        target_keepers: 3,
-                    },
-                    time_created: chrono::Utc::now(),
-                })
                 .build();
 
         // Verify that we deploy every type of zone by iterating all ZoneKind
@@ -1651,7 +1662,7 @@ mod tests {
         };
 
         // Initialize a DNS server.
-        let dns = dns_server::TransientServer::new(&logctx.log)
+        let dns = TransientDnsServer::new(&logctx.log)
             .await
             .expect("created DNS server");
         dns.initialize_with_config(&logctx.log, &params)

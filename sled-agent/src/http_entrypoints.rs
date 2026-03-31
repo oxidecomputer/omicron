@@ -78,7 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26};
+use sled_agent_types_versions::{v1, v20, v25, v26, v30};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -877,7 +877,9 @@ impl SledAgentApi for SledAgentImpl {
         let body_args = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
+                let rules: Vec<_> =
+                    body_args.rules.into_iter().map(Into::into).collect();
+                sa.firewall_rules_ensure(body_args.vni, &rules)
                     .await
                     .map_err(Error::from)?;
                 Ok(HttpResponseUpdatedNoContent())
@@ -959,6 +961,7 @@ impl SledAgentApi for SledAgentImpl {
         //
         // Use shorter names so rustfmt doesn't give up on this function.
         use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
+        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
         type LatestEnvelope = EarlyNetworkConfigEnvelope;
 
         let sa = rqctx.context();
@@ -966,16 +969,14 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&rqctx, async {
                 let bs = sa.bootstore();
 
-                let config = bs.get_network_config().await.map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "failed to get bootstore: {}",
-                        InlineErrorChain::new(&e)
-                    ))
-                })?;
-
+                // It's a little awkward to create a new subscription
+                // (i.e., a new `watch::Receiver`) any time we receive this
+                // dropshot request, but this request is deprecated anyway so we
+                // don't expect it to be called in practice.
+                let config = bs.network_config_subscribe().borrow().clone();
                 let config = match config {
                     Some(config) => {
-                        let body: BodyV20 =
+                        let latest_version_body =
                             LatestEnvelope::deserialize_from_bootstore(&config)
                                 .and_then(|envelope| {
                                     envelope.deserialize_body()
@@ -986,8 +987,9 @@ impl SledAgentApi for SledAgentImpl {
                                          early network config: {}",
                                         InlineErrorChain::new(&err),
                                     ))
-                                })?
-                                .into();
+                                })?;
+                        let body =
+                            BodyV20::from(BodyV26::from(latest_version_body));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,
                             schema_version: BodyV20::SCHEMA_VERSION,
@@ -1005,6 +1007,26 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(config))
             })
             .await
+    }
+
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v26(
@@ -1476,10 +1498,8 @@ impl SledAgentApi for SledAgentImpl {
                 match policy {
                     OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
                     OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
-                        let our_switch_zone_ip =
-                            sa.switch_zone_underlay_info().ip;
                         if request_context.request.remote_addr().ip()
-                            == our_switch_zone_ip
+                            == sa.local_switch_zone_ip()
                         {
                             let message =
                                 "requests to disable the switch zone must \
@@ -1859,9 +1879,11 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<RotPathParams>,
     ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
         let sa = request_context.context();
-        let rot = sa.rot_attestor(path_params.into_inner().rot);
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
+                let remote_addr = request_context.request.remote_addr();
+                let rot =
+                    sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let log = rot.get_measurement_log().await?;
                 Ok(HttpResponseOk(log.into()))
             })
@@ -1873,9 +1895,11 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<RotPathParams>,
     ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
         let sa = request_context.context();
-        let rot = sa.rot_attestor(path_params.into_inner().rot);
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
+                let remote_addr = request_context.request.remote_addr();
+                let rot =
+                    sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let chain = rot.get_certificate_chain().await?;
                 Ok(HttpResponseOk(chain.into()))
             })
@@ -1888,10 +1912,12 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<Nonce>,
     ) -> Result<HttpResponseOk<Attestation>, HttpError> {
         let sa = request_context.context();
-        let rot = sa.rot_attestor(path_params.into_inner().rot);
         let nonce = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
+                let remote_addr = request_context.request.remote_addr();
+                let rot =
+                    sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let attestation = rot.attest(nonce.into()).await?;
                 Ok(HttpResponseOk(attestation.into()))
             })

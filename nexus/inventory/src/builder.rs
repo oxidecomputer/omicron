@@ -722,7 +722,7 @@ impl CollectionBuilder {
         self.found_cockroach_status(node_id, status);
     }
 
-    /// Record pre-built status for a CockroachDB node.
+    /// Record pre-built status for a CockroachDB node
     pub fn found_cockroach_status(
         &mut self,
         node_id: InternalNodeId,

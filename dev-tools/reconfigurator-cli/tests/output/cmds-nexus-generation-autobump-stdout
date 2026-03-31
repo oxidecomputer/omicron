@@ -1152,7 +1152,9 @@ COCKROACH STATUS
 
 
 NTP STATUS
-    No NTP zones reported timesync information
+    Zone 62620961-fc4a-481e-968b-f5acbac0dc63: NTP reports that time is synced
+    Zone 6444f8a5-6465-4f0b-a549-1993c113569c: NTP reports that time is synced
+    Zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8: NTP reports that time is synced
 
 INTERNAL DNS STATUS
     Zone 427ec88f-f467-42fa-9bbb-66a91a36103c: Internal DNS generation @ 1

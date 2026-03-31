@@ -110,6 +110,7 @@ use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
 /// Starts the control plane for tests and tools
@@ -152,8 +153,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     nexus_internal_addr: Option<SocketAddr>,
 
     pub external_dns_zone_name: Option<String>,
-    pub external_dns: Option<dns_server::TransientServer>,
-    pub internal_dns: Option<dns_server::TransientServer>,
+    pub external_dns: Option<TransientDnsServer>,
+    pub internal_dns: Option<TransientDnsServer>,
     dns_config: Option<DnsConfigParams>,
     initial_blueprint_id: Option<BlueprintUuid>,
 
@@ -1105,7 +1106,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_external_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "external_dns_server"));
 
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns = TransientDnsServer::new(&log).await.unwrap();
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
@@ -1187,7 +1188,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// Set up an internal DNS server on the first sled agent
     pub async fn start_internal_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns = TransientDnsServer::new(&log).await.unwrap();
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");

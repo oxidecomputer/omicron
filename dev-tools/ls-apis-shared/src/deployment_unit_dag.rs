@@ -24,6 +24,12 @@ NewtypeDeref! { () pub struct DeploymentUnitId(String); }
 NewtypeDisplay! { () pub struct DeploymentUnitId(String); }
 NewtypeFrom! { () pub struct DeploymentUnitId(String); }
 
+impl From<&str> for DeploymentUnitId {
+    fn from(s: &str) -> Self {
+        DeploymentUnitId(s.to_owned())
+    }
+}
+
 /// A single directed edge in the deployment unit dependency DAG.
 ///
 /// `consumer` depends on `producer`: the producer must be fully updated

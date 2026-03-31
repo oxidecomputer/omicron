@@ -249,7 +249,11 @@ configuration and monitoring that requires the `cockroach` CLI.
 client_package_name = "ntp-admin-client"
 label = "NTP Admin"
 server_package_name = "ntp-admin-api"
-versioned_how = "server"
+versioned_how = "client"
+versioned_how_reason = """
+Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated \
+before NTP. This requires that the NTP Admin API be client-side versioned.
+"""
 notes = """
 This is the server running inside NTP zones that performs \
 monitoring on 'chrony'.
@@ -486,8 +490,27 @@ instance.  It's also used by `crutest` for testing.
 #
 
 #
-# Non-DAG dependencies.  See above for details.
+# RSS-only dependencies.  These are real dependencies that only exist during
+# Rack Setup Service (RSS), not during normal operation or upgrade.
 #
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "cockroach-admin-client"
+evaluation = "rss-only"
+note = """
+Sled Agent only uses the Cockroach Admin client during RSS, which we don't care
+about for the purpose of upgrade.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "dns-service-client"
+evaluation = "rss-only"
+note = """
+Sled Agent only uses the DNS service client during RSS, which we don't care
+about for the purpose of upgrade.
+"""
+
 [[dependency_filter_rules]]
 ancestor = "oximeter-producer"
 client = "nexus-client"
@@ -524,15 +547,6 @@ evaluation = "not-deployed"
 note = """
 Wicketd provides a function to refresh the server's config.  This could probably
 move into the client package instead.
-"""
-
-[[dependency_filter_rules]]
-ancestor = "dns-server"
-client = "dns-service-client"
-evaluation = "not-deployed"
-note = """
-DNS server depends on itself only to provide TransientServer, which is not a
-deployed component.
 """
 
 [[dependency_filter_rules]]

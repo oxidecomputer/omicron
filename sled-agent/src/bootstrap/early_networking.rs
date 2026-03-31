@@ -4,6 +4,7 @@
 
 //! Network setup required to bring up the control plane
 
+use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
@@ -40,14 +41,15 @@ use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
-    PortSpeed, RackNetworkConfig, SwitchSlot,
+    PortSpeed, RackNetworkConfig, RouterPeerType, SwitchSlot, UplinkAddress,
 };
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::watch;
 use tokio::time::sleep;
 
 const BGP_SESSION_RESOLUTION: u64 = 100;
@@ -122,38 +124,39 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// Dynamically looks up (via internal DNS and queries to MGS) the underlay
     /// addresses of the switch zone(s) that have uplinks configured.
     ///
-    /// If `rack_network_config` does not contain any uplinks, returns an empty
-    /// set. Otherwise:
+    /// If the `RackNetworkConfig` inside `config_rx` does not contain any
+    /// uplinks, returns an empty set. Otherwise:
     ///
-    /// * If `rack_network_config` specifies only one switch with an uplink,
-    ///   blocks until we can find that switch zone's underlay address.
-    /// * If `rack_network_config` specifies two switches with uplinks, we will
-    ///   block up to the `wait_for_at_least_one` duration trying to find both
+    /// * If the config specifies only one switch with an uplink, blocks until
+    ///   we can find that switch zone's underlay address.
+    /// * If the config specifies two switches with uplinks, we will block up
+    ///   to the `wait_for_at_least_one` duration trying to find both
     ///   corresponding switch zones. If we pass the deadline without having
     ///   found both, we will return as soon after that as we can find one of
     ///   the switch zone's addresses.
     pub async fn lookup_uplinked_switch_zone_underlay_addrs(
         &self,
         resolver: &DnsResolver,
-        config: &RackNetworkConfig,
+        config_rx: &watch::Receiver<RackNetworkConfig>,
         wait_for_at_least_one: Duration,
     ) -> HashMap<SwitchSlot, Ipv6Addr> {
-        // Which switches have configured ports?
-        let uplinked_switches = config
-            .ports
-            .iter()
-            .map(|port_config| port_config.switch)
-            .collect::<HashSet<SwitchSlot>>();
-
-        // If we have no uplinks, we have nothing to look up.
-        if uplinked_switches.is_empty() {
-            return HashMap::new();
-        }
-
         let query_start = Instant::now();
         let uplinked_switch_zone_addrs = retry_notify(
             retry_policy_switch_mapping(),
             || async {
+                // Which switches have configured ports?
+                let uplinked_switches = config_rx
+                    .borrow()
+                    .ports
+                    .iter()
+                    .map(|port_config| port_config.switch)
+                    .collect::<HashSet<SwitchSlot>>();
+
+                // If we have no uplinks, we have nothing to look up.
+                if uplinked_switches.is_empty() {
+                    return Ok(HashMap::new());
+                }
+
                 match self
                     .lookup_switch_zone_underlay_addrs_one_attempt(
                         resolver,
@@ -308,10 +311,10 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// zone it brought up.
     ///
     /// Returns the list of uplinks configured via DPD.
-    pub async fn init_switch_config(
+    pub(crate) async fn init_switch_config(
         &mut self,
-        rack_network_config: &RackNetworkConfig,
-        switch_zone_underlay_ip: Ipv6Addr,
+        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
+        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
         info!(
@@ -346,6 +349,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                 )));
             }
         };
+
+        // Take a snapshot of the current `RackNetworkConfig` at this point so
+        // we use one consistent config throughout the rest of this function.
+        let rack_network_config = rack_network_config_rx.borrow().clone();
 
         // We now know which switch we are: filter the uplinks to just ours.
         let our_ports = rack_network_config
@@ -426,10 +433,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
 
         let mgd = MgdClient::new(
-            &format!(
-                "http://{}",
-                &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
-            ),
+            &format!("http://[{switch_zone_underlay_ip}]:{MGD_PORT}"),
             self.log.clone(),
         );
 
@@ -554,104 +558,107 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                 }
 
-                // Determine if this is a numbered or unnumbered peer based on
-                // whether an address is specified (unspecified = unnumbered)
-                if !peer.addr.is_unspecified() {
-                    let addr = peer.addr;
+                match peer.addr {
                     // Numbered peer - identified by address
-                    let bpc = MgBgpPeerConfig {
-                        name: format!("{}", addr),
-                        host: format!("{}:179", addr),
-                        hold_time: peer
-                            .hold_time
-                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
-                        idle_hold_time: peer
-                            .idle_hold_time
-                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
-                        delay_open: peer
-                            .delay_open
-                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
-                        connect_retry: peer
-                            .connect_retry
-                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
-                        keepalive: peer
-                            .keepalive
-                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
-                        resolution: BGP_SESSION_RESOLUTION,
-                        passive: false,
-                        remote_asn: peer.remote_asn,
-                        min_ttl: peer.min_ttl,
-                        md5_auth_key: peer.md5_auth_key.clone(),
-                        multi_exit_discriminator: peer.multi_exit_discriminator,
-                        communities: peer.communities.clone(),
-                        local_pref: peer.local_pref,
-                        enforce_first_as: peer.enforce_first_as,
-                        ipv4_unicast: Some(build_ipv4_unicast(peer)),
-                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
-                        vlan_id: peer.vlan_id,
-                        connect_retry_jitter: Some(JitterRange {
-                            max: 1.0,
-                            min: 0.75,
-                        }),
-                        deterministic_collision_resolution: false,
-                        idle_hold_jitter: None,
-                    };
-                    match bgp_peer_configs.get_mut(&port.port) {
-                        Some(peers) => {
-                            peers.push(bpc);
-                        }
-                        None => {
-                            bgp_peer_configs
-                                .insert(port.port.clone(), vec![bpc]);
+                    RouterPeerType::Numbered { ip: addr } => {
+                        let bpc = MgBgpPeerConfig {
+                            name: format!("{}", addr),
+                            host: format!("{}:179", addr),
+                            hold_time: peer
+                                .hold_time
+                                .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                            idle_hold_time: peer.idle_hold_time.unwrap_or(
+                                BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME,
+                            ),
+                            delay_open: peer
+                                .delay_open
+                                .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                            connect_retry: peer.connect_retry.unwrap_or(
+                                BgpPeerConfig::DEFAULT_CONNECT_RETRY,
+                            ),
+                            keepalive: peer
+                                .keepalive
+                                .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                            resolution: BGP_SESSION_RESOLUTION,
+                            passive: false,
+                            remote_asn: peer.remote_asn,
+                            min_ttl: peer.min_ttl,
+                            md5_auth_key: peer.md5_auth_key.clone(),
+                            multi_exit_discriminator: peer
+                                .multi_exit_discriminator,
+                            communities: peer.communities.clone(),
+                            local_pref: peer.local_pref,
+                            enforce_first_as: peer.enforce_first_as,
+                            ipv4_unicast: Some(build_ipv4_unicast(peer)),
+                            ipv6_unicast: Some(build_ipv6_unicast(peer)),
+                            vlan_id: peer.vlan_id,
+                            connect_retry_jitter: Some(JitterRange {
+                                max: 1.0,
+                                min: 0.75,
+                            }),
+                            deterministic_collision_resolution: false,
+                            idle_hold_jitter: None,
+                        };
+                        match bgp_peer_configs.get_mut(&port.port) {
+                            Some(peers) => {
+                                peers.push(bpc);
+                            }
+                            None => {
+                                bgp_peer_configs
+                                    .insert(port.port.clone(), vec![bpc]);
+                            }
                         }
                     }
-                } else {
+
                     // Unnumbered peer - identified by interface
-                    let bpc = MgUnnumberedBgpPeerConfig {
-                        name: format!("unnumbered-{}", port.port),
-                        interface: format!("tfport{}_0", port.port),
-                        hold_time: peer
-                            .hold_time
-                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
-                        idle_hold_time: peer
-                            .idle_hold_time
-                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
-                        delay_open: peer
-                            .delay_open
-                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
-                        connect_retry: peer
-                            .connect_retry
-                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
-                        keepalive: peer
-                            .keepalive
-                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
-                        resolution: BGP_SESSION_RESOLUTION,
-                        passive: false,
-                        remote_asn: peer.remote_asn,
-                        min_ttl: peer.min_ttl,
-                        md5_auth_key: peer.md5_auth_key.clone(),
-                        multi_exit_discriminator: peer.multi_exit_discriminator,
-                        communities: peer.communities.clone(),
-                        local_pref: peer.local_pref,
-                        enforce_first_as: peer.enforce_first_as,
-                        ipv4_unicast: Some(build_ipv4_unicast(peer)),
-                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
-                        vlan_id: peer.vlan_id,
-                        connect_retry_jitter: Some(JitterRange {
-                            max: 1.0,
-                            min: 0.75,
-                        }),
-                        deterministic_collision_resolution: false,
-                        idle_hold_jitter: None,
-                        router_lifetime: peer.router_lifetime.as_u16(),
-                    };
-                    match bgp_unnumbered_peer_configs.get_mut(&port.port) {
-                        Some(peers) => {
-                            peers.push(bpc);
-                        }
-                        None => {
-                            bgp_unnumbered_peer_configs
-                                .insert(port.port.clone(), vec![bpc]);
+                    RouterPeerType::Unnumbered { router_lifetime } => {
+                        let bpc = MgUnnumberedBgpPeerConfig {
+                            name: format!("unnumbered-{}", port.port),
+                            interface: format!("tfport{}_0", port.port),
+                            hold_time: peer
+                                .hold_time
+                                .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                            idle_hold_time: peer.idle_hold_time.unwrap_or(
+                                BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME,
+                            ),
+                            delay_open: peer
+                                .delay_open
+                                .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                            connect_retry: peer.connect_retry.unwrap_or(
+                                BgpPeerConfig::DEFAULT_CONNECT_RETRY,
+                            ),
+                            keepalive: peer
+                                .keepalive
+                                .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                            resolution: BGP_SESSION_RESOLUTION,
+                            passive: false,
+                            remote_asn: peer.remote_asn,
+                            min_ttl: peer.min_ttl,
+                            md5_auth_key: peer.md5_auth_key.clone(),
+                            multi_exit_discriminator: peer
+                                .multi_exit_discriminator,
+                            communities: peer.communities.clone(),
+                            local_pref: peer.local_pref,
+                            enforce_first_as: peer.enforce_first_as,
+                            ipv4_unicast: Some(build_ipv4_unicast(peer)),
+                            ipv6_unicast: Some(build_ipv6_unicast(peer)),
+                            vlan_id: peer.vlan_id,
+                            connect_retry_jitter: Some(JitterRange {
+                                max: 1.0,
+                                min: 0.75,
+                            }),
+                            deterministic_collision_resolution: false,
+                            idle_hold_jitter: None,
+                            router_lifetime: router_lifetime.as_u16(),
+                        };
+                        match bgp_unnumbered_peer_configs.get_mut(&port.port) {
+                            Some(peers) => {
+                                peers.push(bpc);
+                            }
+                            None => {
+                                bgp_unnumbered_peer_configs
+                                    .insert(port.port.clone(), vec![bpc]);
+                            }
                         }
                     }
                 }
@@ -830,13 +837,15 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
-            if a.addr().is_unspecified() {
-                continue;
+            match a.address {
+                UplinkAddress::AddrConf => continue,
+                UplinkAddress::Static { ip_net } => {
+                    // TODO We're discarding the `uplink_cidr.prefix()` here and
+                    // only using the IP address; at some point we probably need
+                    // to give the full CIDR to dendrite?
+                    addrs.push(ip_net.addr());
+                }
             }
-            // TODO We're discarding the `uplink_cidr.prefix()` here and only using
-            // the IP address; at some point we probably need to give the full CIDR
-            // to dendrite?
-            addrs.push(a.addr());
         }
 
         let link_settings = LinkSettings {

@@ -540,7 +540,7 @@ impl SystemApis {
                 &self
                     .api_metadata
                     .deployment_unit_info(id)
-                    .expect("deployment unit info exists")
+                    .expect("deployment unit info in graph exists in metadata")
                     .label
             },
             |_, edge| *edge,
@@ -1577,6 +1577,7 @@ impl ApiDependencyFilter {
             ApiDependencyFilter::Default => !matches!(
                 evaluation,
                 Evaluation::NonDag
+                    | Evaluation::RssOnly
                     | Evaluation::Bogus
                     | Evaluation::NotDeployed
             ),

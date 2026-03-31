@@ -233,7 +233,11 @@ fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
             for unit_id in apis.deployment_units() {
                 let info = metadata
                     .deployment_unit_info(unit_id)
-                    .expect("deployment unit info exists");
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "deployment unit info for {unit_id:?} should exist"
+                        )
+                    });
                 let server_components =
                     apis.deployment_unit_servers(unit_id)?;
                 println!("{}", info.label);

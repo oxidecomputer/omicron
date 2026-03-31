@@ -56,7 +56,6 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
-dns-server.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 hex-literal.workspace = true
@@ -72,3 +71,4 @@ reconfigurator-cli.workspace = true
 semver.workspace = true
 test-strategy.workspace = true
 toml.workspace = true
+transient-dns-server.workspace = true

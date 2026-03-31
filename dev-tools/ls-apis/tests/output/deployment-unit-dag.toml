@@ -2,18 +2,6 @@
 # To regenerate, run `EXPECTORATE=overwrite cargo nextest run -p omicron-ls-apis`.
 
 [[edges]]
-consumer = "host_os"
-producer = "cockroach"
-
-[[edges]]
-consumer = "host_os"
-producer = "dns_server"
-
-[[edges]]
-consumer = "host_os"
-producer = "ntp"
-
-[[edges]]
 consumer = "installinator"
 producer = "host_os"
 
@@ -40,10 +28,6 @@ producer = "dns_server"
 [[edges]]
 consumer = "nexus"
 producer = "host_os"
-
-[[edges]]
-consumer = "nexus"
-producer = "ntp"
 
 [[edges]]
 consumer = "nexus"

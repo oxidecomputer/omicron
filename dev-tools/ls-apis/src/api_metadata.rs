@@ -463,6 +463,11 @@ pub enum Evaluation {
     NotDeployed,
     /// This dependency should not be part of the update DAG
     NonDag,
+    /// This dependency is only used during RSS (Rack Setup Service), not
+    /// during normal operation or upgrade.  Like `NonDag`, this means the
+    /// dependency should not be part of the update DAG.  Unlike `NonDag`,
+    /// this does not require that the target API uses client-side versioning.
+    RssOnly,
     /// This dependency should be part of the update DAG
     Dag,
 }

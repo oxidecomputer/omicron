@@ -239,6 +239,7 @@ mod tests {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .unwrap();
         let stderr = child.stderr.take().unwrap();

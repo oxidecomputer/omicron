@@ -20,6 +20,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use rustix::fd::AsRawFd;
+use sled_agent_types::inventory::InventoryDataset;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -592,6 +593,20 @@ impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
     }
 }
 
+impl From<DatasetProperties> for InventoryDataset {
+    fn from(props: DatasetProperties) -> Self {
+        Self {
+            id: props.id,
+            name: props.name,
+            available: props.avail,
+            used: props.used,
+            quota: props.quota,
+            reservation: props.reservation,
+            compression: props.compression,
+        }
+    }
+}
+
 impl DatasetProperties {
     /// Parses dataset properties, assuming that the caller is providing the
     /// output of the following command as stdout:
@@ -1127,6 +1142,40 @@ pub struct DatasetVolumeDeleteArgs<'a> {
 
     /// Additional actions are required when deleting a raw zvol.
     pub raw: bool,
+}
+
+/// Error returned by [`Zfs::remove_reservation`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to remove reservation from '{name}': {err}")]
+pub struct RemoveReservationError {
+    name: String,
+    #[source]
+    err: RemoveReservationErrorInner,
+}
+
+impl RemoveReservationError {
+    pub fn get_value(name: String, err: GetValueError) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::GetValue(err),
+        }
+    }
+
+    pub fn set_value(name: String, err: SetValueError) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::SetValue(err),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum RemoveReservationErrorInner {
+    #[error(transparent)]
+    GetValue(#[from] GetValueError),
+
+    #[error(transparent)]
+    SetValue(#[from] SetValueError),
 }
 
 impl Zfs {
@@ -2127,6 +2176,23 @@ impl Zfs {
                 }
             }
         }
+    }
+
+    /// Remove a dataset's reservation, if set
+    pub async fn remove_reservation(
+        name: &str,
+    ) -> Result<(), RemoveReservationError> {
+        let value = Zfs::get_value(name, "reservation").await.map_err(|e| {
+            RemoveReservationError::get_value(name.to_string(), e)
+        })?;
+
+        if value != "none" {
+            Zfs::set_value(name, "reservation", "none").await.map_err(|e| {
+                RemoveReservationError::set_value(name.to_string(), e)
+            })?;
+        }
+
+        Ok(())
     }
 }
 

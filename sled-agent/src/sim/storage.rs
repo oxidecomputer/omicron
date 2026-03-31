@@ -23,7 +23,6 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetName;
@@ -44,6 +43,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;

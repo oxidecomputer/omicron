@@ -113,7 +113,7 @@ struct UnvalidatedRackInitializeRequest {
     allowed_source_ips: AllowedSourceIps,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RackInitializeRequestParams {
     pub rack_initialize_request: RackInitializeRequest,
     pub skip_timesync: bool,

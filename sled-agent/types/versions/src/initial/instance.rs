@@ -14,7 +14,7 @@ use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
-use propolis_api_types::instance_spec::v0::InstanceSpecV0;
+use propolis_api_types_versions::v1::instance_spec::InstanceSpec;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -105,7 +105,7 @@ pub struct InstanceMetadata {
 /// Specifies the virtual hardware configuration of a new Propolis VMM in the
 /// form of a Propolis instance specification.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VmmSpec(pub InstanceSpecV0);
+pub struct VmmSpec(pub InstanceSpec);
 
 /// VPC firewall rule after object name resolution has been performed by Nexus
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -115,9 +115,24 @@ pub struct ResolvedVpcFirewallRule {
     pub targets: Vec<NetworkInterface>,
     pub filter_hosts: Option<HashSet<HostIdentifier>>,
     pub filter_ports: Option<Vec<external::L4PortRange>>,
-    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,
     pub priority: external::VpcFirewallRulePriority,
+}
+
+/// The protocols that may be specified in a firewall rule's filter.
+//
+// This is the version of the enum without `Icmp6`, for versions up through
+// `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+pub enum VpcFirewallRuleProtocol {
+    Tcp,
+    Udp,
+    Icmp(Option<external::VpcFirewallIcmpFilter>),
+    // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
+    // Other(u16),
 }
 
 /// The body of a request to move a previously-ensured instance into a specific
