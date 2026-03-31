@@ -1712,6 +1712,7 @@ mod test {
             fm.sitrep_gc_period_secs = 46
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
+            fm.analysis_period_secs = 49
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
