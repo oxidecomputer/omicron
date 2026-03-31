@@ -1232,7 +1232,8 @@ mod tests {
             );
 
             let fsm_file = format!("test-learner-{n}-fsm-state-ledger");
-            let network_file = format!("test-{n}-network-config-ledger");
+            let network_file =
+                format!("test-learner-{n}-network-config-ledger");
             let config = Config {
                 id: learner_id(n),
                 addr: SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, 0, 0, 0),
