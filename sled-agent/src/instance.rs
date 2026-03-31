@@ -3226,66 +3226,92 @@ mod tests {
     }
 
     // tests around dropshot request timeouts during the blocking propolis setup
-    #[tokio::test]
-    async fn test_instance_create_timeout_while_starting_propolis() {
+    #[test]
+    fn test_instance_create_timeout_while_starting_propolis() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_starting_propolis",
         );
         let log = logctx.log.new(o!(FileKv));
-
-        let FakeNexusParts {
-            nexus_client,
-            state_rx,
-            _dns_server,
-            _nexus_server,
-        } = FakeNexusParts::new(&log).await;
-
         let temp_guard = Utf8TempDir::new().unwrap();
 
-        let (inst, _) = timeout(
-            TIMEOUT_DURATION,
-            instance_struct(
-                &log,
-                // we want to test propolis not ever coming up
-                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
+        // Use a manual runtime so that `temp_guard` outlives it.
+        //
+        // The runner task's `setup_propolis_zone` calls `tokio::fs::write`
+        // (which uses `spawn_blocking`) to write zone config files. This
+        // test times out before the runner finishes, so the blocking write
+        // may still be in-flight when the test drops its locals. If
+        // `temp_guard` drops while the blocking thread is writing,
+        // `remove_dir_all` can race and fail silently, leaking files.
+        //
+        // Dropping the runtime first drains the blocking thread pool,
+        // ensuring the write completes before `temp_guard` cleans up.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/10063
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let FakeNexusParts {
                 nexus_client,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
+                state_rx,
+                _dns_server,
+                _nexus_server,
+            } = FakeNexusParts::new(&log).await;
+
+            let (inst, _) = timeout(
+                TIMEOUT_DURATION,
+                instance_struct(
+                    &log,
+                    // we want to test propolis not ever coming up
+                    SocketAddr::V6(SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        1,
+                        0,
+                        0,
+                    )),
+                    nexus_client,
+                    AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                        ZpoolOrRamdisk::Ramdisk,
+                    ),
+                    temp_guard.path().as_str(),
                 ),
-                temp_guard.path().as_str(),
-            ),
-        )
-        .await
-        .expect("timed out creating Instance struct");
-
-        let (put_tx, put_rx) = oneshot::channel();
-
-        tokio::time::pause();
-
-        // pretending we're InstanceManager::ensure_state, try in vain to start
-        // our "instance", but no propolis server is running
-        inst.put_state(put_tx, VmmStateRequested::Running)
-            .expect("failed to send Instance::put_state");
-
-        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
-
-        tokio::time::advance(TIMEOUT_DURATION).await;
-
-        tokio::time::resume();
-
-        timeout_fut
+            )
             .await
-            .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
+            .expect("timed out creating Instance struct");
 
-        if let ReceivedInstanceState::InstancePut(SledVmmState {
-            vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
-            ..
-        }) = state_rx.borrow().to_owned()
-        {
-            panic!(
-                "Nexus's InstanceState should never have reached running if zone creation timed out"
+            let (put_tx, put_rx) = oneshot::channel();
+
+            tokio::time::pause();
+
+            // pretending we're InstanceManager::ensure_state, try in vain
+            // to start our "instance", but no propolis server is running
+            inst.put_state(put_tx, VmmStateRequested::Running)
+                .expect("failed to send Instance::put_state");
+
+            let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
+
+            tokio::time::advance(TIMEOUT_DURATION).await;
+
+            tokio::time::resume();
+
+            timeout_fut.await.expect_err(
+                "*should've* timed out waiting for \
+                 Instance::put_state, but didn't?",
             );
-        }
+
+            if let ReceivedInstanceState::InstancePut(SledVmmState {
+                vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
+                ..
+            }) = state_rx.borrow().to_owned()
+            {
+                panic!(
+                    "Nexus's InstanceState should never have reached \
+                     running if zone creation timed out"
+                );
+            }
+        });
 
         logctx.cleanup_successful();
     }
