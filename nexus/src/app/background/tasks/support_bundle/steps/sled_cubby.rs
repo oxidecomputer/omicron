@@ -45,12 +45,14 @@ pub async fn collect(
         bail!("Could not initialize MGS client");
     };
 
-    write_sled_cubby_info(log, mgs_client, nexus_sleds, dir).await?;
+    write_sled_cubby_info(collection, log, mgs_client, nexus_sleds, dir)
+        .await?;
 
     Ok(CollectionStepOutput::None)
 }
 
 async fn write_sled_cubby_info(
+    collection: &BundleCollection,
     log: &Logger,
     mgs_client: &MgsClient,
     nexus_sleds: &[Sled],
@@ -76,6 +78,9 @@ async fn write_sled_cubby_info(
     for sp in
         available_sps.into_iter().filter(|sp| matches!(sp.type_, SpType::Sled))
     {
+        if collection.is_cancelled() {
+            break;
+        }
         let sp_state = match mgs_client.sp_get(&sp.type_, sp.slot).await {
             Ok(s) => s.into_inner(),
             Err(e) => {

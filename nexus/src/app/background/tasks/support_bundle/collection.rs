@@ -37,6 +37,8 @@ use slog_error_chain::InlineErrorChain;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
@@ -53,6 +55,7 @@ pub struct BundleCollection {
     request: BundleRequest,
     bundle: SupportBundle,
     transfer_chunk_size: NonZeroU64,
+    cancelled: AtomicBool,
 }
 
 impl BundleCollection {
@@ -73,6 +76,7 @@ impl BundleCollection {
             request,
             bundle,
             transfer_chunk_size,
+            cancelled: AtomicBool::new(false),
         }
     }
 
@@ -100,6 +104,11 @@ impl BundleCollection {
         &self.bundle
     }
 
+    /// Returns true if this bundle collection has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
     /// Collect the bundle within Nexus, and store it on a target sled.
     pub async fn collect_bundle_and_store_on_sled(
         self: &Arc<Self>,
@@ -122,65 +131,59 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
-        // TL;DR: This `tokio::select` is allowed to poll multiple futures, but
-        // should not do any async work within the body of any chosen branch. A
-        // previous iteration of this code polled the "collection" as "&mut
-        // collection", and checked the status of the support bundle within a
-        // branch of the "select" polling "yield_interval.tick()".
+        // Spawn a background task that periodically checks whether this
+        // bundle should still be collected. If not, it sets `self.cancelled`.
         //
-        // We organize this work to "check for cancellation" as a whole future
-        // for a critical, but subtle reason: After the tick timer yields,
-        // we may then try to `await` a database function.
+        // The collection loop in `run_collect_bundle_steps` checks this flag
+        // before spawning new steps, and long-running steps check it at
+        // their loop points. When cancellation is detected, the collection
+        // stops spawning new work and drains all in-flight tasks before
+        // returning. This ensures all `spawn_blocking` work (from
+        // `tokio::fs::write` etc.) completes before the TempDir is dropped.
         //
-        // This, at a surface-level glance seems innocent enough. However, there
-        // is something potentially insidious here: if calling a datastore
-        // function - such as "support_bundle_get" - awaits acquiring access
-        // to a connection from the connection pool, while creating the
-        // collection ALSO potentially awaits acquiring access to the
-        // connection pool, it is possible for:
+        // Previous iterations used `tokio::select!` to race cancellation
+        // against collection. This had two problems:
         //
-        // 1. The `&mut collection` arm to have created a future, currently
-        //    yielded, which wants access to this underlying resource.
-        // 2. The current operation executing in `support_bundle_get` to
-        //    be awaiting access to this same underlying resource.
+        // 1. Dropping the collection future left `spawn_blocking` file
+        //    writes in-flight, racing with TempDir cleanup.
+        //    See: https://github.com/oxidecomputer/omicron/issues/10198
         //
-        // In this specific case, the connection pool would be attempting to
-        // yield to the `&mut collection` arm, which cannot run, if we were
-        // awaiting in the body of a different async select arm. This would
-        // result in a deadlock.
+        // 2. Earlier versions of the `select!` did async DB work in the
+        //    cancellation branch body while the collection branch held a
+        //    connection pool claim, causing deadlocks.
+        //    See: https://github.com/oxidecomputer/omicron/issues/9259
         //
-        // In the future, we may attempt to make access to the connection pool
-        // safer from concurrent asynchronous access - it is unsettling that
-        // multiple concurrent `.claim()` functions can cause this behavior -
-        // but in the meantime, we perform this cancellation check in a single
-        // future that always is polled concurrently with the collection work.
-        // Because of this separation, each future is polled until one
-        // completes, at which point we deterministically exit.
-        //
-        // For more details, see:
-        // https://github.com/oxidecomputer/omicron/issues/9259
+        // The current design avoids both issues: cancellation is
+        // cooperative (no future dropping), and the DB check runs in a
+        // separate spawned task (no connection pool contention).
+        let cancel_task = tokio::spawn({
+            let this = Arc::clone(self);
+            async move { this.check_for_cancellation().await }
+        });
 
-        tokio::select! {
-            // Returns if the bundle should no longer be collected.
-            why = self.check_for_cancellation() => {
-                warn!(
-                    &self.log,
-                    "Support Bundle cancelled - stopping collection";
-                    "bundle" => %self.bundle.id,
-                    "state" => ?self.bundle.state
-                );
-                return Err(why);
-            },
-            // Otherwise, keep making progress on the collection itself.
-            report = self.collect_bundle_as_file(&dir) => {
-                info!(
-                    &self.log,
-                    "Bundle Collection completed";
-                    "bundle" => %self.bundle.id
-                );
-                return report;
-            },
+        // Run the collection. It checks self.cancelled and drains all
+        // in-flight work before returning.
+        let report = self.collect_bundle_as_file(dir).await;
+
+        // Collection is done — stop the cancellation checker.
+        cancel_task.abort();
+
+        if self.is_cancelled() {
+            warn!(
+                &self.log,
+                "Support Bundle cancelled - stopping collection";
+                "bundle" => %self.bundle.id,
+                "state" => ?self.bundle.state
+            );
+            return Err(anyhow::anyhow!("Support Bundle Cancelled"));
         }
+
+        info!(
+            &self.log,
+            "Bundle Collection completed";
+            "bundle" => %self.bundle.id
+        );
+        report
     }
 
     async fn store_bundle_on_sled(
@@ -292,14 +295,14 @@ impl BundleCollection {
     // Indefinitely perform periodic checks about whether or not we should
     // cancel the bundle.
     //
-    // Returns an error if:
+    // Sets `self.cancelled` and returns if:
     // - The bundle state is no longer SupportBundleState::Collecting
-    // (which happens if the bundle has been explicitly cancelled, or
-    // if the backing storage has been expunged).
+    //   (which happens if the bundle has been explicitly cancelled, or
+    //   if the backing storage has been expunged).
     // - The bundle has been deleted
     //
     // Otherwise, keeps checking indefinitely while polled.
-    async fn check_for_cancellation(&self) -> anyhow::Error {
+    async fn check_for_cancellation(&self) {
         let work_duration = tokio::time::Duration::from_secs(5);
         let mut yield_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + work_duration,
@@ -329,10 +332,12 @@ impl BundleCollection {
                 }
                 Ok(_) => {
                     // Not collecting, for any reason: Time to exit
-                    return anyhow::anyhow!("Support Bundle Cancelled");
+                    self.cancelled.store(true, Ordering::Relaxed);
+                    return;
                 }
                 Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
-                    return anyhow::anyhow!("Support Bundle Deleted");
+                    self.cancelled.store(true, Ordering::Relaxed);
+                    return;
                 }
                 Err(err) => {
                     warn!(
@@ -361,6 +366,16 @@ impl BundleCollection {
             ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STEPS);
 
         loop {
+            // Check for cancellation before spawning new work.
+            if self.is_cancelled() {
+                info!(
+                    &self.log,
+                    "Cancellation detected — draining in-flight steps";
+                    "bundle" => %self.bundle.id,
+                );
+                break;
+            }
+
             // Process all the currently-planned steps
             while let Some(step) = steps.pop() {
                 let previous_result = tasks
@@ -393,7 +408,8 @@ impl BundleCollection {
 
             // Executing steps may create additional steps, as follow-up work.
             //
-            // Only finish if we've exhausted all possible steps and joined all spawned work.
+            // Only finish if we've exhausted all possible steps and joined
+            // all spawned work.
             if steps.is_empty() {
                 // Write trace file before returning
                 if let Err(err) = self.write_trace_file(output, &report).await {
@@ -406,6 +422,17 @@ impl BundleCollection {
                 return report;
             }
         }
+
+        // Drain all in-flight tasks. This ensures any tokio::fs operations
+        // (which internally use spawn_blocking) complete before we return,
+        // so the TempDir can be safely dropped by our caller.
+        while let Some(output) = tasks.join_next().await {
+            output.process(&mut report, &mut steps);
+            // Ignore newly-spawned steps from drained tasks — we're
+            // stopping.
+        }
+
+        report
     }
 
     // Write a Perfetto Event format JSON file for visualization
@@ -483,7 +510,8 @@ impl BundleCollection {
         Ok(())
     }
 
-    // Perform the work of collecting the support bundle into a temporary directory
+    // Perform the work of collecting the support bundle into a temporary
+    // directory.
     //
     // "dir" is an output directory where data can be stored.
     //
@@ -491,16 +519,9 @@ impl BundleCollection {
     // an Ok(SupportBundleCollectionReport). Any failures from this function
     // will prevent the support bundle from being collected altogether.
     //
-    // NOTE: The background task infrastructure will periodically check to see
-    // if the bundle has been cancelled by a user while it is being collected.
-    // If that happens, this function will be CANCELLED at an await point.
-    //
-    // As a result, it is important that this function be implemented as
-    // cancel-safe.
-    //
-    // The "steps" used within this function - passed to
-    // [`Self::run_collect_bundle_steps`] - are run on a [`ParallelTaskSet`],
-    // which automatically aborts tasks when it is dropped.
+    // Cancellation is cooperative: `self.is_cancelled()` is checked by
+    // `run_collect_bundle_steps` and by individual steps at loop points.
+    // In-flight work is drained before returning.
     async fn collect_bundle_as_file(
         self: &Arc<Self>,
         dir: &Utf8TempDir,

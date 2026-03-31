@@ -68,14 +68,15 @@ async fn collect_sp_dump(
         return Ok(CollectionStepOutput::Skipped);
     }
 
-    save_sp_dumps(mgs_client, sp, dir).await.with_context(|| {
-        format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
-    })?;
+    save_sp_dumps(collection, mgs_client, sp, dir).await.with_context(
+        || format!("failed to save SP dump from: {} {}", sp.type_, sp.slot),
+    )?;
 
     Ok(CollectionStepOutput::None)
 }
 
 async fn save_sp_dumps(
+    collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
     sp_dumps_dir: &Utf8Path,
@@ -92,6 +93,9 @@ async fn save_sp_dumps(
     })?;
 
     for i in 0..dump_count {
+        if collection.is_cancelled() {
+            break;
+        }
         let task_dump = mgs_client
             .sp_task_dump_get(&sp.type_, sp.slot, i)
             .await

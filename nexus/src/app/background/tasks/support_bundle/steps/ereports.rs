@@ -41,6 +41,7 @@ pub async fn collect(
     let ereports_dir = dir.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
     if let Err(err) = save_ereports(
+        collection,
         log,
         opctx,
         datastore,
@@ -64,6 +65,7 @@ pub async fn collect(
 }
 
 async fn save_ereports(
+    collection: &BundleCollection,
     log: &Logger,
     opctx: &OpContext,
     datastore: &Arc<DataStore>,
@@ -76,6 +78,9 @@ async fn save_ereports(
         dropshot::PaginationOrder::Ascending,
     );
     while let Some(p) = paginator.next() {
+        if collection.is_cancelled() {
+            break;
+        }
         let ereports = datastore
             .ereport_fetch_matching(&opctx, &filters, &p.current_pagparams())
             .await

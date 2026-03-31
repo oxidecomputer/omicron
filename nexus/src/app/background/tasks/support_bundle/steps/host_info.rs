@@ -185,6 +185,9 @@ async fn collect_data_from_sled(
     .buffer_unordered(10);
 
     while let Some(result) = diag_cmds.next().await {
+        if collection.is_cancelled() {
+            break;
+        }
         // Log that we failed to write the diag command output to a
         // file but don't return early as we wish to get as much
         // information as we can.
@@ -209,6 +212,9 @@ async fn collect_data_from_sled(
         .collect();
 
     while let Some(log_collection_result) = log_futs.next().await {
+        if collection.is_cancelled() {
+            break;
+        }
         // We log any errors saving the zip file to disk and
         // continue on.
         if let Err(e) = log_collection_result {
