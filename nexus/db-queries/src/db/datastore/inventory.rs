@@ -216,8 +216,7 @@ impl DataStore {
             }
         }
 
-        // Pull services in maintenance result out of all sled agents
-        // TODO-K: change the variable name to svcs_enabled_not_online
+        // Pull services enabled not online result out of all sled agents
         let svcs_enabled_not_online: Vec<_> = collection
             .sled_agents
             .iter()

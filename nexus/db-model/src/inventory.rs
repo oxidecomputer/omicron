@@ -2034,8 +2034,6 @@ impl From<InvMupdateOverrideNonBoot> for MupdateOverrideNonBootInventory {
     }
 }
 
-// TODO-K: here
-
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_svc_enabled_not_online)]
 pub struct InvSvcEnabledNotOnline {
@@ -2050,7 +2048,6 @@ impl InvSvcEnabledNotOnline {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        // TODO-K: Instead of a String this should be the Error type?
         svcs_cmd_error: Option<String>,
         time_of_status: DateTime<Utc>,
     ) -> Self {
@@ -2151,7 +2148,6 @@ impl_enum_type!(
     Unknown => b"unknown"
 );
 
-// TODO-K: make these impls for svc state
 impl From<SvcState> for InvSvcState {
     fn from(value: SvcState) -> Self {
         match value {

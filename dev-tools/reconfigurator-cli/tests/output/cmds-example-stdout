@@ -1740,6 +1740,9 @@ LEDGERED SLED CONFIG
     reference measurements:
         (measurement set is empty)
 
+SMF SERVICES STATUS
+    no data on SMF services has been collected
+
 sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:103::1]:12345
@@ -1887,6 +1890,9 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+
+SMF SERVICES STATUS
+    no data on SMF services has been collected
 
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
@@ -2128,6 +2134,9 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+
+SMF SERVICES STATUS
+    no data on SMF services has been collected
 
 KEEPER MEMBERSHIP
     no membership retrieved
