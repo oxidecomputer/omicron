@@ -554,7 +554,7 @@ fn poll_device_tree(
         tofino: polled_tofino,
         disks: polled_disks,
         baseboard: polled_baseboard,
-    } = polled_hw.clone();
+    } = polled_hw;
 
     // Check for any changes since the last view.
     let mut did_modify_tofino = false;
@@ -577,14 +577,14 @@ fn poll_device_tree(
             if inner.baseboard.as_ref() == Some(&polled_baseboard) {
                 false
             } else {
-                inner.baseboard = Some(polled_baseboard);
+                inner.baseboard = Some(polled_baseboard.clone());
                 true
             };
 
         did_modify_disks = if inner.disks == polled_disks {
             false
         } else {
-            inner.disks = polled_disks;
+            inner.disks = polled_disks.clone();
             true
         };
 
@@ -598,13 +598,13 @@ fn poll_device_tree(
         "did_modify_disks" => did_modify_disks,
     );
     if did_modify_tofino {
-        info!(log, "Updated tofino"; "tofino" => ?polled_hw.tofino);
+        info!(log, "Updated tofino"; "tofino" => ?polled_tofino);
     }
     if did_modify_baseboard {
-        info!(log, "Updated baseboard"; "baseboard" => ?polled_hw.baseboard);
+        info!(log, "Updated baseboard"; "baseboard" => ?polled_baseboard);
     }
     if did_modify_disks {
-        info!(log, "Updated disks"; "disks" => ?polled_hw.disks);
+        info!(log, "Updated disks"; "disks" => ?polled_disks);
     }
 
     Ok(())
