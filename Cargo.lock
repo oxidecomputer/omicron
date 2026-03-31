@@ -2946,36 +2946,26 @@ dependencies = [
  "dns-server-api",
  "dns-service-client",
  "dropshot",
- "expectorate",
  "git-stub-vcs",
  "hickory-client",
  "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
  "hickory-server",
- "http",
  "internal-dns-types",
  "internal-dns-types-versions",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "openapi-lint",
- "openapiv3",
  "oxide-tokio-rt",
  "pretty-hex",
  "progenitor 0.13.0",
  "reqwest 0.13.2",
  "schemars 0.8.22",
- "semver 1.0.27",
  "serde",
  "serde_json",
  "sled",
  "slog",
- "slog-async",
- "slog-envlogger",
  "slog-error-chain",
- "slog-term",
- "subprocess",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
@@ -3010,6 +3000,30 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "slog",
+]
+
+[[package]]
+name = "dnsadm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "dns-server",
+ "dns-service-client",
+ "dropshot",
+ "expectorate",
+ "internal-dns-types",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "slog",
+ "slog-async",
+ "slog-envlogger",
+ "slog-term",
+ "subprocess",
+ "tokio",
 ]
 
 [[package]]
@@ -7415,7 +7429,6 @@ dependencies = [
  "cockroach-admin-types",
  "daft",
  "debug-ignore",
- "dns-server",
  "dropshot",
  "expectorate",
  "gateway-client",
@@ -7457,6 +7470,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "transient-dns-server",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-lib",
@@ -7595,7 +7609,6 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "crucible-agent-client",
- "dns-server",
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "dropshot",
@@ -7641,6 +7654,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-util",
+ "transient-dns-server",
  "uuid",
 ]
 
@@ -9041,7 +9055,6 @@ dependencies = [
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "display-error-chain",
- "dns-server",
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
  "dropshot",
@@ -9141,6 +9154,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.23",
+ "transient-dns-server",
  "trust-quorum",
  "trust-quorum-protocol",
  "trust-quorum-types",
@@ -15469,6 +15483,22 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "transient-dns-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dns-server",
+ "dns-service-client",
+ "dropshot",
+ "hickory-proto 0.25.2",
+ "hickory-resolver 0.25.2",
+ "internal-dns-types",
+ "omicron-workspace-hack",
+ "slog",
+ "tempfile",
 ]
 
 [[package]]

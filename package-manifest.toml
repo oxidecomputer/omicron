@@ -327,6 +327,7 @@ service_name = "internal_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
+  "dnsadm.tar.gz",
   "dns-server.tar.gz",
   "internal-dns-customizations.tar.gz",
   "zone-setup.tar.gz",
@@ -339,6 +340,7 @@ service_name = "external_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
+  "dnsadm.tar.gz",
   "dns-server.tar.gz",
   "external-dns-customizations.tar.gz",
   "zone-setup.tar.gz",
@@ -351,7 +353,17 @@ output.type = "zone"
 service_name = "dns-server"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["dnsadm", "dns-server"]
+source.rust.binary_names = ["dns-server"]
+source.rust.release = true
+source.paths = []
+output.type = "zone"
+output.intermediate_only = true
+
+[package.dnsadm]
+service_name = "dnsadm"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["dnsadm"]
 source.rust.release = true
 source.paths = []
 output.type = "zone"

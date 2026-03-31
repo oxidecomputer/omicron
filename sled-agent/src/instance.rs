@@ -2765,7 +2765,6 @@ mod tests {
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use camino_tempfile::Utf8TempDir;
-    use dns_server::TransientServer;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
@@ -2795,6 +2794,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
+    use transient_dns_server::TransientDnsServer;
 
     const TIMEOUT_DURATION: tokio::time::Duration =
         tokio::time::Duration::from_secs(30);
@@ -2835,7 +2835,7 @@ mod tests {
         nexus_client: NexusClient,
         _nexus_server: HttpServer<ServerContext>,
         state_rx: Receiver<ReceivedInstanceState>,
-        _dns_server: TransientServer,
+        _dns_server: TransientDnsServer,
     }
 
     impl FakeNexusParts {
@@ -3639,7 +3639,7 @@ mod tests {
         // up communicating with, even though the tests may not interact with
         // them directly.
         _nexus_server: HttpServer<ServerContext>,
-        _dns_server: TransientServer,
+        _dns_server: TransientDnsServer,
     }
 
     impl TestInstanceRunner {
