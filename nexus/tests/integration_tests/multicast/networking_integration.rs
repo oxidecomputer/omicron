@@ -831,8 +831,7 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
     }
 
     // Verify forwarding entries on the sim sled-agent.
-    // With a single sled, the forwarding entry exists but has no next hops
-    // (no other sleds to forward to).
+    // The forwarding entry points at a switch for replication.
     {
         let fwd = sled_agent.mcast_fwd.lock().unwrap();
         assert!(
@@ -841,9 +840,10 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
              got: {fwd:?}"
         );
         let next_hops = &fwd[&underlay_ipv6];
-        assert!(
-            next_hops.is_empty(),
-            "Single-sled setup should have empty next_hops, got: {next_hops:?}"
+        assert_eq!(
+            next_hops.len(),
+            1,
+            "Should have 1 next_hop (a switch), got: {next_hops:?}"
         );
     }
 
@@ -1116,24 +1116,14 @@ async fn test_multicast_multi_sled_m2p_propagation(
 
         let fwd = agent.mcast_fwd.lock().unwrap();
         let next_hops = &fwd[&underlay_ipv6];
-        if sled_agent.sled_agent_id() == hosting_sled_id {
-            // Hosting sled: no next hops (only local member, OPTE
-            // delivers locally via subscription).
-            assert!(
-                next_hops.is_empty(),
-                "Hosting sled forwarding should have empty next_hops, \
-                 got: {next_hops:?}"
-            );
-        } else {
-            // Non-hosting sled: next hop is the hosting sled so
-            // senders on this sled can reach the member.
-            assert_eq!(
-                next_hops.len(),
-                1,
-                "Non-hosting sled {i} should have 1 next_hop (the hosting \
-                 sled), got: {next_hops:?}"
-            );
-        }
+        // Every sled gets a single next hop pointing at a switch.
+        // The switch replicates to member sled ports via DPD config.
+        assert_eq!(
+            next_hops.len(),
+            1,
+            "Sled {i} should have 1 next_hop (a switch), \
+             got: {next_hops:?}"
+        );
     }
 
     // Verify per-VMM subscription on the hosting sled only.

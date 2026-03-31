@@ -12,8 +12,8 @@
 //!   hosting sled
 //! - **M2P mappings**: Overlay multicast IP to underlay IPv6 address
 //!   translation, installed on all sleds
-//! - **Forwarding entries**: Underlay multicast address to next-hop sled
-//!   replication lists, installed on all sleds
+//! - **Forwarding entries**: Underlay multicast address to switch next-hop,
+//!   installed on all sleds so OPTE forwards to the switch for replication
 //!
 //! [`dataplane`]: super::dataplane
 
@@ -41,20 +41,29 @@ use sled_agent_client::types::{
     McastSourceFilter,
 };
 
-/// Client for sled-agent multicast operations.
+/// Utility methods for sled-agent multicast operations used by the
+/// background task reconciler.
 ///
-/// Unlike [`MulticastDataplaneClient`] which pre-builds per-switch clients,
-/// sled clients are constructed on demand since the target sled set varies
-/// per group.
+/// Groups sled-agent HTTP calls (OPTE subscriptions, M2P mappings,
+/// forwarding entries) behind a single type to keep the reconciler
+/// logic focused on state transitions rather than client construction.
+///
+/// Unlike [`MulticastDataplaneClient`] which pre-builds per-switch
+/// clients, sled clients are constructed on demand since the target
+/// sled set varies per group.
 ///
 /// [`MulticastDataplaneClient`]: super::dataplane::MulticastDataplaneClient
 pub(crate) struct MulticastSledClient {
     datastore: Arc<DataStore>,
+    resolver: internal_dns_resolver::Resolver,
 }
 
 impl MulticastSledClient {
-    pub(crate) fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub(crate) fn new(
+        datastore: Arc<DataStore>,
+        resolver: internal_dns_resolver::Resolver,
+    ) -> Self {
+        Self { datastore, resolver }
     }
 
     /// Create a sled-agent client for the given sled.
@@ -229,9 +238,10 @@ impl MulticastSledClient {
     /// M2P mappings and forwarding entries are pushed to all VPC-routing
     /// sleds, not just member sleds. Any instance on any sled may send to
     /// a multicast group address. Hence, without the M2P mapping, OPTE's
-    /// overlay layer silently drops the packet. Forwarding entries are needed
-    /// on sender sleds so OPTE can replicate to member sleds. Subscriptions
-    /// (per-port group membership) remain member-sled-only.
+    /// overlay layer silently drops the packet. Forwarding entries point
+    /// each sled at a switch, which replicates to member ports via DPD
+    /// multicast group config. Subscriptions (per-port group membership) remain
+    /// member-sled-only.
     pub(crate) async fn propagate_m2p_and_forwarding(
         &self,
         opctx: &OpContext,
@@ -280,59 +290,6 @@ impl MulticastSledClient {
         let desired_m2p =
             Mcast2PhysMapping { group: group_ip, underlay: underlay_ip };
 
-        // Look up member sled underlay IPs for forwarding next-hop
-        // computation. These are the sleds that host "Joined" members
-        // and should appear as next hops in every sled's forwarding
-        // entry.
-        let mut member_sled_ips: Vec<(SledUuid, Ipv6Addr)> = Vec::new();
-        let mut failed_lookups: usize = 0;
-        for sled_id in &member_sled_ids {
-            let lookup = match nexus_networking::sled_lookup(
-                &self.datastore,
-                opctx,
-                *sled_id,
-            ) {
-                Ok(found) => found,
-                Err(e) => {
-                    warn!(
-                        opctx.log,
-                        "failed to resolve sled for M2P/forwarding";
-                        "sled_id" => %sled_id,
-                        "error" => %e
-                    );
-                    failed_lookups += 1;
-                    continue;
-                }
-            };
-
-            match lookup.fetch().await {
-                Ok((.., sled)) => {
-                    member_sled_ips.push((*sled_id, sled.ip()));
-                }
-                Err(e) => {
-                    warn!(
-                        opctx.log,
-                        "failed to resolve sled for M2P/forwarding";
-                        "sled_id" => %sled_id,
-                        "error" => %e
-                    );
-                    failed_lookups += 1;
-                }
-            }
-        }
-
-        // Abort before mutating sled state if any member lookups failed.
-        // Pushing the partial member set would prune forwarding entries
-        // for the unresolved sleds, turning a transient lookup failure
-        // into packet loss for still-joined members.
-        if failed_lookups > 0 {
-            anyhow::bail!(
-                "aborting convergence: {failed_lookups} member sled \
-                 lookup(s) failed out of {} joined members",
-                member_sled_ids.len()
-            );
-        }
-
         // The group is active if any members are "Joined". M2P and
         // forwarding are pushed to all sleds when active, cleared
         // from all sleds when inactive.
@@ -345,12 +302,36 @@ impl MulticastSledClient {
             .await
             .context("failed to enumerate sleds")?;
 
+        // Select one of the available switches as the forwarding next hop.
+        //
+        // OPTE treats each next hop as a duplication it performs itself, so
+        // pointing at individual member sleds would cause O(n) copies over
+        // cxgbe per sender.
+        //
+        // A single switch next hop means one copy to the switch, which
+        // replicates to member sled ports via DPD multicast group membership.
+        // ECMP over both switches is the more correct longer-term answer,
+        // but OPTE and mgd lack the tooling to express that today.
+        let switch_zone_addrs = crate::app::switch_zone_address_mappings(
+            &self.resolver,
+            &opctx.log,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!(e))
+        .context("failed to resolve switch zone addresses")?;
+
+        let switch_ip = switch_zone_addrs
+            .iter()
+            .min_by_key(|(slot, _)| *slot)
+            .map(|(_, ip)| *ip)
+            .context("no switch zone found for forwarding next hop")?;
+
         let convergence_params = GroupConvergenceParams {
             group_ip,
             underlay_ip,
             group_is_active,
             desired_m2p: &desired_m2p,
-            member_sled_ips: &member_sled_ips,
+            switch_ip,
         };
 
         let mut failed_sleds: usize = 0;
@@ -372,12 +353,9 @@ impl MulticastSledClient {
                 }
             };
 
-            if let Err(e) = converge_sled_m2p_and_forwarding(
-                &client,
-                sled_id,
-                &convergence_params,
-            )
-            .await
+            if let Err(e) =
+                converge_sled_m2p_and_forwarding(&client, &convergence_params)
+                    .await
             {
                 warn!(
                     opctx.log,
@@ -436,7 +414,9 @@ struct GroupConvergenceParams<'a> {
     underlay_ip: Ipv6Addr,
     group_is_active: bool,
     desired_m2p: &'a Mcast2PhysMapping,
-    member_sled_ips: &'a [(SledUuid, Ipv6Addr)],
+    /// Switch zone underlay IP chosen as the forwarding next hop.
+    /// The switch replicates to member sled ports via DPD config.
+    switch_ip: Ipv6Addr,
 }
 
 /// Per-sled convergence of M2P and forwarding state.
@@ -447,11 +427,10 @@ struct GroupConvergenceParams<'a> {
 /// The caller increments `failed_sleds` and continues to the next sled.
 async fn converge_sled_m2p_and_forwarding(
     client: &sled_agent_client::Client,
-    sled_id: SledUuid,
     params: &GroupConvergenceParams<'_>,
 ) -> Result<(), anyhow::Error> {
     converge_m2p(client, params).await?;
-    converge_forwarding(client, sled_id, params).await?;
+    converge_forwarding(client, params).await?;
     Ok(())
 }
 
@@ -502,12 +481,12 @@ async fn converge_m2p(
 
 /// Converge a single sled's forwarding entries for one group.
 ///
-/// When the group is active, computes desired next hops (all member
-/// sleds except this one) and updates only if the current state
-/// differs. When inactive, clears any stale entries.
+/// When the group is active, this sets a single next hop to the switch
+/// zone. The switch replicates to member sled ports via its DPD
+/// multicast group membership. When inactive, this clears any stale
+/// entries.
 async fn converge_forwarding(
     client: &sled_agent_client::Client,
-    sled_id: SledUuid,
     params: &GroupConvergenceParams<'_>,
 ) -> Result<(), anyhow::Error> {
     let found = client
@@ -529,31 +508,17 @@ async fn converge_forwarding(
         return Ok(());
     }
 
-    let desired_next_hops: Vec<McastForwardingNextHop> = params
-        .member_sled_ips
-        .iter()
-        .filter(|(id, _)| *id != sled_id)
-        .map(|(_, ip)| McastForwardingNextHop {
-            next_hop: *ip,
-            replication: McastReplication::Underlay,
-            filter: McastSourceFilter {
-                mode: McastFilterMode::Exclude,
-                sources: Vec::new(),
-            },
-        })
-        .collect();
+    let desired_next_hops = vec![McastForwardingNextHop {
+        next_hop: params.switch_ip,
+        replication: McastReplication::Underlay,
+        filter: McastSourceFilter {
+            mode: McastFilterMode::Exclude,
+            sources: Vec::new(),
+        },
+    }];
 
-    // Comparison via sets: OPTE may return next hops in a different order
-    // than we build them, so a naive Vec comparison would cause spurious
-    // clear+set cycles on every reconciliation pass.
     let needs_update = match current_entry {
-        Some(f) if f.next_hops.len() == desired_next_hops.len() => {
-            !desired_next_hops.iter().all(|d| f.next_hops.contains(d))
-        }
-        Some(_) => true,
-        // Always create the entry when the group is active; even an
-        // empty next-hops list signals to OPTE that the underlay
-        // address is known.
+        Some(f) => f.next_hops != desired_next_hops,
         None => true,
     };
 

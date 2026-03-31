@@ -538,7 +538,10 @@ impl MulticastGroupReconciler {
 
         // Create sled-agent client for OPTE subscriptions and
         // M2P/forwarding propagation.
-        let sled_client = MulticastSledClient::new(self.datastore.clone());
+        let sled_client = MulticastSledClient::new(
+            self.datastore.clone(),
+            self.resolver.clone(),
+        );
 
         // Process creating groups
         match self.reconcile_creating_groups(opctx).await {

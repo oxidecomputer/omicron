@@ -190,7 +190,6 @@ source .github/buildomat/ci-env.sh
 # swap them in. The deploy target is a ramdisk image without pkg(5), so we
 # use rem_drv/add_drv instead of the p5p approach used by install_opte.sh
 # and releng.
-# shellcheck source=/dev/null
 source tools/opte_version_override
 if [[ "x$OPTE_COMMIT" != "x" ]]; then
 	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde"
