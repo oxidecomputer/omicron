@@ -83,6 +83,7 @@ pub enum ServiceZoneNatEntriesError {
          zone types {missing_zone_types:?}"
     )]
     MissingZoneTypes { missing_zone_types: BTreeSet<ZoneKind> },
+
     #[error(
         "ServiceZoneNatEntries requires non-overlapping entries: \
          zone {zone_1_id} IP {ip} ports {zone_1_lo}-{zone_1_hi} \

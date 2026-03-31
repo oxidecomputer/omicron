@@ -10,7 +10,7 @@ use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use mg_admin_client::Client;
 use omicron_common::address::MGD_PORT;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
 use std::time::Duration;
@@ -48,7 +48,7 @@ impl Reconciler for MgdReconciler {
 
     async fn do_reconciliation(
         &mut self,
-        _rack_network_config: &RackNetworkConfig,
+        _system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
         info!(log, "TODO: implement mgd reconciler");
