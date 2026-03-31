@@ -13,7 +13,7 @@ use crate::reconciler_task::ReconcilerTaskHandle;
 use crate::status::ScrimletReconcilersStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::sync::Arc;
 use tokio::sync::SetOnce;
@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub struct ScrimletReconcilersPrereqs {
-    pub rack_network_config_rx: watch::Receiver<RackNetworkConfig>,
+    pub system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
     pub switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
 }
 

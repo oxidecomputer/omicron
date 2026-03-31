@@ -11,19 +11,23 @@ use crate::switch_zone_slot::ThisSledSwitchSlot;
 use dpd_client::Client;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
 use std::time::Duration;
 
+mod nat;
+
+pub use nat::DpdNatReconcilerStatus;
+
 #[derive(Debug, Clone)]
-pub enum DpdReconcilerStatus {
-    /// The reconciler does nothing because it's currently a stub.
-    NotYetImplemented,
+pub struct DpdReconcilerStatus {
+    /// Result of reconciling service zone NAT entries
+    pub nat_status: DpdNatReconcilerStatus,
 }
 
 pub(crate) struct DpdReconciler {
-    _client: Client,
+    client: Client,
     _switch_slot: ThisSledSwitchSlot,
 }
 
@@ -48,15 +52,30 @@ impl Reconciler for DpdReconciler {
                     .new(slog::o!("component" => "DpdReconcilerClient")),
             },
         );
-        Self { _client: client, _switch_slot: switch_slot }
+        Self { client, _switch_slot: switch_slot }
     }
 
     async fn do_reconciliation(
         &mut self,
-        _rack_network_config: &RackNetworkConfig,
+        system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
-        info!(log, "TODO: implement dpd reconciler");
-        DpdReconcilerStatus::NotYetImplemented
+        // TODO implement port reconciliation
+
+        let nat_status = if let Some(nat_entries) =
+            system_networking_config.service_zone_nat_entries.as_ref()
+        {
+            nat::reconcile(&self.client, nat_entries, log).await
+        } else {
+            DpdNatReconcilerStatus::NoNatEntriesConfig
+        };
+
+        info!(
+            log,
+            "dpd reconciliation completed";
+            &nat_status,
+        );
+
+        DpdReconcilerStatus { nat_status }
     }
 }

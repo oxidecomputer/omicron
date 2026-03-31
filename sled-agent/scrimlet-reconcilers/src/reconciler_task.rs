@@ -7,8 +7,8 @@
 //!
 //! Each reconciler follows the same structure:
 //!
-//! 1. Wait until `sled-agent` gives us the `RackNetworkConfig` and our sled's
-//!    switch zone underlay IP. Neither is available until after RSS has
+//! 1. Wait until `sled-agent` gives us the `SystemNetworkingConfig` and our
+//!    sled's switch zone underlay IP. Neither is available until after RSS has
 //!    completed (on first setup) or the rack has unlocked (on cold boot).
 //! 2. Wait to determine [`ThisSledSwitchSlot`]. This requires contacting MGS
 //!    within our switch zone. Non-scrimlet sleds will block forever at this
@@ -18,7 +18,7 @@
 //!    This can happen during sidecar updates if it powers off briefly to reset
 //!    internal FPGAs, or in a variety of other less common and more rainy-day
 //!    situations.
-//! 4. Periodically or when the `RackNetworkConfig` changes, perform
+//! 4. Periodically or when the `SystemNetworkingConfig` changes, perform
 //!    service-specific reconciliation. This is provided by implementors of the
 //!    [`Reconciler`] trait elsewhere in this crate.
 //! 5. Report status of this task in an output watch channel, suitable for
@@ -39,7 +39,7 @@ use crate::status::ReconciliationCompletedStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use chrono::Utc;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::error;
 use slog::info;
@@ -71,13 +71,13 @@ pub(crate) trait Reconciler: Send + 'static {
     ) -> Self;
 
     /// Perform any required reconciliation based on the current contents of
-    /// `rack_network_config`.
+    /// `system_networking_config`.
     ///
     /// This method is infallible; any errors must be described by
     /// `Self::Status`.
     fn do_reconciliation(
         &mut self,
-        rack_network_config: &RackNetworkConfig,
+        system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> impl Future<Output = Self::Status> + Send;
 }
@@ -176,7 +176,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
 
             // Unpack the prereqs and create our inner reconciler.
             let ScrimletReconcilersPrereqs {
-                rack_network_config_rx,
+                system_networking_config_rx,
                 switch_zone_underlay_ip,
             } = prereqs;
             let inner = inner_constructor(
@@ -188,7 +188,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             // Start reconciling.
             let mut inner_task = ReconcilerTask {
                 scrimlet_status_rx,
-                rack_network_config_rx,
+                system_networking_config_rx,
                 status_tx,
                 inner,
                 log,
@@ -230,9 +230,9 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
 ///
 /// This method will return an error if one of its input channels is closed:
 /// either `scrimlet_status_rx`, or once `prereqs` have been received, if the
-/// `rack_network_config_rx` channel inside them is closed. Channel closures are
-/// only expected in tests; in sled-agent it keeps the sending half of these
-/// channels inside its long-running tasks.
+/// `system_networking_config_rx` channel inside them is closed. Channel
+/// closures are only expected in tests; in sled-agent it keeps the sending half
+/// of these channels inside its long-running tasks.
 async fn wait_for_all_prereqs<T: Reconciler>(
     scrimlet_status_rx: &mut watch::Receiver<ScrimletStatus>,
     prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
@@ -242,7 +242,10 @@ async fn wait_for_all_prereqs<T: Reconciler>(
 ) -> Result<(ScrimletReconcilersPrereqs, ThisSledSwitchSlot), RecvError> {
     // Wait for sled-agent to give us our prereqs. We also have to check for the
     // `scrimlet_status_rx` channel being closed, which is our signal to bail.
-    info!(log, "task started; waiting for RackNetworkConfig and underlay IP");
+    info!(
+        log,
+        "task started; waiting for SystemNetworkingConfig and underlay IP"
+    );
     let mut prereqs = loop {
         // Both arms are cancel-safe and we do not `.await` within the
         // body of any arm, avoiding any opportunity for futurelock.
@@ -263,11 +266,12 @@ async fn wait_for_all_prereqs<T: Reconciler>(
     // This will block forever on non-scrimlets.
     //
     // We also have to check for either input channel (`scrimlet_status_rx` or
-    // `prereqs.rack_network_config_rx`) being closed, upon which we bail.
+    // `prereqs.system_networking_config_rx`) being closed, upon which we bail.
     info!(
         log,
-        "received RackNetworkConfig and underlay IP; now waiting to determine \
-         our switch slot (will block forever if we are not a scrimlet)",
+        "received SystemNetworkingConfig and underlay IP; \
+         now waiting to determine our switch slot \
+         (will block forever if we are not a scrimlet)",
     );
     status_tx.send_modify(|status| {
         status.current_status = ReconcilerCurrentStatus::Inert(
@@ -288,7 +292,7 @@ async fn wait_for_all_prereqs<T: Reconciler>(
                 () = result?;
                 continue;
             }
-            result = prereqs.rack_network_config_rx.changed() => {
+            result = prereqs.system_networking_config_rx.changed() => {
                 () = result?;
                 continue;
             }
@@ -300,7 +304,7 @@ async fn wait_for_all_prereqs<T: Reconciler>(
 
 struct ReconcilerTask<T: Reconciler> {
     scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
-    rack_network_config_rx: watch::Receiver<RackNetworkConfig>,
+    system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
     status_tx: watch::Sender<ReconcilerStatus<T::Status>>,
     inner: T,
     log: Logger,
@@ -326,10 +330,10 @@ impl<T: Reconciler> ReconcilerTask<T> {
                 "activation_count" => activation_count,
             );
 
-            // Snapshot the current rack network config so we hold the watch
+            // Snapshot the current networking config so we hold the watch
             // channel as little as possible.
-            let rack_network_config =
-                self.rack_network_config_rx.borrow_and_update().clone();
+            let system_networking_config =
+                self.system_networking_config_rx.borrow_and_update().clone();
             let running_status =
                 ReconcilerRunningStatus::new(activation_reason);
             self.status_tx.send_modify(|status| {
@@ -340,7 +344,7 @@ impl<T: Reconciler> ReconcilerTask<T> {
             // Actually perform reconciliation.
             let status_result = self
                 .inner
-                .do_reconciliation(&rack_network_config, &self.log)
+                .do_reconciliation(&system_networking_config, &self.log)
                 .await;
 
             // Update our output watch channel with the result.
@@ -372,9 +376,9 @@ impl<T: Reconciler> ReconcilerTask<T> {
                     ReconcilerActivationReason::PeriodicTimer
                 }
 
-                result = self.rack_network_config_rx.changed() => {
+                result = self.system_networking_config_rx.changed() => {
                     () = result?;
-                    ReconcilerActivationReason::RackNetworkConfigChanged
+                    ReconcilerActivationReason::SystemNetworkingConfigChanged
                 }
 
                 result = self.scrimlet_status_rx.changed() => {
@@ -423,7 +427,7 @@ impl<T: Reconciler> ReconcilerTask<T> {
                         result = self.scrimlet_status_rx.changed() => {
                             () = result?;
                         }
-                        result = self.rack_network_config_rx.changed() => {
+                        result = self.system_networking_config_rx.changed() => {
                             () = result?;
                         }
                     }

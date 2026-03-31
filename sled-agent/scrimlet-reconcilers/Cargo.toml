@@ -9,11 +9,15 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+daft.workspace = true
 dpd-client.workspace = true
+futures.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
+macaddr.workspace = true
 mg-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
