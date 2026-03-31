@@ -98,7 +98,6 @@ ref-cast.workspace = true
 rdb-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
-reqwest012 = { workspace = true }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
@@ -168,6 +167,7 @@ camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
+flate2.workspace = true
 expectorate.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true

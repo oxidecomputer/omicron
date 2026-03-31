@@ -557,3 +557,56 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(health.status, system::PingStatus::Ok);
 }
+
+/// Test that the external API returns gzip-compressed responses when the
+/// client sends Accept-Encoding: gzip.
+#[nexus_test]
+async fn test_gzip_compression(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create several projects so the response body exceeds the minimum
+    // compression threshold (512 bytes).
+    for i in 0..10 {
+        create_project(&client, &format!("project-{i}")).await;
+    }
+
+    // With Accept-Encoding: gzip, response should be compressed.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/projects")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response.headers.get(http::header::CONTENT_ENCODING).unwrap(),
+        "gzip",
+    );
+
+    // Decompress and verify the body is valid JSON.
+    let compressed_len = response.body.len();
+    let mut decoder = flate2::read::GzDecoder::new(&response.body[..]);
+    let mut decompressed = String::new();
+    std::io::Read::read_to_string(&mut decoder, &mut decompressed).unwrap();
+    let page: dropshot::ResultsPage<Project> =
+        serde_json::from_str(&decompressed).unwrap();
+    assert_eq!(page.items.len(), 10);
+
+    // Without Accept-Encoding: gzip, response should not be compressed.
+    let response = NexusRequest::object_get(client, "/v1/projects")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+
+    let uncompressed_len = response.body.len();
+    assert!(
+        compressed_len < uncompressed_len,
+        "compressed body ({compressed_len} bytes) should be smaller \
+         than uncompressed body ({uncompressed_len} bytes)"
+    );
+}
