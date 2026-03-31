@@ -29,7 +29,7 @@ pub enum ReconcilerInertReason {
 pub enum ReconcilerActivationReason {
     Startup,
     PeriodicTimer,
-    RackNetworkConfigChanged,
+    SystemNetworkingConfigChanged,
     ScrimletStatusChanged,
 }
 

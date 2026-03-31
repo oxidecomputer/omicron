@@ -4,13 +4,14 @@
 
 use super::*;
 use assert_matches::assert_matches;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use std::mem;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 struct MockReconciler {
-    do_reconciliation_calls: Arc<Mutex<Vec<RackNetworkConfig>>>,
+    do_reconciliation_calls: Arc<Mutex<Vec<SystemNetworkingConfig>>>,
     do_reconciliation_results: mpsc::UnboundedReceiver<String>,
 }
 
@@ -30,13 +31,13 @@ impl Reconciler for MockReconciler {
 
     async fn do_reconciliation(
         &mut self,
-        rack_network_config: &RackNetworkConfig,
+        system_networking_config: &SystemNetworkingConfig,
         _log: &Logger,
     ) -> Self::Status {
         self.do_reconciliation_calls
             .lock()
             .unwrap()
-            .push(rack_network_config.clone());
+            .push(system_networking_config.clone());
         self.do_reconciliation_results
             .recv()
             .await
@@ -44,25 +45,31 @@ impl Reconciler for MockReconciler {
     }
 }
 
-fn test_rack_network_config_1() -> RackNetworkConfig {
-    RackNetworkConfig {
-        rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
-        infra_ip_first: "192.0.2.10".parse().unwrap(),
-        infra_ip_last: "192.0.2.100".parse().unwrap(),
-        ports: Vec::new(),
-        bgp: Vec::new(),
-        bfd: Vec::new(),
+fn test_system_networking_config_1() -> SystemNetworkingConfig {
+    SystemNetworkingConfig {
+        rack_network_config: RackNetworkConfig {
+            rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
+            infra_ip_first: "192.0.2.10".parse().unwrap(),
+            infra_ip_last: "192.0.2.100".parse().unwrap(),
+            ports: Vec::new(),
+            bgp: Vec::new(),
+            bfd: Vec::new(),
+        },
+        service_zone_nat_entries: None,
     }
 }
 
-fn test_rack_network_config_2() -> RackNetworkConfig {
-    RackNetworkConfig {
-        rack_subnet: "fd00:aabb:ccdd:0200::/56".parse().unwrap(),
-        infra_ip_first: "192.0.2.20".parse().unwrap(),
-        infra_ip_last: "192.0.2.200".parse().unwrap(),
-        ports: Vec::new(),
-        bgp: Vec::new(),
-        bfd: Vec::new(),
+fn test_system_networking_config_2() -> SystemNetworkingConfig {
+    SystemNetworkingConfig {
+        rack_network_config: RackNetworkConfig {
+            rack_subnet: "fd00:aabb:ccdd:0200::/56".parse().unwrap(),
+            infra_ip_first: "192.0.2.20".parse().unwrap(),
+            infra_ip_last: "192.0.2.200".parse().unwrap(),
+            ports: Vec::new(),
+            bgp: Vec::new(),
+            bfd: Vec::new(),
+        },
+        service_zone_nat_entries: None,
     }
 }
 
@@ -70,7 +77,7 @@ struct Harness {
     task: ReconcilerTaskHandle<MockReconciler>,
     scrimlet_status_tx: watch::Sender<ScrimletStatus>,
     do_reconciliation_results_tx: mpsc::UnboundedSender<String>,
-    do_reconciliation_calls: Arc<Mutex<Vec<RackNetworkConfig>>>,
+    do_reconciliation_calls: Arc<Mutex<Vec<SystemNetworkingConfig>>>,
     prereqs: Arc<SetOnce<ScrimletReconcilersPrereqs>>,
     switch_slot: Arc<SetOnce<ThisSledSwitchSlot>>,
 }
@@ -110,11 +117,11 @@ impl Harness {
         }
     }
 
-    fn provide_prereqs_only(&self) -> watch::Sender<RackNetworkConfig> {
-        let (tx, rx) = watch::channel(test_rack_network_config_1());
+    fn provide_prereqs_only(&self) -> watch::Sender<SystemNetworkingConfig> {
+        let (tx, rx) = watch::channel(test_system_networking_config_1());
         self.prereqs
             .set(ScrimletReconcilersPrereqs {
-                rack_network_config_rx: rx,
+                system_networking_config_rx: rx,
                 switch_zone_underlay_ip:
                     ThisSledSwitchZoneUnderlayIpAddr::TEST_FAKE,
             })
@@ -130,7 +137,7 @@ impl Harness {
 
     fn provide_all_prereqs_and_become_scrimlet(
         &self,
-    ) -> watch::Sender<RackNetworkConfig> {
+    ) -> watch::Sender<SystemNetworkingConfig> {
         let tx = self.provide_prereqs_only();
         self.provide_switch_slot_only();
         self.set_scrimlet_status(ScrimletStatus::Scrimlet);
@@ -287,7 +294,7 @@ async fn prereqs_arrive_but_not_scrimlet() {
     );
 
     // Provide prereqs but don't provide a switch slot.
-    let _rack_network_config_tx = harness.provide_prereqs_only();
+    let _system_networking_config_tx = harness.provide_prereqs_only();
 
     // Task should transition to Inert(WaitingToDetermineSwitchSlot).
     harness.wait_for_task_status_waiting_for_switch_slot().await;
@@ -317,7 +324,7 @@ async fn all_prereqs_arrive_in_order() {
     );
 
     // Provide prereqs but don't provide a switch slot.
-    let _rack_network_config_tx = harness.provide_prereqs_only();
+    let _system_networking_config_tx = harness.provide_prereqs_only();
 
     // Task should transition to Inert(WaitingToDetermineSwitchSlot).
     harness.wait_for_task_status_waiting_for_switch_slot().await;
@@ -353,7 +360,7 @@ async fn scrimlet_becomes_not_scrimlet_during_select() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs as a scrimlet.
-    let _rack_network_config_tx =
+    let _system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete the first reconciliation so the task reaches the select!.
@@ -393,7 +400,7 @@ async fn first_reconciliation_on_startup() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs to start the inner reconciler.
-    let _rack_network_config_tx =
+    let _system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Wait for do_reconciliation to be entered: the mock blocks on the
@@ -417,7 +424,7 @@ async fn first_reconciliation_on_startup() {
     let received_configs =
         harness.do_reconciliation_calls.lock().unwrap().clone();
     assert_eq!(received_configs.len(), 1);
-    assert_eq!(received_configs[0], test_rack_network_config_1());
+    assert_eq!(received_configs[0], test_system_networking_config_1());
 
     // Release do_reconciliation with a specific status string.
     harness.do_reconciliation_results_tx.send("all good".to_string()).unwrap();
@@ -437,17 +444,17 @@ async fn first_reconciliation_on_startup() {
 }
 
 // Test: after the first reconciliation completes, changing the
-// RackNetworkConfig triggers a second reconciliation with
+// SystemNetworkingConfig triggers a second reconciliation with
 // activation_reason = RackNetworkConfigChanged and the new config.
 #[tokio::test(start_paused = true)]
-async fn rack_network_config_change_triggers_re_reconciliation() {
+async fn system_networking_config_change_triggers_re_reconciliation() {
     let logctx = omicron_test_utils::dev::test_setup_log(
-        "rack_network_config_change_triggers_re_reconciliation",
+        "system_networking_config_change_triggers_re_reconciliation",
     );
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let rack_network_config_tx =
+    let system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Wait for the first do_reconciliation call (Startup).
@@ -457,11 +464,11 @@ async fn rack_network_config_change_triggers_re_reconciliation() {
     harness.do_reconciliation_results_tx.send("first".to_string()).unwrap();
     harness.wait_for_task_status_idle().await;
 
-    // Send a new RackNetworkConfig.
-    let first_config = test_rack_network_config_1();
-    let second_config = test_rack_network_config_2();
+    // Send a new SystemNetworkingConfig.
+    let first_config = test_system_networking_config_1();
+    let second_config = test_system_networking_config_2();
     assert_ne!(first_config, second_config);
-    rack_network_config_tx.send(second_config.clone()).unwrap();
+    system_networking_config_tx.send(second_config.clone()).unwrap();
 
     // Wait for the second do_reconciliation call.
     harness.wait_for_do_reconciliation_call_count(2).await;
@@ -479,7 +486,7 @@ async fn rack_network_config_change_triggers_re_reconciliation() {
         ReconcilerCurrentStatus::Running(running) => {
             assert_matches!(
                 running.activation_reason(),
-                ReconcilerActivationReason::RackNetworkConfigChanged
+                ReconcilerActivationReason::SystemNetworkingConfigChanged
             );
         }
         other => panic!("expected Running status, got {other:?}"),
@@ -493,7 +500,7 @@ async fn rack_network_config_change_triggers_re_reconciliation() {
         status.last_completion.expect("should have last_completion");
     assert_matches!(
         completion.activation_reason,
-        ReconcilerActivationReason::RackNetworkConfigChanged
+        ReconcilerActivationReason::SystemNetworkingConfigChanged
     );
     assert_eq!(completion.activation_count, 1);
     assert_eq!(completion.status, "second");
@@ -513,7 +520,7 @@ async fn periodic_timer_triggers_re_reconciliation() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let _rack_network_config_tx =
+    let _system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete the first reconciliation (Startup).
@@ -560,7 +567,7 @@ async fn periodic_timer_triggers_re_reconciliation() {
     logctx.cleanup_successful();
 }
 
-// Test: if the RackNetworkConfig changes while do_reconciliation is
+// Test: if the SystemNetworkingConfig changes while do_reconciliation is
 // in-flight, the task should notice when it reaches the select! and
 // immediately perform another reconciliation with
 // activation_reason = RackNetworkConfigChanged using the latest config.
@@ -572,7 +579,7 @@ async fn config_change_during_inflight_reconciliation() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let rack_network_config_tx =
+    let system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Wait for the first do_reconciliation call (Startup) to be entered.
@@ -581,21 +588,23 @@ async fn config_change_during_inflight_reconciliation() {
     // While the first reconciliation is still in-flight, change the
     // config. The task won't see this until it finishes and hits the
     // select!.
-    rack_network_config_tx.send(test_rack_network_config_2()).unwrap();
+    system_networking_config_tx
+        .send(test_system_networking_config_2())
+        .unwrap();
 
     // Complete the first reconciliation.
     harness.do_reconciliation_results_tx.send("first".to_string()).unwrap();
 
     // The task should immediately start a second reconciliation because
-    // rack_network_config_rx.changed() fires in the select!.
+    // system_networking_config_rx.changed() fires in the select!.
     harness.wait_for_do_reconciliation_call_count(2).await;
 
     // The second call should have received the new config (via
     // borrow_and_update()).
     let received_configs =
         harness.do_reconciliation_calls.lock().unwrap().clone();
-    assert_eq!(received_configs[0], test_rack_network_config_1());
-    assert_eq!(received_configs[1], test_rack_network_config_2());
+    assert_eq!(received_configs[0], test_system_networking_config_1());
+    assert_eq!(received_configs[1], test_system_networking_config_2());
 
     // Status should be Running with RackNetworkConfigChanged.
     let status = harness.task.status();
@@ -603,7 +612,7 @@ async fn config_change_during_inflight_reconciliation() {
         ReconcilerCurrentStatus::Running(running) => {
             assert_matches!(
                 running.activation_reason(),
-                ReconcilerActivationReason::RackNetworkConfigChanged
+                ReconcilerActivationReason::SystemNetworkingConfigChanged
             );
         }
         other => panic!("expected Running status, got {other:?}"),
@@ -616,7 +625,7 @@ async fn config_change_during_inflight_reconciliation() {
         status.last_completion.expect("should have last_completion");
     assert_matches!(
         completion.activation_reason,
-        ReconcilerActivationReason::RackNetworkConfigChanged
+        ReconcilerActivationReason::SystemNetworkingConfigChanged
     );
     assert_eq!(completion.activation_count, 1);
     assert_eq!(completion.status, "second");
@@ -636,7 +645,7 @@ async fn scrimlet_status_round_trip() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs as a scrimlet.
-    let _rack_network_config_tx =
+    let _system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // First reconciliation (Startup).
@@ -690,18 +699,18 @@ async fn scrimlet_status_round_trip() {
     logctx.cleanup_successful();
 }
 
-// Test: dropping the rack_network_config sender while the task is in
+// Test: dropping the system_networking_config sender while the task is in
 // the select! (after completing a reconciliation) causes the task to
 // exit with TaskExitedUnexpectedly.
 #[tokio::test(start_paused = true)]
-async fn channel_closure_rack_network_config_during_select() {
+async fn channel_closure_system_networking_config_during_select() {
     let logctx = omicron_test_utils::dev::test_setup_log(
-        "channel_closure_rack_network_config_during_select",
+        "channel_closure_system_networking_config_during_select",
     );
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let rack_network_config_tx =
+    let system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete one reconciliation so the task reaches the select!.
@@ -709,10 +718,10 @@ async fn channel_closure_rack_network_config_during_select() {
     harness.do_reconciliation_results_tx.send("done".to_string()).unwrap();
     harness.wait_for_task_status_idle().await;
 
-    // Drop the rack_network_config sender. This closes the watch channel,
-    // which causes the `rack_network_config_rx.changed()` arm in the
+    // Drop the system_networking_config sender. This closes the watch channel,
+    // which causes the `system_networking_config_rx.changed()` arm in the
     // select! to return Err(RecvError), causing the task to exit.
-    mem::drop(rack_network_config_tx);
+    mem::drop(system_networking_config_tx);
 
     // Wait for the task to exit and verify the final status.
     harness.task._task.await.expect("task didn't panic");
@@ -745,7 +754,7 @@ async fn channel_closure_scrimlet_status_during_select() {
     let harness = Harness::new(&logctx.log);
 
     // Provide all prereqs.
-    let _rack_network_config_tx =
+    let _system_networking_config_tx =
         harness.provide_all_prereqs_and_become_scrimlet();
 
     // Complete one reconciliation so the task reaches the select!.
@@ -801,7 +810,7 @@ async fn channel_closure_scrimlet_status_during_switch_slot_wait() {
 
     // Provide prereqs but not the switch slot, so the task blocks in
     // wait_for_all_prereqs()'s second phase.
-    let _rack_network_config_tx = harness.provide_prereqs_only();
+    let _system_networking_config_tx = harness.provide_prereqs_only();
 
     // Wait for the task to reach Inert(WaitingToDetermineSwitchSlot),
     // confirming it's blocked in the switch slot wait.
@@ -844,25 +853,25 @@ async fn channel_closure_scrimlet_status_during_switch_slot_wait() {
     logctx.cleanup_successful();
 }
 
-// Test: dropping the rack_network_config sender while the task is blocked
+// Test: dropping the system_networking_config sender while the task is blocked
 // in wait_for_all_prereqs() waiting for the switch slot causes the task
 // to exit with TaskExitedUnexpectedly.
 #[tokio::test(start_paused = true)]
-async fn channel_closure_rack_network_config_during_switch_slot_wait() {
+async fn channel_closure_system_networking_config_during_switch_slot_wait() {
     let logctx = omicron_test_utils::dev::test_setup_log(
-        "channel_closure_rack_network_config_during_switch_slot_wait",
+        "channel_closure_system_networking_config_during_switch_slot_wait",
     );
     let harness = Harness::new(&logctx.log);
 
     // Provide prereqs but not the switch slot, so the task blocks in
     // wait_for_all_prereqs()'s second phase.
-    let rack_network_config_tx = harness.provide_prereqs_only();
+    let system_networking_config_tx = harness.provide_prereqs_only();
 
     // Wait for the task to reach Inert(WaitingToDetermineSwitchSlot),
     // confirming it's blocked in the switch slot wait.
     harness.wait_for_task_status_waiting_for_switch_slot().await;
 
-    // Destructure the harness so we can drop the rack_network_config
+    // Destructure the harness so we can drop the system_networking_config
     // sender while still holding the other pieces we need.
     let Harness {
         task,
@@ -871,10 +880,10 @@ async fn channel_closure_rack_network_config_during_switch_slot_wait() {
         ..
     } = harness;
 
-    // Drop the rack_network_config sender. The task is currently blocked
+    // Drop the system_networking_config sender. The task is currently blocked
     // waiting for the switch slot, but also monitors this channel for
     // closure; it should notice and exit.
-    mem::drop(rack_network_config_tx);
+    mem::drop(system_networking_config_tx);
 
     // Wait for the task to exit and verify the final status.
     task._task.await.expect("task didn't panic");
@@ -911,7 +920,7 @@ async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
     // NotScrimlet (the default). This exact flow can't really happen (we'd have
     // to become a scrimlet to get a switch slot), but emulates us becoming
     // NotScrimlet immediately after finding our switch slot.
-    let _rack_network_config_tx = harness.provide_prereqs_only();
+    let _system_networking_config_tx = harness.provide_prereqs_only();
     harness.provide_switch_slot_only();
 
     // Wait for the task to reach Inert(NoLongerAScrimlet), confirming it's
@@ -955,13 +964,13 @@ async fn channel_closure_scrimlet_status_during_not_scrimlet_wait() {
     logctx.cleanup_successful();
 }
 
-// Test: dropping the rack_network_config sender while the task is
+// Test: dropping the system_networking_config sender while the task is
 // blocked in wait_if_this_sled_is_no_longer_a_scrimlet() causes the task to
 // exit with TaskExitedUnexpectedly.
 #[tokio::test(start_paused = true)]
-async fn channel_closure_rack_network_config_during_not_scrimlet_wait() {
+async fn channel_closure_system_networking_config_during_not_scrimlet_wait() {
     let logctx = omicron_test_utils::dev::test_setup_log(
-        "channel_closure_rack_network_config_during_not_scrimlet_wait",
+        "channel_closure_system_networking_config_during_not_scrimlet_wait",
     );
     let harness = Harness::new(&logctx.log);
 
@@ -969,14 +978,14 @@ async fn channel_closure_rack_network_config_during_not_scrimlet_wait() {
     // NotScrimlet (the default). This exact flow can't really happen (we'd have
     // to become a scrimlet to get a switch slot), but emulates us becoming
     // NotScrimlet immediately after finding our switch slot.
-    let rack_network_config_tx = harness.provide_prereqs_only();
+    let system_networking_config_tx = harness.provide_prereqs_only();
     harness.provide_switch_slot_only();
 
     // Wait for the task to reach Inert(NoLongerAScrimlet), confirming it's
     // blocked in wait_if_this_sled_is_no_longer_a_scrimlet().
     harness.wait_for_task_status_no_longer_a_scrimlet().await;
 
-    // Destructure the harness so we can drop the rack_network_config
+    // Destructure the harness so we can drop the system_networking_config
     // sender while still holding the other pieces we need.
     let Harness {
         task,
@@ -985,10 +994,10 @@ async fn channel_closure_rack_network_config_during_not_scrimlet_wait() {
         ..
     } = harness;
 
-    // Drop the rack_network_config sender. The task is currently blocked
+    // Drop the system_networking_config sender. The task is currently blocked
     // waiting for scrimlet status, so it should also notice that this
     // channel has closed and exit.
-    mem::drop(rack_network_config_tx);
+    mem::drop(system_networking_config_tx);
 
     // Wait for the task to exit and verify the final status.
     task._task.await.expect("task didn't panic");
