@@ -973,8 +973,8 @@ impl MulticastGroupReconciler {
 
         // Clear M2P/forwarding from all sleds before DPD cleanup.
         // This must succeed before deleting DB records, otherwise
-        // stale OPTE state would persist on failed sleds with no
-        // source of truth to drive a later cleanup pass.
+        // stale OPTE state would persist on sleds where the clear
+        // failed, with no DB record to drive a retry on a later pass.
         sled_client
             .clear_m2p_and_forwarding(opctx, group)
             .await

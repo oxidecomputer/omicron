@@ -2708,14 +2708,6 @@ impl InstanceRunner {
 
         self.multicast_groups.push(membership.clone());
         self.ensure_multicast_groups()?;
-
-        // OPTE's xde driver uses mac_siphon_set on the underlay NIC to
-        // receive all packets (including multicast) at the MAC layer.
-        //
-        // Subscription filtering and delivery happen inside OPTE via
-        // mcast_subscribe. Rack-wide dataplane forwarding is handled by
-        // the RPW reconciler + DPD.
-
         Ok(())
     }
 

@@ -109,14 +109,6 @@ struct RouteSet {
 ///
 /// The only lock nesting is:
 /// - `routes` then `ports` in `vpc_routes_ensure`
-/// - `ports` then `eip_gateways` in `create_port`
-///
-/// `set_eip_gateways` acquires each lock separately (global map first,
-/// then ports), so there is no nesting. A concurrent `create_port`
-/// between the two reads the already-updated global map. The subsequent
-/// port iteration is redundant but idempotent. Neither path is hot:
-/// `set_eip_gateways` runs once per background task pass and
-/// `create_port` runs at instance boot.
 ///
 /// Note: `release_inner` acquires `ports` then `routes` sequentially
 /// (dropping each before acquiring the next).
@@ -137,11 +129,6 @@ struct PortManagerInner {
 
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
-
-    /// Most recent EIP gateway mappings, keyed by NIC ID. We store this here so
-    /// that ports created after `set_eip_gateways` can seed their initial
-    /// gateway state.
-    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
 }
 
 /// Mutable per-port state tracked alongside the immutable `Port`.
@@ -403,7 +390,6 @@ impl PortManager {
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
-            eip_gateways: Mutex::new(HashMap::new()),
         });
 
         Self { inner }
@@ -479,17 +465,7 @@ impl PortManager {
                 vni,
                 gateway,
             });
-            let mut new_port_state = PortState::new(port.clone());
-
-            // Seed gateway mappings from the global map so that a port
-            // created after set_eip_gateways has the correct state
-            // immediately. Lock order: ports then eip_gateways.
-            if let Some(gw) =
-                self.inner.eip_gateways.lock().unwrap().get(&nic.id).cloned()
-            {
-                new_port_state.eip_gateways = gw;
-            }
-
+            let new_port_state = PortState::new(port.clone());
             let old = ports.insert((nic.id, nic.kind), new_port_state);
             assert!(
                 old.is_none(),
@@ -761,24 +737,17 @@ impl PortManager {
     ///
     /// Returns whether the internal mappings were changed.
     pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
-        // Update global map (single lock). A concurrent create_port
-        // between these two locks will read the updated global map and
-        // seed correctly; the port iteration below is then a redundant
-        // but idempotent overwrite.
-        let mut global_gw = self.inner.eip_gateways.lock().unwrap();
-        let changed = &*global_gw != &mappings.mappings;
-        *global_gw = mappings.mappings.clone();
-        drop(global_gw);
-
-        // Push into existing ports.
         let mut ports = self.inner.ports.lock().unwrap();
-        for ((nic_id, _), port_state) in ports.iter_mut() {
+        ports.iter_mut().fold(false, |changed, ((nic_id, _), port_state)| {
             let new_gw =
                 mappings.mappings.get(nic_id).cloned().unwrap_or_default();
-            port_state.eip_gateways = new_gw;
-        }
-
-        changed
+            if port_state.eip_gateways != new_gw {
+                port_state.eip_gateways = new_gw;
+                true
+            } else {
+                changed
+            }
+        })
     }
 
     /// Lookup an OPTE port, and ensure its external IP config is up to date.
@@ -1627,7 +1596,7 @@ mod tests {
         const SERVICES_VPC_VNI: Vni = Vni::SERVICES_VNI;
 
         let handle = Handle::new().unwrap();
-        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
+        handle.set_xde_underlay("foo0", "foo1").unwrap();
 
         // First, create a port for a service.
         //
