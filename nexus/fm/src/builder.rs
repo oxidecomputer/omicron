@@ -4,6 +4,7 @@
 
 //! Sitrep builder
 
+use crate::analysis;
 use nexus_types::fm;
 use nexus_types::inventory;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -26,25 +27,18 @@ pub struct SitrepBuilder<'a> {
 }
 
 impl<'a> SitrepBuilder<'a> {
-    pub fn new(
-        log: &Logger,
-        inventory: &'a inventory::Collection,
-        parent_sitrep: Option<&'a fm::Sitrep>,
-    ) -> Self {
-        Self::new_with_rng(
-            log,
-            inventory,
-            parent_sitrep,
-            SitrepBuilderRng::from_entropy(),
-        )
+    pub fn new(log: &Logger, inputs: &'a analysis::Input) -> Self {
+        Self::new_with_rng(log, inputs, SitrepBuilderRng::from_entropy())
     }
 
     pub fn new_with_rng(
         log: &Logger,
-        inventory: &'a inventory::Collection,
-        parent_sitrep: Option<&'a fm::Sitrep>,
+        inputs: &'a analysis::Input,
         mut rng: SitrepBuilderRng,
     ) -> Self {
+        let parent_sitrep = inputs.parent_sitrep();
+        let inventory = inputs.inventory();
+
         // TODO(eliza): should the RNG also be seeded with the parent sitrep
         // UUID and/or the Omicron zone UUID? Hmm.
         let sitrep_id = rng.sitrep_id();
@@ -54,12 +48,11 @@ impl<'a> SitrepBuilder<'a> {
             "inv_collection_id" => format!("{:?}", inventory.id),
         ));
 
-        let cases =
-            case::AllCases::new(log.clone(), sitrep_id, parent_sitrep, rng);
+        let cases = case::AllCases::new(log.clone(), sitrep_id, inputs, rng);
 
         slog::info!(
             &log,
-            "preparing sitrep {sitrep_id:?}";
+            "building sitrep {sitrep_id:?}";
             "existing_open_cases" => cases.len(),
         );
 

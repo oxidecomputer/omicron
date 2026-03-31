@@ -31,17 +31,51 @@ impl AllCases {
     pub(super) fn new(
         log: slog::Logger,
         sitrep_id: SitrepUuid,
-        parent_sitrep: Option<&fm::Sitrep>,
+        inputs: &crate::analysis::Input,
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
-        // Copy forward any open cases from the parent sitrep.
-        // If a case was closed in the parent sitrep, skip it.
-        let cases: IdOrdMap<_> = parent_sitrep
+        // Copy forward any open cases from the parent sitrep. If a case was
+        // closed in the parent sitrep, skip it, if AND ONLY IF all of its
+        // ereports have been marked as seen when analysis inputs were loaded.
+        let unmarked_seen_ereports = inputs.already_seen_ereports();
+        let cases: IdOrdMap<_> = inputs
+            .parent_sitrep()
             .iter()
-            .flat_map(|s| s.open_cases())
-            .map(|case| {
+            .flat_map(|s| s.cases.iter())
+            .filter_map(|case| {
+                if !case.is_open() {
+                    let unmarked_ereport =
+                        case.ereports.iter().find(|ereport| {
+                            unmarked_seen_ereports
+                                .contains(ereport.ereport_id())
+                        });
+                    if let Some(ereport) = unmarked_ereport {
+                        slog::debug!(
+                            &log,
+                            "closed case must still be copied forwards, as it \
+                             contains an ereport not yet marked as seen";
+                            "case_id" => %case.id,
+                            "ereport_id" => %ereport.ereport_id(),
+                            "case_ereport_id" => %ereport.id,
+                        );
+                    } else {
+                        slog::trace!(
+                            &log,
+                            "closed case need no longer be copied forwards";
+                            "case_id" => %case.id,
+                        );
+                        return None;
+                    }
+                } else {
+                    slog::trace!(
+                        &log,
+                        "open case will be copied forwards";
+                        "case_id" => %case.id,
+                    );
+                }
+
                 let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
-                CaseBuilder::new(&log, sitrep_id, case.clone(), rng)
+                Some(CaseBuilder::new(&log, sitrep_id, case.clone(), rng))
             })
             .collect();
 

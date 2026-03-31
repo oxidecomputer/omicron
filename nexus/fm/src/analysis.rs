@@ -12,6 +12,7 @@ pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
     new_ereports: IdOrdMap<fm::Ereport>,
+    already_seen_ereports: BTreeSet<fm::EreportId>,
 }
 
 impl Input {
@@ -27,6 +28,10 @@ impl Input {
         &self.new_ereports
     }
 
+    pub(crate) fn already_seen_ereports(&self) -> &BTreeSet<fm::EreportId> {
+        &self.already_seen_ereports
+    }
+
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
@@ -36,15 +41,14 @@ impl Input {
                 parent_sitrep,
                 inv,
                 new_ereports: IdOrdMap::default(),
+                already_seen_ereports: BTreeSet::default(),
             },
-            already_seen_ereports: BTreeSet::default(),
         }
     }
 }
 
 pub struct InputBuilder {
     input: Input,
-    already_seen_ereports: BTreeSet<fm::EreportId>,
 }
 
 impl InputBuilder {
@@ -58,7 +62,7 @@ impl InputBuilder {
                 if let Some(sitrep) = parent_sitrep {
                     let id = ereport.id();
                     if sitrep.ereports_by_id.contains_key(&id) {
-                        self.already_seen_ereports.insert(*id);
+                        self.input.already_seen_ereports.insert(*id);
                         return None;
                     }
                 }
@@ -89,7 +93,7 @@ impl InputBuilder {
             parent_inv_id,
             inv_id: self.input.inv.id,
             new_ereport_ids,
-            already_seen_ereport_ids: self.already_seen_ereports,
+            already_seen_ereport_ids: self.input.already_seen_ereports.clone(),
         };
         (self.input, report)
     }

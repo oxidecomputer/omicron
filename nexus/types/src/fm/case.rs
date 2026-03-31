@@ -5,6 +5,7 @@
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
+use crate::fm::EreportId;
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
@@ -73,6 +74,12 @@ impl IdOrdItem for CaseEreport {
     }
 
     iddqd::id_upcast!();
+}
+
+impl CaseEreport {
+    pub fn ereport_id(&self) -> &EreportId {
+        self.ereport.id()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
