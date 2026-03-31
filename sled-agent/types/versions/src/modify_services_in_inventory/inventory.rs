@@ -10,6 +10,7 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
+use slog_error_chain::SlogInlineError;
 use std::net::SocketAddrV6;
 
 use crate::v1::inventory::InventoryDataset;
@@ -150,12 +151,27 @@ pub enum SvcsEnabledNotOnlineResult {
 
 /// Error that is a one to one mapping of `illumos_utils::ExecutionError`, which
 /// uses a String for any type in `ExecutionError` that is not cloneable.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    thiserror::Error,
+    Debug,
+    SlogInlineError,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum SvcsError {
+    #[error("failed to start execution of `{command}`: {err}")]
     ExecutionStart { command: String, err: String },
+    #[error("command failure: {0}")]
     CommandFailure(String),
+    #[error("contract error: {msg}: {err}")]
     ContractFailure { msg: String, err: String },
+    #[error("failed to parse command output: {0}")]
     ParseFailure(String),
+    #[error("zone is not running")]
     NotRunning,
 }

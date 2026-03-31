@@ -87,6 +87,7 @@ impl_typed_uuid_kinds! {
         SubnetPool = {},
         SubnetPoolMember = {},
         SupportBundle = {},
+        SvcEnabledNotOnline = {},
         TufArtifact = {},
         TufRepo = {},
         TufTrustRoot = {},

@@ -11,6 +11,7 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
+use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
@@ -62,6 +63,9 @@ use nexus_db_model::InvSingleMeasurements;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
+use nexus_db_model::InvSvcEnabledNotOnline;
+use nexus_db_model::InvSvcEnabledNotOnlineError;
+use nexus_db_model::InvSvcEnabledNotOnlineService;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -209,6 +213,85 @@ impl DataStore {
                 }
             }
         }
+
+        // Pull services in maintenance result out of all sled agents
+        // TODO-K: change the variable name to svcs_enabled_not_online
+        let svcs_enabled_not_online: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        vec![InvSvcEnabledNotOnline::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            None,
+                            svcs.time_of_status,
+                        )]
+                    }
+                    SvcsEnabledNotOnlineResult::SvcsCmdError(error) => {
+                        vec![InvSvcEnabledNotOnline::new(
+                            collection_id,
+                            sled_agent.sled_id,
+                            Some(error.to_string()),
+                            // TODO-K: Adding the timestamp here should be fine?
+                            Utc::now(),
+                        )]
+                    }
+                    SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
+                }
+            })
+            .collect();
+
+        // Pull services in maintenance details out of all sled agents
+        let svcs_enabled_not_online_services: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        svcs.services
+                            .iter()
+                            .map(|svc| {
+                                InvSvcEnabledNotOnlineService::new(
+                                    collection_id,
+                                    sled_agent.sled_id,
+                                    svc.clone(),
+                                )
+                            })
+                            .collect()
+                    }
+                    // If there is an error we've already captured it above
+                    SvcsEnabledNotOnlineResult::SvcsCmdError(_) => vec![],
+                    SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
+                }
+            })
+            .collect();
+
+        // Pull services in maintenance errors out of all sled agents
+        let svcs_enabled_not_online_errors: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        svcs.errors
+                            .iter()
+                            .map(|error| {
+                                InvSvcEnabledNotOnlineError::new(
+                                    collection_id,
+                                    sled_agent.sled_id,
+                                    error.clone(),
+                                )
+                            })
+                            .collect()
+                    }
+                    // If there is an error we've already captured it above
+                    SvcsEnabledNotOnlineResult::SvcsCmdError(_) => vec![],
+                    SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
+                }
+            })
+            .collect();
 
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
@@ -1517,6 +1600,65 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_mupdate_override_non_boot)
                         .values(some_non_boot)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the results from the  enabled not online SMF
+            // services we found.
+            {
+                use nexus_db_schema::schema::inv_svc_enabled_not_online::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_enabled_not_online = svcs_enabled_not_online.into_iter();
+                loop {
+                    let some_svcs_enabled_not_online =
+                        svcs_enabled_not_online.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_enabled_not_online.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online)
+                        .values(some_svcs_enabled_not_online)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the SMF services enabled not online we found.
+            {
+                use nexus_db_schema::schema::inv_svc_enabled_not_online_service::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_enabled_not_online_services = svcs_enabled_not_online_services.into_iter();
+                loop {
+                    let some_svcs_enabled_not_online_services =
+                        svcs_enabled_not_online_services.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_enabled_not_online_services.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online_service)
+                        .values(some_svcs_enabled_not_online_services)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the errors from the enabled not online SMF
+            // services we found.
+            {
+                use nexus_db_schema::schema::inv_svc_enabled_not_online_error::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_enabled_not_online_errors = svcs_enabled_not_online_errors.into_iter();
+                loop {
+                    let some_svcs_enabled_not_online_errors =
+                        svcs_enabled_not_online_errors.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_enabled_not_online_errors.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online_error)
+                        .values(some_svcs_enabled_not_online_errors)
                         .execute_async(&conn)
                         .await?;
                 }

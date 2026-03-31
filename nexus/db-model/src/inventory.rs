@@ -9,6 +9,7 @@ use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
+use crate::to_db_typed_uuid;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -44,8 +45,9 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
-    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_svc_enabled_not_online, inv_svc_enabled_not_online_error,
+    inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
+    inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
@@ -63,6 +65,7 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -72,6 +75,8 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
@@ -92,6 +97,8 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::Svc;
+use sled_agent_types::inventory::SvcState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
@@ -2023,6 +2030,154 @@ impl From<InvMupdateOverrideNonBoot> for MupdateOverrideNonBootInventory {
             path: row.path.into(),
             is_valid: row.is_valid,
             message: row.message,
+        }
+    }
+}
+
+// TODO-K: here
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online)]
+pub struct InvSvcEnabledNotOnline {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub svcs_cmd_error: Option<String>,
+    pub time_of_status: DateTime<Utc>,
+}
+
+impl InvSvcEnabledNotOnline {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        // TODO-K: Instead of a String this should be the Error type?
+        svcs_cmd_error: Option<String>,
+        time_of_status: DateTime<Utc>,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            svcs_cmd_error,
+            time_of_status,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online_service)]
+pub struct InvSvcEnabledNotOnlineService {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub fmri: String,
+    pub zone: String,
+    pub state: InvSvcState,
+}
+
+impl InvSvcEnabledNotOnlineService {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svc: Svc,
+    ) -> Self {
+        let Svc { fmri, zone, state } = svc;
+
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            fmri,
+            zone,
+            state: state.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online_error)]
+pub struct InvSvcEnabledNotOnlineError {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub error_message: String,
+}
+
+impl InvSvcEnabledNotOnlineError {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        error_message: String,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::from_untyped_uuid(
+            Uuid::new_v4(),
+        ));
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            error_message,
+        }
+    }
+}
+
+// See [`sled_agent_types::inventory::SvcState`].
+impl_enum_type!(
+    InvSvcStateEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvSvcState;
+
+    // Enum values
+    Uninitialized => b"uninitialized"
+    Offline => b"offline"
+    Online => b"online"
+    Degraded => b"degraded"
+    Maintenance => b"maintenance"
+    Disabled => b"disabled"
+    LegacyRun => b"legacy_run"
+    Unknown => b"unknown"
+);
+
+// TODO-K: make these impls for svc state
+impl From<SvcState> for InvSvcState {
+    fn from(value: SvcState) -> Self {
+        match value {
+            SvcState::Online => InvSvcState::Online,
+            SvcState::Degraded => InvSvcState::Degraded,
+            SvcState::Uninitialized => InvSvcState::Uninitialized,
+            SvcState::Offline => InvSvcState::Offline,
+            SvcState::Maintenance => InvSvcState::Maintenance,
+            SvcState::Disabled => InvSvcState::Disabled,
+            SvcState::LegacyRun => InvSvcState::LegacyRun,
+            SvcState::Unknown => InvSvcState::Unknown,
+        }
+    }
+}
+
+impl From<InvSvcState> for SvcState {
+    fn from(value: InvSvcState) -> Self {
+        match value {
+            InvSvcState::Online => SvcState::Online,
+            InvSvcState::Degraded => SvcState::Degraded,
+            InvSvcState::Uninitialized => SvcState::Uninitialized,
+            InvSvcState::Offline => SvcState::Offline,
+            InvSvcState::Maintenance => SvcState::Maintenance,
+            InvSvcState::Disabled => SvcState::Disabled,
+            InvSvcState::LegacyRun => SvcState::LegacyRun,
+            InvSvcState::Unknown => SvcState::Unknown,
         }
     }
 }

@@ -1725,6 +1725,36 @@ table! {
 }
 
 table! {
+    inv_svc_enabled_not_online (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        svcs_cmd_error -> Nullable<Text>,
+        time_of_status -> Timestamptz,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online_service (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        fmri -> Text,
+        zone -> Text,
+        state -> crate::enums::InvSvcStateEnum,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online_error (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        error_message -> Text,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
