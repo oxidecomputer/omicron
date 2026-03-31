@@ -41,4 +41,5 @@ pub mod multicast;
 pub mod quiesce;
 pub mod saga;
 pub mod silo;
+pub mod support_bundle;
 pub mod trust_quorum;

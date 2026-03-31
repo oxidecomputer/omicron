@@ -6,7 +6,6 @@
 //! running a full VM.
 
 use crate::metrics::MetricsRequestQueue;
-use anyhow::Context as _;
 use anyhow::{Result, anyhow};
 use dropshot::HttpError;
 use iddqd::IdHashItem;
@@ -21,9 +20,9 @@ use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
 };
-use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::{
-    NetworkInterface, ResolvedVpcFirewallRule,
+    ExternalIpConfig, ExternalIpv4Config, ExternalIpv6Config, NetworkInterface,
+    ResolvedVpcFirewallRule,
 };
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, ProbeUuid};
 use rand::SeedableRng;
@@ -348,21 +347,25 @@ impl ProbeManagerInner {
             "Probes are expected to have an Ephemeral IP address",
         );
         let external_ips = match eip.ip {
-            IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
-                .with_ephemeral_ip(ipv4)
-                .build()
-                .context("building ExternalIpConfig")?
-                .into(),
-            IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
-                .with_ephemeral_ip(ipv6)
-                .build()
-                .context("building ExternalIpConfig")?
-                .into(),
+            IpAddr::V4(ipv4) => ExternalIpConfig {
+                v4: Some(ExternalIpv4Config {
+                    ephemeral_ip: Some(ipv4),
+                    ..Default::default()
+                }),
+                v6: None,
+            },
+            IpAddr::V6(ipv6) => ExternalIpConfig {
+                v6: Some(ExternalIpv6Config {
+                    ephemeral_ip: Some(ipv6),
+                    ..Default::default()
+                }),
+                v4: None,
+            },
         };
 
         let port = self.port_manager.create_port(PortCreateParams {
             nic,
-            external_ips: &Some(external_ips),
+            external_ips: &external_ips,
             firewall_rules: &[ResolvedVpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,

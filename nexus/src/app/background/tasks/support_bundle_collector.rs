@@ -416,7 +416,7 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
-            let request = BundleRequest::default();
+            let request = BundleRequest::all();
             match self.collect_bundle(&opctx, &request).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
@@ -441,10 +441,8 @@ mod test {
     use super::*;
 
     use crate::app::background::tasks::support_bundle::perfetto;
-    use crate::app::background::tasks::support_bundle::request::BundleData;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
-    use illumos_utils::zpool::ZpoolHealth;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
@@ -456,6 +454,7 @@ mod test {
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::{BundleData, SledSelection};
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -468,6 +467,7 @@ mod test {
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
         PhysicalDiskUuid, SledUuid,
     };
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::HashSet;
     use std::num::NonZeroU64;
     use uuid::Uuid;
@@ -519,7 +519,7 @@ mod test {
             nexus.id(),
         );
 
-        let request = BundleRequest::default();
+        let request = BundleRequest::all();
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -587,10 +587,11 @@ mod test {
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
+        const SLED_SLOT: u16 = 8;
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
@@ -648,7 +649,10 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                Reporter::HostOs {
+                    sled: SledUuid::new_v4(),
+                    slot: Some(SLED_SLOT),
+                },
                 vec![
                     EreportData {
                         id: EreportId {
@@ -681,7 +685,7 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
                         id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
@@ -830,8 +834,8 @@ mod test {
         // The bundle collection should complete successfully.
         // NOTE: The support bundle querying interface isn't supported on
         // the simulated sled agent (yet?) so we're using an empty sled selection.
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -907,8 +911,8 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1025,7 +1029,7 @@ mod test {
             transfer_chunk_size: NonZeroU64::new(16).unwrap(),
             data_selection: [
                 BundleData::Reconfigurator,
-                BundleData::HostInfo(HashSet::new()),
+                BundleData::HostInfo(SledSelection::Specific(HashSet::new())),
                 BundleData::SledCubbyInfo,
                 BundleData::SpDumps,
             ]
@@ -1126,8 +1130,8 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1291,8 +1295,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1446,8 +1450,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1531,8 +1535,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1617,8 +1621,8 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let mut request = BundleRequest::all();
+        request.data_selection = request.data_selection.with_specific_sleds([]);
         let report = collector
             .collect_bundle(&opctx, &request)
             .await

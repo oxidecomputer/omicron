@@ -4,10 +4,11 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
+use omicron_common::api::internal::shared::external_ip::v1::ExternalIpConfig;
 use omicron_uuid_kinds::InstanceUuid;
+
+use crate::v10::instance::ResolvedVpcFirewallRule;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;

@@ -31,7 +31,9 @@ const SHA3_256_LEN: usize = 32;
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Sha3_256Digest(
-    #[serde(with = "serde_human_bytes::hex_array")]
+    #[serde(with = "byte_wrapper::HexArray::<SHA3_256_LEN>")]
+    // If and when this type changes next, delete the `schemars(schema_with)`
+    // line and this comment.
     #[schemars(schema_with = "omicron_common::hex_schema::<SHA3_256_LEN>")]
     pub [u8; SHA3_256_LEN],
 );
@@ -68,7 +70,9 @@ pub struct CertificateChain(pub Vec<String>);
 #[serde(untagged)]
 pub enum Nonce {
     /// A 32-byte nonce.
-    #[serde(with = "serde_human_bytes::hex_array")]
+    #[serde(with = "byte_wrapper::HexArray::<32>")]
+    // If and when this type changes next, delete the `schemars(schema_with)`
+    // line and this comment.
     #[schemars(schema_with = "omicron_common::hex_schema::<32>")]
     N32([u8; 32]),
 }
@@ -78,7 +82,9 @@ const ED25519_SIG_LEN: usize = 64;
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Ed25519Signature(
-    #[serde(with = "serde_human_bytes::hex_array")]
+    #[serde(with = "byte_wrapper::HexArray::<ED25519_SIG_LEN>")]
+    // If and when this type changes next, delete the `schemars(schema_with)`
+    // line and this comment.
     #[schemars(schema_with = "omicron_common::hex_schema::<ED25519_SIG_LEN>")]
     pub [u8; ED25519_SIG_LEN],
 );

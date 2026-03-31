@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -437,6 +438,10 @@ pub struct BackgroundTaskConfig {
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
     /// configuration for console session cleanup task
     pub session_cleanup: SessionCleanupConfig,
+    /// configuration for audit log incomplete timeout task
+    pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
+    /// configuration for audit log cleanup (retention) task
+    pub audit_log_cleanup: AuditLogCleanupConfig,
 }
 
 #[serde_as]
@@ -448,6 +453,39 @@ pub struct SessionCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_delete_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogTimeoutIncompleteConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// how old an incomplete entry must be before it is timed out
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout_secs: Duration,
+
+    /// max rows per SQL statement
+    pub max_timed_out_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogCleanupConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// retention period in days; must be at least 1
+    ///
+    /// This should be much longer than the `audit_log_timeout_incomplete`
+    /// timeout so orphaned entries are completed before they become eligible
+    /// for cleanup.
+    pub retention_days: NonZeroU32,
+
+    /// maximum rows hard-deleted per activation
+    pub max_deleted_per_activation: u32,
 }
 
 #[serde_as]
@@ -1276,6 +1314,12 @@ mod test {
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1544,6 +1588,17 @@ mod test {
                             period_secs: Duration::from_secs(300),
                             max_delete_per_activation: 10_000,
                         },
+                        audit_log_timeout_incomplete:
+                            AuditLogTimeoutIncompleteConfig {
+                                period_secs: Duration::from_secs(600),
+                                timeout_secs: Duration::from_secs(14400),
+                                max_timed_out_per_activation: 1000,
+                            },
+                        audit_log_cleanup: AuditLogCleanupConfig {
+                            period_secs: Duration::from_secs(600),
+                            retention_days: NonZeroU32::new(90).unwrap(),
+                            max_deleted_per_activation: 10_000,
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1652,6 +1707,12 @@ mod test {
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"
@@ -1773,6 +1834,19 @@ mod test {
         } else {
             panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
+    }
+
+    #[test]
+    fn test_invalid_audit_log_cleanup_retention_days() {
+        let error = toml::from_str::<AuditLogCleanupConfig>(
+            r##"
+            period_secs = 600
+            retention_days = 0
+            max_deleted_per_activation = 10000
+            "##,
+        )
+        .expect_err("retention_days = 0 should be rejected");
+        assert!(error.message().contains("nonzero"), "error = {}", error);
     }
 
     #[test]

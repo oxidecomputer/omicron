@@ -888,14 +888,7 @@ impl ServiceInner {
                                 rib_priority: r.rib_priority,
                             })
                             .collect(),
-                        addresses: config
-                            .addresses
-                            .iter()
-                            .map(|a| NexusTypes::UplinkAddressConfig {
-                                address: a.address,
-                                vlan_id: a.vlan_id,
-                            })
-                            .collect(),
+                        addresses: config.addresses.clone(),
                         switch: config.switch,
                         uplink_port_speed: config.uplink_port_speed,
                         uplink_port_fec: config.uplink_port_fec,
@@ -923,10 +916,6 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
-                                router_lifetime:
-                                    NexusTypes::RouterLifetimeConfig(
-                                        b.router_lifetime.as_u16(),
-                                    ),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {
@@ -1366,10 +1355,18 @@ impl ServiceInner {
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
+        //
+        // lookup_uplinked_switch_zone_underlay_addrs() is shared with
+        // sled-agent, which has the rack network config in a watch channel that
+        // changes as Nexus pushes updates in via the bootstore. We don't have
+        // that, but can stuff the (unchanging) config into a watch channel to
+        // fit this API.
+        let (_rack_network_config_tx, rack_network_config_rx) =
+            watch::channel(config.rack_network_config.clone());
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_uplinked_switch_zone_underlay_addrs(
                 &resolver,
-                &config.rack_network_config,
+                &rack_network_config_rx,
                 // We willing to wait forever to find all the switches that have
                 // configured uplinks; if we attempt to proceed without doing
                 // so, we'll fail handing off to Nexus later. (Ideally we could

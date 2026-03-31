@@ -27,7 +27,6 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::ZpoolHealth;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::inv_zone_manifest_non_boot;
 use nexus_db_schema::schema::inv_zone_manifest_zone;
@@ -94,6 +93,7 @@ use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -2259,7 +2259,7 @@ impl From<InvNvmeDiskFirmware>
     }
 }
 
-// See [`illumos_utils::zpool::ZpoolHealth`].
+// See [`sled_agent_types::inventory::ZpoolHealth`].
 impl_enum_type!(
     InvZpoolHealthEnum:
 

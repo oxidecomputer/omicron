@@ -16,7 +16,9 @@ use diesel::sql_types;
 use nexus_db_schema::schema::ereport;
 use nexus_types::fm::ereport::{self as types, Ena, EreportId};
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
+use omicron_uuid_kinds::{
+    EreporterRestartKind, OmicronZoneKind, SitrepKind, SledKind,
+};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -97,30 +99,31 @@ pub struct Ereport {
 
     #[diesel(embed)]
     pub reporter: Reporter,
+
+    /// The sitrep ID of the sitrep which was being executed by `fm_rendezvous`
+    /// when this ereport was marked as "seen".
+    ///
+    /// If this is `Some`, the ereport has *definitely* been seen by at least
+    /// one committed sitrep at some point in time. If it is None`, the
+    /// ereport may or may not have been included in a sitrep, and you will
+    /// have to actually check the sitrep to find out.
+    ///
+    /// When this is `Some`, the value is the ID of the sitrep which the
+    /// `fm_rendezvous` task was executing when this ereport was marked as seen.
+    /// because execution may lag arbitrarily behind the generation of new
+    /// sitreps, this does *not* indicate that this was the *first* sitrep in
+    /// which this ereport was seen (which is why this is called "marked seen
+    /// in" rather than "first seen in" or similar) --- in general, this field
+    /// should basically just be treated as a `bool` and the actual value of the
+    /// sitrep ID is included only to provide *some* record for human-readable
+    /// debugging purposes.
+    pub marked_seen_in: Option<DbTypedUuid<SitrepKind>>,
 }
 
 #[derive(Copy, Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = ereport)]
 pub struct Reporter {
     pub reporter: EreporterType,
-
-    //
-    // The physical location of the reporting SP.
-    //
-    /// SP location: the type of SP slot (sled, switch, power shelf).
-    ///
-    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
-    /// is never NULL, which is enforced by the `reporter_identity_validity`
-    /// CHECK constraint. This is because SPs are indexed by their physical
-    /// location when requesting ereports through MGS.
-    pub sp_type: Option<SpType>,
-    /// SP location: the slot number.
-    ///
-    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
-    /// is never NULL, which is enforced by the `reporter_identity_validity`
-    /// CHECK constraint. This is because SPs are indexed by their physical
-    /// location when requesting ereports through MGS.
-    pub sp_slot: Option<SpMgsSlot>,
 
     /// For host OS ereports, the sled UUID of the sled-agent from which this
     /// ereport was received.
@@ -129,6 +132,23 @@ pub struct Reporter {
     /// EreporterType::Host`). This is enforced by the
     /// `reporter_identity_validity` CHECK constraint.
     pub sled_id: Option<DbTypedUuid<SledKind>>,
+
+    //
+    // The physical location of the reporter
+    //
+    /// Reporter location: the type of the physical slot (sled, switch, power
+    /// shelf).
+    pub slot_type: SpType,
+    /// Reporter location: the slot number.
+    ///
+    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
+    /// is never NULL, which is enforced by the `reporter_identity_validity`
+    /// CHECK constraint. This is because SPs are indexed by their physical
+    /// location when requesting ereports through MGS. For host OS ereports,
+    /// this may be NULL, as it is possible for a sled-agent to be part of the
+    /// control plane before its location is included in an inventory
+    /// collection.
+    pub slot: Option<SpMgsSlot>,
 }
 
 impl Ereport {
@@ -176,13 +196,19 @@ impl Ereport {
             class,
             report,
             reporter: reporter.into(),
+            marked_seen_in: None,
         }
     }
 }
 
 impl From<types::Ereport> for Ereport {
-    fn from(types::Ereport { data, reporter }: types::Ereport) -> Self {
-        Self::new(data, reporter)
+    fn from(
+        types::Ereport { data, reporter, marked_seen_in }: types::Ereport,
+    ) -> Self {
+        Self {
+            marked_seen_in: marked_seen_in.map(Into::into),
+            ..Self::new(data, reporter)
+        }
     }
 }
 
@@ -198,6 +224,7 @@ impl TryFrom<Ereport> for types::Ereport {
             class,
             report,
             reporter,
+            marked_seen_in,
             ..
         } = ereport;
         let reporter = reporter.try_into().map_err(|e: Error| {
@@ -216,6 +243,7 @@ impl TryFrom<Ereport> for types::Ereport {
                 report,
             },
             reporter,
+            marked_seen_in: marked_seen_in.map(Into::into),
         })
     }
 }
@@ -223,17 +251,17 @@ impl TryFrom<Ereport> for types::Ereport {
 impl From<types::Reporter> for Reporter {
     fn from(reporter: types::Reporter) -> Self {
         match reporter {
-            types::Reporter::HostOs { sled } => Self {
+            types::Reporter::HostOs { sled, slot } => Self {
                 reporter: EreporterType::Host,
                 sled_id: Some(sled.into()),
-                sp_type: None,
-                sp_slot: None,
+                slot_type: SpType::Sled,
+                slot: slot.map(SpMgsSlot::from),
             },
             types::Reporter::Sp { sp_type, slot } => Self {
                 reporter: EreporterType::Sp,
-                sp_type: Some(sp_type.into()),
-                sp_slot: Some(slot.into()),
                 sled_id: None,
+                slot_type: sp_type.into(),
+                slot: Some(slot.into()),
             },
         }
     }
@@ -245,35 +273,53 @@ impl TryFrom<Reporter> for types::Reporter {
         match reporter {
             Reporter {
                 reporter: EreporterType::Sp,
-                sp_type: Some(sp_type),
-                sp_slot: Some(slot),
+                slot_type,
+                slot: Some(slot),
                 ..
             } => Ok(Self::Sp {
-                sp_type: sp_type.into(),
+                sp_type: slot_type.into(),
                 slot: crate::SqlU16::from(slot).0,
             }),
             Reporter {
-                reporter: EreporterType::Sp, sp_type, sp_slot, ..
+                reporter: EreporterType::Sp, slot_type, slot, ..
             } => Err(Error::InternalError {
                 internal_message: format!(
                     "the 'reporter_identity_validity' CHECK constraint \
                      should enforce that ereports with reporter='sp' have \
-                     a non-NULL SP type and slot, but this ereport has \
-                     sp_type={sp_type:?} and sp_slot={sp_slot:?}",
+                     a non-NULL `slot`, but this ereport has \
+                     slot_type={slot_type:?} and slot={slot:?}",
                 ),
             }),
             Reporter {
                 reporter: EreporterType::Host,
                 sled_id: Some(id),
+                slot_type: SpType::Sled,
+                slot,
                 ..
-            } => Ok(Self::HostOs { sled: id.into() }),
+            } => Ok(Self::HostOs {
+                sled: id.into(),
+                slot: slot.map(|slot| crate::SqlU16::from(slot).0),
+            }),
             Reporter {
-                reporter: EreporterType::Host, sled_id: None, ..
+                reporter: EreporterType::Host,
+                slot_type: SpType::Sled,
+                sled_id: None,
+                ..
             } => Err(Error::internal_error(
                 "the 'reporter_identity_validity' CHECK constraint \
                      should enforce that ereports with reporter='host' \
                      have a non-NULL sled_id, but this ereport does not",
             )),
+            Reporter { reporter: EreporterType::Host, slot_type, .. } => {
+                Err(Error::InternalError {
+                    internal_message: format!(
+                        "the 'reporter_identity_validity' CHECK constraint \
+                        should  enforce that ereports with reporter='host' \
+                        have slot_type='sled', but this ereport has \
+                        slot_type={slot_type:?}",
+                    ),
+                })
+            }
         }
     }
 }

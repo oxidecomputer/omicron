@@ -25,6 +25,7 @@ use omicron_common::api::external::{
 };
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::SwitchSlot;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -839,14 +840,14 @@ impl DataStore {
         opctx: &OpContext,
         port_settings_id: Uuid,
         interface_name: &str,
-        addr: Option<IpNetwork>,
+        addr: Option<IpAddr>,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
         // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
-        let db_addr: IpNetwork = addr.unwrap_or_else(|| {
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED).into()
-        });
+        let db_addr: IpNetwork = addr
+            .unwrap_or_else(|| IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+            .into();
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
@@ -871,7 +872,7 @@ impl DataStore {
         opctx: &OpContext,
         port_settings_id: Uuid,
         interface_name: &str,
-        addr: Option<IpNetwork>,
+        addr: Option<IpAddr>,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
@@ -880,9 +881,9 @@ impl DataStore {
 
         // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
         // for the allow_export table (which has non-nullable addr)
-        let db_addr: IpNetwork = addr.unwrap_or_else(|| {
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED).into()
-        });
+        let db_addr: IpNetwork = addr
+            .unwrap_or_else(|| IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+            .into();
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -892,7 +893,8 @@ impl DataStore {
                 async move {
                     // Query the main peer config table. For unnumbered peers,
                     // addr is NULL; for numbered peers, addr matches.
-                    let active = if addr.is_some() {
+                    let active = if let Some(addr) = addr {
+                        let addr = IpNetwork::from(addr);
                         peer_dsl::switch_port_settings_bgp_peer_config
                             .filter(db_peer::port_settings_id.eq(port_settings_id))
                             .filter(db_peer::addr.eq(addr))
@@ -965,7 +967,7 @@ impl DataStore {
         opctx: &OpContext,
         port_settings_id: Uuid,
         interface_name: &str,
-        addr: Option<IpNetwork>,
+        addr: Option<IpAddr>,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
@@ -974,9 +976,9 @@ impl DataStore {
 
         // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
         // for the allow_import table (which has non-nullable addr)
-        let db_addr: IpNetwork = addr.unwrap_or_else(|| {
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED).into()
-        });
+        let db_addr: IpNetwork = addr
+            .unwrap_or_else(|| IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+            .into();
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -987,7 +989,8 @@ impl DataStore {
                 async move {
                     // Query the main peer config table. For unnumbered peers,
                     // addr is NULL; for numbered peers, addr matches.
-                    let active = if addr.is_some() {
+                    let active = if let Some(addr) = addr {
+                        let addr = IpNetwork::from(addr);
                         peer_dsl::switch_port_settings_bgp_peer_config
                             .filter(db_peer::port_settings_id.eq(port_settings_id))
                             .filter(db_peer::addr.eq(addr))
