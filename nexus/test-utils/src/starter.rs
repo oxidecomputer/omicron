@@ -484,9 +484,10 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         // Set up an instance of mgd
         let bgp_addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into();
-        let mgd = dev::maghemite::MgdInstance::start(0, bgp_addr, Some(mgs_addr))
-            .await
-            .unwrap();
+        let mgd =
+            dev::maghemite::MgdInstance::start(0, bgp_addr, Some(mgs_addr))
+                .await
+                .unwrap();
         let port = mgd.port;
         self.mgd.insert(switch_location, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);

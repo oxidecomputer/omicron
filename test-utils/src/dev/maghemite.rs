@@ -156,28 +156,8 @@ async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
         .context("time out while discovering mgd port number")?
 }
 
-async fn discover_bgp_dispatcher_port(
-    logfile: String,
-) -> Result<u16, anyhow::Error> {
-    let timeout = Instant::now() + MGD_TIMEOUT;
-    tokio::time::timeout_at(
-        timeout,
-        find_mgd_bgp_dispatcher_port_in_log(logfile),
-    )
-    .await
-    .context("time out while discovering bgp dispatcher port number")?
-}
-
 async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
     let re = regex::Regex::new(r#""local_addr":"\[::1?\]:([0-9]+)""#).unwrap();
-    find_pattern_in_logfile(logfile, re).await
-}
-
-async fn find_mgd_bgp_dispatcher_port_in_log(
-    logfile: String,
-) -> Result<u16, anyhow::Error> {
-    let re = regex::Regex::new(r#"TcpListener \{ addr: 127.0.0.1:([0-9]+)"#)
-        .unwrap();
     find_pattern_in_logfile(logfile, re).await
 }
 
@@ -213,7 +193,7 @@ async fn find_pattern_in_logfile(
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_port, discover_bgp_dispatcher_port};
+    use super::discover_port;
     use std::io::Write;
     use std::process::Stdio;
     use tempfile::NamedTempFile;
@@ -243,30 +223,7 @@ mod tests {
         file.flush().unwrap();
 
         assert_eq!(
-            discover_port(file.path().display().to_string())
-                .await
-                .unwrap(),
-            EXPECTED_PORT
-        );
-    }
-
-    #[tokio::test]
-    async fn test_discover_bgp_dispatcher_port() {
-        // Write some data to a fake log file
-        // This line is representative of the kind of output that mgd currently logs
-        let line = r#"msg":"TcpListener created","v":0,"name":"slog-rs","level":30,"time":"2026-03-09T22:00:02.987824162Z","hostname":"sled01","pid":3605,"unit":"dispatcher","module":"neighbor","component":"bgp","listener":"TcpListener { addr: 127.0.0.1:4676, fd: 10 }"#;
-        let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "A garbage line").unwrap();
-        writeln!(file, "{}", line).unwrap();
-        writeln!(file, "Another garbage line").unwrap();
-        file.flush().unwrap();
-
-        assert_eq!(
-            discover_bgp_dispatcher_port(
-                file.path().display().to_string()
-            )
-            .await
-            .unwrap(),
+            discover_port(file.path().display().to_string()).await.unwrap(),
             EXPECTED_PORT
         );
     }

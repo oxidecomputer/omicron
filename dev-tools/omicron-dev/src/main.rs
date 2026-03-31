@@ -14,8 +14,11 @@ use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
-use std::{fs, net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6}};
-use slog::{o, Drain};
+use slog::{Drain, o};
+use std::{
+    fs,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
+};
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
@@ -283,17 +286,22 @@ impl RunMultipleArgs {
 
         let mut peer_routers = vec![];
 
-        let mut loopback_manager = mg_test::LoopbackIpManager::new("loopback_manager", log.clone());
+        let mut loopback_manager =
+            mg_test::LoopbackIpManager::new("lo0", log.clone());
 
         for n in 0..self.peer_routers {
-
-            let mgd_bgp_addr = SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
+            let mgd_bgp_addr =
+                SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
 
             loopback_manager.add(&[mgd_bgp_addr.ip()]);
 
-            let mgd = omicron_test_utils::dev::maghemite::MgdInstance::start(0, mgd_bgp_addr.into(), None)
-                .await
-                .unwrap();
+            let mgd = omicron_test_utils::dev::maghemite::MgdInstance::start(
+                0,
+                mgd_bgp_addr,
+                None,
+            )
+            .await
+            .unwrap();
 
             println!(
                 "peer router {n}: mgd api:                http://[::1]:{}",
@@ -312,19 +320,23 @@ impl RunMultipleArgs {
                 );
             }
 
-            let api_socket_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgd.port, 0, 0);
+            let api_socket_addr =
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgd.port, 0, 0);
 
             let client = mg_admin_client::Client::new(
                 &format!("http://{api_socket_addr}"),
-                slog::Logger::new(&log, o!(
-                    "component" => "MgdClient",
-                    "peer_router" => n,
-                )),
+                slog::Logger::new(
+                    &log,
+                    o!(
+                        "component" => "MgdClient",
+                        "peer_router" => n,
+                    ),
+                ),
             );
 
             let router = mg_admin_client::types::Router {
-                asn: 65100 + n as u32,
-                id: 65100 + n as u32,
+                asn: 65100 + u32::from(n),
+                id: 65100 + u32::from(n),
                 graceful_shutdown: true,
                 listen: mgd.bgp_dispatcher_addr.to_string(),
             };
@@ -338,6 +350,10 @@ impl RunMultipleArgs {
 
             peer_routers.push(mgd);
         }
+
+        // TODO: bug causes loopbacks to hang around even after tearing down
+        // the topology
+        // loopback_manager.install()?;
 
         for n in 0..self.count {
             config
@@ -358,7 +374,8 @@ impl RunMultipleArgs {
             config.deployment.techport_external_server_port = 0;
 
             println!("\nomicron-dev: setting up all services for rack {n}... ");
-            let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
+            let cptestctx =
+                nexus_test_utils::omicron_dev_setup_with_config::<
                     omicron_nexus::Server,
                 >(&mut config, 1, self.gateway_config.clone())
                 .await
@@ -501,6 +518,8 @@ impl RunMultipleArgs {
                 eprintln!("error cleaning up peer router: {e}")
             }
         }
+
+        // loopback_manager.uninstall();
 
         Ok(())
     }
