@@ -5,7 +5,6 @@ Usage: omicron-dev <COMMAND>
 Commands:
   run-all       Run a full simulated control plane
   run-multiple  Run multiple simulated control planes
-  topology      Create an simulated topolgy from a file
   help          Print this message or the help of the given subcommand(s)
 
 Options:
