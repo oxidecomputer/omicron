@@ -491,7 +491,9 @@ instance.  It's also used by `crutest` for testing.
 
 #
 # RSS-only dependencies.  These are real dependencies that only exist during
-# Rack Setup Service (RSS), not during normal operation or upgrade.
+# RSS, not during normal operation or upgrade.
+#
+# At RSS time, the system is known to be at a single, consistent version.
 #
 [[dependency_filter_rules]]
 ancestor = "omicron-sled-agent"

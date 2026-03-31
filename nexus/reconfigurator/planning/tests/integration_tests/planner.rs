@@ -5377,10 +5377,11 @@ fn test_zone_update_ordering_respects_dependency_dag() {
 
         if consumer.first_activity < producer_done {
             violations.push(format!(
-                "consumer {:?} started updating at iteration {}, \
-                 but producer {:?} was not fully updated until \
+                "for the dependency from consumer {:?} to producer {:?}, \
+                 the consumer started updating at iteration {}, \
+                 but the producer was not fully updated until \
                  iteration {producer_done}",
-                edge.consumer, consumer.first_activity, edge.producer,
+                edge.consumer, edge.producer, consumer.first_activity,
             ));
         }
     }
