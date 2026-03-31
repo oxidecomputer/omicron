@@ -5050,6 +5050,47 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
     PRIMARY KEY (inv_collection_id, zone_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_state_enum AS ENUM (
+    'uninitialized',
+    'offline',
+    'online',
+    'degraded',
+    'maintenance',
+    'disabled',
+    'legacy_run',
+    'unknown'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    svcs_cmd_error TEXT,
+    time_of_status TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    fmri TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    state omicron.public.inv_svc_state_enum NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_error (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    error_message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -8315,7 +8356,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '246.0.0', NULL)
+    (TRUE, NOW(), NOW(), '247.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

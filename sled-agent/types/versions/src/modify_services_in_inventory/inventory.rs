@@ -175,3 +175,39 @@ pub enum SvcsError {
     #[error("zone is not running")]
     NotRunning,
 }
+
+impl From<String> for SvcsError {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "zone is not running" => SvcsError::NotRunning,
+            _ if s.starts_with("failed to start execution of `") => {
+                let rest = &s["failed to start execution of `".len()..];
+                let (command, err) =
+                    rest.split_once("`: ").unwrap_or((rest, ""));
+                SvcsError::ExecutionStart {
+                    command: command.to_string(),
+                    err: err.to_string(),
+                }
+            }
+            _ if s.starts_with("command failure: ") => {
+                SvcsError::CommandFailure(
+                    s["command failure: ".len()..].to_string(),
+                )
+            }
+            _ if s.starts_with("contract error: ") => {
+                let rest = &s["contract error: ".len()..];
+                let (msg, err) = rest.split_once(": ").unwrap_or((rest, ""));
+                SvcsError::ContractFailure {
+                    msg: msg.to_string(),
+                    err: err.to_string(),
+                }
+            }
+            _ if s.starts_with("failed to parse command output: ") => {
+                SvcsError::ParseFailure(
+                    s["failed to parse command output: ".len()..].to_string(),
+                )
+            }
+            _ => SvcsError::CommandFailure(s),
+        }
+    }
+}
