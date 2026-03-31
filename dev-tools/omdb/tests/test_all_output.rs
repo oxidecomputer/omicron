@@ -131,8 +131,19 @@ async fn test_omdb_usage_errors() {
     assert_contents("tests/usage_errors.out", &output);
 }
 
-#[nexus_test(extra_sled_agents = 1)]
-async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+#[tokio::test]
+async fn test_omdb_success_cases() {
+    // Use a custom ControlPlaneBuilder so we can enable background tasks
+    // which might otherwise be disabled.
+    // We want it enabled here so the omdb is realistic.
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_omdb_success_cases")
+            .with_extra_sled_agents(1)
+            .customize_nexus_config(&|config| {
+                config.pkg.background_tasks.sp_ereport_ingester.disable = false;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
     clear_omdb_env();
 
     let cmd_path = path_to_executable(CMD_OMDB);
@@ -443,6 +454,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &ox_url,
         ox_test_producer,
     );
+
+    cptestctx.teardown().await;
 }
 
 /// Verify that we properly deal with cases where:

@@ -8,6 +8,7 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
+use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
@@ -30,7 +31,7 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-use nexus_types::fm;
+
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
@@ -305,8 +306,7 @@ pub struct Nexus {
 
     /// Watch channel containing the currently-loaded fault management sitrep.
     #[allow(dead_code)]
-    sitrep_load_rx:
-        watch::Receiver<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+    sitrep_load_rx: watch::Receiver<Option<CurrentSitrep>>,
 
     /// handle to pull update status data
     update_status: UpdateStatusHandle,
