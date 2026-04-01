@@ -678,10 +678,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "954f63a1b47f8199de44081d394ae50897855a3b"
+source.commit = "8456ce46352a1b5afd6c9a35b40ef2ab6620cc02"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "b305afa1efa5889cc5bbf6ec5b7c9d90b31298ab95c68168edfff797f56cafeb"
+source.sha256 = "d5e57c64ae50e775a90cf8f0c821334106b52ecf02575bf430fa88957ca5c328"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -694,10 +694,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "954f63a1b47f8199de44081d394ae50897855a3b"
+source.commit = "8456ce46352a1b5afd6c9a35b40ef2ab6620cc02"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "e7301cd0d20940596f0d99836b2c57c48072539839aedc59cf44b09020aeb2bf"
+source.sha256 = "a9529b2a653e2ede9fe18a7acc10181b3e7685eb897db73f83d892b07d939435"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -709,7 +709,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "954f63a1b47f8199de44081d394ae50897855a3b"
+source.commit = "8456ce46352a1b5afd6c9a35b40ef2ab6620cc02"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "8802d8cf7e77c9280eab919734bc8fb7449b30e5dc5a9674f5d69a71b9ed40b9"
