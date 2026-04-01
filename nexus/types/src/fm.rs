@@ -19,6 +19,7 @@ use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
@@ -82,7 +83,7 @@ impl Sitrep {
         &self,
     ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
         self.cases.iter().flat_map(|case| {
-            let case_id = case.id;
+            let case_id = *case.id();
             case.alerts_requested.iter().map(move |alert| (case_id, alert))
         })
     }
@@ -162,7 +163,17 @@ pub struct AnalysisInputReport {
     pub parent_inv_id: Option<CollectionUuid>,
     pub inv_id: CollectionUuid,
     pub new_ereport_ids: BTreeSet<EreportId>,
-    pub already_seen_ereport_ids: BTreeSet<EreportId>,
+    /// Cases which were open in the parent sitrep.
+    pub open_cases: BTreeMap<CaseUuid, case::Metadata>,
+    /// Cases which have closed, but which have been copied forwards as they
+    /// contain ereports which have not yet been marked seen.
+    pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClosedCaseReport {
+    pub metadata: case::Metadata,
+    pub unmarked_ereports: BTreeSet<EreportId>,
 }
 
 impl AnalysisInputReport {
@@ -185,7 +196,8 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     parent_inv_id,
                     inv_id,
                     new_ereport_ids,
-                    already_seen_ereport_ids,
+                    open_cases,
+                    closed_cases_copied_forward,
                 },
             indent,
         } = self;
@@ -208,40 +220,83 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "",
             )?;
         }
+
         writeln!(f)?;
-        writeln!(
-            f,
-            "{:indent$}new ereports ({} total):",
-            "",
-            new_ereport_ids.len()
-        )?;
-        for ereport_id in new_ereport_ids {
-            writeln!(f, "{:indent$}- {ereport_id}", "")?;
+
+        if !new_ereport_ids.is_empty() {
+            writeln!(
+                f,
+                "{:indent$}new ereports ({} total):",
+                "",
+                new_ereport_ids.len()
+            )?;
+            for ereport_id in new_ereport_ids {
+                writeln!(f, "{:indent$}- {ereport_id}", "")?;
+            }
+        } else {
+            writeln!(
+                f,
+                "{:indent$}no new ereports since the parent sitrep",
+                "",
+            )?;
         }
-        if !already_seen_ereport_ids.is_empty() {
-            writeln!(f)?;
-            if let Some(parent_id) = parent_sitrep_id {
+
+        let total_cases = open_cases.len() + closed_cases_copied_forward.len();
+        if total_cases > 0 {
+            writeln!(f, "{:indent$}cases ({} total):", "", total_cases)?;
+            let indent = indent + 2;
+
+            if open_cases.is_empty() {
+                writeln!(f, "{:indent$}no open cases", "",)?;
+            } else {
                 writeln!(
                     f,
-                    "{:indent$}ereports already seen in {parent_id} but not \
-                     marked ({} total):",
+                    "{:indent$}open cases ({} total):",
+                    "-",
+                    open_cases.len()
+                )?;
+                for (case_id, metadata) in open_cases {
+                    writeln!(f, "{:indent$}- {case_id}", "")?;
+                    metadata.display_multiline(indent + 2, None).fmt(f)?;
+                }
+            }
+
+            if closed_cases_copied_forward.is_empty() {
+                writeln!(
+                    f,
+                    "{:indent$}no closed cases must be copied forwards",
                     "",
-                    already_seen_ereport_ids.len()
                 )?;
             } else {
                 writeln!(
                     f,
-                    "{:<indent$}this is weird: there's no parent sitrep, but\n\
-                     {:<indent$} {} ereports were (allegedly) seen but not marked",
-                    "/!\\",
-                    "",
-                    already_seen_ereport_ids.len()
+                    "{:indent$}closed cases copied forwards({} total):",
+                    "-",
+                    closed_cases_copied_forward.len()
                 )?;
+                for (
+                    case_id,
+                    ClosedCaseReport { metadata, unmarked_ereports },
+                ) in closed_cases_copied_forward
+                {
+                    writeln!(f, "{:indent$}- {case_id}", "")?;
+                    let indent = indent + 2;
+                    metadata.display_multiline(indent, None).fmt(f)?;
+                    writeln!(
+                        f,
+                        "{:indent$}copied forwards because these ereports \
+                         haven't been marked seen yet:",
+                        ""
+                    )?;
+                    for ereport_id in unmarked_ereports {
+                        writeln!(f, "{:indent$}- {ereport_id}", "")?;
+                    }
+                }
             }
-            for ereport_id in already_seen_ereport_ids {
-                writeln!(f, "{:indent$}- {ereport_id}", "")?;
-            }
+        } else {
+            writeln!(f, "{:indent$}no cases copied forward", "")?;
         }
+
         Ok(())
     }
 }

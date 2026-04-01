@@ -370,13 +370,15 @@ mod tests {
         let case1_id = CaseUuid::new_v4();
         let mut case1 = fm::Case {
             id: case1_id,
-            created_sitrep_id: sitrep1_id,
-            closed_sitrep_id: None,
-            de: fm::DiagnosisEngineKind::PowerShelf,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep1_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "my great case".to_string(),
+            },
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
-            comment: "my great case".to_string(),
         };
         case1
             .alerts_requested
@@ -445,13 +447,15 @@ mod tests {
         let case2_id = CaseUuid::new_v4();
         let mut case2 = fm::Case {
             id: case2_id,
-            created_sitrep_id: sitrep1_id,
-            closed_sitrep_id: None,
-            de: fm::DiagnosisEngineKind::PowerShelf,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep1_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "my other great case".to_string(),
+            },
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
-            comment: "my other great case".to_string(),
         };
         case2
             .alerts_requested
@@ -748,13 +752,15 @@ mod tests {
                 .unwrap();
             fm::Case {
                 id: case1_id,
-                created_sitrep_id: sitrep1_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep1_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "case with two ereports".to_string(),
+                },
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "case with two ereports".to_string(),
             }
         };
 
@@ -953,13 +959,15 @@ mod tests {
                 .unwrap();
             fm::Case {
                 id: CaseUuid::new_v4(),
-                created_sitrep_id: sitrep1_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep1_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "case with ereport 1".to_string(),
+                },
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "case with ereport 1".to_string(),
             }
         };
 
@@ -1059,13 +1067,15 @@ mod tests {
                 .unwrap();
             fm::Case {
                 id: CaseUuid::new_v4(),
-                created_sitrep_id: sitrep1_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep1_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "case with all three ereports".to_string(),
+                },
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "case with all three ereports".to_string(),
             }
         };
 

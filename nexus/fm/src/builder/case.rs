@@ -34,48 +34,12 @@ impl AllCases {
         inputs: &crate::analysis::Input,
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
-        // Copy forward any open cases from the parent sitrep. If a case was
-        // closed in the parent sitrep, skip it, if AND ONLY IF all of its
-        // ereports have been marked as seen when analysis inputs were loaded.
-        let unmarked_seen_ereports = inputs.unmarked_seen_ereports();
-        let cases: IdOrdMap<_> = inputs
-            .parent_sitrep()
+        let cases = inputs
+            .cases()
             .iter()
-            .flat_map(|s| s.cases.iter())
-            .filter_map(|case| {
-                if !case.is_open() {
-                    let unmarked_ereport =
-                        case.ereports.iter().find(|ereport| {
-                            unmarked_seen_ereports
-                                .contains(ereport.ereport_id())
-                        });
-                    if let Some(ereport) = unmarked_ereport {
-                        slog::debug!(
-                            &log,
-                            "closed case must still be copied forwards, as it \
-                             contains an ereport not yet marked as seen";
-                            "case_id" => %case.id,
-                            "ereport_id" => %ereport.ereport_id(),
-                            "case_ereport_id" => %ereport.id,
-                        );
-                    } else {
-                        slog::trace!(
-                            &log,
-                            "closed case need no longer be copied forwards";
-                            "case_id" => %case.id,
-                        );
-                        return None;
-                    }
-                } else {
-                    slog::trace!(
-                        &log,
-                        "open case will be copied forwards";
-                        "case_id" => %case.id,
-                    );
-                }
-
+            .map(|case| {
                 let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
-                Some(CaseBuilder::new(&log, sitrep_id, case.clone(), rng))
+                CaseBuilder::new(&log, sitrep_id, case.clone(), rng)
             })
             .collect();
 
@@ -95,10 +59,12 @@ impl AllCases {
             iddqd::id_ord_map::Entry::Vacant(entry) => {
                 let case = fm::Case {
                     id,
-                    created_sitrep_id: self.sitrep_id,
-                    closed_sitrep_id: None,
-                    de,
-                    comment: String::new(),
+                    metadata: fm::case::Metadata {
+                        created_sitrep_id: self.sitrep_id,
+                        closed_sitrep_id: None,
+                        de,
+                        comment: String::new(),
+                    },
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
@@ -148,8 +114,8 @@ impl CaseBuilder {
     ) -> Self {
         let log = log.new(slog::o!(
             "case_id" => case.id.to_string(),
-            "de" => case.de.to_string(),
-            "created_sitrep_id" => case.created_sitrep_id.to_string(),
+            "de" => case.metadata.de.to_string(),
+            "created_sitrep_id" => case.metadata.created_sitrep_id.to_string(),
         ));
         Self { log, case, sitrep_id, rng }
     }
@@ -183,7 +149,7 @@ impl CaseBuilder {
     }
 
     pub fn close(&mut self) {
-        self.case.closed_sitrep_id = Some(self.sitrep_id);
+        self.case.metadata.closed_sitrep_id = Some(self.sitrep_id);
 
         slog::info!(&self.log, "case closed");
     }
@@ -236,7 +202,7 @@ impl CaseBuilder {
 
     /// Mutably borrows the case's `comment` field (i.e. to append to it).
     pub fn comment_mut(&mut self) -> &mut String {
-        &mut self.case.comment
+        &mut self.case.metadata.comment
     }
 }
 

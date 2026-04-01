@@ -370,12 +370,14 @@ impl DataStore {
                         alert_requests.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
-                        created_sitrep_id: created_sitrep_id.into(),
-                        closed_sitrep_id: closed_sitrep_id.map(Into::into),
-                        de: de.into(),
-                        comment,
-                        ereports,
+                        metadata: fm::case::Metadata {
+                            created_sitrep_id: created_sitrep_id.into(),
+                            closed_sitrep_id: closed_sitrep_id.map(Into::into),
+                            de: de.into(),
+                            comment,
+                        },
                         alerts_requested,
+                        ereports,
                         support_bundles_requested: iddqd::IdOrdMap::new(),
                     }
                 }));
@@ -1555,10 +1557,13 @@ mod tests {
         for case in &that.cases {
             let fm::Case {
                 id,
-                created_sitrep_id,
-                closed_sitrep_id,
-                comment,
-                de,
+                metadata:
+                    fm::case::Metadata {
+                        created_sitrep_id,
+                        closed_sitrep_id,
+                        comment,
+                        de,
+                    },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: _,
@@ -1578,18 +1583,21 @@ mod tests {
             // :(
             assert_eq!(&expected.id, id, "while checking case {case_id}");
             assert_eq!(
-                &expected.created_sitrep_id, created_sitrep_id,
+                &expected.metadata.created_sitrep_id, created_sitrep_id,
                 "while checking case {case_id}"
             );
             assert_eq!(
-                &expected.closed_sitrep_id, closed_sitrep_id,
+                &expected.metadata.closed_sitrep_id, closed_sitrep_id,
                 "while checking case {case_id}"
             );
             assert_eq!(
-                &expected.comment, comment,
+                &expected.metadata.comment, comment,
                 "while checking case {case_id}"
             );
-            assert_eq!(&expected.de, de, "while checking case {case_id}");
+            assert_eq!(
+                &expected.metadata.de, de,
+                "while checking case {case_id}"
+            );
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
@@ -1776,13 +1784,15 @@ mod tests {
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
-                created_sitrep_id: sitrep_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "my cool case".to_string(),
+                },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "my cool case".to_string(),
             }
         };
 
@@ -1809,13 +1819,15 @@ mod tests {
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
-                created_sitrep_id: sitrep_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "break in case of emergency".to_string(),
+                },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "break in case of emergency".to_string(),
             }
         };
 
