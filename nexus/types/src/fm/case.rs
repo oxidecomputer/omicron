@@ -124,7 +124,7 @@ impl Metadata {
                     )?;
                 }
 
-                writeln!(f, "\n{:>indent$}comment: {comment}", "")?;
+                writeln!(f, "{:>indent$}comment: {comment}", "")?;
 
                 Ok(())
             }
