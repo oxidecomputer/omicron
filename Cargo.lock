@@ -9322,6 +9322,7 @@ dependencies = [
  "digest",
  "dof 0.3.0",
  "dof 0.4.0",
+ "dropshot 0.17.0",
  "ecdsa",
  "ed25519-dalek",
  "either",
