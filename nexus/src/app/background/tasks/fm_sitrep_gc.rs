@@ -8,6 +8,7 @@ use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::fm::GcOrphansResult;
 use nexus_types::internal_api::background::SitrepGcStatus as Status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -47,12 +48,16 @@ impl SitrepGc {
         let mut status = Status::default();
 
         match self.datastore.fm_sitrep_gc_orphans(&opctx).await {
-            Ok(result) => {
-                status.orphaned_sitreps_deleted = result.sitreps_deleted;
-                status.sitrep_metadata_batches = result.sitrep_metadata_batches;
-                status.batch_size = result.batch_size;
-                status.child_tables = result
-                    .child_tables
+            Ok(GcOrphansResult {
+                sitreps_deleted,
+                sitrep_metadata_batches,
+                batch_size,
+                child_tables,
+            }) => {
+                status.orphaned_sitreps_deleted = sitreps_deleted;
+                status.sitrep_metadata_batches = sitrep_metadata_batches;
+                status.batch_size = batch_size;
+                status.child_tables = child_tables
                     .into_iter()
                     .map(|(table, stats)| {
                         (

@@ -54,9 +54,19 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Declares the [`SitrepChildTable`] enum and its associated table/column
-/// metadata. To add a new child table to the sitrep GC, just add a line
-/// here — the GC loop, omdb display, and completeness test all adapt
-/// automatically.
+/// metadata. To add a new child table to the sitrep GC, just add a line within
+/// the call to "sitrep_child_tables!" below — the GC loop, omdb display,
+/// and completeness test all adapt automatically.
+///
+/// Syntax:
+/// ```ignore
+/// sitrep_child_tables! {
+///     // The sitrep ID column defaults to "sitrep_id"
+///     MyTable => { table: "fm_my_table" },
+///     // Override the column name if needed:
+///     OtherTable => { table: "fm_other_table", sitrep_id: "sitrep_col" },
+/// }
+/// ```
 macro_rules! sitrep_child_tables {
     ($(
         $(#[$meta:meta])*
@@ -949,8 +959,8 @@ impl DataStore {
     ///
     /// 1. Deletes orphaned `fm_sitrep` metadata rows (not in history,
     ///    stale parent).
-    /// 2. Deletes "deeply orphaned" child rows from each child table —
-    ///    rows whose `sitrep_id` doesn't exist in `fm_sitrep` at all.
+    /// 2. Deletes child rows from each child table that are not referenced
+    ///    by sitreps (their `sitrep_id` doesn't exist in `fm_sitrep`).
     ///    This catches children of sitreps deleted in step 1 (within
     ///    this transaction) AND children leaked by the race in
     ///    <https://github.com/oxidecomputer/omicron/issues/10131>.
@@ -968,6 +978,12 @@ impl DataStore {
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
+        // TODO(sean): This should probably be paginated.
+        //
+        // We need to be careful about separating "delete sitrep" from "delete
+        // sitrep child tables" to avoid having torn reads - but we could delete
+        // a bounded number of sitreps, and all their tables, and repeatedly
+        // issue transactions until no additional orphaned sitreps exist.
         let result = self
             .transaction_retry_wrapper("fm_sitrep_gc_orphans")
             .transaction(&conn, |conn| {
@@ -1051,6 +1067,9 @@ impl DataStore {
     /// Builds a DELETE query that removes orphaned `fm_sitrep` metadata
     /// rows in a single paginated batch (sitreps not in history whose
     /// parent is not current). Returns (rows_deleted, next_marker).
+    ///
+    /// The SQL text of this query is in
+    /// `nexus/db-queries/tests/output/delete_orphaned_sitrep_metadata.sql`.
     fn delete_orphaned_sitrep_metadata_query(
         marker: SitrepUuid,
         batch_size: std::num::NonZeroU32,
@@ -1112,6 +1131,9 @@ impl DataStore {
     /// 2. Deletes rows whose `sitrep_id` has no corresponding `fm_sitrep`
     /// 3. Returns (rows_deleted, next_marker) where next_marker is NULL
     ///    when there are no more pages
+    ///
+    /// The SQL text of this query is in
+    /// `nexus/db-queries/tests/output/deeply_orphaned_batch_query.sql`.
     fn deeply_orphaned_batch_query(
         table: SitrepChildTable,
         marker: SitrepUuid,
@@ -2601,9 +2623,14 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // SitrepChildTableCounts: mirrors BlueprintTableCounts from
-    // deployment.rs to ensure every fm_* child table is covered by
-    // `SitrepChildTable`.
+    // SitrepChildTableCounts: queries each table listed in
+    // `SitrepChildTable::ALL` to count the number of rows matching a
+    // given `sitrep_id`. Used by tests to verify that orphan GC
+    // actually cleaned up the expected rows.
+    //
+    // Mirrors `BlueprintTableCounts` from deployment.rs; the
+    // completeness test below ensures every `fm_*` child table with
+    // a `sitrep_id` column is covered by `SitrepChildTable`.
     // ---------------------------------------------------------------
 
     struct SitrepChildTableCounts {
@@ -2721,10 +2748,13 @@ mod tests {
             if !tables_unchecked.is_empty() {
                 Err(format!(
                     "found fm_* child table(s) not covered by \
-                     SitrepChildTable: {}\n\n\
+                     `SitrepChildTable`: {}\n\n\
                      If you added a new fm_* child table, add a variant \
-                     to SitrepChildTable and update the orphan GC code \
-                     in fm_sitrep_gc_orphans.",
+                     to `SitrepChildTable` and update the orphan GC code \
+                     in `fm_sitrep_gc_orphans`.\n\n\
+                     If your new table should NOT be covered by orphan GC, \
+                     either drop the `fm_` prefix or add it to \
+                     `tables_ignored` in this test.",
                     tables_unchecked.join(", ")
                 ))
             } else {

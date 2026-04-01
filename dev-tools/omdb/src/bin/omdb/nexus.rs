@@ -3481,6 +3481,9 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     // Ensure columns stay aligned even if a child table name is long.
     let width = child_tables
         .keys()
+        // We're using two spaces here to match the
+        // "orphaned {name} rows deleted" format string.
+        // Removing "{name}" leaves a space on either side.
         .map(|name| "orphaned  rows deleted:".len() + name.len() + 1)
         .fold(BASE_WIDTH, |w, l| w.max(l));
 
@@ -3504,6 +3507,11 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
         "  batches:"
     );
+
+    if child_tables.is_empty() {
+        eprintln!("(!)   warning: no child tables reported (likely a bug)");
+    }
+
     for (table_name, stats) in &child_tables {
         println!(
             "    {:<width$}{:>NUM_WIDTH$}",
