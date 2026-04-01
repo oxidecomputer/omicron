@@ -191,8 +191,7 @@ macro_rules! versioned_decode {
     }};
 }
 
-/// Envelope containing a versioned JSON blob (a
-/// [`SystemNetworkingConfig`]).
+/// Envelope containing a versioned JSON blob (a [`SystemNetworkingConfig`]).
 ///
 /// A [`WriteNetworkConfigRequest`] received by sled-agent (typically sent by
 /// Nexus) results in a new [`bootstore::NetworkConfig`] being written to the

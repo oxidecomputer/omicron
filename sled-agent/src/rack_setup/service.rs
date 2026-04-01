@@ -88,7 +88,9 @@ use nexus_lockstep_client::types::InitialTrustQuorumConfig;
 use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
-use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
+use nexus_types::deployment::{
+    Blueprint, BlueprintZoneType, blueprint_zone_type,
+};
 use nexus_types::internal_api::params::ExternalPortDiscovery;
 use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
@@ -118,6 +120,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
+use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -231,6 +234,9 @@ pub enum SetupServiceError {
 
     #[error("Failed to convert setup plan to blueprint: {0:#}")]
     ConvertPlanToBlueprint(anyhow::Error),
+
+    #[error("Failed to construct valid set of service zone NAT entries")]
+    InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
 
     // We used transparent, because `EarlyNetworkSetupError` contains a subset
     // of error variants already in this type
@@ -781,8 +787,10 @@ impl ServiceInner {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handoff_to_nexus(
         &self,
+        blueprint: Blueprint,
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
@@ -791,23 +799,6 @@ impl ServiceInner {
         initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
-
-        // Convert `service_plan` into the initial blueprint for the system.
-        let blueprint = service_plan
-            .to_blueprint(
-                // This is a bit of a hack. We only construct a blueprint after
-                // completing RSS, so we need to know the final generation value
-                // sent to all sleds. Arguably, we should record this in
-                // `service_plan`; however, that doesn't match how we use it:
-                // `service_plan` contains the final set of configs on
-                // constructing, then as we run RSS we send sleds a filtered
-                // down config at earlier generations. We know that the final
-                // config sent to all sleds used `V5_EVERYTHING` (i.e., "don't
-                // filter anything out"), so use that as the generation for all
-                // sled configs in the blueprint, too.
-                DeployStepVersion::V5_EVERYTHING,
-            )
-            .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         info!(
             self.log,
@@ -1320,14 +1311,16 @@ impl ServiceInner {
         // TODO: In future releases, we will get rid of the bootstore entirely,
         // and early_network_config will be replicated by the trust quorum
         // nodes.
-        let system_networking_config = SystemNetworkingConfig {
+        let mut system_networking_config = SystemNetworkingConfig {
             rack_network_config: config.rack_network_config.clone(),
-            // TODO-correctness We need to fill this in based on the
-            // `ServicePlan` we generate.
+            // We can't populate this until we create a `ServicePlan` below.
+            // TODO-correctness could we wait to put this into the bootstore
+            // until after the service plan is created, once we've finished
+            // moving all system networking into scrimlet reconcilers?
             service_zone_nat_entries: None,
         };
-        info!(self.log, "Writing Rack Network Configuration to bootstore");
-        rss_step.update(RssStep::NetworkConfigUpdate);
+        info!(self.log, "Writing initial network configuration to bootstore");
+        rss_step.update(RssStep::InitialNetworkConfigUpdate);
         bootstore
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&system_networking_config)
@@ -1354,6 +1347,48 @@ impl ServiceInner {
         // a service allocation plan.
         let service_plan =
             ServicePlan::create(&self.log, &config, &sled_plan.sleds).await?;
+
+        // Convert `service_plan` into the initial blueprint for the system.
+        let blueprint = service_plan
+            .to_blueprint(
+                // This is a bit of a hack. We only make use of the sled config
+                // generations in the blueprint after completing RSS, so we need
+                // to know the final generation value sent to all sleds.
+                // Arguably, we should record this in `service_plan`; however,
+                // that doesn't match how we use it: `service_plan` contains the
+                // final set of configs on constructing, then as we run RSS we
+                // send sleds a filtered down config at earlier generations. We
+                // know that the final config sent to all sleds used
+                // `V5_EVERYTHING` (i.e., "don't filter anything out"), so use
+                // that as the generation for all sled configs in the blueprint,
+                // too.
+                DeployStepVersion::V5_EVERYTHING,
+            )
+            .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+
+        // Now that we have a service plan (and therefore a blueprint), we can
+        // fill in the service_zone_nat_entries in the bootstore.
+        system_networking_config.service_zone_nat_entries = Some(
+            blueprint
+                .to_service_zone_nat_entries()
+                .map_err(SetupServiceError::InvalidServiceZoneNatEntries)?,
+        );
+        info!(
+            self.log,
+            "Writing final system networking configuration to bootstore",
+        );
+        rss_step.update(RssStep::FinalNetworkConfigUpdate);
+        bootstore
+            .update_network_config(
+                EarlyNetworkConfigEnvelope::from(&system_networking_config)
+                    // TODO-cleanup Nexus hardcodes knowledge that the final
+                    // network config we install in the bootstore stops at
+                    // generation 2. If you're touching this value, or adding
+                    // new generations afterwards, coordinate changes with
+                    // `DataStore::bump_bootstore_generation()`.
+                    .serialize_to_bootstore_with_generation(2),
+            )
+            .await?;
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
@@ -1508,6 +1543,7 @@ impl ServiceInner {
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
         self.handoff_to_nexus(
+            blueprint,
             &config,
             &sled_plan,
             &service_plan,

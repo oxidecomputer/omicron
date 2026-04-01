@@ -6,8 +6,9 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::tasks::networking::{
-        api_to_dpd_port_settings, build_mgd_clients,
+    background::{
+        LoadedTargetBlueprint,
+        tasks::networking::{api_to_dpd_port_settings, build_mgd_clients},
     },
     dpd_clients, switch_zone_address_mappings,
 };
@@ -20,6 +21,7 @@ use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
     NETWORK_KEY, SwitchLinkSpeed,
 };
+use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
@@ -131,11 +133,16 @@ impl Default for AddStaticRouteRequest {
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
     resolver: Resolver,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl SwitchPortSettingsManager {
-    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
-        Self { datastore, resolver }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        resolver: Resolver,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+    ) -> Self {
+        Self { datastore, resolver, rx_blueprint }
     }
 
     async fn switch_ports(
@@ -1301,6 +1308,28 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
+                let service_zone_nat_entries = match self
+                    .rx_blueprint
+                    .borrow_and_update()
+                    .clone()
+                    .map(|bp| bp.blueprint.to_service_zone_nat_entries())
+                {
+                    Some(Ok(entries)) => entries,
+                    Some(Err(err)) => {
+                        error!(
+                            log,
+                            "cannot construct service zone NAT entries \
+                             from blueprint";
+                            InlineErrorChain::new(&err),
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(log, "blueprint not yet loaded - skipping sync");
+                        continue;
+                    }
+                };
+
                 let desired_config = SystemNetworkingConfig {
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: subnet,
@@ -1310,9 +1339,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         bgp,
                         bfd,
                     },
-                    // TODO-correctness We need to fill this in based on the
-                    // current blueprint.
-                    service_zone_nat_entries: None,
+                    service_zone_nat_entries: Some(service_zone_nat_entries),
                 };
 
                 // bootstore_needs_update is a boolean value that determines
