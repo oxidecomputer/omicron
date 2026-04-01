@@ -37,8 +37,7 @@ impl Reconciler for MgdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        let baseurl =
-            format!("http://[{switch_zone_underlay_ip}]:{MGD_PORT}");
+        let baseurl = format!("http://[{switch_zone_underlay_ip}]:{MGD_PORT}");
         let client = Client::new(
             &baseurl,
             parent_log.new(slog::o!("component" => "MgdReconcilerClient")),
