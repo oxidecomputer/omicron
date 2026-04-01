@@ -495,6 +495,11 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let report = output.collection_report.as_ref().expect("Missing report");
     assert_eq!(report.bundle, bundle.id);
     assert!(report.activated_in_db_ok);
+    // This assertion expects 0 ereports in the database. This depends on
+    // the sp_ereport_ingester background task being disabled in the test
+    // config (config.test.toml). If that task runs before bundle collection,
+    // it will ingest ereports from the simulated SPs into the database,
+    // causing this assertion to fail nondeterministically.
     assert_eq!(
         report.ereports,
         Some(SupportBundleEreportStatus {
@@ -619,6 +624,8 @@ async fn test_support_bundle_range_requests(
     let report = output.collection_report.as_ref().expect("Missing report");
     assert_eq!(report.bundle, bundle.id);
     assert!(report.activated_in_db_ok);
+    // See comment above — this depends on sp_ereport_ingester being disabled
+    // in config.test.toml.
     assert_eq!(
         report.ereports,
         Some(SupportBundleEreportStatus {

@@ -210,18 +210,8 @@ impl DataStore {
         // JOINed query *will* potentially load the same ereport multiple times
         // in that case, but this is still probably much more efficient than
         // issuing a bunch of smaller queries to load ereports individually.
+        let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
         let mut case_ereports = {
-            // TODO(eliza): as a potential optimization, since ereport
-            // records are immutable, we might consider hanging onto this
-            // map of all ereports in the `Sitrep` structure. Then, when we
-            // load the next sitrep, we could first check if the ereports in
-            // that sitrep are contained in the map before loading them
-            // again. That would require changing the rest of this code to
-            // not `JOIN` with the ereports table here, and instead populate
-            // a list of additional ereports we need to load, and issue a
-            // separate query for that. But, it's worth considering maybe if
-            // this becomes a bottleneck...
-            let mut ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
             let mut map = HashMap::<CaseUuid, iddqd::IdOrdMap<_>>::new();
 
             let mut paginator =
@@ -405,7 +395,7 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        Ok(Sitrep { metadata, cases })
+        Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
     }
 
     async fn fm_sitrep_cases_list_on_conn(
@@ -1244,6 +1234,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
 
         datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
@@ -1293,6 +1284,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1307,6 +1299,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -1348,6 +1341,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1363,6 +1357,7 @@ mod tests {
                 parent_sitrep_id: Some(nonexistent_id),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, sitrep2).await;
@@ -1398,6 +1393,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1412,6 +1408,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.unwrap();
 
@@ -1427,6 +1424,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         let result = datastore.fm_sitrep_insert(&opctx, sitrep3.clone()).await;
 
@@ -1468,6 +1466,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone())
@@ -1509,6 +1508,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.metadata.id),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone())
@@ -1680,6 +1680,7 @@ mod tests {
                 parent_sitrep_id,
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         match datastore.fm_sitrep_insert(&opctx, sitrep).await {
             Ok(_) => {
@@ -1749,7 +1750,7 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport { data: ereport1, reporter }),
+                    ereport: Arc::new(fm::Ereport::new(ereport1, reporter)),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 1".to_string(),
                 })
@@ -1790,7 +1791,7 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport { data: ereport2, reporter }),
+                    ereport: Arc::new(fm::Ereport::new(ereport2, reporter)),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 2".to_string(),
                 })
@@ -1821,6 +1822,11 @@ mod tests {
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
+        let mut ereports_by_id = iddqd::IdOrdMap::new();
+        for case in cases.iter() {
+            ereports_by_id
+                .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
+        }
         fm::Sitrep {
             metadata: fm::SitrepMetadata {
                 id: sitrep_id,
@@ -1832,6 +1838,7 @@ mod tests {
                 parent_sitrep_id: None,
             },
             cases,
+            ereports_by_id,
         }
     }
 
@@ -1893,6 +1900,7 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                     },
                     cases: Default::default(),
+                    ereports_by_id: Default::default(),
                 },
             )
             .await
@@ -2048,6 +2056,7 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                     },
                     cases: Default::default(),
+                    ereports_by_id: Default::default(),
                 },
             )
             .await

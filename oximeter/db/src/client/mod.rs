@@ -1338,10 +1338,15 @@ impl Client {
                 "n_timeseries" => chunk.len(),
             );
             for table in tables.iter() {
+                // NOTE: The settings on this query make it fully synchronous
+                // across the entire cluster. That is, wait for all deletions on
+                // every node to complete. This is slow, but we don't run this
+                // out of tests right now.
                 let sql = format!(
                     "ALTER TABLE {}.{} \
                     {} \
-                    DELETE WHERE timeseries_name in ({})",
+                    DELETE WHERE timeseries_name IN ({}) \
+                    SETTINGS mutations_sync=2",
                     crate::DATABASE_NAME,
                     table,
                     maybe_on_cluster,

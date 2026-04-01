@@ -1355,10 +1355,18 @@ impl ServiceInner {
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
+        //
+        // lookup_uplinked_switch_zone_underlay_addrs() is shared with
+        // sled-agent, which has the rack network config in a watch channel that
+        // changes as Nexus pushes updates in via the bootstore. We don't have
+        // that, but can stuff the (unchanging) config into a watch channel to
+        // fit this API.
+        let (_rack_network_config_tx, rack_network_config_rx) =
+            watch::channel(config.rack_network_config.clone());
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_uplinked_switch_zone_underlay_addrs(
                 &resolver,
-                &config.rack_network_config,
+                &rack_network_config_rx,
                 // We willing to wait forever to find all the switches that have
                 // configured uplinks; if we attempt to proceed without doing
                 // so, we'll fail handing off to Nexus later. (Ideally we could

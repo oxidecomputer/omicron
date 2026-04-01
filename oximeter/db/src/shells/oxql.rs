@@ -4,7 +4,7 @@
 
 //! OxQL shell implementation.
 
-// Copyright 2024 Oxide Computer
+// Copyright 2026 Oxide Computer
 
 use super::{list_timeseries, prepare_columns};
 use crate::{Client, OxqlResult, make_client, oxql::query::QueryAuthzScope};
@@ -18,6 +18,36 @@ use reedline::Signal;
 use slog::Logger;
 use std::net::IpAddr;
 
+/// Ouptut formats for printing the results of an OxQL query.
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// Human-readable formatted output, the default.
+    #[default]
+    HumanReadable,
+    /// Simple human-readable formatted output.
+    ///
+    /// This is the same format as `human-readable`, but without non-printable
+    /// style characters like bold or underline, or enclosing data points in
+    /// square brackets.
+    Simple,
+    /// Compact JSON format.
+    Json,
+    /// Prettified JSON format.
+    JsonPretty,
+}
+
+impl std::fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            OutputFormat::HumanReadable => "human-readable",
+            OutputFormat::Simple => "simple",
+            OutputFormat::Json => "json",
+            OutputFormat::JsonPretty => "json-pretty",
+        };
+        s.fmt(f)
+    }
+}
+
 /// Options for the OxQL shell.
 #[derive(Clone, Debug, Default, Args)]
 pub struct ShellOptions {
@@ -27,6 +57,9 @@ pub struct ShellOptions {
     /// Print the total elapsed query duration.
     #[clap(long = "elapsed")]
     pub print_elapsed: bool,
+    /// Query result output format.
+    #[clap(long, short = 'f', default_value_t = Default::default())]
+    pub output_format: OutputFormat,
 }
 
 /// Run/execute the OxQL shell.
@@ -128,7 +161,10 @@ pub async fn shell(
                                 .await
                             {
                                 Ok(result) => {
-                                    print_tables(&result.tables);
+                                    print_tables(
+                                        &result.tables,
+                                        opts.output_format,
+                                    );
                                     println!();
                                     print_query_summary(
                                         &result,
@@ -170,7 +206,7 @@ pub async fn exec_query(
         )
         .await?;
 
-    print_tables(&result.tables);
+    print_tables(&result.tables, opts.output_format);
     println!();
     print_query_summary(&result, opts.print_elapsed, opts.print_summaries);
 
@@ -357,7 +393,26 @@ fn print_query_summary(
     }
 }
 
-fn print_tables(tables: &[Table]) {
+fn print_tables(tables: &[Table], output_format: OutputFormat) {
+    match output_format {
+        OutputFormat::HumanReadable => print_human_readable_tables(tables),
+        OutputFormat::Simple => print_simple_tables(tables),
+        OutputFormat::Json => match serde_json::to_string(tables) {
+            Ok(s) => println!("{s}"),
+            Err(e) => eprintln!("failed to print tables to JSON: {e}"),
+        },
+        OutputFormat::JsonPretty => {
+            match serde_json::to_string_pretty(tables) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("failed to print tables to pretty JSON: {e}")
+                }
+            }
+        }
+    }
+}
+
+fn print_human_readable_tables(tables: &[Table]) {
     for table in tables.iter() {
         println!();
         println!("{}", table.name().underlined().bold());
@@ -370,7 +425,26 @@ fn print_tables(tables: &[Table]) {
                 println!(" {}: {}", name.as_str().bold(), value);
             }
             for point in timeseries.points.iter_points() {
-                println!("   {point}");
+                println!("   {}", point.to_string_pretty());
+            }
+        }
+    }
+}
+
+fn print_simple_tables(tables: &[Table]) {
+    for table in tables.iter() {
+        println!();
+        println!("{}", table.name());
+        for timeseries in table.iter() {
+            if timeseries.points.is_empty() {
+                continue;
+            }
+            println!();
+            for (name, value) in timeseries.fields.iter() {
+                println!(" {}: {}", name.as_str(), value);
+            }
+            for point in timeseries.points.iter_points() {
+                println!("   {}", point.to_string_simple());
             }
         }
     }

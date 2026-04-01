@@ -2,8 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashMap;
+
+use omicron_common::disk::DiskIdentity;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 
 cfg_if::cfg_if! {
@@ -20,23 +24,6 @@ pub mod cleanup;
 pub mod disk;
 pub use disk::*;
 pub mod underlay;
-
-/// Provides information from the underlying hardware about updates
-/// which may require action on behalf of the Sled Agent.
-///
-/// These updates should generally be "non-opinionated" - the higher
-/// layers of the sled agent can make the call to ignore these updates
-/// or not.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub enum HardwareUpdate {
-    TofinoDeviceChange,
-    TofinoAvailable,
-    TofinoUnavailable,
-    DiskAdded(UnparsedDisk),
-    DiskRemoved(UnparsedDisk),
-    DiskUpdated(UnparsedDisk),
-}
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
@@ -295,5 +282,103 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::SledCpuFamily {
         //
         // Other families are, of course, unknown.
         _ => SledCpuFamily::Unknown,
+    }
+}
+
+/// A snapshot of information about the underlying Tofino device.
+///
+/// This snapshot tells us whether there is a tofino visible to Illumos and
+/// accessible to us in userspace.  We would expect both to be true or both to
+/// be false, except transiently (e.g., during a tofino reset).
+///
+/// Note: this doesn't specifically tell us whether there is a sidecar connected
+/// to the system, but it tells us if there is a sidecar we can use.  The
+/// distinction largely comes down to whether the driver has successfully
+/// recognized the device and initialized itself.  The three-way relationship
+/// between PCI hotplug, device driver management, and zones is fragile enough
+/// that we can get stuck in a state that requires a gimlet reboot to fix.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct TofinoSnapshot {
+    // Is there a Tofino ASIC visible in the device tree
+    exists: bool,
+    // Are we able to access the ASIC through the device driver
+    available: bool,
+}
+
+// Describes a view of the Tofino switch.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // only instantiated on illumos
+enum TofinoView {
+    // The view of the Tofino switch exactly matches the snapshot of hardware.
+    Real(TofinoSnapshot),
+    // The Tofino switch has been "stubbed out", and the underlying hardware is
+    // being ignored.
+    Stub { active: bool },
+}
+
+// A cached copy of "our latest view of what hardware exists".
+//
+// This struct can be expanded arbitrarily, as it's useful for the Sled Agent
+// to perceive hardware.
+//
+// Q: Why bother caching this information at all? Why not rely on devinfo for
+//    all queries?
+//
+// A: Keeping an in-memory representation allows us to immediately answer
+//    questions about the hardware without needing to poll devinfo on demand. We
+//    also keep a `HardwareView` in a watch channel, allowing consumers to
+//    cheaply watch for any changes to the in-memory view.
+#[derive(Debug, Clone)]
+pub struct HardwareView {
+    tofino: TofinoView,
+    disks: HashMap<DiskIdentity, UnparsedDisk>,
+    baseboard: Option<Baseboard>,
+    online_processor_count: u32,
+    usable_physical_pages: u64,
+    usable_physical_ram_bytes: u64,
+    cpu_family: sled_hardware_types::SledCpuFamily,
+}
+
+impl HardwareView {
+    pub fn baseboard(&self) -> Baseboard {
+        self.baseboard.as_ref().cloned().unwrap_or_else(|| Baseboard::unknown())
+    }
+
+    pub fn cpu_family(&self) -> sled_hardware_types::SledCpuFamily {
+        self.cpu_family
+    }
+
+    pub fn online_processor_count(&self) -> u32 {
+        self.online_processor_count
+    }
+
+    pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
+        self.disks.clone()
+    }
+
+    pub fn into_disks(self) -> HashMap<DiskIdentity, UnparsedDisk> {
+        self.disks
+    }
+
+    pub fn usable_physical_pages(&self) -> u64 {
+        self.usable_physical_pages
+    }
+
+    pub fn usable_physical_ram_bytes(&self) -> u64 {
+        self.usable_physical_ram_bytes
+    }
+
+    pub fn is_scrimlet(&self) -> bool {
+        match &self.tofino {
+            TofinoView::Real(TofinoSnapshot { exists, .. }) => *exists,
+            TofinoView::Stub { active } => *active,
+        }
+    }
+
+    pub fn is_scrimlet_asic_available(&self) -> bool {
+        match &self.tofino {
+            TofinoView::Real(TofinoSnapshot { available, .. }) => *available,
+            TofinoView::Stub { active } => *active,
+        }
     }
 }

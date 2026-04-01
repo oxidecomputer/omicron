@@ -1,2 +1,0 @@
-ALTER INDEX IF EXISTS lookup_webhook_event_globs_by_schema_version
-RENAME TO lookup_alert_globs_by_schema_version

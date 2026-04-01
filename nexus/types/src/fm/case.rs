@@ -100,7 +100,7 @@ pub struct SupportBundleRequest {
     /// The sitrep in which this support bundle was requested.
     pub requested_sitrep_id: SitrepUuid,
     /// Which data to include in the support bundle. Use
-    /// [`BundleDataSelection::default()`] to request all default data.
+    /// [`BundleDataSelection::all()`] to request all data.
     pub data_selection: BundleDataSelection,
 }
 
@@ -362,6 +362,7 @@ mod tests {
                     sp_type: SpType::Power,
                     slot: 0,
                 },
+                marked_seen_in: Some(created_sitrep_id),
             }),
             assigned_sitrep_id: created_sitrep_id,
             comment: "PSU removed".to_string(),
@@ -387,6 +388,7 @@ mod tests {
                     sp_type: SpType::Power,
                     slot: 0,
                 },
+                marked_seen_in: None,
             }),
             assigned_sitrep_id: closed_sitrep_id,
             comment: "PSU inserted, closing this case".to_string(),
@@ -429,7 +431,7 @@ mod tests {
             .insert_unique(SupportBundleRequest {
                 id: bundle2_id,
                 requested_sitrep_id: closed_sitrep_id,
-                data_selection: BundleDataSelection::default(),
+                data_selection: BundleDataSelection::all(),
             })
             .unwrap();
 

@@ -2872,6 +2872,8 @@ table! {
         sled_id -> Nullable<Uuid>,
         slot_type -> crate::enums::SpTypeEnum,
         slot -> Nullable<Int4>,
+
+        marked_seen_in -> Nullable<Uuid>,
     }
 }
 

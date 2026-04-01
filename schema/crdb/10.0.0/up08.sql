@@ -1,1 +1,0 @@
-ALTER TYPE omicron.public.service_kind ADD VALUE 'clickhouse_keeper' AFTER 'clickhouse';

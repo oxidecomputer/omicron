@@ -110,6 +110,7 @@ use super::tasks::external_endpoints;
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
+use super::tasks::fm_sitrep_load::CurrentSitrep;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
@@ -154,7 +155,7 @@ use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::fm;
+
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
@@ -1281,8 +1282,7 @@ pub struct BackgroundTasksData {
     /// handle for controlling Nexus quiesce
     pub nexus_quiesce: NexusQuiesceHandle,
     /// Channel for exposing the latest loaded fault-management sitrep.
-    pub sitrep_load_tx:
-        watch::Sender<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+    pub sitrep_load_tx: watch::Sender<Option<CurrentSitrep>>,
     /// Console session absolute timeout, from
     /// `pkg.console.session_absolute_timeout_minutes`.
     pub console_session_absolute_timeout: chrono::TimeDelta,

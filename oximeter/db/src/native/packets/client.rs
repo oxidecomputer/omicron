@@ -154,7 +154,46 @@ impl QueryResult {
             query: self.query.clone(),
             elapsed: self.progress.query_time,
             io_summary: self.progress.into(),
+            profile_summary: self.profile_summary(),
         }
+    }
+
+    /// Aggregate ClickHouse profile events by name.
+    ///
+    /// By default, ClickHouse includes a block of ProfileEvents with each
+    /// query when using the native protocol:
+    ///
+    /// ```text
+    /// host_name                      current_time         thread_id  type       name                                 value
+    /// ────────────────────────────── ──────────────────── ────────── ───────── ──────────────────────────────── ──────────
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment ReadCompressedBytes               124134764
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment DiskReadElapsedMicroseconds          211350
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment SelectedRows                       16941579
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment UserTimeMicroseconds                 339959
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment SystemTimeMicroseconds              2169535
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 gauge     MemoryTrackerUsage                 40823063
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 gauge     MemoryTrackerPeakUsage             40823063
+    /// ...
+    /// ```
+    ///
+    /// If profile events are available, sum their values by event name to
+    /// attach to the query summary.
+    fn profile_summary(&self) -> BTreeMap<String, i64> {
+        let mut summary = BTreeMap::new();
+        if let Some(block) = self.profile_events.as_ref() {
+            let names = block
+                .column_values("name")
+                .ok()
+                .and_then(|v| v.as_string().ok());
+            let values =
+                block.column_values("value").ok().and_then(|v| v.as_i64().ok());
+            if let (Some(names), Some(values)) = (names, values) {
+                for (name, &value) in names.iter().zip(values.iter()) {
+                    *summary.entry(name.clone()).or_insert(0) += value;
+                }
+            }
+        }
+        summary
     }
 }
 

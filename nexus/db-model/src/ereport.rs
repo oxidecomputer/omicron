@@ -16,7 +16,9 @@ use diesel::sql_types;
 use nexus_db_schema::schema::ereport;
 use nexus_types::fm::ereport::{self as types, Ena, EreportId};
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
+use omicron_uuid_kinds::{
+    EreporterRestartKind, OmicronZoneKind, SitrepKind, SledKind,
+};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -97,6 +99,25 @@ pub struct Ereport {
 
     #[diesel(embed)]
     pub reporter: Reporter,
+
+    /// The sitrep ID of the sitrep which was being executed by `fm_rendezvous`
+    /// when this ereport was marked as "seen".
+    ///
+    /// If this is `Some`, the ereport has *definitely* been seen by at least
+    /// one committed sitrep at some point in time. If it is None`, the
+    /// ereport may or may not have been included in a sitrep, and you will
+    /// have to actually check the sitrep to find out.
+    ///
+    /// When this is `Some`, the value is the ID of the sitrep which the
+    /// `fm_rendezvous` task was executing when this ereport was marked as seen.
+    /// because execution may lag arbitrarily behind the generation of new
+    /// sitreps, this does *not* indicate that this was the *first* sitrep in
+    /// which this ereport was seen (which is why this is called "marked seen
+    /// in" rather than "first seen in" or similar) --- in general, this field
+    /// should basically just be treated as a `bool` and the actual value of the
+    /// sitrep ID is included only to provide *some* record for human-readable
+    /// debugging purposes.
+    pub marked_seen_in: Option<DbTypedUuid<SitrepKind>>,
 }
 
 #[derive(Copy, Clone, Debug, Insertable, Queryable, Selectable)]
@@ -175,13 +196,19 @@ impl Ereport {
             class,
             report,
             reporter: reporter.into(),
+            marked_seen_in: None,
         }
     }
 }
 
 impl From<types::Ereport> for Ereport {
-    fn from(types::Ereport { data, reporter }: types::Ereport) -> Self {
-        Self::new(data, reporter)
+    fn from(
+        types::Ereport { data, reporter, marked_seen_in }: types::Ereport,
+    ) -> Self {
+        Self {
+            marked_seen_in: marked_seen_in.map(Into::into),
+            ..Self::new(data, reporter)
+        }
     }
 }
 
@@ -197,6 +224,7 @@ impl TryFrom<Ereport> for types::Ereport {
             class,
             report,
             reporter,
+            marked_seen_in,
             ..
         } = ereport;
         let reporter = reporter.try_into().map_err(|e: Error| {
@@ -215,6 +243,7 @@ impl TryFrom<Ereport> for types::Ereport {
                 report,
             },
             reporter,
+            marked_seen_in: marked_seen_in.map(Into::into),
         })
     }
 }

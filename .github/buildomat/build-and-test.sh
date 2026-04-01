@@ -178,6 +178,13 @@ fi
 banner doctest
 ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
 
+# Verify that old migrations have been removed.
+#
+# We do this after the main build, so the dependencies of "cargo xtask schema"
+# have already been built, which makes this cheap(er).
+banner "check schema migration cleanup"
+ptime -m cargo xtask schema old-migrations
+
 # Build the live-tests.  This is only supported on illumos.
 # We also can't actually run them here.  See the README for more details.
 if [[ $target_os == "illumos" ]]; then

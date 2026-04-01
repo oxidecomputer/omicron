@@ -34,7 +34,7 @@ Maghemite DDM Admin (client: ddm-admin-client)
 
 DNS Server (client: dns-service-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 Dendrite DPD (client: dpd-client)
     consumed by: ddmd (maghemite/ddmd) via 2 paths

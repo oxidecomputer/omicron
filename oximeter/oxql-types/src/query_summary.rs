@@ -8,6 +8,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -46,4 +47,6 @@ pub struct QuerySummary {
     pub elapsed: Duration,
     /// Summary of the data read and written.
     pub io_summary: IoSummary,
+    /// Aggregated profile events from the query.
+    pub profile_summary: BTreeMap<String, i64>,
 }

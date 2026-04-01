@@ -4,7 +4,9 @@
 
 //! [`DataStore`] methods on Database Metadata.
 
-use super::{DataStore, DbConnection, IdentityCheckPolicy};
+use super::{
+    DataStore, DataStoreConnection, DbConnection, IdentityCheckPolicy,
+};
 use crate::authz;
 use crate::context::OpContext;
 
@@ -517,8 +519,12 @@ impl DataStore {
         }
 
         let desired_version = validated_action.desired_version().clone();
+        let conn = self
+            .pool_connection_unauthorized()
+            .await
+            .map_err(|e| BackoffError::transient(e.into()))?;
         let (found_version, found_target_version) = self
-            .database_schema_version()
+            .database_schema_version_on_conn(&conn)
             .await
             .context("Cannot read database schema version")
             .map_err(BackoffError::transient)?;
@@ -645,6 +651,7 @@ impl DataStore {
                 let log = log.new(o!("target_step.version" => target_step.version.to_string()));
 
                 self.apply_step_version_update(
+                    &conn,
                     &log,
                     &step,
                     &target_step,
@@ -691,10 +698,14 @@ impl DataStore {
                     "Missing final step version"
                 ))
             })?;
-            self.finalize_schema_update(&current_version, &last_step_version)
-                .await
-                .context("Failed to finalize schema update")
-                .map_err(BackoffError::transient)?;
+            self.finalize_schema_update(
+                &conn,
+                &current_version,
+                &last_step_version,
+            )
+            .await
+            .context("Failed to finalize schema update")
+            .map_err(BackoffError::transient)?;
 
             info!(
                 log,
@@ -717,6 +728,7 @@ impl DataStore {
     // `db_metadata.target_version`.
     async fn apply_step_version_update(
         &self,
+        conn: &DataStoreConnection,
         log: &Logger,
         step: &SchemaUpgradeStep,
         target_step: &StepSemverVersion,
@@ -738,7 +750,7 @@ impl DataStore {
         //
         // Sets the following:
         // - db_metadata.target_version = new version
-        self.prepare_schema_update(&current_version, &target_step)
+        self.prepare_schema_update(conn, &current_version, &target_step)
             .await
             .context("Failed to prepare schema change")?;
 
@@ -748,15 +760,20 @@ impl DataStore {
         );
 
         // Perform the schema change.
-        self.apply_schema_update(&current_version, &target_step.version, step)
-            .await
-            .with_context(|| {
-                format!(
-                    "update to {}, applying step {:?}",
-                    target_step.version,
-                    step.label()
-                )
-            })?;
+        self.apply_schema_update(
+            conn,
+            &current_version,
+            &target_step.version,
+            step,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "update to {}, applying step {:?}",
+                target_step.version,
+                step.label()
+            )
+        })?;
 
         info!(
             log,
@@ -771,13 +788,15 @@ impl DataStore {
         // back. We run a verification query in a **separate transaction**
         // to confirm the change actually landed.
         if step.verification_sql().is_some() {
-            self.verify_schema_change(log, step).await.with_context(|| {
-                format!(
-                    "update to {}, verifying step {:?}",
-                    target_step.version,
-                    step.label()
-                )
-            })?;
+            self.verify_schema_change(conn, log, step).await.with_context(
+                || {
+                    format!(
+                        "update to {}, verifying step {:?}",
+                        target_step.version,
+                        step.label()
+                    )
+                },
+            )?;
         }
 
         Ok(())
@@ -796,6 +815,7 @@ impl DataStore {
     /// startup retry loop will re-attempt the entire migration.
     async fn verify_schema_change(
         &self,
+        conn: &DataStoreConnection,
         log: &Logger,
         step: &SchemaUpgradeStep,
     ) -> Result<(), anyhow::Error> {
@@ -807,10 +827,6 @@ impl DataStore {
             "Verifying schema change";
             "step" => step.label(),
         );
-        let conn = self
-            .pool_connection_unauthorized()
-            .await
-            .context("verification: failed to get connection")?;
         conn.batch_execute_async(verify_sql).await.with_context(|| {
             format!("schema change verification failed for {:?}", step.label())
         })?;
@@ -1184,12 +1200,20 @@ impl DataStore {
     pub async fn database_schema_version(
         &self,
     ) -> Result<(Version, Option<Version>), Error> {
+        let conn = self.pool_connection_unauthorized().await?;
+        self.database_schema_version_on_conn(&conn).await
+    }
+
+    async fn database_schema_version_on_conn(
+        &self,
+        conn: &DataStoreConnection,
+    ) -> Result<(Version, Option<Version>), Error> {
         use nexus_db_schema::schema::db_metadata::dsl;
 
         let (version, target): (String, Option<String>) = dsl::db_metadata
             .filter(dsl::singleton.eq(true))
             .select((dsl::version, dsl::target_version))
-            .get_result_async(&*self.pool_connection_unauthorized().await?)
+            .get_result_async(&**conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -1222,6 +1246,7 @@ impl DataStore {
     // make progress.
     async fn prepare_schema_update(
         &self,
+        conn: &DataStoreConnection,
         from_version: &Version,
         target_step: &StepSemverVersion,
     ) -> Result<(), Error> {
@@ -1248,7 +1273,7 @@ impl DataStore {
             dsl::time_modified.eq(Utc::now()),
             dsl::target_version.eq(Some(target_step.version.to_string())),
         ))
-        .execute_async(&*self.pool_connection_unauthorized().await?)
+        .execute_async(&**conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -1275,11 +1300,11 @@ impl DataStore {
     // `nexus/db-model/src/schema_versions.rs`.
     async fn apply_schema_update(
         &self,
+        conn: &DataStoreConnection,
         current: &Version,
         target: &Version,
         step: &SchemaUpgradeStep,
     ) -> Result<(), Error> {
-        let conn = self.pool_connection_unauthorized().await?;
         let sql = step.sql();
         let validate_query = version_validation_query(current, target);
 
@@ -1366,6 +1391,7 @@ impl DataStore {
     // - last_step: What we expect "target_version" must be to proceed.
     async fn finalize_schema_update(
         &self,
+        conn: &DataStoreConnection,
         from_version: &Version,
         last_step: &StepSemverVersion,
     ) -> Result<(), Error> {
@@ -1383,7 +1409,7 @@ impl DataStore {
             dsl::version.eq(to_version.to_string()),
             dsl::target_version.eq(None as Option<String>),
         ))
-        .execute_async(&*self.pool_connection_unauthorized().await?)
+        .execute_async(&**conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 

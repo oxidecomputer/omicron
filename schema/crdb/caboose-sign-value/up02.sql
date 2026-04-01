@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS omicron.public.sw_caboose@caboose_properties;

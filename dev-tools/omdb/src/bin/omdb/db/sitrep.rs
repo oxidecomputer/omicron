@@ -238,7 +238,7 @@ async fn cmd_db_sitrep_show(
         }
     };
 
-    let fm::Sitrep { metadata, cases } = sitrep;
+    let fm::Sitrep { metadata, cases, ereports_by_id } = sitrep;
     let fm::SitrepMetadata {
         id,
         creator_id,
@@ -259,6 +259,7 @@ async fn cmd_db_sitrep_show(
     const INV_COLLECTION_ID: &'static str = "inventory collection ID";
     const INV_STARTED_AT: &'static str = "  started at";
     const INV_FINISHED_AT: &'static str = "  finished at";
+    const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -272,6 +273,7 @@ async fn cmd_db_sitrep_show(
         INV_COLLECTION_ID,
         INV_STARTED_AT,
         INV_FINISHED_AT,
+        TOTAL_EREPORTS,
     ]);
 
     println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
@@ -344,6 +346,9 @@ async fn cmd_db_sitrep_show(
             )
         }
     }
+    println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
+    // TODO(eliza): perhaps display a table summarizing those ereports? possibly
+    // behind a verbose flag?
 
     if !cases.is_empty() {
         println!("\n{:-<80}\n", "== CASES");

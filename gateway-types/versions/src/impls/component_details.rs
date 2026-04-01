@@ -15,7 +15,7 @@ use crate::latest::component_details::{
 impl From<UnsupportedComponentDetails> for HttpError {
     fn from(value: UnsupportedComponentDetails) -> Self {
         HttpError::for_bad_request(
-            None,
+            Some("UnsupportedComponentDetails".to_string()),
             format!(
                 "requested component details are not yet supported: {value}"
             ),

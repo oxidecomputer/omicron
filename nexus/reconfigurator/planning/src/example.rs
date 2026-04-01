@@ -1289,6 +1289,7 @@ mod tests {
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
     use strum::IntoEnumIterator;
+    use transient_dns_server::TransientDnsServer;
 
     use super::*;
 
@@ -1651,7 +1652,7 @@ mod tests {
         };
 
         // Initialize a DNS server.
-        let dns = dns_server::TransientServer::new(&logctx.log)
+        let dns = TransientDnsServer::new(&logctx.log)
             .await
             .expect("created DNS server");
         dns.initialize_with_config(&logctx.log, &params)

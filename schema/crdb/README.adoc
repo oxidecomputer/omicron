@@ -120,16 +120,51 @@ There are automated tests to validate many of these steps:
   must be sequential major numbers with minor and micro both being `0`.  (This
   catches various mismerge errors: accidentally duplicating a version, putting
   versions in the wrong order, etc.)
-* The combination of all `up*.sql` files results in the same schema as
+* The combination of the most recent `up*.sql` files results in the same schema as
   `dbinit.sql`.  (This catches forgetting to update dbinit.sql, forgetting to
   implement a schema update altogether, or a mismatch between dbinit.sql and
   the update.)
-* All `up*.sql` files can be applied twice without error.  (This catches
+* The most recent `up*.sql` files can be applied twice without error.  (This catches
   non-idempotent update steps.)
 * All `.verify.sql` files match the expected auto-generated output for their
   corresponding `up*.sql` files.  (This catches missing or stale verification
   files.  Run `EXPECTORATE=overwrite cargo nextest run -p nexus-db-model 'test_migration_verification_files'`
   to regenerate them.)
+
+We currently support schema migrations from one release of Omicron to the next.
+Rather than replaying every historical migration in tests, we start from a
+**baseline schema** (`schema/crdb/dbinit-base.sql`) that captures the database
+state at a prior release. Tests then only apply migrations from the baseline
+forward to the current version.
+
+Three things must stay in sync:
+
+* `schema/crdb/dbinit-base.sql` — the baseline schema SQL
+* `EARLIEST_SUPPORTED_VERSION` in `nexus/db-model/src/schema_versions.rs`
+* `KNOWN_VERSIONS` — should only contain versions >= the baseline
+
+==== Updating the baseline after a release
+
+After each Omicron release, update the baseline to match the previous release.
+The "baseline" will become the new "earliest supported CockroachDB schema version",
+so it will limit the scope of backwards compatibility.
+
+. Generate the new base file from the release tag
+  (e.g., `cargo xtask schema generate-base rel/v15/rc1`).
+. Run `cargo xtask schema old-migrations` to see which
+  `KNOWN_VERSIONS` entries and migration directories are now stale.
+. Remove the listed old entries from `KNOWN_VERSIONS` in
+  `nexus/db-model/src/schema_versions.rs` and update `EARLIEST_SUPPORTED_VERSION`
+  to match the schema version in the new `dbinit-base.sql`.
+. Run `cargo xtask schema old-migrations --remove` to delete the orphaned
+  migration directories. **Commit any pending schema changes first** — this
+  command deletes directories and is not easily reversible.
+. Run tests to verify everything is consistent:
+  `cargo nextest run -p omicron-nexus 'integration_tests::schema'`
+
+NOTE: `cargo xtask schema old-migrations` runs in CI and will fail if orphaned
+migration directories exist. This ensures old migrations are cleaned up before
+merging.
 
 **If you've finished all this and another PR lands on "main" that chose the
 same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
@@ -171,9 +206,10 @@ add the `NOT NULL` constraint.
 
 For the time being, if you can write the data migration in SQL (e.g., using a
 SQL `UPDATE`), then you can do this with a single new schema version where the
-second step is an `UPDATE`. See schema version 54 (`blueprint-add-external-ip-id`)
-for an example of this (though that one did not make the new column `NOT NULL` --
-you'd want to do that in another step). Update the `validate_data_migration()`
+second step is an `UPDATE`. See the
+link:https://github.com/oxidecomputer/omicron/tree/f4dd98d4d336ef872ec835d40abc6e41980c88ed/schema/crdb/blueprint-sled-last-used-ip[`blueprint-sled-last-used-ip`]
+migration for an example of adding a column and backfilling it with an UPDATE.
+Update the `validate_data_migration()`
 test in `nexus/tests/integration_tests/schema.rs` to add a test for this.
 
 In the future when schema updates happen while the control plane is online,
@@ -188,7 +224,7 @@ different way to backfill the data before you can apply the step that adds the
 
 Adding a new variant to an enum is straightforward: `ALTER TYPE your_type ADD VALUE IF NOT EXISTS your_new_value AFTER some_existing_value`
 (or `... BEFORE some_existing_value`); for an example, see the
-link:https://github.com/oxidecomputer/omicron/tree/main/schema/crdb/add-management-gateway-producer-kind[`add-management-gateway-producer-kind`] migration.
+link:https://github.com/oxidecomputer/omicron/tree/f4dd98d4d336ef872ec835d40abc6e41980c88ed/schema/crdb/local-storage-disk-type[`local-storage-disk-type`] migration.
 
 Removing or renaming variants is more burdensome. `ALTER TYPE DROP VALUE ...`
 and `ALTER TYPE RENAME VALUE ...` both exist, but they do not have clauses to
@@ -207,10 +243,7 @@ you can use the following sequence of migration steps:
 . Drop the temporary type.
 
 For an example, see the
-link:https://github.com/oxidecomputer/omicron/tree/main/schema/crdb/auto-restart-policy-v2[`auto-restart-policy-v2`] migration (whose README is the
-source of this list!). The steps can be simplified some if the enum itself is
-being renamed, in which case you may not need the temporary enum; see the
-link:https://github.com/oxidecomputer/omicron/tree/main/schema/crdb/separate-instance-and-vmm-states[`separate-instance-and-vmm-states`] migration for an example.
+link:https://github.com/oxidecomputer/omicron/tree/f4dd98d4d336ef872ec835d40abc6e41980c88ed/schema/crdb/audit-log-auth-method-enum[`audit-log-auth-method-enum`] migration.
 
 ==== Renaming columns
 

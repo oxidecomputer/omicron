@@ -19,6 +19,7 @@ mod cockroach;
 mod commands;
 mod console_api;
 mod crucible_replacements;
+mod data_migrations;
 mod demo_saga;
 mod device_auth;
 mod disks;
