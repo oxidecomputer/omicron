@@ -276,6 +276,7 @@ async fn apply_plan(
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 struct ReconciliationPlan {
     // Set of zones whose NAT entries already exist in DPD.
     unchanged: BTreeSet<OmicronZoneUuid>,
@@ -306,7 +307,10 @@ impl ReconciliationPlan {
             let entry = NatEntry::from(entry);
 
             // We should have no duplicates; if we do, we have two different
-            // zones that want the same NAT entry. Refuse to reconcile.
+            // zones that want the same NAT entry. Refuse to reconcile. This
+            // should be impossible by construction: `ServiceZoneNatEntries`
+            // rejects overlapping entries. We double-check here in case that
+            // changes or is buggy.
             if !desired_nat_entries.insert(entry) {
                 let prev_zone_id = nat_to_zone_id
                     .get(&entry)
@@ -364,6 +368,7 @@ impl ReconciliationPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Diffable)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 struct NatEntry {
     sled_underlay_ip: Ipv6Addr,
     target_ip: IpAddr,
@@ -540,3 +545,6 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
