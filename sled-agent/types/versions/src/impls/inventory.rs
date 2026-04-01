@@ -27,7 +27,7 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcState, SvcsEnabledNotOnline,
+    SingleMeasurementInventory, SvcState, SvcsEnabledNotOnline, SvcsError,
     ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 
@@ -944,6 +944,42 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
+impl From<String> for SvcsError {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "zone is not running" => SvcsError::NotRunning,
+            _ if s.starts_with("failed to start execution of `") => {
+                let rest = &s["failed to start execution of `".len()..];
+                let (command, err) =
+                    rest.split_once("`: ").unwrap_or((rest, ""));
+                SvcsError::ExecutionStart {
+                    command: command.to_string(),
+                    err: err.to_string(),
+                }
+            }
+            _ if s.starts_with("command failure: ") => {
+                SvcsError::CommandFailure(
+                    s["command failure: ".len()..].to_string(),
+                )
+            }
+            _ if s.starts_with("contract error: ") => {
+                let rest = &s["contract error: ".len()..];
+                let (msg, err) = rest.split_once(": ").unwrap_or((rest, ""));
+                SvcsError::ContractFailure {
+                    msg: msg.to_string(),
+                    err: err.to_string(),
+                }
+            }
+            _ if s.starts_with("failed to parse command output: ") => {
+                SvcsError::ParseFailure(
+                    s["failed to parse command output: ".len()..].to_string(),
+                )
+            }
+            _ => SvcsError::CommandFailure(s),
+        }
+    }
+}
+
 impl From<&'_ str> for SvcState {
     fn from(value: &str) -> Self {
         match value {
@@ -973,5 +1009,57 @@ impl fmt::Display for SvcState {
         };
 
         write!(f, "{state}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_svcs_error_from_string() {
+        assert_eq!(
+            SvcsError::from("zone is not running".to_string()),
+            SvcsError::NotRunning,
+        );
+
+        assert_eq!(
+            SvcsError::from(
+                "failed to start execution of `svcs -H -o state`: \
+                 No such file or directory"
+                    .to_string()
+            ),
+            SvcsError::ExecutionStart {
+                command: "svcs -H -o state".to_string(),
+                err: "No such file or directory".to_string(),
+            },
+        );
+
+        assert_eq!(
+            SvcsError::from("command failure: exit status 1".to_string()),
+            SvcsError::CommandFailure("exit status 1".to_string()),
+        );
+
+        assert_eq!(
+            SvcsError::from(
+                "contract error: failed to get ctid: some io error".to_string()
+            ),
+            SvcsError::ContractFailure {
+                msg: "failed to get ctid".to_string(),
+                err: "some io error".to_string(),
+            },
+        );
+
+        assert_eq!(
+            SvcsError::from(
+                "failed to parse command output: unexpected format".to_string()
+            ),
+            SvcsError::ParseFailure("unexpected format".to_string()),
+        );
+
+        assert_eq!(
+            SvcsError::from("some unknown error".to_string()),
+            SvcsError::CommandFailure("some unknown error".to_string()),
+        );
     }
 }

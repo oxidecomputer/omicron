@@ -235,7 +235,6 @@ impl DataStore {
                             collection_id,
                             sled_agent.sled_id,
                             Some(error.to_string()),
-                            // TODO-K: Adding the timestamp here should be fine?
                             Utc::now(),
                         )]
                     }
