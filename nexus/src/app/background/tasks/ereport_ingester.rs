@@ -190,24 +190,25 @@ impl SpEreportIngester {
 
         // If any ereports were ingested that were not already in the database,
         // trigger a new FM analysis run.
-        let (log_level, activate_analysis) = if total_new_ereports > 0 {
-            (slog::Level::Info, true)
-        } else {
-            (slog::Level::Debug, false)
-        };
-        
-        slog::log!(
-            opctx.log,
-            log_level,
-            "ingested {total_ereports} ({total_new_ereports} new) \
-            ereports from {} service processors",
-            status.sps.len();
-            "total_ereports" => total_ereports,
-            "new_ereports" => total_new_ereports,
-        );
-        
-        if activate_analysis {
+        if total_new_ereports > 0 {
+            slog::info!(
+                opctx.log,
+                "ingested {total_ereports} ({total_new_ereports} new) \
+                 ereports from {} service processors",
+                status.sps.len();
+                "total_ereports" => total_ereports,
+                "new_ereports" => total_new_ereports,
+            );
             self.fm_analysis.activate();
+        } else {
+            slog::debug!(
+                opctx.log,
+                "ingested {total_ereports} (0 new) \
+                 ereports from {} service processors",
+                status.sps.len();
+                "total_ereports" => total_ereports,
+                "new_ereports" => total_new_ereports,
+            );
         }
 
         // Sort statuses for consistent output in OMDB commands.
