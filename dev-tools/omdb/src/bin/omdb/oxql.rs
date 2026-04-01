@@ -42,6 +42,10 @@ pub struct OxqlArgs {
     /// Execute the query and exit.
     #[clap(long, short, value_name = "QUERY")]
     execute: Option<String>,
+
+    /// The format for printing the result of queries.
+    #[clap(short = 'f', default_value_t = Default::default())]
+    output_format: oxql::OutputFormat,
 }
 
 impl OxqlArgs {
@@ -56,6 +60,7 @@ impl OxqlArgs {
         let opts = ShellOptions {
             print_summaries: self.print_summaries,
             print_elapsed: self.print_elapsed,
+            output_format: self.output_format,
         };
 
         if let Some(query) = &self.execute {
