@@ -866,7 +866,7 @@ async fn external_subnet_create_name_conflict(
         client,
         &external_subnets_url(PROJECT_NAME),
         &create_params,
-        StatusCode::BAD_REQUEST,
+        StatusCode::CONFLICT,
     )
     .await;
     assert_eq!(error.error_code.as_deref(), Some("ObjectAlreadyExists"));

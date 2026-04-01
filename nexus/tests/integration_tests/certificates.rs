@@ -84,6 +84,23 @@ async fn cert_create_expect_error(
     cert: String,
     key: String,
 ) -> String {
+    cert_create_expect_error_status(
+        client,
+        name,
+        cert,
+        key,
+        StatusCode::BAD_REQUEST,
+    )
+    .await
+}
+
+async fn cert_create_expect_error_status(
+    client: &ClientTestContext,
+    name: &str,
+    cert: String,
+    key: String,
+    status: StatusCode,
+) -> String {
     let url = CERTS_URL.to_string();
     let params = CertificateCreate {
         identity: IdentityMetadataCreateParams {
@@ -97,7 +114,7 @@ async fn cert_create_expect_error(
 
     NexusRequest::expect_failure_with_body(
         client,
-        StatusCode::BAD_REQUEST,
+        status,
         Method::POST,
         &url,
         &params,
@@ -167,9 +184,14 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fetched_cert.identity.name, CERT_NAME);
 
     // Cannot create a certificate with the same name twice.
-    let message =
-        cert_create_expect_error(&client, CERT_NAME, cert.clone(), key.clone())
-            .await;
+    let message = cert_create_expect_error_status(
+        &client,
+        CERT_NAME,
+        cert.clone(),
+        key.clone(),
+        StatusCode::CONFLICT,
+    )
+    .await;
     assert_eq!(message, format!("already exists: certificate \"{CERT_NAME}\""));
 
     // However, we can create a certificate with a different name.

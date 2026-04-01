@@ -372,7 +372,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &projects_url)
             .body(Some(&project_create))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+            .expect_status(Some(StatusCode::CONFLICT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
