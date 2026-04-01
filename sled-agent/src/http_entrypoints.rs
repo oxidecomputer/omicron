@@ -1053,13 +1053,11 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&rqctx, async {
                 let bs = sa.bootstore();
 
-                let config = bs.get_network_config().await.map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "failed to get bootstore: {}",
-                        InlineErrorChain::new(&e)
-                    ))
-                })?;
-
+                // It's a little awkward to create a new subscription
+                // (i.e., a new `watch::Receiver`) any time we receive this
+                // dropshot request, but this request is deprecated anyway so we
+                // don't expect it to be called in practice.
+                let config = bs.network_config_subscribe().borrow().clone();
                 let config = match config {
                     Some(config) => {
                         let latest_version_body =
@@ -1584,10 +1582,8 @@ impl SledAgentApi for SledAgentImpl {
                 match policy {
                     OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
                     OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
-                        let our_switch_zone_ip =
-                            sa.switch_zone_underlay_info().ip;
                         if request_context.request.remote_addr().ip()
-                            == our_switch_zone_ip
+                            == sa.local_switch_zone_ip()
                         {
                             let message =
                                 "requests to disable the switch zone must \
