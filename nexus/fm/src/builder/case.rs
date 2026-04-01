@@ -37,7 +37,7 @@ impl AllCases {
         // Copy forward any open cases from the parent sitrep. If a case was
         // closed in the parent sitrep, skip it, if AND ONLY IF all of its
         // ereports have been marked as seen when analysis inputs were loaded.
-        let unmarked_seen_ereports = inputs.already_seen_ereports();
+        let unmarked_seen_ereports = inputs.unmarked_seen_ereports();
         let cases: IdOrdMap<_> = inputs
             .parent_sitrep()
             .iter()

@@ -164,25 +164,27 @@ impl FmAnalysis {
             let prev_total = builder.num_ereports();
             let batch = self
                 .datastore
-                .ereports_list_unseen(opctx, &p.current_pagparams())
+                .ereports_list_unmarked(opctx, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|e| {
                 (e.restart_id.into_untyped_uuid(), e.ena)
             });
             let loaded = batch.len();
             let mut invalid = 0;
-            builder.add_new_ereports(batch.into_iter().filter_map(|ereport| {
-                let ereport = match fm::Ereport::try_from(ereport) {
-                    Ok(ereport) => ereport,
-                    Err(e) => {
-                        invalid += 1;
-                        errors.push(e.to_string());
-                        return None;
-                    }
-                };
+            builder.add_unmarked_ereports(batch.into_iter().filter_map(
+                |ereport| {
+                    let ereport = match fm::Ereport::try_from(ereport) {
+                        Ok(ereport) => ereport,
+                        Err(e) => {
+                            invalid += 1;
+                            errors.push(e.to_string());
+                            return None;
+                        }
+                    };
 
-                Some(ereport)
-            }));
+                    Some(ereport)
+                },
+            ));
 
             let total = builder.num_ereports();
             let new = total - prev_total;

@@ -11,8 +11,15 @@ use std::sync::Arc;
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
+    /// Ereports which are new and should be input to analysis in the next
+    /// sitrep.
     new_ereports: IdOrdMap<fm::Ereport>,
-    already_seen_ereports: BTreeSet<fm::EreportId>,
+    /// The IDs of any ereports which have been included in the parent sitrep,
+    /// but which have *not* yet been marked as seen in the database.
+    ///
+    /// These must be tracked in order to determine which closed cases must be
+    /// copied forwards due to containing unmarked ereports.
+    unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 }
 
 impl Input {
@@ -28,8 +35,8 @@ impl Input {
         &self.new_ereports
     }
 
-    pub(crate) fn already_seen_ereports(&self) -> &BTreeSet<fm::EreportId> {
-        &self.already_seen_ereports
+    pub(crate) fn unmarked_seen_ereports(&self) -> &BTreeSet<fm::EreportId> {
+        &self.unmarked_seen_ereports
     }
 
     pub fn builder(
@@ -41,7 +48,7 @@ impl Input {
                 parent_sitrep,
                 inv,
                 new_ereports: IdOrdMap::default(),
-                already_seen_ereports: BTreeSet::default(),
+                unmarked_seen_ereports: BTreeSet::default(),
             },
         }
     }
@@ -52,7 +59,14 @@ pub struct InputBuilder {
 }
 
 impl InputBuilder {
-    pub fn add_new_ereports(
+    /// Adds a set of ereports which have not been marked as "seen" in the
+    /// database to the inputs under construction.
+    ///
+    /// This will filter out any ereports which are present in the parent sitrep
+    /// and have not yet been marked in the database, and then add any ereports
+    /// which remain to the set of ereports which are actually new and should be
+    /// included in the inputs to the next sitrep.
+    pub fn add_unmarked_ereports(
         &mut self,
         ereports: impl IntoIterator<Item = fm::Ereport>,
     ) {
@@ -62,7 +76,7 @@ impl InputBuilder {
                 if let Some(sitrep) = parent_sitrep {
                     let id = ereport.id();
                     if sitrep.ereports_by_id.contains_key(&id) {
-                        self.input.already_seen_ereports.insert(*id);
+                        self.input.unmarked_seen_ereports.insert(*id);
                         return None;
                     }
                 }
@@ -93,7 +107,7 @@ impl InputBuilder {
             parent_inv_id,
             inv_id: self.input.inv.id,
             new_ereport_ids,
-            already_seen_ereport_ids: self.input.already_seen_ereports.clone(),
+            already_seen_ereport_ids: self.input.unmarked_seen_ereports.clone(),
         };
         (self.input, report)
     }

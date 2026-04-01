@@ -557,7 +557,7 @@ mod tests {
         let mut marker = None;
         loop {
             let page = datastore
-                .ereports_list_unseen(
+                .ereports_list_unmarked(
                     opctx,
                     &DataPageParams {
                         marker: marker.as_ref(),
