@@ -974,7 +974,7 @@ impl DataStore {
     ///
     /// Each phase runs as a series of individual paginated queries (no
     /// wrapping transaction). This is safe because readers
-    /// ([`fm_sitrep_read_on_conn`]) load children first and metadata
+    /// ([`DataStore::fm_sitrep_read_on_conn`]) load children first and metadata
     /// **last**: once a metadata row is deleted and committed in step 1,
     /// any concurrent reader gets `NotFound` rather than a torn sitrep.
     /// See <https://github.com/oxidecomputer/omicron/issues/9594>.
