@@ -447,6 +447,11 @@ pub mod physical_disk {
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskPolicy;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskState;
+
+    // Types from MANUAL_DISK_ADOPTION.
+    pub use crate::v2026_04_02_00::physical_disk::PhysicalDiskAdoptionRequest;
+    pub use crate::v2026_04_02_00::physical_disk::PhysicalDiskId;
+    pub use crate::v2026_04_02_00::physical_disk::UninitializedPhysicalDisk;
 }
 
 pub mod rack {

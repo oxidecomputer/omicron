@@ -124,11 +124,11 @@ impl BackgroundTask for PhysicalDiskAdoption {
 
             let result = self
                 .datastore
-                .physical_disk_uninitialized_list(opctx, collection_id)
+                .physical_disk_adoptable_list(opctx, collection_id)
                 .await;
 
-            let uninitialized = match result {
-                Ok(uninitialized) => uninitialized,
+            let adoptable = match result {
+                Ok(adoptable) => adoptable,
                 Err(err) => {
                     let err = InlineErrorChain::new(&err);
                     warn!(
@@ -142,7 +142,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 }
             };
 
-            for inv_disk in uninitialized {
+            for inv_disk in adoptable {
                 let disk = PhysicalDisk::new(
                     PhysicalDiskUuid::new_v4(),
                     inv_disk.vendor,

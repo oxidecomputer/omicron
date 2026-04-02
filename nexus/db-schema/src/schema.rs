@@ -1147,6 +1147,17 @@ table! {
 }
 
 table! {
+    physical_disk_adoption_request (id) {
+        id -> Uuid,
+        vendor -> Text,
+        model -> Text,
+        serial -> Text,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     certificate (id) {
         id -> Uuid,
         name -> Text,
@@ -2662,6 +2673,7 @@ allow_tables_to_appear_in_same_query!(
     instance_network_interface,
     inv_physical_disk,
     inv_nvme_disk_firmware,
+    physical_disk_adoption_request,
     service_network_interface,
     oximeter,
     physical_disk,

@@ -34,6 +34,7 @@ use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::networking;
 use nexus_types::external_api::path_params;
+use nexus_types::external_api::physical_disk;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::rack;
@@ -120,6 +121,20 @@ pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
 
 pub static HARDWARE_SWITCH_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/switches/{}", SWITCH_UUID));
+
+pub static DEMO_HARDWARE_PHYSICAL_DISK_ID: LazyLock<
+    physical_disk::PhysicalDiskId,
+> = LazyLock::new(|| physical_disk::PhysicalDiskId {
+    vendor: "test".into(),
+    serial: "test".into(),
+    model: "test".into(),
+});
+
+pub static HARDWARE_DISK_ADOPTION_REQUESTS_URL: &'static str =
+    "/v1/system/hardware/disk-adoption-requests";
+pub static HARDWARE_DISKS_UNINITIALIZED_URL: &'static str =
+    "/v1/system/hardware/disks-uninitialized";
+
 pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
 pub static HARDWARE_DISK_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID)
@@ -2985,10 +3000,28 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &HARDWARE_DISKS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_HARDWARE_PHYSICAL_DISK_ID)
+                            .unwrap(),
+                    ),
+                ],
             },
             VerifyEndpoint {
                 url: &HARDWARE_DISK_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISKS_UNINITIALIZED_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISK_ADOPTION_REQUESTS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

@@ -217,7 +217,10 @@ networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-por
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
 networking_switch_port_status            GET      /v1/system/hardware/switch-port/{port}/status
+physical_disk_adopt                      PUT      /v1/system/hardware/disks
 physical_disk_list                       GET      /v1/system/hardware/disks
+physical_disk_list_adoption_requests     GET      /v1/system/hardware/disk-adoption-requests
+physical_disk_list_uninitialized         GET      /v1/system/hardware/disks-uninitialized
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}

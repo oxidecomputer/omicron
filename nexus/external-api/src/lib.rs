@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_02_00, MANUAL_DISK_ADOPTION),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
@@ -6681,6 +6682,52 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
+
+    /// List uninitialized physical disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks-uninitialized",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_uninitialized(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::UninitializedPhysicalDisk>,
+        >,
+        HttpError,
+    >;
+
+    /// List physical disks adoption requests
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disk-adoption-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        >,
+        HttpError,
+    >;
+
+    /// Adopt a physical disk for usage by the control plane
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/disks",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_adopt(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<latest::physical_disk::PhysicalDiskId>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     // Switches
 

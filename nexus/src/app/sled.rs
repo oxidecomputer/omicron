@@ -283,6 +283,38 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn physical_disk_list_uninitialized(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<db::model::InvPhysicalDisk> {
+        let collection_id =
+            self.db_datastore.inventory_get_latest_collection_id(opctx).await?;
+        let Some(collection_id) = collection_id else {
+            return Ok(vec![]);
+        };
+        self.db_datastore
+            .physical_disk_uninitialized_list(opctx, collection_id)
+            .await
+    }
+
+    pub(crate) async fn physical_disk_adoption_request_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::PhysicalDiskAdoptionRequest> {
+        self.db_datastore
+            .physical_disk_adoption_request_list(opctx, pagparams)
+            .await
+    }
+
+    pub(crate) async fn physical_disk_adopt(
+        &self,
+        opctx: &OpContext,
+        disk_id: nexus_types::external_api::physical_disk::PhysicalDiskId,
+    ) -> Result<(), Error> {
+        self.db_datastore.physical_disk_adopt(opctx, disk_id).await
+    }
+
     /// Inserts a physical disk into the database unless it already exists.
     ///
     /// NOTE: I'd like to re-work this to avoid the upsert-like behavior - can

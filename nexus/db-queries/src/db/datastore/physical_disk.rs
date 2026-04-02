@@ -12,6 +12,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskAdoptionRequest;
 use crate::db::model::PhysicalDiskKind;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
@@ -29,6 +30,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplyPhysicalDiskFilterExt;
 use nexus_types::deployment::{DiskFilter, SledFilter};
+use nexus_types::external_api::physical_disk::PhysicalDiskId;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -36,6 +38,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::bail_unless;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -43,7 +46,10 @@ use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 impl DataStore {
-    /// Inserts a physical disk and zpool together in a transaction
+    /// Inserts a physical disk and zpool together in a transaction if there is
+    /// a valid adoption request.
+    ///
+    /// Soft-deletes the adoption request.
     pub async fn physical_disk_and_zpool_insert(
         &self,
         opctx: &OpContext,
@@ -73,6 +79,15 @@ impl DataStore {
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
+                    // Delete the adoption request if it exists. If it doesn't exist
+                    // this will return an error.
+                    Self::physical_disk_adoption_request_delete_on_connection(
+                        &conn,
+                        (&disk).into(),
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
                     Self::physical_disk_insert_on_connection(
                         &conn, opctx, disk,
                     )
@@ -94,6 +109,89 @@ impl DataStore {
                     None => public_error_from_diesel(e, ErrorHandler::Server),
                 }
             })?;
+        Ok(())
+    }
+
+    /// Create a row in `physical_disk_adoption_request` for a given `disk_id`
+    /// as long as a non-expunged disk isn't present in the `physical_disk`
+    /// table for the same disk_id.
+    ///
+    /// This request is idempotent. If the disk is already adopted, or an
+    /// adoption request exists, success is returned.
+    pub async fn physical_disk_adopt(
+        &self,
+        opctx: &OpContext,
+        disk_id: PhysicalDiskId,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl as adoption_dsl;
+
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("physical_disk_adopt")
+            .transaction(&conn, |conn| {
+                let vendor = disk_id.vendor.clone();
+                let serial = disk_id.serial.clone();
+                let model = disk_id.model.clone();
+                async move {
+                    // Check for an active (non-expunged) physical disk with
+                    // the same vendor/serial/model.
+                    let active_disk_exists = physical_disk_dsl::physical_disk
+                        .filter(physical_disk_dsl::vendor.eq(vendor.clone()))
+                        .filter(physical_disk_dsl::serial.eq(serial.clone()))
+                        .filter(physical_disk_dsl::model.eq(model.clone()))
+                        .filter(physical_disk_dsl::time_deleted.is_null())
+                        .filter(
+                            physical_disk_dsl::disk_policy
+                                .ne(PhysicalDiskPolicy::Expunged),
+                        )
+                        .select(physical_disk_dsl::id)
+                        .first_async::<Uuid>(&conn)
+                        .await
+                        .optional()?;
+
+                    if active_disk_exists.is_some() {
+                        return Ok(());
+                    }
+
+                    // Check for an active adoption request with the same
+                    // vendor/serial/model.
+                    let active_request_exists =
+                        adoption_dsl::physical_disk_adoption_request
+                            .filter(adoption_dsl::vendor.eq(vendor.clone()))
+                            .filter(adoption_dsl::serial.eq(serial.clone()))
+                            .filter(adoption_dsl::model.eq(model.clone()))
+                            .filter(adoption_dsl::time_deleted.is_null())
+                            .select(adoption_dsl::id)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .optional()?;
+
+                    if active_request_exists.is_some() {
+                        return Ok(());
+                    }
+
+                    // Insert the adoption request.
+                    diesel::insert_into(
+                        adoption_dsl::physical_disk_adoption_request,
+                    )
+                    .values((
+                        adoption_dsl::id.eq(Uuid::new_v4()),
+                        adoption_dsl::vendor.eq(vendor),
+                        adoption_dsl::serial.eq(serial),
+                        adoption_dsl::model.eq(model),
+                        adoption_dsl::time_created.eq(Utc::now()),
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -189,15 +287,17 @@ impl DataStore {
         Ok(())
     }
 
-    /// Returns all physical disks which:
+    /// Returns all physical disks which are eligible for adoption.
+    ///
+    /// These disks:
     ///
     /// - Appear on in-service sleds
     /// - Appear in inventory
-    /// - Do not have any records of expungement
+    /// - Have adoption requests
     ///
     /// If "inventory_collection_id" is not associated with a collection, this
     /// function returns an empty list, rather than failing.
-    pub async fn physical_disk_uninitialized_list(
+    pub async fn physical_disk_adoptable_list(
         &self,
         opctx: &OpContext,
         inventory_collection_id: CollectionUuid,
@@ -205,7 +305,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
-        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl as adoption_request_dsl;
         use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
         sled_dsl::sled
@@ -224,13 +324,77 @@ impl DataStore {
                         ),
                 ),
             )
-            // Filter out any disks in the inventory for which we have ever had
-            // a control plane disk.
+            // Ensure that each inventory disk has a valid adoption request
+            .inner_join(
+                adoption_request_dsl::physical_disk_adoption_request.on(
+                    adoption_request_dsl::vendor
+                        .eq(inv_physical_disk_dsl::vendor)
+                        .and(
+                            adoption_request_dsl::model
+                                .eq(inv_physical_disk_dsl::model),
+                        )
+                        .and(
+                            adoption_request_dsl::serial
+                                .eq(inv_physical_disk_dsl::serial),
+                        )
+                        .and(adoption_request_dsl::time_deleted.is_null()),
+                ),
+            )
+            .select(InvPhysicalDisk::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns all physical disks which:
+    ///
+    /// - Appear on in-service sleds
+    /// - Appear in inventory
+    /// - Do not have adoption requests
+    /// - Do not have active physical disk records
+    ///
+    /// If "inventory_collection_id" is not associated with a collection, this
+    /// function returns an empty list, rather than failing.
+    pub async fn physical_disk_uninitialized_list(
+        &self,
+        opctx: &OpContext,
+        inventory_collection_id: CollectionUuid,
+    ) -> ListResultVec<InvPhysicalDisk> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl as adoption_request_dsl;
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+
+        sled_dsl::sled
+            // If the sled is not in-service, drop the list immediately.
+            .filter(sled_dsl::time_deleted.is_null())
+            .sled_filter(SledFilter::InService)
+            // Look up all inventory physical disks that could match this sled
+            .inner_join(
+                inv_physical_disk_dsl::inv_physical_disk.on(
+                    inv_physical_disk_dsl::inv_collection_id
+                        .eq(inventory_collection_id.into_untyped_uuid())
+                        .and(inv_physical_disk_dsl::sled_id.eq(sled_dsl::id))
+                        .and(
+                            inv_physical_disk_dsl::variant
+                                .eq(PhysicalDiskKind::U2),
+                        ),
+                ),
+            )
+            // Filter out any disks in the inventory where we have a control
+            // plane disk that is active.
             .filter(diesel::dsl::not(diesel::dsl::exists(
                 physical_disk_dsl::physical_disk
                     .select(0.into_sql::<diesel::sql_types::Integer>())
                     .filter(physical_disk_dsl::sled_id.eq(sled_dsl::id))
                     .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2))
+                    .filter(physical_disk_dsl::time_deleted.is_null())
+                    .filter(
+                        physical_disk_dsl::disk_policy
+                            .ne(PhysicalDiskPolicy::Expunged),
+                    )
                     .filter(
                         physical_disk_dsl::vendor
                             .eq(inv_physical_disk_dsl::vendor),
@@ -241,6 +405,25 @@ impl DataStore {
                     )
                     .filter(
                         physical_disk_dsl::serial
+                            .eq(inv_physical_disk_dsl::serial),
+                    ),
+            )))
+            // Filter out physical disks that exist in `physical_disk_adoption_request`. This means
+            // they are in the process of being adopted already.
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                adoption_request_dsl::physical_disk_adoption_request
+                    .select(0.into_sql::<diesel::sql_types::Integer>())
+                    .filter(adoption_request_dsl::time_deleted.is_null())
+                    .filter(
+                        adoption_request_dsl::vendor
+                            .eq(inv_physical_disk_dsl::vendor),
+                    )
+                    .filter(
+                        adoption_request_dsl::model
+                            .eq(inv_physical_disk_dsl::model),
+                    )
+                    .filter(
+                        adoption_request_dsl::serial
                             .eq(inv_physical_disk_dsl::serial),
                     ),
             )))
@@ -262,6 +445,22 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .physical_disk_filter(disk_filter)
             .select(PhysicalDisk::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Return a page of active physical disk adoption requests.
+    pub async fn physical_disk_adoption_request_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<PhysicalDiskAdoptionRequest> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl;
+        paginated(dsl::physical_disk_adoption_request, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(PhysicalDiskAdoptionRequest::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -329,6 +528,33 @@ impl DataStore {
             .await
             .map(|_rows_modified| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    // Delete an adoption request from the database
+    async fn physical_disk_adoption_request_delete_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: PhysicalDiskId,
+    ) -> Result<(), TransactionError<Error>> {
+        let now = Utc::now();
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl;
+        let rows_modified = diesel::update(dsl::physical_disk_adoption_request)
+            .filter(dsl::vendor.eq(id.vendor.clone()))
+            .filter(dsl::serial.eq(id.serial.clone()))
+            .filter(dsl::model.eq(id.model.clone()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(conn)
+            .await?;
+
+        bail_unless!(
+            rows_modified == 1,
+            "No adoption request for physical disk: {}:{}:{}",
+            id.vendor,
+            id.serial,
+            id.model
+        );
+
+        Ok(())
     }
 }
 
@@ -797,6 +1023,13 @@ mod test {
         // We can insert a disk into a sled that is not yet expunged
         let inv_disk = create_inv_disk("serial-001".to_string(), 1);
         let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
+
+        // We need an adoption request before we can adopt the disk
+        // Adoption is idempotent
+        datastore
+            .physical_disk_adopt(&opctx, (&disk).into())
+            .await
+            .expect("adoption succeeds");
         datastore
             .physical_disk_and_zpool_insert(&opctx, disk, zpool)
             .await
@@ -814,6 +1047,12 @@ mod test {
         // Now that the sled is expunged, inserting the disk should fail
         let inv_disk = create_inv_disk("serial-002".to_string(), 2);
         let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
+        // We don't want it to fail because it doesn't have an adoption request
+        // though
+        datastore
+            .physical_disk_adopt(&opctx, (&disk).into())
+            .await
+            .expect("adoption succeeds");
         let err = datastore
             .physical_disk_and_zpool_insert(&opctx, disk, zpool)
             .await
@@ -903,8 +1142,16 @@ mod test {
         //
         // This creates disks for: 001, 002, and 101.
         // It leaves the following uninitialized: 003, 102, 103
+        //
+        // We make sure we submit an adoption request before we attempt to
+        // create the disk and zpools as we don't want automatic adoption in the
+        // background task that uses this datastore method.
         let (disk_001, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
+        datastore
+            .physical_disk_adopt(&opctx, (&disk_001).into())
+            .await
+            .expect("adoption request succeeds");
         datastore
             .physical_disk_and_zpool_insert(&opctx, disk_001, zpool)
             .await
@@ -912,11 +1159,19 @@ mod test {
         let (disk_002, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
         datastore
+            .physical_disk_adopt(&opctx, (&disk_002).into())
+            .await
+            .expect("adoption request succeeds");
+        datastore
             .physical_disk_and_zpool_insert(&opctx, disk_002, zpool)
             .await
             .unwrap();
         let (disk_101, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
+        datastore
+            .physical_disk_adopt(&opctx, (&disk_101).into())
+            .await
+            .expect("adoption request succeeds");
         datastore
             .physical_disk_and_zpool_insert(&opctx, disk_101, zpool)
             .await
@@ -956,17 +1211,29 @@ mod test {
         let (disk_003, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
         datastore
+            .physical_disk_adopt(&opctx, (&disk_003).into())
+            .await
+            .expect("adoption request succeeds");
+        datastore
             .physical_disk_and_zpool_insert(&opctx, disk_003.clone(), zpool)
             .await
             .unwrap();
         let (disk_102, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
         datastore
+            .physical_disk_adopt(&opctx, (&disk_102).into())
+            .await
+            .expect("adoption request succeeds");
+        datastore
             .physical_disk_and_zpool_insert(&opctx, disk_102.clone(), zpool)
             .await
             .unwrap();
         let (disk_103, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
+        datastore
+            .physical_disk_adopt(&opctx, (&disk_103).into())
+            .await
+            .expect("adoption request succeeds");
         datastore
             .physical_disk_and_zpool_insert(&opctx, disk_103.clone(), zpool)
             .await
@@ -978,8 +1245,8 @@ mod test {
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 0);
 
-        // Expunge some disks, observe that they do not re-appear as
-        // initialized.
+        // Expunge some disks, observe that they are now uninitialized again. This allows
+        // re-adding them to the control plane.
         use nexus_db_schema::schema::physical_disk::dsl;
 
         // Set a disk to "deleted".
@@ -1005,12 +1272,171 @@ mod test {
             .await
             .unwrap();
 
-        // The set of uninitialized disks should remain at zero
+        // The set of uninitialized disks should include the expunged/deleted
+        // disks
         let uninitialized_disks = datastore
             .physical_disk_uninitialized_list(&opctx, collection_id)
             .await
             .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 0);
+        assert_eq!(uninitialized_disks.len(), 2);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn physical_disk_adoptable_list() {
+        let logctx = dev::test_setup_log("physical_disk_adoptable_list");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let sled_a = create_test_sled(&datastore).await;
+        let sled_b = create_test_sled(&datastore).await;
+
+        // No inventory -> No adoptable disks
+        let adoptable_disks = datastore
+            .physical_disk_adoptable_list(
+                &opctx,
+                CollectionUuid::new_v4(), // Collection that does not exist
+            )
+            .await
+            .expect("Failed to look up adoptable disks");
+        assert!(adoptable_disks.is_empty());
+
+        // Create inventory disks for both sleds
+        let mut builder = nexus_inventory::CollectionBuilder::new("test");
+        let disks_a = vec![
+            create_inv_disk("serial-001".to_string(), 1),
+            create_inv_disk("serial-002".to_string(), 2),
+            create_inv_disk("serial-003".to_string(), 3),
+        ];
+        let disks_b = vec![
+            create_inv_disk("serial-101".to_string(), 1),
+            create_inv_disk("serial-102".to_string(), 2),
+            create_inv_disk("serial-103".to_string(), 3),
+        ];
+        add_sled_to_inventory(&mut builder, &sled_a, disks_a.clone());
+        add_sled_to_inventory(&mut builder, &sled_b, disks_b.clone());
+        let collection = builder.build();
+        let collection_id = collection.id;
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // We have inventory, but no adoption requests so we should still list
+        // 0 disks.
+        let adoptable_disks = datastore
+            .physical_disk_adoptable_list(&opctx, collection_id)
+            .await
+            .expect("Failed to look up adoptable disks");
+        assert!(adoptable_disks.is_empty());
+
+        // All 6 disks should be uninitialized
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 6);
+
+        // Make two disks adoptable
+        datastore
+            .physical_disk_adopt(&opctx, disks_a[0].identity.clone().into())
+            .await
+            .expect("adoption request succeeds");
+        datastore
+            .physical_disk_adopt(&opctx, disks_b[0].identity.clone().into())
+            .await
+            .expect("adoption request succeeds");
+
+        // Adoption is idempotent
+        datastore
+            .physical_disk_adopt(&opctx, disks_b[0].identity.clone().into())
+            .await
+            .expect("adoption request succeeds");
+
+        // We should now have 2 adoptable disks
+        let adoptable_disks = datastore
+            .physical_disk_adoptable_list(&opctx, collection_id)
+            .await
+            .expect("Failed to look up adoptable disks");
+        assert_eq!(adoptable_disks.len(), 2);
+
+        // The remaining 4 disks should be uninitialized
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 4);
+
+        // soft-deleting both adoptable disks makes them unadoptable again
+        DataStore::physical_disk_adoption_request_delete_on_connection(
+            &conn,
+            disks_a[0].identity.clone().into(),
+        )
+        .await
+        .expect("successful soft delete");
+        DataStore::physical_disk_adoption_request_delete_on_connection(
+            &conn,
+            disks_b[0].identity.clone().into(),
+        )
+        .await
+        .expect("successful soft delete");
+        let adoptable_disks = datastore
+            .physical_disk_adoptable_list(&opctx, collection_id)
+            .await
+            .expect("Failed to look up adoptable disks");
+        assert!(adoptable_disks.is_empty());
+
+        // All 6 disks should be uninitialized again
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 6);
+
+        // Adding one of the same disks back again should make it adoptable
+        datastore
+            .physical_disk_adopt(&opctx, disks_a[0].identity.clone().into())
+            .await
+            .expect("adoption request succeeds");
+        let adoptable_disks = datastore
+            .physical_disk_adoptable_list(&opctx, collection_id)
+            .await
+            .expect("Failed to look up adoptable disks");
+        assert_eq!(adoptable_disks.len(), 1);
+
+        // We should now only have 5 unininitialized disks
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 5);
+
+        // Making a disk adoption reqeust for a disk that is not in inventory
+        // will not make the disk show up as adoptable. We allow the request to
+        // succeed but not the adoption. This means an operator can insert the
+        // disk after the fact.
+        let mut disk_not_in_inventory: PhysicalDiskId =
+            disks_a[0].identity.clone().into();
+        disk_not_in_inventory.vendor = "some-other-vendor".to_string();
+        datastore
+            .physical_disk_adopt(&opctx, disk_not_in_inventory)
+            .await
+            .expect("adoption request succeeds");
+        let adoptable_disks = datastore
+            .physical_disk_adoptable_list(&opctx, collection_id)
+            .await
+            .expect("Failed to look up adoptable disks");
+        assert_eq!(adoptable_disks.len(), 1);
+
+        // We should still have only 5 unininitialized disks
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 5);
 
         db.terminate().await;
         logctx.cleanup_successful();

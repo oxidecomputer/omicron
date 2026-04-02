@@ -74,6 +74,16 @@ impl PhysicalDisk {
     }
 }
 
+impl From<&PhysicalDisk> for physical_disk_types::PhysicalDiskId {
+    fn from(value: &PhysicalDisk) -> Self {
+        Self {
+            vendor: value.vendor.clone(),
+            serial: value.serial.clone(),
+            model: value.model.clone(),
+        }
+    }
+}
+
 impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
     fn from(disk: PhysicalDisk) -> Self {
         Self {
@@ -85,6 +95,33 @@ impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
             serial: disk.serial,
             model: disk.model,
             form_factor: disk.variant.into(),
+        }
+    }
+}
+
+/// A request to adopt a physical disk into the control plane.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[diesel(table_name = nexus_db_schema::schema::physical_disk_adoption_request)]
+pub struct PhysicalDiskAdoptionRequest {
+    pub id: uuid::Uuid,
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+    pub time_created: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+}
+
+impl From<PhysicalDiskAdoptionRequest>
+    for physical_disk_types::PhysicalDiskAdoptionRequest
+{
+    fn from(req: PhysicalDiskAdoptionRequest) -> Self {
+        Self {
+            id: req.id,
+            vendor: req.vendor,
+            serial: req.serial,
+            model: req.model,
+            time_created: req.time_created,
+            time_deleted: req.time_deleted,
         }
     }
 }

@@ -56,7 +56,10 @@ use nexus_types::external_api::identity_provider::IdentityProvider;
 use nexus_types::external_api::image::Image;
 use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
-use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::physical_disk::{
+    PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskId,
+    UninitializedPhysicalDisk,
+};
 use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::external_api::project::Project;
 use nexus_types::external_api::rack::{Rack, RackMembershipStatus};
@@ -6693,6 +6696,94 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
+    }
+
+    async fn physical_disk_list_uninitialized(
+        rqctx: RequestContext<ApiContext>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<HttpResponseOk<ResultsPage<UninitializedPhysicalDisk>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let pag_params = query.into_inner();
+        if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+            return Err(Error::invalid_value(
+                last_seen.clone(),
+                "bad page token",
+            )
+            .into());
+        }
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let disks = nexus
+                .physical_disk_list_uninitialized(&opctx)
+                .await?
+                .into_iter()
+                .map(|d| UninitializedPhysicalDisk {
+                    sled_id: d.sled_id.into(),
+                    slot: d.slot as u64,
+                    variant: d.variant.into(),
+                    disk_id: PhysicalDiskId {
+                        vendor: d.vendor,
+                        serial: d.serial,
+                        model: d.model,
+                    },
+                })
+                .collect();
+            Ok(HttpResponseOk(ResultsPage { items: disks, next_page: None }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<PhysicalDiskAdoptionRequest>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let requests = nexus
+                .physical_disk_adoption_request_list(
+                    &opctx,
+                    &data_page_params_for(&rqctx, &query)?,
+                )
+                .await?
+                .into_iter()
+                .map(|r| r.into())
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                requests,
+                &|_, req: &PhysicalDiskAdoptionRequest| req.id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn physical_disk_adopt(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<PhysicalDiskId>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus.physical_disk_adopt(&opctx, req.into_inner()).await?;
+            Ok(HttpResponseUpdatedNoContent())
+        })
+        .await
     }
 
     // Switches
