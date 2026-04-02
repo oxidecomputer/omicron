@@ -36,7 +36,6 @@ use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
-use dpd_client::{Client as DpdClient, Error as DpdError, types as DpdTypes};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
@@ -62,10 +61,8 @@ use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use omicron_common::address::AZ_PREFIX;
-use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
-use omicron_common::address::MAX_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -81,9 +78,6 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{PrivateIpConfig, SledIdentifiers};
-use omicron_common::backoff::{
-    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
-};
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -212,9 +206,6 @@ pub enum Error {
         #[source]
         err: Box<illumos_utils::opte::Error>,
     },
-
-    #[error("Error contacting dpd")]
-    DpdError(#[from] DpdError<DpdTypes::Error>),
 
     #[error("Failed to create Vnic in the switch zone")]
     SwitchZoneVnicCreation(#[source] illumos_utils::dladm::CreateVnicError),
@@ -624,7 +615,6 @@ pub struct ServiceManagerInner {
 pub(crate) struct SledAgentInfo {
     pub(crate) config: Config,
     pub(crate) port_manager: PortManager,
-    pub(crate) resolver: Resolver,
     pub(crate) underlay_address: Ipv6Addr,
     pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
     pub(crate) rack_id: Uuid,
@@ -635,100 +625,6 @@ pub(crate) struct SledAgentInfo {
 #[derive(Clone)]
 pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
-}
-
-/// Ensure that a NAT entry exists, overwriting a previous conflicting entry if
-/// applicable.
-///
-/// nat_ipv\[46\]_create are not idempotent (see oxidecomputer/dendrite#343),
-/// but this wrapper function is. Call this from sagas instead.
-#[allow(clippy::too_many_arguments)]
-async fn dpd_ensure_nat_entry(
-    client: &DpdClient,
-    log: &Logger,
-    target_ip: IpAddr,
-    target_mac: DpdTypes::MacAddr,
-    target_first_port: u16,
-    target_last_port: u16,
-    target_vni: u32,
-    sled_ip_address: &std::net::Ipv6Addr,
-) -> Result<(), Error> {
-    let existing_nat = match &target_ip {
-        IpAddr::V4(ip) => client.nat_ipv4_get(ip, target_first_port).await,
-        IpAddr::V6(ip) => client.nat_ipv6_get(ip, target_first_port).await,
-    };
-
-    // If a NAT entry already exists, but has the wrong internal
-    // IP address, delete the old entry before continuing (the
-    // DPD entry-creation API won't replace an existing entry).
-    // If the entry exists and has the right internal IP, there's
-    // no more work to do for this external IP.
-    match existing_nat {
-        Ok(existing) => {
-            let existing = existing.into_inner();
-            if existing.internal_ip != *sled_ip_address {
-                info!(log, "deleting old nat entry";
-                      "target_ip" => ?target_ip);
-
-                match &target_ip {
-                    IpAddr::V4(ip) => {
-                        client.nat_ipv4_delete(ip, target_first_port).await
-                    }
-                    IpAddr::V6(ip) => {
-                        client.nat_ipv6_delete(ip, target_first_port).await
-                    }
-                }?;
-            } else {
-                info!(log,
-                      "nat entry with expected internal ip exists";
-                      "target_ip" => ?target_ip,
-                      "existing_entry" => ?existing);
-
-                return Ok(());
-            }
-        }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                info!(log, "no nat entry found for: {target_ip:#?}");
-            } else {
-                return Err(Error::DpdError(e));
-            }
-        }
-    }
-
-    info!(log, "creating nat entry for: {target_ip:#?}");
-    let nat_target = DpdTypes::NatTarget {
-        inner_mac: target_mac,
-        internal_ip: *sled_ip_address,
-        vni: target_vni.into(),
-    };
-
-    match &target_ip {
-        IpAddr::V4(ip) => {
-            client
-                .nat_ipv4_create(
-                    ip,
-                    target_first_port,
-                    target_last_port,
-                    &nat_target,
-                )
-                .await
-        }
-        IpAddr::V6(ip) => {
-            client
-                .nat_ipv6_create(
-                    ip,
-                    target_first_port,
-                    target_last_port,
-                    &nat_target,
-                )
-                .await
-        }
-    }?;
-
-    info!(log, "creation of nat entry successful for: {target_ip:#?}");
-
-    Ok(())
 }
 
 impl ServiceManager {
@@ -1048,35 +944,6 @@ impl ServiceManager {
         &self,
         zone_args: &ZoneArgs<'_>,
     ) -> Result<Vec<(Port, PortTicket)>, Error> {
-        // As a part of setting up OPTE ports, we notify dendrite on all
-        // switches that have an uplink about the new required NAT entries. This
-        // requires finding the switch zone IP addresses. We currently block
-        // until either:
-        //
-        // 1. We find all switch zone IPs.
-        // 2. We find at least one switch zone IP and this timeout elapses.
-        //
-        // If Nexus is up, we don't really need to do any of this work; it has a
-        // background task that will sync NAT entries periodically. However,
-        // it's critical that we set up NAT entries for boundary NTP in
-        // particular during cold boot; otherwise, we won't be able to timesync
-        // and bring the rack up.
-        //
-        // The choice of timeout here is a tension between wanting to wait for
-        // both switches and not wanting to block zone startup indefinitely if
-        // one of the scrimlets or switches is unavailable for an extended
-        // period of time. We should probably revist this entirely - maybe
-        // sled-agent should have its own NAT config reconciler for cold boot
-        // (although it's unclear how something like that wout interact with
-        // Nexus)?
-        //
-        // We'll pick 5 minutes, which has historically been the timeout here
-        // and should hopefully give enough time for a "just rebooted" scrimlet
-        // to bring its switch zone up, if we get unlucky in coincidental
-        // timings.
-        const WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT: Duration =
-            Duration::from_secs(5 * 60);
-
         if !matches!(
             zone_args.omicron_type(),
             Some(OmicronZoneType::ExternalDns { .. })
@@ -1086,37 +953,8 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let SledAgentInfo {
-            port_manager,
-            underlay_address,
-            resolver,
-            network_config_rx,
-            ..
-        } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
-
-        let uplinked_switch_zone_addrs =
-            EarlyNetworkSetup::new(&self.inner.log)
-                .lookup_uplinked_switch_zone_underlay_addrs(
-                    resolver,
-                    network_config_rx,
-                    WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT,
-                )
-                .await;
-
-        let dpd_clients: Vec<DpdClient> = uplinked_switch_zone_addrs
-            .values()
-            .map(|addr| {
-                DpdClient::new(
-                    &format!("http://[{}]:{}", addr, DENDRITE_PORT),
-                    dpd_client::ClientState {
-                        tag: "sled-agent".to_string(),
-                        log: self.inner.log.new(o!(
-                            "component" => "DpdClient"
-                        )),
-                    },
-                )
-            })
-            .collect();
+        let SledAgentInfo { port_manager, .. } =
+            &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
         let (zone_kind, nic, external_ips) = match &zone_args.omicron_type() {
             Some(
@@ -1184,49 +1022,7 @@ impl ServiceManager {
                 service: zone_kind,
                 err: Box::new(err),
             })?;
-        let nat_data = extract_nat_data_for_external_ip_config(&external_ips);
 
-        for dpd_client in &dpd_clients {
-            // TODO-correctness(#2933): If we fail part-way we need to
-            // clean up previous entries instead of leaking them.
-            let nat_create = || async {
-                info!(
-                    self.inner.log, "creating NAT entry for service";
-                    "zone_type" => zone_kind.report_str(),
-                );
-
-                for data in nat_data.iter() {
-                    dpd_ensure_nat_entry(
-                        dpd_client,
-                        &self.inner.log,
-                        data.ip,
-                        dpd_client::types::MacAddr {
-                            a: port.0.mac().into_array(),
-                        },
-                        data.first_port,
-                        data.last_port,
-                        port.0.vni().as_u32(),
-                        underlay_address,
-                    )
-                    .await
-                    .map_err(BackoffError::<Error>::transient)?;
-                }
-                Ok::<(), BackoffError<Error>>(())
-            };
-            let log_failure = |error, _| {
-                warn!(
-                    self.inner.log, "failed to create NAT entry for service";
-                    InlineErrorChain::new(&error),
-                    "zone_type" => zone_kind.report_str(),
-                );
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                nat_create,
-                log_failure,
-            )
-            .await?;
-        }
         Ok(vec![port])
     }
 
@@ -4262,59 +4058,6 @@ impl ServiceManager {
             }
         })
     }
-}
-
-struct NatData {
-    ip: IpAddr,
-    first_port: u16,
-    last_port: u16,
-}
-
-// Construct a list of IP address and port-ranges needed to update
-// Dendrite wtih the NAT mappings. This handles dual-stack and mulitple
-// addresses.
-fn extract_nat_data_for_external_ip_config(
-    external_ips: &ExternalIpConfig,
-) -> Vec<NatData> {
-    let mut nat_data = Vec::new();
-    if let Some(cfg) = external_ips.v4.as_ref() {
-        nat_data
-            .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
-    }
-    if let Some(cfg) = external_ips.v6.as_ref() {
-        nat_data
-            .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
-    }
-    nat_data
-}
-
-fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
-    cfg: &ExternalIps<T>,
-) -> Vec<NatData> {
-    let mut nat_data = Vec::new();
-    if let Some(snat) = cfg.source_nat.as_ref() {
-        let (first_port, last_port) = snat.port_range_raw();
-        nat_data.push(NatData {
-            ip: snat.ip.into_ipaddr(),
-            first_port,
-            last_port,
-        });
-    }
-    if let Some(ip) = cfg.ephemeral_ip.as_ref() {
-        nat_data.push(NatData {
-            ip: ip.into_ipaddr(),
-            first_port: 0,
-            last_port: MAX_PORT,
-        });
-    }
-    for ip in cfg.floating_ips.iter() {
-        nat_data.push(NatData {
-            ip: ip.into_ipaddr(),
-            first_port: 0,
-            last_port: MAX_PORT,
-        });
-    }
-    nat_data
 }
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
