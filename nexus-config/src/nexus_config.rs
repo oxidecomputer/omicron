@@ -377,8 +377,6 @@ pub struct BackgroundTaskConfig {
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
     pub blueprints: BlueprintTasksConfig,
-    /// configuration for service zone nat sync task
-    pub sync_service_zone_nat: SyncServiceZoneNatConfig,
     /// configuration for the bfd manager task
     pub bfd_manager: BfdManagerConfig,
     /// configuration for the switch port settings manager task
@@ -1284,7 +1282,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1490,9 +1487,6 @@ mod test {
                             period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
                         },
-                        sync_service_zone_nat: SyncServiceZoneNatConfig {
-                            period_secs: Duration::from_secs(30)
-                        },
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
                                 period_secs: Duration::from_secs(30),
@@ -1683,7 +1677,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
