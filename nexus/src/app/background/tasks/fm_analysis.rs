@@ -122,7 +122,7 @@ impl FmAnalysis {
             });
 
         if let status::AnalysisOutcome::Committed { .. } = &outcome {
-            // If we commmitted a new sitrep, we ought to go ahead and load it
+            // If we committed a new sitrep, we ought to go ahead and load it
             // now...
             self.sitrep_loader.activate();
         }

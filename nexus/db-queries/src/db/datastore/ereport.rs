@@ -696,7 +696,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explain_ereports_list_unmarkedquery() {
+    async fn explain_ereports_list_unmarked_query() {
         let logctx =
             dev::test_setup_log("explain_ereports_list_unmarked_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
