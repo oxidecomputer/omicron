@@ -135,7 +135,6 @@ use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::session_cleanup;
 use super::tasks::support_bundle_collector;
-use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
@@ -240,7 +239,6 @@ impl BackgroundTasksInitializer {
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
-            task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
             task_v2p_manager: Activator::new(),
             task_region_replacement: Activator::new(),
@@ -335,7 +333,6 @@ impl BackgroundTasksInitializer {
             task_blueprint_executor,
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
-            task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
@@ -700,22 +697,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_decommissioned_disk_cleaner,
-        });
-
-        driver.register(TaskDefinition {
-            name: "service_zone_nat_tracker",
-            description:
-                "ensures service zone nat records are recorded in NAT RPW \
-                 table",
-            period: config.sync_service_zone_nat.period_secs,
-            task_impl: Box::new(ServiceZoneNatTracker::new(
-                datastore.clone(),
-                resolver.clone(),
-                inventory_load_watcher.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_service_zone_nat_tracker,
         });
 
         driver.register(TaskDefinition {

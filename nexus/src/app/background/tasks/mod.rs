@@ -50,7 +50,6 @@ pub mod service_firewall_rules;
 pub mod session_cleanup;
 pub mod support_bundle;
 pub mod support_bundle_collector;
-pub mod sync_service_zone_nat;
 pub mod sync_switch_configuration;
 pub mod trust_quorum;
 pub mod tuf_artifact_replication;
