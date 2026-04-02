@@ -548,19 +548,20 @@ impl DataStore {
 
         // Create the sitrep metadata record.
         //
-        // NOTE: we must insert this record before anything else, for two
-        // reasons:
+        // NOTE: we must insert this record before anything else. The GC's
+        // "deeply orphaned" cleanup deletes child rows whose sitrep_id
+        // has no corresponding fm_sitrep row. If we inserted children
+        // *before* metadata, a concurrent GC run could incorrectly delete
+        // those in-progress children. Inserting metadata first ensures
+        // the children's sitrep_id exists in fm_sitrep, protecting them.
         //
-        // 1. It's how orphaned sitreps are found when performing garbage
-        //    collection. Were we to first insert some other records and
-        //    insert the metadata record *last*, we could die when we have
-        //    inserted some sitrep data but have yet to create the metadata
-        //    record.
-        //
-        // 2. The GC task's "deeply orphaned" cleanup deletes child rows
-        //    whose sitrep_id has no corresponding fm_sitrep row. If we
-        //    inserted children *before* metadata, a concurrent GC run
-        //    could incorrectly delete those in-progress children.
+        // This protection is temporary: if our parent becomes stale
+        // before we finish inserting (e.g. another writer supersedes it),
+        // the GC may delete our metadata row — and subsequently our
+        // children — while we're still inserting them. This is harmless:
+        // the insert will fail with ParentNotCurrent at the end, and
+        // any rows GC didn't already clean up will be collected on the
+        // next pass.
         //
         // See https://github.com/oxidecomputer/omicron/issues/10131 for
         // details.
