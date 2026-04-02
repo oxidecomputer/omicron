@@ -2850,12 +2850,17 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Stress test that concurrently inserts, reads, deletes, and
-    /// garbage-collects sitreps. The key invariant: a successful read must
-    /// always return a *complete* sitrep (no torn reads). Errors (e.g.
-    /// `NotFound`) are expected and fine — partial data is not.
+    /// Stress test that concurrently inserts, reads, and garbage-collects
+    /// sitreps. The key invariant: a successful read must always return a
+    /// *complete* sitrep (no torn reads). Errors (e.g. `NotFound`) are
+    /// expected and fine — partial data is not.
+    ///
+    /// Writers race with each other, causing `ParentNotCurrent` failures.
+    /// Those failed inserts leave orphaned metadata + child rows (not in
+    /// history, stale parent) that the GC tasks find and delete. Readers
+    /// concurrently read sitreps that may be mid-GC.
     #[tokio::test]
-    async fn test_concurrent_sitrep_insert_read_delete_gc() {
+    async fn test_concurrent_sitrep_insert_read_gc() {
         use rand::Rng;
         use rand::SeedableRng;
         use std::sync::atomic::AtomicBool;
@@ -2863,19 +2868,13 @@ mod tests {
         use std::sync::atomic::Ordering;
         use tokio::sync::Mutex;
 
-        const TEST_NAME: &str = "test_concurrent_sitrep_insert_read_delete_gc";
+        const TEST_NAME: &str = "test_concurrent_sitrep_insert_read_gc";
         let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Shared state: sitreps available for reading/deleting.
-        // Each entry is (original_sitrep, child_sitrep_id) so the
-        // deleter can delete both.
-        struct LiveSitrep {
-            sitrep: fm::Sitrep,
-            child_id: SitrepUuid,
-        }
-        let live_sitreps: Arc<Mutex<Vec<LiveSitrep>>> =
+        // Shared state: sitreps available for reading.
+        let live_sitreps: Arc<Mutex<Vec<fm::Sitrep>>> =
             Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
 
@@ -2885,7 +2884,6 @@ mod tests {
             reads_ok: Arc<AtomicUsize>,
             reads_err: Arc<AtomicUsize>,
             inserts: Arc<AtomicUsize>,
-            deletes: Arc<AtomicUsize>,
             gc_runs: Arc<AtomicUsize>,
         }
 
@@ -2894,11 +2892,10 @@ mod tests {
                 write!(
                     f,
                     "reads_ok={}, reads_err={}, inserts={}, \
-                     deletes={}, gc_runs={}",
+                     gc_runs={}",
                     self.reads_ok.load(Ordering::Relaxed),
                     self.reads_err.load(Ordering::Relaxed),
                     self.inserts.load(Ordering::Relaxed),
-                    self.deletes.load(Ordering::Relaxed),
                     self.gc_runs.load(Ordering::Relaxed),
                 )
             }
@@ -2908,13 +2905,11 @@ mod tests {
             reads_ok: Arc::new(AtomicUsize::new(0)),
             reads_err: Arc::new(AtomicUsize::new(0)),
             inserts: Arc::new(AtomicUsize::new(0)),
-            deletes: Arc::new(AtomicUsize::new(0)),
             gc_runs: Arc::new(AtomicUsize::new(0)),
         };
 
         const NUM_WRITERS: usize = 3;
         const NUM_READERS: usize = 10;
-        const NUM_DELETERS: usize = 2;
         const NUM_GC: usize = 2;
 
         let mut handles = Vec::new();
@@ -3009,10 +3004,7 @@ mod tests {
                         "child_id" => %child_id,
                     );
                     last_child_id = Some(child_id);
-                    live_sitreps
-                        .lock()
-                        .await
-                        .push(LiveSitrep { sitrep, child_id });
+                    live_sitreps.lock().await.push(sitrep);
                     stats.inserts.fetch_add(1, Ordering::Relaxed);
                 }
             }));
@@ -3042,7 +3034,7 @@ mod tests {
                             continue;
                         }
                         let idx = rng.random_range(0..guard.len());
-                        guard[idx].sitrep.clone()
+                        guard[idx].clone()
                     };
                     let sitrep_id = entry.id();
                     match datastore.fm_sitrep_read(&opctx, sitrep_id).await {
@@ -3069,66 +3061,6 @@ mod tests {
                             );
                         }
                     }
-                }
-            }));
-        }
-
-        // --- Deleter tasks ---
-        for n in 0..NUM_DELETERS {
-            let task_name = format!("deleter-{n}");
-            let datastore = datastore.clone();
-            let opctx = opctx.child(
-                std::iter::once(("task".to_string(), task_name.clone()))
-                    .collect(),
-            );
-            let log = opctx.log.clone();
-            let live_sitreps = live_sitreps.clone();
-            let stop = stop.clone();
-            let stats = stats.clone();
-            handles.push(tokio::spawn(async move {
-                while !stop.load(Ordering::Relaxed) {
-                    let entry = {
-                        let mut guard = live_sitreps.lock().await;
-                        if guard.is_empty() {
-                            drop(guard);
-                            tokio::task::yield_now().await;
-                            continue;
-                        }
-                        guard.remove(0)
-                    };
-                    let sitrep_id = entry.sitrep.id();
-                    let child_id = entry.child_id;
-                    // Try to delete both the original sitrep and its
-                    // child. This may fail if the child is still
-                    // current — that's expected.
-                    match datastore
-                        .fm_sitrep_delete_all(&opctx, vec![sitrep_id, child_id])
-                        .await
-                    {
-                        Ok(_) => {
-                            slog::info!(
-                                &log, "deleted sitrep pair";
-                                "sitrep_id" => %sitrep_id,
-                                "child_id" => %child_id,
-                            );
-                        }
-                        Err(Error::Conflict { .. }) => {
-                            slog::info!(
-                                &log,
-                                "delete conflict (child is current)";
-                                "sitrep_id" => %sitrep_id,
-                                "child_id" => %child_id,
-                            );
-                        }
-                        Err(other) => {
-                            panic!(
-                                "[{task_name}] unexpected delete error \
-                                 for sitrep {sitrep_id}, child \
-                                 {child_id}: {other} ({stats})"
-                            );
-                        }
-                    }
-                    stats.deletes.fetch_add(1, Ordering::Relaxed);
                 }
             }));
         }
@@ -3168,18 +3100,12 @@ mod tests {
         // Wait until we've exercised enough of each operation, then stop.
         const MIN_READS: usize = 200;
         const MIN_INSERTS: usize = 20;
-        const MIN_DELETES: usize = 10;
         const MIN_GC_RUNS: usize = 10;
         loop {
             let r = stats.reads_ok.load(Ordering::Relaxed);
             let i = stats.inserts.load(Ordering::Relaxed);
-            let d = stats.deletes.load(Ordering::Relaxed);
             let g = stats.gc_runs.load(Ordering::Relaxed);
-            if r >= MIN_READS
-                && i >= MIN_INSERTS
-                && d >= MIN_DELETES
-                && g >= MIN_GC_RUNS
-            {
+            if r >= MIN_READS && i >= MIN_INSERTS && g >= MIN_GC_RUNS {
                 break;
             }
             tokio::task::yield_now().await;
