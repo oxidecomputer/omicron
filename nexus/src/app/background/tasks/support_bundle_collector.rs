@@ -447,6 +447,7 @@ mod test {
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
+    use nexus_db_queries::db::datastore::SupportBundleCreateParams;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
@@ -816,9 +817,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -896,9 +899,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For trace file testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For trace file testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1006,9 +1011,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1106,18 +1113,22 @@ mod test {
         let bundle1 = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
         let bundle2 = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a second support bundle");
@@ -1217,9 +1228,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1281,9 +1294,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1367,9 +1382,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1436,9 +1453,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1521,9 +1540,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1605,9 +1626,11 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "Testing reconfigurator state collection",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "Testing reconfigurator state collection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
