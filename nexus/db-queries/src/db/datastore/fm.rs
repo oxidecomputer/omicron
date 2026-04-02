@@ -116,6 +116,10 @@ macro_rules! sitrep_child_tables {
 sitrep_child_tables! {
     CaseEreport => { table: "fm_ereport_in_case" },
     AlertRequest => { table: "fm_alert_request" },
+    SupportBundleRequestDataSelectionFlags => { table: "fm_support_bundle_request_data_selection_flags" },
+    SupportBundleRequestDataSelectionHostInfo => { table: "fm_support_bundle_request_data_selection_host_info" },
+    SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
+    SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
 }
 
@@ -1459,6 +1463,7 @@ impl DataStore {
 
     /// Delete child data selection rows for support bundle requests, then the
     /// support bundle request rows themselves.
+    #[cfg(test)]
     async fn support_bundle_requests_delete_on_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sitrep_ids: Vec<uuid::Uuid>,
