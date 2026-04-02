@@ -713,8 +713,15 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    orphaned sitreps found:      0
-    orphaned sitreps deleted:    0
+    batch size:                               1000
+    orphaned sitreps deleted:                    0
+      batches:                                   1
+    orphaned fm_alert_request rows deleted:      0
+      batches:                                   1
+    orphaned fm_case rows deleted:               0
+      batches:                                   1
+    orphaned fm_ereport_in_case rows deleted:    0
+      batches:                                   1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
@@ -1346,8 +1353,15 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    orphaned sitreps found:      0
-    orphaned sitreps deleted:    0
+    batch size:                               1000
+    orphaned sitreps deleted:                    0
+      batches:                                   1
+    orphaned fm_alert_request rows deleted:      0
+      batches:                                   1
+    orphaned fm_case rows deleted:               0
+      batches:                                   1
+    orphaned fm_ereport_in_case rows deleted:    0
+      batches:                                   1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
