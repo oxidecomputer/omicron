@@ -5,6 +5,7 @@
 //! Sitrep builder
 
 use crate::analysis_input;
+use iddqd::IdOrdMap;
 use nexus_types::fm;
 use nexus_types::inventory;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -23,6 +24,7 @@ pub struct SitrepBuilder<'a> {
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
+    closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
     comment: String,
 }
 
@@ -49,11 +51,13 @@ impl<'a> SitrepBuilder<'a> {
         ));
 
         let cases = case::AllCases::new(log.clone(), sitrep_id, inputs, rng);
+        let closed_cases_copied_forward = inputs.closed_cases_copied_forward();
 
         slog::info!(
             &log,
             "building sitrep {sitrep_id:?}";
             "existing_open_cases" => cases.len(),
+            "closed_cases_copied_forward" => closed_cases_copied_forward.len(),
         );
 
         SitrepBuilder {
@@ -62,6 +66,7 @@ impl<'a> SitrepBuilder<'a> {
             inventory,
             parent_sitrep,
             comment: String::new(),
+            closed_cases_copied_forward,
             cases,
         }
     }
@@ -84,11 +89,11 @@ impl<'a> SitrepBuilder<'a> {
             .cases
             .cases
             .into_iter()
-            .map(|case| {
-                let case = fm::Case::from(case);
+            .map(fm::Case::from)
+            .chain(self.closed_cases_copied_forward.iter().cloned())
+            .inspect(|case| {
                 ereports_by_id
                     .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
-                case
             })
             .collect();
         fm::Sitrep {

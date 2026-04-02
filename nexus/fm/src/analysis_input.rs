@@ -34,7 +34,8 @@ pub struct Input {
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<fm::Ereport>,
-    cases: IdOrdMap<fm::Case>,
+    open_cases: IdOrdMap<fm::Case>,
+    closed_cases_copied_forward: IdOrdMap<fm::Case>,
 }
 
 impl Input {
@@ -51,7 +52,11 @@ impl Input {
     }
 
     pub fn cases(&self) -> &IdOrdMap<fm::Case> {
-        &self.cases
+        &self.open_cases
+    }
+
+    pub(crate) fn closed_cases_copied_forward(&self) -> &IdOrdMap<fm::Case> {
+        &self.closed_cases_copied_forward
     }
 
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
@@ -145,28 +150,28 @@ impl Builder {
         // Determine which cases must be copied forwards into the next sitrep.
         // Cases from the parent sitrep should be copied forwards if:
         // - The case is still open
+        let mut open_cases = IdOrdMap::new();
         // - The case has been closed, but it contains an ereport which has not
         //   yet been marked as "seen" in the database.
-        let cases: IdOrdMap<_> = parent_sitrep
-            .iter()
-            .flat_map(|s| s.cases.iter())
-            .filter_map(|case| {
-                if !case.is_open() {
-                    let unmarked_ereports = case
-                        .ereports
-                        .iter()
-                        .filter_map(|ereport| {
-                            let id = ereport.ereport_id();
-                            if self.unmarked_seen_ereports.contains(&id) {
-                                Some(*id)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<BTreeSet<_>>();
-                    if unmarked_ereports.is_empty() {
-                        return None;
-                    }
+        let mut closed_cases_copied_forward = IdOrdMap::new();
+        for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
+            if case.is_open() {
+                report.open_cases.insert(case.id, case.metadata.clone());
+                open_cases.insert_unique(case.clone());
+            } else {
+                let unmarked_ereports = case
+                    .ereports
+                    .iter()
+                    .filter_map(|ereport| {
+                        let id = ereport.ereport_id();
+                        if self.unmarked_seen_ereports.contains(&id) {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<BTreeSet<_>>();
+                if !unmarked_ereports.is_empty() {
                     report.closed_cases_copied_forward.insert(
                         case.id,
                         ClosedCaseReport {
@@ -174,18 +179,16 @@ impl Builder {
                             unmarked_ereports,
                         },
                     );
-                } else {
-                    report.open_cases.insert(case.id, case.metadata.clone());
+                    closed_cases_copied_forward.insert_unique(case.clone());
                 }
-                Some(case.clone())
-            })
-            .collect();
-
+            }
+        }
         let input = Input {
             parent_sitrep: self.parent_sitrep.clone(),
             inv: self.inv.clone(),
             new_ereports: self.new_ereports,
-            cases,
+            open_cases,
+            closed_cases_copied_forward,
         };
 
         (input, report)
