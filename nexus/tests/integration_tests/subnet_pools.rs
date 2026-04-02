@@ -116,7 +116,11 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
     let url = format!("{}/{}/members", SUBNET_POOLS_URL, SUBNET_POOL_NAME);
     let _pool =
         create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
+
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 0.0).await;
+
     let n_members = 100;
+    let addrs_per_member = (1u128 << 80) as f64; // /48
     let mut members = Vec::with_capacity(n_members);
     for i in 0..n_members {
         let subnet = format!("2001:db8:{i:x}::/48").parse().unwrap();
@@ -125,6 +129,10 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(member.subnet, subnet);
         members.push(member);
     }
+
+    let capacity = n_members as f64 * addrs_per_member;
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, capacity)
+        .await;
 
     let list =
         objects_list_page_authz::<SubnetPoolMember>(client, &url).await.items;
@@ -167,6 +175,11 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
         objects_list_page_authz::<SubnetPoolMember>(client, &url).await.items;
     assert_eq!(new_list.len(), list.len() - 1);
     assert!(!new_list.iter().any(|member| member.subnet == to_remove.subnet));
+
+    // Capacity should have shrunk by one member.
+    let new_capacity = (n_members - 1) as f64 * addrs_per_member;
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, new_capacity)
+        .await;
 
     // Creating an overlapping member fails.
     let to_add = SubnetPoolMemberAdd {
@@ -637,6 +650,9 @@ async fn cannot_link_multiple_times(cptestctx: &ControlPlaneTestContext) {
     object_create_error(client, &url, &link_params, StatusCode::CONFLICT).await;
 }
 
+// These tests focus on capacity (total) with large numbers. Allocated
+// utilization is tested across the external subnet tests. Look for
+// assert_subnet_pool_utilization calls.
 #[nexus_test]
 async fn test_ipv4_subnet_pool_utilization(
     cptestctx: &ControlPlaneTestContext,
