@@ -45,7 +45,7 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::external::DataPageParams,
+    api::external::{DataPageParams, Name},
 };
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
@@ -75,11 +75,12 @@ use std::{
     hash::Hash,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-const PHY0: &str = "phy0";
+static PHY0: LazyLock<Name> =
+    LazyLock::new(|| "phy0".parse().expect("phy0 is a valid Name"));
 
 // This is more of an implementation detail of the BGP implementation. It
 // defines the maximum time the peering engine will wait for external messages
@@ -532,6 +533,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     for peer in &settings.bgp_peers {
                         let bgp_config_id = peer.bgp_config_id();
                         let port_settings_id = peer.port_settings_id();
+                        let interface_name = peer.interface_name();
                         let peer = peer.as_bgp_peer();
 
                         // since we only have one bgp config per switch, we only need to fetch it once
@@ -627,22 +629,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
-                        let ttl = peer.min_ttl;
-
-                        // Determine if this is a numbered or unnumbered peer
-                        // (None or unspecified address = unnumbered)
-                        let peer_addr = match peer.addr {
-                            Some(addr) if !addr.is_unspecified() => Some(addr),
-                            _ => None,
-                        };
-
-                        // Numbered peer - identified by address
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
                             port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer_addr,
+                            interface_name,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -665,8 +657,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer_addr,
+                            interface_name,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -733,8 +725,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer_addr,
+                            interface_name,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -798,106 +790,105 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             None => MgImportExportPolicy6::NoFiltering,
                         };
 
-                        // numbered peer
-                        if let Some(addr) = peer_addr {
-                            // now that the peer passes the above validations, add it to the list for configuration
-                            let peer_config = BgpPeerConfig {
-                                name: format!("{}", addr),
-                                host: format!("{}:179", addr),
-                                hold_time: peer.hold_time.into(),
-                                idle_hold_time: peer.idle_hold_time.into(),
-                                delay_open: peer.delay_open.into(),
-                                connect_retry: peer.connect_retry.into(),
-                                keepalive: peer.keepalive.into(),
-                                resolution: BGP_SESSION_RESOLUTION,
-                                passive: false,
-                                remote_asn: peer.remote_asn,
-                                min_ttl: ttl,
-                                md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator,
-                                local_pref: peer.local_pref,
-                                enforce_first_as: peer.enforce_first_as,
-                                communities: communities.into_iter().map(|c| c.community.0).collect(),
-                                ipv4_unicast: Some(Ipv4UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy4,
-                                    export_policy: export_policy4,
-                                }),
-                                ipv6_unicast: Some(Ipv6UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy6,
-                                    export_policy: export_policy6,
-                                }),
-                                vlan_id: peer.vlan_id,
-                                //TODO plumb these out to the external API
-                                connect_retry_jitter: Some(JitterRange {
-                                    max: 1.0,
-                                    min: 0.75,
-                                }),
-                                deterministic_collision_resolution: false,
-                                idle_hold_jitter: None,
-                            };
+                        match peer.addr {
+                            // Numbered peer - identified by address
+                            RouterPeerType::Numbered { ip } => {
+                                // now that the peer passes the above validations, add it to the list for configuration
+                                let peer_config = BgpPeerConfig {
+                                    name: format!("{ip}"),
+                                    host: format!("{ip}:179"),
+                                    hold_time: peer.hold_time.into(),
+                                    idle_hold_time: peer.idle_hold_time.into(),
+                                    delay_open: peer.delay_open.into(),
+                                    connect_retry: peer.connect_retry.into(),
+                                    keepalive: peer.keepalive.into(),
+                                    resolution: BGP_SESSION_RESOLUTION,
+                                    passive: false,
+                                    remote_asn: peer.remote_asn,
+                                    min_ttl: peer.min_ttl,
+                                    md5_auth_key: peer.md5_auth_key.clone(),
+                                    multi_exit_discriminator: peer.multi_exit_discriminator,
+                                    local_pref: peer.local_pref,
+                                    enforce_first_as: peer.enforce_first_as,
+                                    communities: communities.into_iter().map(|c| c.community.0).collect(),
+                                    ipv4_unicast: Some(Ipv4UnicastConfig{
+                                        nexthop: None,
+                                        import_policy: import_policy4,
+                                        export_policy: export_policy4,
+                                    }),
+                                    ipv6_unicast: Some(Ipv6UnicastConfig{
+                                        nexthop: None,
+                                        import_policy: import_policy6,
+                                        export_policy: export_policy6,
+                                    }),
+                                    vlan_id: peer.vlan_id,
+                                    //TODO plumb these out to the external API
+                                    connect_retry_jitter: Some(JitterRange {
+                                        max: 1.0,
+                                        min: 0.75,
+                                    }),
+                                    deterministic_collision_resolution: false,
+                                    idle_hold_jitter: None,
+                                };
 
-                            // update the stored vec if it exists, create a new on if it doesn't exist
-                            match peers.entry(port.port_name.clone().to_string()) {
-                                Entry::Occupied(mut occupied_entry) => {
-                                    occupied_entry.get_mut().push(peer_config);
-                                },
-                                Entry::Vacant(vacant_entry) => {
-                                    vacant_entry.insert(vec![peer_config]);
-                                },
+                                // update the stored vec if it exists, create a new on if it doesn't exist
+                                match peers.entry(port.port_name.clone().to_string()) {
+                                    Entry::Occupied(mut occupied_entry) => {
+                                        occupied_entry.get_mut().push(peer_config);
+                                    },
+                                    Entry::Vacant(vacant_entry) => {
+                                        vacant_entry.insert(vec![peer_config]);
+                                    },
+                                }
                             }
-                        }
-                        // unnumbered peer
-                        else {
                             // Unnumbered peer - identified by interface
-                            // For unnumbered peers, we use NoFiltering policies as the
-                            // communities/import/export tables are keyed by address
-                            let peer_config = UnnumberedBgpPeerConfig {
-                                name: format!("unnumbered-{}", port.port_name),
-                                interface: format!("tfport{}_0", port.port_name),
-                                hold_time: peer.hold_time.into(),
-                                idle_hold_time: peer.idle_hold_time.into(),
-                                delay_open: peer.delay_open.into(),
-                                connect_retry: peer.connect_retry.into(),
-                                keepalive: peer.keepalive.into(),
-                                resolution: BGP_SESSION_RESOLUTION,
-                                passive: false,
-                                remote_asn: peer.remote_asn,
-                                min_ttl: ttl,
-                                md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator,
-                                local_pref: peer.local_pref,
-                                enforce_first_as: peer.enforce_first_as,
-                                communities: communities.into_iter().map(|c| c.community.0).collect(),
-                                ipv4_unicast: Some(Ipv4UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy4,
-                                    export_policy: export_policy4,
-                                }),
-                                ipv6_unicast: Some(Ipv6UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy6,
-                                    export_policy: export_policy6,
-                                }),
-                                vlan_id: peer.vlan_id,
-                                connect_retry_jitter: Some(JitterRange {
-                                    max: 1.0,
-                                    min: 0.75,
-                                }),
-                                deterministic_collision_resolution: false,
-                                idle_hold_jitter: None,
-                                router_lifetime: peer.router_lifetime,
-                            };
+                            RouterPeerType::Unnumbered { router_lifetime } => {
+                                let peer_config = UnnumberedBgpPeerConfig {
+                                    name: format!("unnumbered-{}", port.port_name),
+                                    interface: format!("tfport{}_0", port.port_name),
+                                    hold_time: peer.hold_time.into(),
+                                    idle_hold_time: peer.idle_hold_time.into(),
+                                    delay_open: peer.delay_open.into(),
+                                    connect_retry: peer.connect_retry.into(),
+                                    keepalive: peer.keepalive.into(),
+                                    resolution: BGP_SESSION_RESOLUTION,
+                                    passive: false,
+                                    remote_asn: peer.remote_asn,
+                                    min_ttl: peer.min_ttl,
+                                    md5_auth_key: peer.md5_auth_key.clone(),
+                                    multi_exit_discriminator: peer.multi_exit_discriminator,
+                                    local_pref: peer.local_pref,
+                                    enforce_first_as: peer.enforce_first_as,
+                                    communities: communities.into_iter().map(|c| c.community.0).collect(),
+                                    ipv4_unicast: Some(Ipv4UnicastConfig{
+                                        nexthop: None,
+                                        import_policy: import_policy4,
+                                        export_policy: export_policy4,
+                                    }),
+                                    ipv6_unicast: Some(Ipv6UnicastConfig{
+                                        nexthop: None,
+                                        import_policy: import_policy6,
+                                        export_policy: export_policy6,
+                                    }),
+                                    vlan_id: peer.vlan_id,
+                                    connect_retry_jitter: Some(JitterRange {
+                                        max: 1.0,
+                                        min: 0.75,
+                                    }),
+                                    deterministic_collision_resolution: false,
+                                    idle_hold_jitter: None,
+                                    router_lifetime: router_lifetime.as_u16(),
+                                };
 
-                            // update the stored vec if it exists, create a new on if it doesn't exist
-                            match unnumbered_peers.entry(port.port_name.clone().to_string()) {
-                                Entry::Occupied(mut occupied_entry) => {
-                                    occupied_entry.get_mut().push(peer_config);
-                                },
-                                Entry::Vacant(vacant_entry) => {
-                                    vacant_entry.insert(vec![peer_config]);
-                                },
+                                // update the stored vec if it exists, create a new on if it doesn't exist
+                                match unnumbered_peers.entry(port.port_name.clone().to_string()) {
+                                    Entry::Occupied(mut occupied_entry) => {
+                                        occupied_entry.get_mut().push(peer_config);
+                                    },
+                                    Entry::Vacant(vacant_entry) => {
+                                        vacant_entry.insert(vec![peer_config]);
+                                    },
+                                }
                             }
                         }
                     }
@@ -1185,24 +1176,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
-                        // For unnumbered peers, pass None
-                        //
-                        // TODO-cleanup Push `RouterPeerAddress` down to all the
-                        // datastore methods below instead of an `Option`.
-                        let peer_addr_for_lookup = match peer.addr {
-                            RouterPeerType::Unnumbered { .. } => None,
-                            RouterPeerType::Numbered { ip } => {
-                                Some(IpAddr::from(ip))
-                            }
-                        };
-
                         peer.communities = match self
                             .datastore
                             .communities_for_peer(
                                 opctx,
                                 port.port_settings_id.unwrap(),
-                                PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                                peer_addr_for_lookup,
+                                &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                                peer.addr,
                             ).await {
                                 Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
                                 Err(e) => {
@@ -1219,8 +1199,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
-                            PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer_addr_for_lookup,
+                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -1243,8 +1223,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
-                            PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer_addr_for_lookup,
+                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
