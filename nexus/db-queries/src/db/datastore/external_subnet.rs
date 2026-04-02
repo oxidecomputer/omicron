@@ -509,13 +509,26 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SubnetPoolSiloLink> {
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
-        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
-        paginated(dsl::subnet_pool_silo_link, dsl::silo_id, &pagparams)
-            .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())))
-            .select(SubnetPoolSiloLink::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        use nexus_db_schema::schema::silo;
+        use nexus_db_schema::schema::subnet_pool;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+        paginated(
+            subnet_pool_silo_link::table,
+            subnet_pool_silo_link::silo_id,
+            &pagparams,
+        )
+        .inner_join(subnet_pool::table)
+        .inner_join(silo::table)
+        .filter(
+            subnet_pool_silo_link::subnet_pool_id
+                .eq(to_db_typed_uuid(authz_pool.id())),
+        )
+        .filter(subnet_pool::time_deleted.is_null())
+        .filter(silo::time_deleted.is_null())
+        .select(SubnetPoolSiloLink::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List Subnet Pools linked to the given Silo.
@@ -2118,6 +2131,87 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn deleted_silo_does_not_appear_in_subnet_pool_silo_list() {
+        use nexus_db_schema::schema::silo::dsl as silo_dsl;
+
+        let logctx = dev::test_setup_log(
+            "deleted_silo_does_not_appear_in_subnet_pool_silo_list",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect("able to link pool to default silo");
+
+        let links = datastore
+            .list_silos_linked_to_subnet_pool(
+                opctx,
+                &authz_pool,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: 100.try_into().unwrap(),
+                },
+            )
+            .await
+            .expect("able to list silos for pool before silo delete");
+        assert_eq!(links.len(), 1);
+
+        let c = diesel::update(silo_dsl::silo.find(DEFAULT_SILO_ID))
+            .set(silo_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("should be able to soft-delete silo");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let links = datastore
+            .list_silos_linked_to_subnet_pool(
+                opctx,
+                &authz_pool,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: 100.try_into().unwrap(),
+                },
+            )
+            .await
+            .expect("able to list silos for pool after silo delete");
+        assert!(
+            links.is_empty(),
+            "deleted silo should not appear in subnet pool silo list"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     struct Context {
         logctx: LogContext,
         db: TestDatabase,
@@ -3013,6 +3107,64 @@ mod tests {
             panic!("Expected InvalidRequest, found {err:#?}");
         };
         assert_eq!(message.external_message(), NO_LINKED_DEFAULT_POOL_ERR_MSG,);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn creating_subnet_ignores_deleted_default_pool() {
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
+
+        let context = setup_external_subnet_test(
+            "creating_subnet_ignores_deleted_default_pool",
+        )
+        .await;
+
+        let c = diesel::update(
+            pool_dsl::subnet_pool
+                .find(context.db_pool.id().into_untyped_uuid()),
+        )
+        .set(pool_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*context
+                .db
+                .datastore()
+                .pool_connection_authorized(context.db.opctx())
+                .await
+                .unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete subnet pool");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let prefix_length = 64;
+        let err = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-subnet".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Auto {
+                        pool_selector: PoolSelector::Auto {
+                            ip_version: Some(IpVersion::V6),
+                        },
+                        prefix_length,
+                    },
+                },
+            )
+            .await
+            .expect_err("deleted default pool should be ignored");
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(message.external_message(), NO_LINKED_DEFAULT_POOL_ERR_MSG);
 
         context.db.terminate().await;
         context.logctx.cleanup_successful();
