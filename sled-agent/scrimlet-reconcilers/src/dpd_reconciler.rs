@@ -42,16 +42,39 @@ impl Reconciler for DpdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
+        // Build a custom reqwest client, primarly to set a lower
+        // `pool_idle_timeout`. Our `RE_RECONCILE_INTERVAL` interval of 30
+        // seconds happens to coincide exactly with dropshot's default
+        // connection timeout of 30 seconds. In early testing, this caused us to
+        // hit <https://github.com/hyperium/hyper/issues/2136> surprisingly
+        // frequently: dpd would close a connection right as we were trying to
+        // use it, resulting in spurious "connection closed before message
+        // completed" or "connection reset by peer" errors.
+        //
+        // We choose a much lower `pool_idle_timeout`: 10 seconds is long enough
+        // to reuse a connection for all the requests made during one
+        // reconciliation pass, but is short enough we should discard it before
+        // the server wants to time us out.
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(15))
+            .pool_idle_timeout(Duration::from_secs(10))
+            .build()
+            .expect("reqwest parameters are valid");
+
         let baseurl =
             format!("http://[{switch_zone_underlay_ip}]:{DENDRITE_PORT}");
-        let client = Client::new(
+
+        let client = Client::new_with_client(
             &baseurl,
+            reqwest_client,
             dpd_client::ClientState {
                 tag: OMICRON_DPD_TAG.to_owned(),
                 log: parent_log
                     .new(slog::o!("component" => "DpdReconcilerClient")),
             },
         );
+
         Self { client, _switch_slot: switch_slot }
     }
 
