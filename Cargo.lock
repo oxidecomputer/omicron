@@ -9149,6 +9149,7 @@ dependencies = [
  "sled-agent-health-monitor",
  "sled-agent-measurements",
  "sled-agent-resolvable-files",
+ "sled-agent-scrimlet-reconcilers",
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-diagnostics",
