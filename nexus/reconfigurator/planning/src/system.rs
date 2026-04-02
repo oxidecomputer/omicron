@@ -12,7 +12,6 @@ use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use illumos_utils::zpool::ZpoolHealth;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
@@ -74,6 +73,7 @@ use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
@@ -1121,12 +1121,37 @@ impl SystemDescription {
                         ).unwrap();
                     }
 
-                    // TODO: We may want to include responses from Boundary NTP
-                    // and CockroachDb zones here too - but neither of those are
-                    // currently part of the example system, so their synthetic
-                    // responses to inventory collection aren't necessary yet.
+                    // Synthesize time-sync responses from NTP zones.
+                    if zone.zone_type.is_ntp() {
+                        builder
+                            .found_ntp_timesync(
+                                nexus_types::inventory::TimeSync {
+                                    zone_id: zone.id,
+                                    synced: true,
+                                },
+                            )
+                            .unwrap();
+                    }
                 }
             }
+        }
+
+        // Synthesize CockroachDb status: every running CockroachDb zone
+        // reports healthy metrics.  We assign sequential node IDs and report
+        // the total cluster size as liveness_live_nodes.
+        let cockroach_zone_count =
+            builder.ledgered_zones_of_kind(ZoneKind::CockroachDb).count();
+        let live_nodes = cockroach_zone_count as u64;
+        for i in 0..cockroach_zone_count {
+            builder.found_cockroach_status(
+                cockroach_admin_types::node::InternalNodeId::new(
+                    (i + 1).to_string(),
+                ),
+                nexus_types::inventory::CockroachStatus {
+                    ranges_underreplicated: Some(0),
+                    liveness_live_nodes: Some(live_nodes),
+                },
+            );
         }
 
         for membership in &self.clickhouse_keeper_cluster_membership {

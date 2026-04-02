@@ -1,2 +1,0 @@
-ALTER INDEX IF EXISTS lookup_webhook_event_globs_for_rx
-RENAME TO lookup_alert_globs_for_rx;

@@ -94,10 +94,6 @@ read_only_region_replacement_start.period_secs = 30
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 sp_ereport_ingester.period_secs = 30
-# Disabled in R16, as the Hubris task that handles ereport ingestion requests
-# has not merged yet, and trying to ingest them will just result in Nexus
-# logging a bunch of errors.
-sp_ereport_ingester.disable = true
 # How frequently to check for a new fault management sitrep (made by any
 # Nexus).
 # This is cheap, so we should check frequently.
@@ -123,6 +119,12 @@ trust_quorum.period_secs = 60
 attached_subnet_manager.period_secs = 60
 session_cleanup.period_secs = 300
 session_cleanup.max_delete_per_activation = 10000
+audit_log_timeout_incomplete.period_secs = 600
+audit_log_timeout_incomplete.timeout_secs = 14400
+audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+audit_log_cleanup.period_secs = 600
+audit_log_cleanup.retention_days = 90
+audit_log_cleanup.max_deleted_per_activation = 10000
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

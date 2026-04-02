@@ -84,8 +84,8 @@ pub struct SimTufRepoSource {
     zone_manifest_source: OmicronInstallManifestSource,
     measurement_manifest_source: MeasurementManifestSource,
     message: String,
-    known_artifact_id_names: BTreeSet<String>,
-    error_artifact_id_names: BTreeSet<String>,
+    known_zone_names: BTreeSet<String>,
+    error_zone_names: BTreeSet<String>,
 }
 
 impl SimTufRepoSource {
@@ -135,8 +135,8 @@ impl SimTufRepoSource {
                 measurement_manifest_source,
             ),
             message,
-            known_artifact_id_names: known,
-            error_artifact_id_names: BTreeSet::new(),
+            known_zone_names: known,
+            error_zone_names: BTreeSet::new(),
         })
     }
 
@@ -155,16 +155,14 @@ impl SimTufRepoSource {
         let (known, unknown): (Vec<_>, Vec<_>) = artifact_id_names
             .into_iter()
             .map(|zone_name| zone_name.as_ref().to_owned())
-            .partition(|zone_name| {
-                self.known_artifact_id_names.contains(zone_name)
-            });
+            .partition(|zone_name| self.known_zone_names.contains(zone_name));
         if !unknown.is_empty() {
             return Err(UnknownZoneNamesError::new(
                 unknown,
-                self.known_artifact_id_names.clone(),
+                self.known_zone_names.clone(),
             ));
         }
-        self.error_artifact_id_names.extend(known);
+        self.error_zone_names.extend(known);
         Ok(())
     }
 
@@ -199,21 +197,12 @@ impl SimTufRepoSource {
 
                 let file_name = artifact.id.name.to_string();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
-                let status =
-                    if self.error_artifact_id_names.contains(&artifact.id.name)
-                    {
-                        Err("reconfigurator-sim: simulated error \
-                             validating measurement"
-                            .to_owned())
-                    } else {
-                        Ok(())
-                    };
                 Some(ZoneArtifactInventory {
                     file_name,
                     path,
                     expected_size: artifact.size,
                     expected_hash: artifact.hash,
-                    status,
+                    status: Ok(()),
                 })
             })
             .collect();
@@ -240,8 +229,7 @@ impl SimTufRepoSource {
                     .to_owned();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
                 let status =
-                    if self.error_artifact_id_names.contains(&artifact.id.name)
-                    {
+                    if self.error_zone_names.contains(&artifact.id.name) {
                         Err("reconfigurator-sim: simulated error \
                              validating zone image"
                             .to_owned())
@@ -269,12 +257,8 @@ impl SimTufRepoSource {
             " (system version {}",
             self.description.repo.system_version
         );
-        if !self.error_artifact_id_names.is_empty() {
-            swrite!(
-                message,
-                ", {} zone errors",
-                self.error_artifact_id_names.len()
-            );
+        if !self.error_zone_names.is_empty() {
+            swrite!(message, ", {} zone errors", self.error_zone_names.len());
         }
         message.push(')');
 

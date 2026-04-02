@@ -87,6 +87,7 @@ use sled_agent_types_versions::v1;
 use sled_agent_types_versions::v20;
 use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
+use sled_agent_types_versions::v30;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -403,7 +404,8 @@ impl SledAgentApi for SledAgentSimImpl {
     > {
         // Read the current envelope, then convert it back down to the version
         // we have to report for this (now-removed!) API endpoint.
-        use v20::early_networking::EarlyNetworkConfigBody;
+        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
+        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
 
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
@@ -416,21 +418,36 @@ impl SledAgentApi for SledAgentSimImpl {
                         InlineErrorChain::new(&err)
                     ))
                 })?;
-        let body: EarlyNetworkConfigBody = envelope
-            .deserialize_body()
-            .map_err(|err| {
+        let latest_version_body =
+            envelope.deserialize_body().map_err(|err| {
                 HttpError::for_internal_error(format!(
                     "could not deserialize early network config body: {}",
                     InlineErrorChain::new(&err)
                 ))
-            })?
-            .into();
+            })?;
+
+        // Downconvert from the current version to the v20 version we have to
+        // return from this endpoint.
+        let body = BodyV20::from(BodyV26::from(latest_version_body));
 
         Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
             generation: config.generation,
-            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+            schema_version: BodyV20::SCHEMA_VERSION,
             body,
         }))
+    }
+
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v26(

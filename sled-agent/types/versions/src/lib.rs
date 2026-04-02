@@ -67,8 +67,16 @@ pub mod v25;
 pub mod v26;
 #[path = "modify_services_in_inventory/mod.rs"]
 pub mod v28;
+#[path = "add_vsock_component/mod.rs"]
+pub mod v29;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
+#[path = "stronger_bgp_unnumbered_types/mod.rs"]
+pub mod v30;
+#[path = "add_icmpv6_firewall_support/mod.rs"]
+pub mod v31;
+#[path = "make_all_external_ip_fields_optional/mod.rs"]
+pub mod v32;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

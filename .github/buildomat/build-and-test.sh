@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.125'
+NEXTEST_VERSION='0.9.131'
 
 cargo --version
 rustc --version
@@ -138,6 +138,7 @@ RECORDING_CONFIG_DIR="/tmp/nextest-recording-config"
 RECORDING_CONFIG="$RECORDING_CONFIG_DIR/config.toml"
 NEXTEST_STATE_DIR="$(mktemp -d /tmp/nextest-state.XXXXXX)"
 ARCHIVE_PATH="/tmp/nextest-run-archive.zip"
+CHROME_TRACE_PATH="/tmp/nextest-chrome-trace.json"
 
 mkdir -p "$RECORDING_CONFIG_DIR"
 printf '[experimental]\nrecord = true\n\n[record]\nenabled = true\n' \
@@ -160,6 +161,12 @@ if ! ptime -m cargo nextest store export latest \
     echo "warning: failed to export recording archive" >&2
 fi
 
+if ! ptime -m cargo nextest store export-chrome-trace latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --output "$CHROME_TRACE_PATH"; then
+    echo "warning: failed to export Chrome trace" >&2
+fi
+
 if [[ "$NEXTEST_EXIT" -ne 0 ]]; then
     echo "error: cargo nextest run failed with exit code $NEXTEST_EXIT" >&2
     exit "$NEXTEST_EXIT"
@@ -170,6 +177,13 @@ fi
 #
 banner doctest
 ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
+
+# Verify that old migrations have been removed.
+#
+# We do this after the main build, so the dependencies of "cargo xtask schema"
+# have already been built, which makes this cheap(er).
+banner "check schema migration cleanup"
+ptime -m cargo xtask schema old-migrations
 
 # Build the live-tests.  This is only supported on illumos.
 # We also can't actually run them here.  See the README for more details.

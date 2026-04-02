@@ -884,6 +884,7 @@ impl DataStore {
             &authn::USER_INTERNAL_READ,
             &authn::USER_EXTERNAL_AUTHN,
             &authn::USER_SAGA_RECOVERY,
+            &authn::USER_OMDB,
         ]
         .iter()
         .map(|u| {

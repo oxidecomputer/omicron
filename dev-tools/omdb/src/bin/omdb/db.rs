@@ -112,6 +112,7 @@ use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -322,7 +323,7 @@ impl DbUrlOptions {
         Fut: Future<Output = anyhow::Result<T>>,
     {
         let datastore = self.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
         let result = f(opctx, datastore.clone()).await;
         datastore.terminate().await;
         result
@@ -2187,7 +2188,6 @@ async fn cmd_db_rack_list(
     struct RackRow {
         id: String,
         initialized: bool,
-        tuf_base_url: String,
         rack_subnet: String,
     }
 
@@ -2203,7 +2203,6 @@ async fn cmd_db_rack_list(
     let rows = rack_list.into_iter().map(|rack| RackRow {
         id: rack.id().to_string(),
         initialized: rack.initialized,
-        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
         rack_subnet: rack
             .rack_subnet
             .map(|subnet| subnet.to_string())
@@ -8158,8 +8157,9 @@ async fn cmd_db_trust_quorum_list_configs(
     }
 
     let limit = fetch_opts.fetch_limit;
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(args.rack_id);
     let configs = datastore
-        .tq_list_config(opctx, args.rack_id, &first_page::<i64>(limit))
+        .tq_list_config(opctx, authz_tq, &first_page::<i64>(limit))
         .await
         .context("listing trust quorum configurations")?;
 

@@ -1048,7 +1048,6 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         initialized -> Bool,
-        tuf_base_url -> Nullable<Text>,
         rack_subnet -> Nullable<Inet>,
     }
 }
@@ -2869,9 +2868,11 @@ table! {
         report -> Jsonb,
 
         reporter -> crate::enums::EreporterTypeEnum,
-        sp_type -> Nullable<crate::enums::SpTypeEnum>,
-        sp_slot -> Nullable<Int4>,
         sled_id -> Nullable<Uuid>,
+        slot_type -> crate::enums::SpTypeEnum,
+        slot -> Nullable<Int4>,
+
+        marked_seen_in -> Nullable<Uuid>,
     }
 }
 

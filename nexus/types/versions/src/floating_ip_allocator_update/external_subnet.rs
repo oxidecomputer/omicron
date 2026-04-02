@@ -64,7 +64,7 @@ impl TryFrom<crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator>
             } => {
                 if pool.is_some() {
                     return Err(Error::invalid_request(
-                        "May not specify both an IP subnet and a Subnet Pool",
+                        "May not specify both an IP subnet and a subnet pool",
                     ));
                 }
                 Ok(Self::Explicit { subnet })
