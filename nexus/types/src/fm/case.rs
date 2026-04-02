@@ -53,7 +53,7 @@ impl fmt::Display for Case {
 impl IdOrdItem for Case {
     type Key<'a> = &'a CaseUuid;
     fn key(&self) -> Self::Key<'_> {
-        &self.id()
+        &self.id
     }
 
     iddqd::id_upcast!();
