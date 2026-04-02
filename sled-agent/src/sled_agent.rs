@@ -42,7 +42,6 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
@@ -716,10 +715,6 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
