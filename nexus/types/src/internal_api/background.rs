@@ -889,11 +889,23 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
+/// Per-child-table GC statistics, used by [`SitrepGcStatus`].
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
+)]
+pub struct ChildTableGcStats {
+    pub rows_deleted: usize,
+    pub batches: usize,
+}
+
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
-    pub orphaned_sitreps_found: usize,
     pub orphaned_sitreps_deleted: usize,
+    pub sitrep_metadata_batches: usize,
+    pub batch_size: u32,
+    /// Per-child-table statistics, keyed by table name.
+    pub child_tables: BTreeMap<String, ChildTableGcStats>,
     pub errors: Vec<String>,
 }
 

@@ -3459,8 +3459,10 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
-        orphaned_sitreps_found,
         orphaned_sitreps_deleted,
+        sitrep_metadata_batches,
+        batch_size,
+        child_tables,
         errors,
     } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
         Err(error) => {
@@ -3473,23 +3475,51 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
-    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
-    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
-    pub const ERRORS: &str = "errors:";
-    pub const WIDTH: usize =
-        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
-    pub const NUM_WIDTH: usize = 4;
+    const BASE_WIDTH: usize = 40;
+    const NUM_WIDTH: usize = 4;
+
+    // Ensure columns stay aligned even if a child table name is long.
+    let width = child_tables
+        .keys()
+        // We're using two spaces here to match the
+        // "orphaned {name} rows deleted" format string.
+        // Removing "{name}" leaves a space on either side.
+        .map(|name| "orphaned  rows deleted:".len() + name.len() + 1)
+        .fold(BASE_WIDTH, |w, l| w.max(l));
+
     if !errors.is_empty() {
-        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!(
+            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
+            "errors:",
+            errors.len()
+        );
         for error in errors {
             println!("      > {error}")
         }
     }
 
-    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!("    {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
     println!(
-        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+        "    {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
+        "orphaned sitreps deleted:"
     );
+    println!(
+        "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
+        "  batches:"
+    );
+
+    if child_tables.is_empty() {
+        eprintln!("(!)   warning: no child tables reported (likely a bug)");
+    }
+
+    for (table_name, stats) in &child_tables {
+        println!(
+            "    {:<width$}{:>NUM_WIDTH$}",
+            format!("orphaned {table_name} rows deleted:"),
+            stats.rows_deleted,
+        );
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+    }
 }
 
 fn print_task_fm_rendezvous(details: &serde_json::Value) {
