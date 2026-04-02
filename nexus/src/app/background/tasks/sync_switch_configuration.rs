@@ -53,7 +53,6 @@ use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
 use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
-use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::InvalidIpAddrError;
@@ -68,7 +67,8 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
-use sled_agent_types::early_networking::WriteNetworkConfigRequest;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -1301,7 +1301,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let desired_config = EarlyNetworkConfigBody {
+                let desired_config = SystemNetworkingConfig {
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: subnet,
                         infra_ip_first,
@@ -1310,6 +1310,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         bgp,
                         bfd,
                     },
+                    // TODO-correctness We need to fill this in based on the
+                    // current blueprint.
+                    service_zone_nat_entries: None,
                 };
 
                 // bootstore_needs_update is a boolean value that determines
@@ -1339,8 +1342,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .and_then(|envelope| envelope.deserialize_body())
                         {
                             Ok(config) => {
-                                let current_rnc = &config.rack_network_config;
-                                let desired_rnc = &desired_config.rack_network_config;
+                                let SystemNetworkingConfig {
+                                    rack_network_config: current_rnc,
+                                    service_zone_nat_entries: current_nat,
+                                } = &config;
+                                let SystemNetworkingConfig {
+                                    rack_network_config: desired_rnc,
+                                    service_zone_nat_entries: desired_nat,
+                                } = &desired_config;
+
                                 let rnc_differs = {
                                     !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
                                     !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
@@ -1350,12 +1360,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     current_rnc.infra_ip_last != desired_rnc.infra_ip_last
                                 };
 
-                                if rnc_differs {
+                                let nat_differs = current_nat != desired_nat;
+
+                                if rnc_differs || nat_differs {
                                     info!(
                                         log,
-                                        "rack network config has changed";
-                                        "old" => ?config.rack_network_config,
-                                        "new" => ?desired_config.rack_network_config,
+                                        "system network config has changed";
+                                        "old" => ?config,
+                                        "new" => ?desired_config,
                                     );
                                     true
                                 } else {

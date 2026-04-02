@@ -9,5 +9,6 @@ pub(crate) mod early_networking;
 mod instance;
 pub(crate) mod inventory;
 mod sled;
+mod system_networking;
 mod uplink;
 mod zone_bundle;
