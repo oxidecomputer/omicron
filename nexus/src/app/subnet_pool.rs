@@ -336,7 +336,8 @@ impl super::Nexus {
             .subnet_pool_utilization(opctx, &authz_pool)
             .await?;
 
-        let Some(remaining) = capacity.checked_sub(allocated) else {
+        let remaining = capacity - allocated;
+        if remaining < 0.0 {
             return Err(Error::internal_error(
                 format!(
                     "Computed an impossible negative count of remaining \
@@ -345,8 +346,6 @@ impl super::Nexus {
                 .as_str(),
             ));
         };
-        let remaining = remaining as f64;
-        let capacity = capacity as f64;
         Ok(subnet_pool_types::SubnetPoolUtilization { remaining, capacity })
     }
 }

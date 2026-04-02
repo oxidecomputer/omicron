@@ -32,15 +32,17 @@ use diesel::JoinOnDsl as _;
 use diesel::NullableExpressionMethods as _;
 use diesel::QueryDsl as _;
 use diesel::SelectableHelper as _;
+use diesel::define_sql_function;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use diesel::sql_types::Double;
+use diesel::sql_types::Nullable;
 use dropshot::PaginationOrder;
 use nexus_auth::authz;
 use nexus_auth::authz::SUBNET_POOL_LIST;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
@@ -126,6 +128,8 @@ impl From<AttachedSubnetDetails> for AttachedSubnet {
         }
     }
 }
+
+define_sql_function!(fn coalesce(x: Nullable<Double>, y: Double) -> Double);
 
 impl DataStore {
     /// Lookup a Subnet Pool by name or ID.
@@ -641,42 +645,62 @@ impl DataStore {
 
     // === Subnet Pool Utilization ===
 
-    /// Return the number of addresses allocated from and the capacity of the
-    /// provided Subnet Pool.
+    /// Return (allocated, capacity) as f64 address counts for a subnet pool.
+    ///
+    /// Both values are computed entirely in SQL using
+    /// `SUM(pow(2, bits - prefix_len))` over the member and allocated subnet
+    /// tables. Because CockroachDB cannot do 128-bit integer arithmetic on
+    /// inet values, we use FLOAT8 (f64), which is also the type exposed in
+    /// the API response. For IPv6 subnets this loses precision in the low
+    /// bits, but the API already accepts that tradeoff.
     pub async fn subnet_pool_utilization(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
-    ) -> Result<(u128, u128), Error> {
+    ) -> Result<(f64, f64), Error> {
+        use diesel::dsl::{sql, sum};
+        use diesel::sql_types::Double as SqlDouble;
+        use nexus_db_schema::schema::external_subnet;
+        use nexus_db_schema::schema::subnet_pool_member;
+
+        // SQL expression for the number of addresses in a subnet.
+        // Diesel has no native inet function support, so this stays as
+        // a raw SQL fragment; everything else uses the DSL.
+        const SUBNET_SIZE_SQL: &str = "pow(2::FLOAT8, \
+            (CASE WHEN family(subnet) = 4 THEN 32 ELSE 128 END \
+             - masklen(subnet))::FLOAT8)";
+
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let pool_id = to_db_typed_uuid(authz_pool.id());
-        let (member_subnets, allocated_subnets) = self
-            .transaction_retry_wrapper("subnet_pool_utilization")
-            .transaction(&conn, |conn| async move {
-                let member_subnets = self
-                    .subnet_pool_list_member_subnets_on_connection(
-                        &conn, pool_id,
-                    )
-                    .await?;
-                let allocated_subnets = self
-                    .subnet_pool_list_allocated_subnets_on_connection(
-                        &conn, pool_id,
-                    )
-                    .await?;
-                Ok((member_subnets, allocated_subnets))
-            })
-            .await
-            .map_err(|e| match &e {
-                DieselError::NotFound => public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                ),
-                _ => public_error_from_diesel(e, ErrorHandler::Server),
-            })?;
-        let capacity = Self::accumulate_subnet_sizes(&member_subnets)?;
-        let allocated = Self::accumulate_subnet_sizes(&allocated_subnets)?;
+
+        let capacity_subq = subnet_pool_member::table
+            .filter(subnet_pool_member::subnet_pool_id.eq(pool_id))
+            .filter(subnet_pool_member::time_deleted.is_null())
+            .select(sum(sql::<SqlDouble>(SUBNET_SIZE_SQL)))
+            .single_value();
+
+        let allocated_subq = external_subnet::table
+            .filter(external_subnet::subnet_pool_id.eq(pool_id))
+            .filter(external_subnet::time_deleted.is_null())
+            .select(sum(sql::<SqlDouble>(SUBNET_SIZE_SQL)))
+            .single_value();
+
+        let (capacity, allocated) = diesel::select((
+            coalesce(capacity_subq, 0.0),
+            coalesce(allocated_subq, 0.0),
+        ))
+        .get_result_async::<(f64, f64)>(&*conn)
+        .await
+        .map_err(|e| match &e {
+            DieselError::NotFound => public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByResource(authz_pool),
+            ),
+            _ => public_error_from_diesel(e, ErrorHandler::Server),
+        })?;
+
         Ok((allocated, capacity))
     }
 
@@ -686,21 +710,10 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
-    ) -> Result<u128, Error> {
-        opctx.authorize(authz::Action::Read, authz_pool).await?;
-        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let pool_id = to_db_typed_uuid(authz_pool.id());
-        let subnets = self
-            .subnet_pool_list_member_subnets_on_connection(&conn, pool_id)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                )
-            })?;
-        Self::accumulate_subnet_sizes(&subnets)
+    ) -> Result<f64, Error> {
+        let (_, capacity) =
+            self.subnet_pool_utilization(opctx, authz_pool).await?;
+        Ok(capacity)
     }
 
     /// Return the total number of allocated addresses in the provided Subnet
@@ -710,77 +723,10 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
-    ) -> Result<u128, Error> {
-        opctx.authorize(authz::Action::Read, authz_pool).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let pool_id = to_db_typed_uuid(authz_pool.id());
-        let subnets = self
-            .subnet_pool_list_allocated_subnets_on_connection(&conn, pool_id)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Self::accumulate_subnet_sizes(&subnets)
-    }
-
-    async fn subnet_pool_list_member_subnets_on_connection(
-        &self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        pool_id: nexus_db_model::DbTypedUuid<
-            omicron_uuid_kinds::SubnetPoolKind,
-        >,
-    ) -> Result<Vec<nexus_db_model::IpNet>, DieselError> {
-        use nexus_db_schema::schema::subnet_pool_member;
-        subnet_pool_member::table
-            .filter(subnet_pool_member::subnet_pool_id.eq(pool_id))
-            .filter(subnet_pool_member::time_deleted.is_null())
-            .select(subnet_pool_member::subnet)
-            .limit(10000)
-            .get_results_async::<nexus_db_model::IpNet>(conn)
-            .await
-    }
-
-    async fn subnet_pool_list_allocated_subnets_on_connection(
-        &self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        pool_id: nexus_db_model::DbTypedUuid<
-            omicron_uuid_kinds::SubnetPoolKind,
-        >,
-    ) -> Result<Vec<nexus_db_model::IpNet>, DieselError> {
-        use nexus_db_schema::schema::external_subnet;
-        external_subnet::table
-            .filter(external_subnet::subnet_pool_id.eq(pool_id))
-            .filter(external_subnet::time_deleted.is_null())
-            .select(external_subnet::subnet)
-            .limit(10000)
-            .get_results_async::<nexus_db_model::IpNet>(conn)
-            .await
-    }
-
-    fn accumulate_subnet_sizes(
-        subnets: &[nexus_db_model::IpNet],
-    ) -> Result<u128, Error> {
-        let mut count: u128 = 0;
-        for subnet in subnets {
-            let size = match subnet {
-                nexus_db_model::IpNet::V4(v4) => {
-                    u128::from(v4.size().ok_or_else(|| {
-                        Error::internal_error(
-                            "overflow computing IPv4 subnet size",
-                        )
-                    })?)
-                }
-                nexus_db_model::IpNet::V6(v6) => {
-                    v6.size().ok_or_else(|| {
-                        Error::internal_error(
-                            "overflow computing IPv6 subnet size",
-                        )
-                    })?
-                }
-            };
-            count = count.checked_add(size).ok_or_else(|| {
-                Error::internal_error("overflow accumulating subnet pool sizes")
-            })?;
-        }
-        Ok(count)
+    ) -> Result<f64, Error> {
+        let (allocated, _) =
+            self.subnet_pool_utilization(opctx, authz_pool).await?;
+        Ok(allocated)
     }
 
     /// Create an External Subnet.
@@ -4137,7 +4083,7 @@ mod tests {
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(capacity, 0);
+        assert_eq!(capacity, 0.0);
 
         // Link the pool to the silo so we can allocate external subnets.
         datastore
@@ -4166,14 +4112,14 @@ mod tests {
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(capacity, 256);
+        assert_eq!(capacity, 256.0);
 
         // No subnets allocated yet.
         let allocated = datastore
             .subnet_pool_allocated_count(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(allocated, 0);
+        assert_eq!(allocated, 0.0);
 
         // Allocate a /28 (16 addresses).
         datastore
@@ -4199,14 +4145,14 @@ mod tests {
             .subnet_pool_allocated_count(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(allocated, 16);
+        assert_eq!(allocated, 16.0);
 
         // Capacity is unchanged.
         let capacity = datastore
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(capacity, 256);
+        assert_eq!(capacity, 256.0);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -4268,7 +4214,7 @@ mod tests {
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(capacity, 0);
+        assert_eq!(capacity, 0.0);
 
         // Add a /48 member (2^80 addresses).
         let member_subnet: oxnet::IpNet = "2001:db8:1::/48".parse().unwrap();
@@ -4290,14 +4236,15 @@ mod tests {
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(capacity, 1u128 << 80);
+        // 2^80 is exactly representable as f64 (it's a power of 2)
+        assert_eq!(capacity, (1u128 << 80) as f64);
 
         // No subnets allocated yet.
         let allocated = datastore
             .subnet_pool_allocated_count(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(allocated, 0);
+        assert_eq!(allocated, 0.0);
 
         // Allocate a /64 (2^64 addresses).
         datastore
@@ -4322,14 +4269,14 @@ mod tests {
             .subnet_pool_allocated_count(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(allocated, 1u128 << 64);
+        assert_eq!(allocated, (1u128 << 64) as f64);
 
         // Capacity is unchanged.
         let capacity = datastore
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(capacity, 1u128 << 80);
+        assert_eq!(capacity, (1u128 << 80) as f64);
 
         // Add a second, larger member.
         let big_subnet: oxnet::IpNet = "2001:db9::/32".parse().unwrap();
@@ -4351,8 +4298,9 @@ mod tests {
             .subnet_pool_total_capacity(opctx, &authz_pool)
             .await
             .unwrap();
-        // /48 has 2^80, /32 has 2^96
-        assert_eq!(capacity, (1u128 << 80) + (1u128 << 96));
+        // /48 has 2^80, /32 has 2^96. Both are exact as f64; their sum
+        // is also exact because they differ by only 16 powers of 2.
+        assert_eq!(capacity, (1u128 << 80) as f64 + (1u128 << 96) as f64);
 
         db.terminate().await;
         logctx.cleanup_successful();
