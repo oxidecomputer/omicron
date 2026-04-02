@@ -4,7 +4,6 @@
 
 //! Network setup required to bring up the control plane
 
-use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
@@ -39,6 +38,7 @@ use omicron_common::backoff::{
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
+use sled_agent_scrimlet_reconcilers::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
     PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
