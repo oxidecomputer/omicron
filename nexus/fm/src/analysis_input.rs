@@ -13,6 +13,21 @@ use std::sync::Arc;
 
 pub use nexus_types::fm::AnalysisInputReport as Report;
 
+/// A complete set of inputs to a fault management analysis phase.
+///
+/// This struct bundles together all the inputs to analysis, including:
+///
+/// - The [parent sitrep](Input::parent_sitrep)
+/// - The current [inventory collection](Input::inventory)
+/// - Any [new ereports](Input::new_ereports) which were received since when
+///   the parent sitrep was produced
+/// - The set of [cases](Input::cases) which must be copied forwards into
+///   the next sitrep
+///
+/// This type represents the outputs of the analysis preparation phase. Once it
+/// is constructed, the inputs are immutable and cannot be modified. To
+/// construct a new `Input` as part of a preparaation phase, use
+/// [`Input::builder`].
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
@@ -39,6 +54,8 @@ impl Input {
         &self.cases
     }
 
+    /// Returns a [`Builder`] for constructing a new `Input` from the provided
+    /// `parent_sitrep` and inventory collection.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
@@ -52,6 +69,7 @@ impl Input {
     }
 }
 
+#[must_use]
 pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
@@ -97,6 +115,9 @@ impl Builder {
         self.new_ereports.len()
     }
 
+    /// Finish constructing the [`Input`] and return it, along with a [`Report`]
+    /// that provides a human-readable summary of how the inputs were
+    /// constructed.
     pub fn build(self) -> (Input, Report) {
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
@@ -120,6 +141,12 @@ impl Builder {
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
         };
+
+        // Determine which cases must be copied forwards into the next sitrep.
+        // Cases from the parent sitrep should be copied forwards if:
+        // - The case is still open
+        // - The case has been closed, but it contains an ereport which has not
+        //   yet been marked as "seen" in the database.
         let cases: IdOrdMap<_> = parent_sitrep
             .iter()
             .flat_map(|s| s.cases.iter())
