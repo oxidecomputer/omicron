@@ -139,8 +139,10 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
-    ) -> anyhow::Result<(fm::analysis::Input, status::PreparationStatus)> {
-        let mut builder = fm::analysis::Input::builder(parent_sitrep, inv);
+    ) -> anyhow::Result<(fm::analysis_input::Input, status::PreparationStatus)>
+    {
+        let mut builder =
+            fm::analysis_input::Input::builder(parent_sitrep, inv);
         let mut errors = Vec::new();
         self.load_new_ereports(opctx, &mut builder, &mut errors)
             .await
@@ -153,7 +155,7 @@ impl FmAnalysis {
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,
-        builder: &mut fm::analysis::InputBuilder,
+        builder: &mut fm::analysis_input::Builder,
         errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
         let mut paginator = Paginator::new(
@@ -204,7 +206,7 @@ impl FmAnalysis {
     async fn analyze(
         &mut self,
         _opctx: &OpContext,
-        _inputs: fm::analysis::Input,
+        _inputs: fm::analysis_input::Input,
     ) -> anyhow::Result<status::AnalysisOutcome> {
         anyhow::bail!("FM analysis is not yet implemented")
     }

@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Inputs to fault management analysis.
+
 use iddqd::IdOrdMap;
-use nexus_types::fm::{
-    self, AnalysisInputReport, ClosedCaseReport, Sitrep, SitrepVersion,
-};
+use nexus_types::fm::{self, ClosedCaseReport, Sitrep, SitrepVersion};
 use nexus_types::inventory;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+
+pub use nexus_types::fm::AnalysisInputReport as Report;
 
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
@@ -40,8 +42,8 @@ impl Input {
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
-    ) -> InputBuilder {
-        InputBuilder {
+    ) -> Builder {
+        Builder {
             parent_sitrep,
             inv,
             new_ereports: IdOrdMap::default(),
@@ -50,7 +52,7 @@ impl Input {
     }
 }
 
-pub struct InputBuilder {
+pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
     /// Ereports which are new and should be input to analysis in the next
@@ -65,7 +67,7 @@ pub struct InputBuilder {
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 }
 
-impl InputBuilder {
+impl Builder {
     /// Adds a set of ereports which have not been marked as "seen" in the
     /// database to the inputs under construction.
     ///
@@ -95,7 +97,7 @@ impl InputBuilder {
         self.new_ereports.len()
     }
 
-    pub fn finish(self) -> (Input, AnalysisInputReport) {
+    pub fn finish(self) -> (Input, Report) {
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
             Some(sitrep) => {
@@ -106,7 +108,7 @@ impl InputBuilder {
             None => (None, None),
         };
 
-        let mut report = AnalysisInputReport {
+        let mut report = Report {
             parent_sitrep_id,
             parent_inv_id,
             inv_id: self.inv.id,

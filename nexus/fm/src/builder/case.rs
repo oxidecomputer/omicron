@@ -31,7 +31,7 @@ impl AllCases {
     pub(super) fn new(
         log: slog::Logger,
         sitrep_id: SitrepUuid,
-        inputs: &crate::analysis::Input,
+        inputs: &crate::analysis_input::Input,
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
         let cases = inputs

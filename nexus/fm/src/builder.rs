@@ -4,7 +4,7 @@
 
 //! Sitrep builder
 
-use crate::analysis;
+use crate::analysis_input;
 use nexus_types::fm;
 use nexus_types::inventory;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -27,13 +27,13 @@ pub struct SitrepBuilder<'a> {
 }
 
 impl<'a> SitrepBuilder<'a> {
-    pub fn new(log: &Logger, inputs: &'a analysis::Input) -> Self {
+    pub fn new(log: &Logger, inputs: &'a analysis_input::Input) -> Self {
         Self::new_with_rng(log, inputs, SitrepBuilderRng::from_entropy())
     }
 
     pub fn new_with_rng(
         log: &Logger,
-        inputs: &'a analysis::Input,
+        inputs: &'a analysis_input::Input,
         mut rng: SitrepBuilderRng,
     ) -> Self {
         let parent_sitrep = inputs.parent_sitrep();
