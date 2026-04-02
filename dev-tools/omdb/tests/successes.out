@@ -453,10 +453,6 @@ task: "service_firewall_rule_propagation"
     connectivity
 
 
-task: "service_zone_nat_tracker"
-    ensures service zone nat records are recorded in NAT RPW table
-
-
 task: "session_cleanup"
     hard-deletes expired console sessions based on absolute timeout
 
@@ -906,12 +902,6 @@ task: "service_firewall_rule_propagation"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-
-task: "service_zone_nat_tracker"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: inventory collection is None
 
 task: "session_cleanup"
   configured period: every <REDACTED_DURATION>m
@@ -1546,12 +1536,6 @@ task: "service_firewall_rule_propagation"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-
-task: "service_zone_nat_tracker"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: inventory collection is None
 
 task: "session_cleanup"
   configured period: every <REDACTED_DURATION>m
