@@ -148,7 +148,7 @@ impl FmAnalysis {
             .await
             .context("failed to load new ereports")?;
 
-        let (input, report) = builder.finish();
+        let (input, report) = builder.build();
         Ok((input, status::PreparationStatus { errors, report }))
     }
 

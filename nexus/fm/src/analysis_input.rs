@@ -97,7 +97,7 @@ impl Builder {
         self.new_ereports.len()
     }
 
-    pub fn finish(self) -> (Input, Report) {
+    pub fn build(self) -> (Input, Report) {
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
             Some(sitrep) => {
