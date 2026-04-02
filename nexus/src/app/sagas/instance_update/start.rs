@@ -114,7 +114,13 @@ async fn siu_lock_instance(
     // lock the instance record: we may encounter a database error that does NOT
     // indicate that the lock is already held. In that case, this action MUST
     // continue retrying the lock operation forever until it either succeeds or
-    // indicates that another saga has the lock. Otherwise, a particularly
+    // indicates that another saga has the lock, in order to satisfy the
+    // distributed saga requirement that exuting an action must be idempotent.
+    // Retrying indefinitely is necessary to ensure idempotency because it is
+    // possible that a previous execution of this action *did* succesfully
+    // acquire the lock but crashed before it completed.
+    //
+    // As aan example of why this is important, consider a particularly
     // unlucky sequence of a Nexus crash followed by a transient database error
     // could leave the instance record permanently locked by this (now failed)
     // saga. The scenario in which this would occur is as follows:
@@ -129,9 +135,6 @@ async fn siu_lock_instance(
     //    (`siu_instance_lock_undo()`), will *not* execute, so the instance
     //    record remains locked, but this saga has now failed, so no one will
     //    ever unlock the instance.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/10166 for more
-    // details.
     //
     // Due to this potential danger, we shall retry the lock operation forever
     // until it either succeeds or indicates that the instance has already been
@@ -186,10 +189,10 @@ async fn siu_lock_instance(
             if http_error.status_code.is_client_error() {
                 // A "client error" here indicates that we probably sent a query
                 // to the database that will never succeed. This should
-                // hopefully never happen, and probably indicates indicate a
-                // programmer error in the lock operation. However, if we don't
-                // keep retrying, the instance may remain locked forever, so
-                // we shall just keep seeing if it will ever succeed.
+                // hopefully never happen, and probably indicates a programmer
+                // error in the lock operation. However, if we don't keep
+                // retrying, the instance may remain locked forever, so we shall
+                // just keep seeing if it will ever succeed.
                 error!(
                     osagactx.log(),
                     "instance update: client error while trying to lock \
