@@ -157,7 +157,10 @@ impl Builder {
         for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
             if case.is_open() {
                 report.open_cases.insert(case.id, case.metadata.clone());
-                open_cases.insert_unique(case.clone());
+                open_cases.insert_unique(case.clone()).expect(
+                    "the case UUID is coming from iterating over another \
+                     `IdOrdMap`, so it must be unique",
+                );
             } else {
                 let unmarked_ereports = case
                     .ereports
@@ -179,7 +182,10 @@ impl Builder {
                             unmarked_ereports,
                         },
                     );
-                    closed_cases_copied_forward.insert_unique(case.clone());
+                    closed_cases_copied_forward.insert_unique(case.clone()).expect(
+                        "the case UUID is coming from iterating over another \
+                         `IdOrdMap`, so it must be unique",
+                    );
                 }
             }
         }
