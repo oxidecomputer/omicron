@@ -404,6 +404,7 @@ impl DataStore {
     ) -> UpdateResult<SubnetPoolSiloLink> {
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        use diesel::dsl::exists;
         use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
         let pool_id = to_db_typed_uuid(authz_pool.id());
@@ -415,7 +416,13 @@ impl DataStore {
             return diesel::update(
                 dsl::subnet_pool_silo_link
                     .filter(dsl::subnet_pool_id.eq(pool_id))
-                    .filter(dsl::silo_id.eq(silo_id)),
+                    .filter(dsl::silo_id.eq(silo_id))
+                    .filter(exists(
+                        pool_dsl::subnet_pool
+                            .filter(pool_dsl::id.eq(pool_id))
+                            .filter(pool_dsl::time_deleted.is_null())
+                            .select(pool_dsl::id),
+                    )),
             )
             .set(dsl::is_default.eq(false))
             .returning(SubnetPoolSiloLink::as_returning())
@@ -4088,6 +4095,84 @@ mod tests {
             .await
             .expect_err(
                 "should not be able to set default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unset_deleted_subnet_pool_default_even_if_link_exists() {
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl as link_dsl;
+
+        let logctx = dev::test_setup_log(
+            "cannot_unset_deleted_subnet_pool_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("should be able to link pool to default silo");
+
+        let c = diesel::update(
+            pool_dsl::subnet_pool.find(db_pool.id().into_untyped_uuid()),
+        )
+        .set(pool_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete subnet pool");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let links: Vec<SubnetPoolSiloLink> = link_dsl::subnet_pool_silo_link
+            .filter(
+                link_dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("should still have link rows for deleted subnet pool");
+        assert_eq!(links.len(), 1);
+
+        let err = datastore
+            .update_subnet_pool_silo_link(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                false,
+            )
+            .await
+            .expect_err(
+                "should not be able to unset default on a deleted pool link",
             );
         assert_matches!(err, Error::ObjectNotFound { .. });
 

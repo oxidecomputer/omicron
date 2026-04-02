@@ -1365,6 +1365,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
+        use diesel::dsl::exists;
         use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::ip_pool_resource::dsl;
 
@@ -1382,6 +1383,12 @@ impl DataStore {
                 .filter(dsl::resource_id.eq(silo_id))
                 .filter(dsl::ip_pool_id.eq(ip_pool_id))
                 .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                .filter(exists(
+                    pool_dsl::ip_pool
+                        .filter(pool_dsl::id.eq(ip_pool_id))
+                        .filter(pool_dsl::time_deleted.is_null())
+                        .select(pool_dsl::id),
+                ))
                 .set(dsl::is_default.eq(false))
                 .returning(IpPoolResource::as_returning())
                 .get_result_async(&*conn)
@@ -4491,6 +4498,84 @@ mod test {
             .await
             .expect_err(
                 "Should not be able to set default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unset_deleted_pool_default_even_if_link_exists() {
+        let logctx = dev::test_setup_log(
+            "cannot_unset_deleted_pool_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should be able to link pool to default silo");
+
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
+        let c = diesel::update(pool_dsl::ip_pool.find(ip_pool.id()))
+            .set(pool_dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        use nexus_db_schema::schema::ip_pool_resource::dsl as resource_dsl;
+        let links: Vec<IpPoolResource> = resource_dsl::ip_pool_resource
+            .filter(resource_dsl::ip_pool_id.eq(ip_pool.id()))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should still have link rows for deleted pool");
+        assert_eq!(links.len(), 1);
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::Fleet,
+            nexus_types::silo::DEFAULT_SILO_ID,
+            LookupType::ById(nexus_types::silo::DEFAULT_SILO_ID),
+        );
+        let err = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect_err(
+                "Should not be able to unset default on a deleted pool link",
             );
         assert_matches!(err, Error::ObjectNotFound { .. });
 
