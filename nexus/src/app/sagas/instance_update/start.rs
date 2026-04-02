@@ -193,7 +193,7 @@ async fn siu_lock_instance(
                 error!(
                     osagactx.log(),
                     "instance update: client error while trying to lock \
-                     instance (likely requires operator intervention), \
+                     instance (likely requires support intervention), \
                      retrying anyway...";
                      "instance_id" => %instance_id,
                      "saga_id" => %lock_id,
