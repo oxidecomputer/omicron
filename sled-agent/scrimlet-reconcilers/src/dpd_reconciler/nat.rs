@@ -446,6 +446,11 @@ struct CurrentDpdEntriesAssembler<'a> {
     current_entries: BTreeSet<NatEntry>,
 }
 
+struct RelevantEntryCount {
+    service_vni: u64,
+    non_service_vni: u64,
+}
+
 impl<'a> CurrentDpdEntriesAssembler<'a> {
     async fn assemble(
         client: &'a Client,
@@ -477,14 +482,26 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
     ) -> Result<(), DpdClientError> {
         let mut stream_addresses =
             self.client.nat_ipv4_addresses_list_stream(SINGLE_REQUEST_LIMIT);
+
+        let mut counts =
+            RelevantEntryCount { service_vni: 0, non_service_vni: 0 };
+
         while let Some(ip) = stream_addresses.try_next().await? {
             self.assemble_entries_from_stream(
                 self.client.nat_ipv4_list_stream(&ip, SINGLE_REQUEST_LIMIT),
-                "ipv4",
-                log,
+                &mut counts,
             )
             .await?;
         }
+
+        info!(
+            log,
+            "finished fetching current ipv4 NAT entries from dpd";
+            "service_nat_entries" => counts.service_vni,
+            "non_service_nat_entries" => counts.non_service_vni,
+            "service_vnis" => ?self.service_vnis,
+        );
+
         Ok(())
     }
 
@@ -494,29 +511,38 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
     ) -> Result<(), DpdClientError> {
         let mut stream_addresses =
             self.client.nat_ipv6_addresses_list_stream(SINGLE_REQUEST_LIMIT);
+
+        let mut counts =
+            RelevantEntryCount { service_vni: 0, non_service_vni: 0 };
+
         while let Some(ip) = stream_addresses.try_next().await? {
             self.assemble_entries_from_stream(
                 self.client.nat_ipv6_list_stream(&ip, SINGLE_REQUEST_LIMIT),
-                "ipv6",
-                log,
+                &mut counts,
             )
             .await?;
         }
+
+        info!(
+            log,
+            "finished fetching current ipv6 NAT entries from dpd";
+            "service_nat_entries" => counts.service_vni,
+            "non_service_nat_entries" => counts.non_service_vni,
+            "service_vnis" => ?self.service_vnis,
+        );
+
         Ok(())
     }
 
     async fn assemble_entries_from_stream<S, T>(
         &mut self,
         mut stream: S,
-        description: &str,
-        log: &Logger,
+        counts: &mut RelevantEntryCount,
     ) -> Result<(), DpdClientError>
     where
         S: Stream<Item = Result<T, DpdClientError>> + Unpin,
         T: TryInto<NatEntry, Error = BadVni>,
     {
-        let mut found: u64 = 0;
-        let mut skipped: u64 = 0;
         while let Some(entry) = stream.try_next().await? {
             // The only way we can fail to convert a dpd `NatEntry` is if the
             // Vni from dpd isn't a valid omicron Vni (the `BadVni` in our
@@ -526,21 +552,13 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
             match entry.try_into() {
                 Ok(entry) if self.service_vnis.contains(&entry.vni) => {
                     self.current_entries.insert(entry);
-                    found += 1;
+                    counts.service_vni += 1;
                 }
                 Ok(_) | Err(BadVni) => {
-                    skipped += 1;
+                    counts.non_service_vni += 1;
                 }
             }
         }
-
-        info!(
-            log,
-            "finished fetching current {description} NAT entries from dpd";
-            "service_nat_entries" => found,
-            "non_service_nat_entries" => skipped,
-            "service_vnis" => ?self.service_vnis,
-        );
 
         Ok(())
     }
