@@ -1,5 +1,10 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result, anyhow};
+use bootstrap_agent_lockstep_api::RackInitializeRequest;
 use chrono::Utc;
 use hickory_resolver::ResolveErrorKind;
 use hickory_resolver::proto::ProtoErrorKind;
@@ -10,7 +15,6 @@ use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
 use reqwest::Url;
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
-use sled_agent_types::rack_init::RackInitializeRequest;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;

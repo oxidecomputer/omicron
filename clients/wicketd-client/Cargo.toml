@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+bootstrap-agent-lockstep-api.workspace = true
 chrono.workspace = true
 installinator-common.workspace = true
 omicron-common.workspace = true

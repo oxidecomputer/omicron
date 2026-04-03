@@ -12,6 +12,7 @@ anstyle.workspace = true
 anyhow = { workspace = true, features = ["backtrace"] }
 async-trait.workspace = true
 base64.workspace = true
+bootstrap-agent-lockstep-api.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 clap.workspace = true

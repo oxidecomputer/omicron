@@ -11,6 +11,7 @@ workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
+bootstrap-agent-lockstep-api.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
