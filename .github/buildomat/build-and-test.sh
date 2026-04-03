@@ -24,6 +24,9 @@ cargo --version
 rustc --version
 curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
+cargo build --release -p ci-resource-usage
+bmat process start ci-resource-usage target/release/ci-resource-usage /var/tmp/ci-resource-usage.csv
+
 #
 # Set up a custom temporary directory within whatever one we were given so that
 # we can check later whether we left detritus around.
