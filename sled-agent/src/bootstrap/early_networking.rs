@@ -701,7 +701,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     fanout: config.max_paths.as_nonzero_u8(),
                 };
 
-                if let Err(e) = mgd.bgp_apply_v2(&request).await {
+                if let Err(e) = mgd.bgp_apply(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
@@ -710,7 +710,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
 
-                if let Err(e) = mgd.update_rib_bestpath_fanout(&fanout).await {
+                if let Err(e) = mgd.update_bestpath_fanout(&fanout).await {
                     error!(
                         self.log,
                         "error while updating bestpath fanout";
