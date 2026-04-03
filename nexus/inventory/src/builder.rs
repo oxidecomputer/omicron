@@ -708,7 +708,7 @@ impl CollectionBuilder {
             .context("NTP service reported time multiple times")
     }
 
-    /// Record metrics from a CockroachDB node
+    /// Record metrics from a CockroachDB node.
     pub fn found_cockroach_metrics(
         &mut self,
         node_id: InternalNodeId,

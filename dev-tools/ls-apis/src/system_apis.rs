@@ -6,7 +6,6 @@
 //! the Oxide system
 
 use crate::ClientPackageName;
-use crate::DeploymentUnitName;
 use crate::LoadArgs;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
@@ -28,10 +27,13 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use itertools::Itertools;
+use ls_apis_shared::DagEdge;
+use ls_apis_shared::DeploymentUnitId;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -41,10 +43,10 @@ use std::fmt;
 pub struct SystemApis {
     /// maps a deployment unit to its list of service components
     unit_server_components:
-        BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
+        BTreeMap<DeploymentUnitId, BTreeSet<ServerComponentName>>,
     /// maps a server component to the deployment unit that it's part of
     /// (reverse of `unit_server_components`)
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitId>,
 
     /// maps a server component to the list of APIs it uses (using the client
     /// package name as a primary key for the API)
@@ -161,12 +163,10 @@ impl SystemApis {
         // unit, the deployment unit for any component, the servers in each
         // component, etc.
         let mut tracker = ServerComponentsTracker::new(&server_packages);
-        for (deployment_unit, dunit_info) in api_metadata.deployment_units() {
+        for dunit_info in api_metadata.deployment_units() {
             for dunit_pkg in &dunit_info.packages {
-                tracker.found_deployment_unit_package(
-                    deployment_unit,
-                    dunit_pkg,
-                )?;
+                tracker
+                    .found_deployment_unit_package(&dunit_info.id, dunit_pkg)?;
                 let (workspace, server_pkg) =
                     workspaces.find_package_workspace(dunit_pkg)?;
                 let dep_path = DepPath::for_pkg(server_pkg.id.clone());
@@ -346,9 +346,7 @@ impl SystemApis {
     }
 
     /// Iterate over the deployment units
-    pub fn deployment_units(
-        &self,
-    ) -> impl Iterator<Item = &DeploymentUnitName> {
+    pub fn deployment_units(&self) -> impl Iterator<Item = &DeploymentUnitId> {
         self.unit_server_components.keys()
     }
 
@@ -356,14 +354,14 @@ impl SystemApis {
     pub fn server_component_unit(
         &self,
         server_component: &ServerComponentName,
-    ) -> Option<&DeploymentUnitName> {
+    ) -> Option<&DeploymentUnitId> {
         self.server_component_units.get(server_component)
     }
 
     /// For one deployment unit, iterate over the servers contained in it
     pub fn deployment_unit_servers(
         &self,
-        unit: &DeploymentUnitName,
+        unit: &DeploymentUnitId,
     ) -> Result<impl Iterator<Item = &ServerComponentName> + use<'_>> {
         Ok(self
             .unit_server_components
@@ -536,7 +534,41 @@ impl SystemApis {
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
         let (graph, _) =
             self.make_deployment_unit_graph(filter, EdgeFilter::All)?;
-        Ok(Dot::new(&graph).to_string())
+        // Map IDs to human-readable labels for dot output.
+        let labeled = graph.map(
+            |_, id| {
+                &self
+                    .api_metadata
+                    .deployment_unit_info(id)
+                    .expect("deployment unit info in graph exists in metadata")
+                    .label
+            },
+            |_, edge| *edge,
+        );
+        Ok(Dot::new(&labeled).to_string())
+    }
+
+    /// Returns the edges of the deployment unit dependency DAG.
+    ///
+    /// Each edge represents a consumer that depends on a producer, meaning
+    /// the producer must be fully updated before the consumer starts
+    /// updating.
+    pub fn deployment_unit_dag_edges(&self) -> Result<Vec<DagEdge>> {
+        let idu_only_edges = self.validate_idu_only_edges()?;
+        let (graph, _nodes) = self.make_deployment_unit_graph(
+            ApiDependencyFilter::Default,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
+
+        let mut edges = BTreeSet::new();
+        for edge_ref in graph.edge_references() {
+            edges.insert(DagEdge {
+                consumer: graph[edge_ref.source()].clone(),
+                producer: graph[edge_ref.target()].clone(),
+            });
+        }
+
+        Ok(edges.into_iter().collect())
     }
 
     // The complex type below is only used in this one place: the return value
@@ -547,8 +579,8 @@ impl SystemApis {
         dependency_filter: ApiDependencyFilter,
         edge_filter: EdgeFilter<'_>,
     ) -> Result<(
-        Graph<&DeploymentUnitName, &ClientPackageName>,
-        BTreeMap<&DeploymentUnitName, NodeIndex>,
+        Graph<&DeploymentUnitId, &ClientPackageName>,
+        BTreeMap<&DeploymentUnitId, NodeIndex>,
     )> {
         let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
@@ -1300,9 +1332,9 @@ struct ServerComponentsTracker<'a> {
         &'a BTreeMap<ServerPackageName, Vec<&'a ApiMetadata>>,
 
     // outputs (structures that we're building up)
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitId>,
     unit_server_components:
-        BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
+        BTreeMap<DeploymentUnitId, BTreeSet<ServerComponentName>>,
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
 }
 
@@ -1399,7 +1431,7 @@ impl<'a> ServerComponentsTracker<'a> {
     /// packages (server components)
     pub fn found_deployment_unit_package(
         &mut self,
-        deployment_unit: &DeploymentUnitName,
+        deployment_unit: &DeploymentUnitId,
         server_component: &ServerComponentName,
     ) -> Result<()> {
         if let Some(previous) = self
@@ -1545,6 +1577,7 @@ impl ApiDependencyFilter {
             ApiDependencyFilter::Default => !matches!(
                 evaluation,
                 Evaluation::NonDag
+                    | Evaluation::RssOnly
                     | Evaluation::Bogus
                     | Evaluation::NotDeployed
             ),

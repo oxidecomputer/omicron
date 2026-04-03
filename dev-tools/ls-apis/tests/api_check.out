@@ -15,7 +15,6 @@ Server-managed APIs:
     Management Gateway Service (gateway-client, exposed by omicron-gateway)
     LLDP daemon (lldpd-client, exposed by lldpd)
     Maghemite MG Admin (mg-admin-client, exposed by mgd)
-    NTP Admin (ntp-admin-client, exposed by omicron-ntp-admin)
     External API (oxide-client, exposed by omicron-nexus)
     Oximeter (oximeter-client, exposed by oximeter-collector)
     Propolis (propolis-client, exposed by propolis-server)
@@ -35,6 +34,9 @@ Client-managed API:
         reason: Circular dependencies between Nexus and other services
     Nexus Internal Lockstep API (nexus-lockstep-client, exposed by omicron-nexus)
         reason: Circular dependencies between Nexus and other services
+    NTP Admin (ntp-admin-client, exposed by omicron-ntp-admin)
+        reason: Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated before NTP. This requires that the NTP Admin API be client-side versioned.
+
     Crucible Repair (repair-client, exposed by crucible-downstairs)
         reason: depends on itself (i.e., instances call each other)
     Repo Depot API (repo-depot-client, exposed by omicron-sled-agent)
