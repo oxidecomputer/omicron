@@ -7,14 +7,59 @@
 use crate::ClientPackageName;
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use camino::Utf8Path;
 use cargo_metadata::CargoOpt;
 use cargo_metadata::Package;
 use cargo_metadata::PackageId;
+use omicron_zone_package::package::PackageSource;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::LazyLock;
+
+struct RelatedRepoConfig {
+    repo_name: &'static str,
+    expected_pkg_name: &'static str,
+    extra_cargo_features: Option<CargoOpt>,
+}
+
+static RELATED_REPOS: LazyLock<[RelatedRepoConfig; 5]> = LazyLock::new(|| {
+    [
+        RelatedRepoConfig {
+            repo_name: "crucible",
+            expected_pkg_name: "crucible-agent-client",
+            extra_cargo_features: None,
+        },
+        RelatedRepoConfig {
+            repo_name: "dendrite",
+            expected_pkg_name: "dpd-client",
+            extra_cargo_features: None,
+        },
+        RelatedRepoConfig {
+            repo_name: "propolis",
+            expected_pkg_name: "propolis-client",
+            // The artifacts shipped from the Propolis repo (particularly,
+            // `propolis-server`) are built with the `omicron-build`
+            // feature, which is not enabled by default.  Enable this
+            // feature when loading the Propolis repo metadata so that we
+            // see the dependency tree that a shipping system will have.
+            extra_cargo_features: Some(CargoOpt::SomeFeatures(vec![
+                String::from("omicron-build"),
+            ])),
+        },
+        RelatedRepoConfig {
+            repo_name: "maghemite",
+            expected_pkg_name: "mg-admin-client",
+            extra_cargo_features: None,
+        },
+        RelatedRepoConfig {
+            repo_name: "lldp",
+            expected_pkg_name: "lldpd-client",
+            extra_cargo_features: None,
+        },
+    ]
+});
 
 /// Thin wrapper around a list of workspaces that makes it easy to query which
 /// workspace has which package
@@ -32,6 +77,7 @@ impl Workspaces {
     /// of inconsistencies between API metadata and Cargo metadata.
     pub fn load(
         api_metadata: &AllApiMetadata,
+        workspace_root: &Utf8Path,
     ) -> Result<(Workspaces, Vec<anyhow::Error>)> {
         // First, load information about the "omicron" workspace.  This is the
         // current workspace so we don't need to provide the path to it.
@@ -42,6 +88,23 @@ impl Workspaces {
             None,
             ignored_non_clients,
         )?);
+
+        // Next, load the top level package manifest.  This will tell us for
+        // each related component (like Crucible, Maghemite, etc.), which commit
+        // of that component's repo Omicron actually deploys to running systems.
+        let package_manifest_path =
+            workspace_root.join("package-manifest.toml");
+        let package_manifest =
+            omicron_zone_package::config::parse(&package_manifest_path)
+                .with_context(|| {
+                    format!("parsing {package_manifest_path:?}")
+                })?;
+        let mut related_repo_commits = BTreeMap::new();
+        for related_repo in &*RELATED_REPOS {
+            let commit =
+                find_repo_commit(&package_manifest, related_repo.repo_name)?;
+            related_repo_commits.insert(related_repo.repo_name, commit);
+        }
 
         // In order to assemble this metadata, Cargo already has a clone of most
         // of the other workspaces that we care about.  We'll use those clones
@@ -58,43 +121,31 @@ impl Workspaces {
         //
         // If we had many more repos than this, we'd probably want to limit the
         // concurrency.
-        let handles: Vec<_> = [
-            // To find this repo ... look up this package in Omicron
-            //   |                       |         +---- and enable these extra
-            //   |                       |         |     features when loading
-            //   v                       v         v
-            ("crucible", "crucible-agent-client", None),
-            ("dendrite", "dpd-client", None),
-            (
-                "propolis",
-                "propolis-client",
-                // The artifacts shipped from the Propolis repo (particularly,
-                // `propolis-server`) are built with the `omicron-build`
-                // feature, which is not enabled by default.  Enable this
-                // feature when loading the Propolis repo metadata so that we
-                // see the dependency tree that a shipping system will have.
-                Some(CargoOpt::SomeFeatures(vec![String::from(
-                    "omicron-build",
-                )])),
-            ),
-            ("maghemite", "mg-admin-client", None),
-            ("lldp", "lldpd-client", None),
-        ]
-        .into_iter()
-        .map(|(repo, omicron_pkg, extra_features)| {
-            let mine = omicron.clone();
-            let my_ignored = ignored_non_clients.clone();
-            std::thread::spawn(move || {
-                load_dependent_repo(
-                    &mine,
-                    repo,
-                    omicron_pkg,
-                    extra_features,
-                    my_ignored,
-                )
+        let handles: Vec<_> = RELATED_REPOS
+            .iter()
+            .map(|repo_config| {
+                let RelatedRepoConfig {
+                    repo_name,
+                    expected_pkg_name,
+                    extra_cargo_features,
+                } = repo_config;
+                let mine = omicron.clone();
+                let my_ignored = ignored_non_clients.clone();
+                // unwrap(): we loaded a commit for each repo in the loop above
+                let expected_commit =
+                    (*related_repo_commits.get(repo_name).unwrap()).clone();
+                std::thread::spawn(move || {
+                    load_dependent_repo(
+                        &mine,
+                        repo_name,
+                        expected_pkg_name,
+                        extra_cargo_features.clone(),
+                        my_ignored,
+                        &expected_commit,
+                    )
+                })
             })
-        })
-        .collect();
+            .collect();
 
         let mut workspaces: BTreeMap<_, _> = handles
             .into_iter()
@@ -109,23 +160,6 @@ impl Workspaces {
         workspaces.insert(
             String::from("omicron"),
             Arc::into_inner(omicron).expect("no more Omicron Arc references"),
-        );
-
-        // To load Dendrite, we need to look something up in Maghemite (loaded
-        // above).
-        let maghemite = workspaces
-            .get("maghemite")
-            .ok_or_else(|| anyhow!("missing maghemite workspaces"))?;
-
-        workspaces.insert(
-            String::from("dendrite"),
-            load_dependent_repo(
-                &maghemite,
-                "dendrite",
-                "dpd-client",
-                None,
-                ignored_non_clients.clone(),
-            )?,
         );
 
         // Validate the metadata against what we found in the workspaces.
@@ -221,26 +255,61 @@ fn load_dependent_repo(
     pkgname: &str,
     extra_features: Option<CargoOpt>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
+    expected_commit: &str,
 ) -> Result<Workspace> {
-    // `Workspace` doesn't let us look up a non-workspace package by name
-    // because there may be many of them.  So list all the pkgids and take any
-    // one of them -- any of them should work for our purpoes.
-    let pkgid = workspace.pkgids(pkgname).next().ok_or_else(|| {
-        anyhow!(
-            "workspace {} did not contain expected package {}",
-            workspace.name(),
-            pkgname
-        )
-    })?;
+    // It's possible to have more than one non-workspace package with a given
+    // name.  For example, Omicron references `dpd-client` in multiple ways:
+    // from Nexus and through lldpd-client.  So which version do we want?  Well,
+    // the goal of looking up `dpd-client` is really to find the source for
+    // Dendrite.  And we want the Dendrite that's actually going to run on a
+    // real system.  That's the one specified by package-manifest.toml.  The
+    // caller already figured out which commit that is and provided it in
+    // `expected_commit`.
+    //
+    // In summary: we're going to choose the package matching `expected_commit`.
+    let mut found_pkg = None;
 
-    // Now we can look up the package metadata.
-    let pkg = workspace.pkg_by_id(pkgid).ok_or_else(|| {
-        anyhow!(
-            "workspace {}: did not contain expected package id {}",
-            workspace.name(),
-            pkgname
-        )
-    })?;
+    for pkgid in workspace.pkgids(pkgname) {
+        let pkginfo = workspace.pkg_by_id(pkgid).with_context(|| {
+            format!("failed to find metadata for found package {pkgid:?}")
+        })?;
+
+        let Some(source) = &pkginfo.source else {
+            eprintln!(
+                "warn: looking up {pkgid:?}: unexpectedly found source `None`"
+            );
+            continue;
+        };
+
+        // This is cheesy, but it works okay for now and fails safely.
+        if source.repr.contains(expected_commit) {
+            found_pkg = Some(pkginfo);
+            break;
+        }
+
+        eprintln!(
+            "warn: looking up {pkgid:?}: looking for git commit \
+             {expected_commit} (based on package-manifest.toml), found \
+             source {source:?}"
+        );
+        eprintln!(
+            "If another version of package {pkgname:?} is found corresponding \
+             with this commit, then it may be suspicious to have multiple version \
+             of this package, but it will not break this tool."
+        );
+        eprintln!(
+            "If not, there's a mismatch between commits in package-manifest.toml \
+             and Cargo.toml or there is a bug in this tool."
+        );
+    }
+
+    let Some(pkg) = found_pkg else {
+        bail!(
+            "found no versions of package {pkgname:?} matching the git commit \
+             found in package-manifest.toml ({})",
+            expected_commit,
+        );
+    };
 
     // The package metadata should show where the package's manifest file should
     // be.  This may be buried deep in the workspace.  How do we find the root
@@ -283,4 +352,42 @@ fn load_dependent_repo(
         extra_features,
         &ignored_non_clients,
     )
+}
+
+fn find_repo_commit(
+    package_manifest: &omicron_zone_package::config::Config,
+    repo_name: &str,
+) -> Result<String> {
+    // We want to figure out which version of repo `repo_name` is actually
+    // deployed on real systems.  To do that, we look at what's in the package
+    // manifest.  All of the repos we care about are packaged into Omicron as
+    // prebuilt packages.  The one hitch is that the same repo may appear
+    // multiple times in the package manifest.  In that case, we require that
+    // they all be the same commit.
+    let candidates: BTreeSet<&String> = package_manifest
+        .packages
+        .iter()
+        .filter_map(|(_, pkg)| match &pkg.source {
+            PackageSource::Local { .. }
+            | PackageSource::Composite { .. }
+            | PackageSource::Manual => None,
+            PackageSource::Prebuilt { repo, commit, .. } => {
+                if repo == repo_name { Some(commit) } else { None }
+            }
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        bail!("expected repo {repo_name:?} to appear in package-manifest.toml");
+    }
+
+    if candidates.len() > 1 {
+        bail!(
+            "expected repo {repo_name:?} to have exactly one git commit \
+             in package-manifest.toml, but found multiple: {candidates:?}",
+        );
+    }
+
+    // unwrap(): we already checked that there's at least one
+    Ok(candidates.into_iter().next().unwrap().clone())
 }

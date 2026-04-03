@@ -82,6 +82,9 @@ impl Borrow<String> for ServerPackageName {
 
 /// Parameters for loading information about system APIs
 pub struct LoadArgs {
+    /// path to the root of the Omicron workspace
+    pub workspace_root: Utf8PathBuf,
+
     /// path to developer-maintained API metadata
     pub api_manifest_path: Utf8PathBuf,
 }
