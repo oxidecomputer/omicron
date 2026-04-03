@@ -9212,7 +9212,6 @@ dependencies = [
  "iddqd",
  "idna",
  "indexmap 2.13.0",
- "indicatif",
  "inout",
  "ipnet",
  "ipnetwork",
@@ -9313,7 +9312,6 @@ dependencies = [
  "zeroize",
  "zip 0.6.6",
  "zip 4.6.1",
- "zone",
 ]
 
 [[package]]
