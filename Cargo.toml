@@ -582,7 +582,6 @@ kstat-rs = "0.2.4"
 libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
-libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
@@ -1065,9 +1064,6 @@ opt-level = 3
 
 # [patch."https://github.com/oxidecomputer/diesel-dtrace"]
 # diesel-dtrace = { path = "../diesel-dtrace" }
-
-# [patch."https://github.com/oxidecomputer/falcon"]
-# libfalcon = { path = "../falcon/lib" }
 
 # [patch."https://github.com/oxidecomputer/propolis"]
 # propolis-client = { path = "../propolis/lib/propolis-client" }

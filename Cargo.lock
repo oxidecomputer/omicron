@@ -558,12 +558,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
-name = "base16ct"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
-
-[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1142,16 +1136,6 @@ checksum = "5fbd1fe9db3ebf71b89060adaf7b0504c2d6a425cf061313099547e382c2e472"
 dependencies = [
  "serde",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "cargo_toml"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "374b7c592d9c00c1f4972ea58390ac6b18cbb6ab79011f3bdc90a0b82ca06b77"
-dependencies = [
- "serde",
- "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -2136,19 +2120,6 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "crucible-client-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=7103cd3a3d7b0112d2949dd135db06fef0c156bb#7103cd3a3d7b0112d2949dd135db06fef0c156bb"
-dependencies = [
- "base64 0.22.1",
- "crucible-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "uuid",
 ]
 
 [[package]]
@@ -3367,7 +3338,7 @@ version = "0.13.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
 dependencies = [
- "base16ct 0.2.0",
+ "base16ct",
  "crypto-bigint",
  "digest",
  "ff",
@@ -5978,48 +5949,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b024e211b1b371da58cd69e4fb8fa4ed16915edcc0e2e1fb04ac4bad61959f25"
 
 [[package]]
-name = "libfalcon"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/falcon?branch=main#d83f56a657e253e09dd16c1c1c62b6eba24d8ad6"
-dependencies = [
- "anstyle",
- "anyhow",
- "base16ct 1.0.0",
- "camino",
- "cargo_toml 0.22.3",
- "clap",
- "colored 3.1.1",
- "futures",
- "indicatif",
- "libc",
- "libnet",
- "oxnet",
- "prettyplease",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f)",
- "quote",
- "rand 0.8.5",
- "regex",
- "reqwest 0.12.28",
- "ron 0.12.0",
- "serde",
- "sha2",
- "slog",
- "slog-async",
- "slog-envlogger",
- "slog-term",
- "smf 0.2.3",
- "syn 2.0.117",
- "tabwriter",
- "thiserror 1.0.69",
- "tokio",
- "tokio-tungstenite 0.21.0",
- "toml 0.9.12+spec-1.1.0",
- "uuid",
- "xz2",
- "zone",
-]
-
-[[package]]
 name = "libgit2-sys"
 version = "0.18.3+1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6367,17 +6296,6 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
-
-[[package]]
-name = "lzma-sys"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fda04ab3764e6cde78b9974eec4f779acaba7c4e84b36eca3cf77c581b85d27"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
-]
 
 [[package]]
 name = "lzss"
@@ -8659,7 +8577,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client 0.13.0",
  "progenitor-extras",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "propolis-client",
  "qorb",
  "rand 0.9.2",
  "range-requests",
@@ -9104,9 +9022,9 @@ dependencies = [
  "oxnet",
  "pretty_assertions",
  "progenitor 0.13.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "propolis-client",
  "propolis-mock-server",
- "propolis_api_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "propolis_api_types",
  "rand 0.9.2",
  "range-requests",
  "rcgen",
@@ -9188,7 +9106,6 @@ dependencies = [
  "hex",
  "http",
  "libc",
- "libfalcon",
  "nexus-config",
  "omicron-common",
  "omicron-workspace-hack",
@@ -9234,7 +9151,7 @@ dependencies = [
  "aho-corasick",
  "anyhow",
  "aws-lc-rs",
- "base16ct 0.2.0",
+ "base16ct",
  "base64 0.22.1",
  "base64ct",
  "bitflags 1.3.2",
@@ -10162,7 +10079,7 @@ version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fc9e2161f1f215afdfce23677034ae137bbd45016a880c2eb3ba8eb95f085b2"
 dependencies = [
- "base16ct 0.2.0",
+ "base16ct",
  "ecdsa",
  "elliptic-curve",
  "primeorder",
@@ -11214,8 +11131,8 @@ name = "propolis-api-types-versions"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2#368a2225b79328514ce0ea9181d8f874019edaa2"
 dependencies = [
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=a945a32ba9e1f2098ce3a8963765f1894f37110b)",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "crucible-client-types",
+ "propolis_types",
  "schemars 0.8.22",
  "serde",
  "thiserror 1.0.69",
@@ -11229,37 +11146,13 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0
 dependencies = [
  "async-trait",
  "base64 0.21.7",
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=a945a32ba9e1f2098ce3a8963765f1894f37110b)",
+ "crucible-client-types",
  "futures",
  "progenitor 0.13.0",
  "progenitor-client 0.13.0",
  "propolis-api-types-versions",
  "rand 0.9.2",
  "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "thiserror 1.0.69",
- "tokio",
- "tokio-tungstenite 0.21.0",
- "uuid",
-]
-
-[[package]]
-name = "propolis-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
-dependencies = [
- "async-trait",
- "base64 0.21.7",
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=7103cd3a3d7b0112d2949dd135db06fef0c156bb)",
- "futures",
- "progenitor 0.10.0",
- "progenitor-client 0.10.0",
- "propolis_api_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f)",
- "rand 0.9.2",
- "reqwest 0.12.28",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -11284,8 +11177,8 @@ dependencies = [
  "hyper",
  "progenitor 0.13.0",
  "propolis-api-types-versions",
- "propolis_api_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "propolis_api_types",
+ "propolis_types",
  "rand 0.9.2",
  "reqwest 0.13.2",
  "schemars 0.8.22",
@@ -11308,36 +11201,14 @@ name = "propolis_api_types"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2#368a2225b79328514ce0ea9181d8f874019edaa2"
 dependencies = [
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=a945a32ba9e1f2098ce3a8963765f1894f37110b)",
+ "crucible-client-types",
  "propolis-api-types-versions",
-]
-
-[[package]]
-name = "propolis_api_types"
-version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
-dependencies = [
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=7103cd3a3d7b0112d2949dd135db06fef0c156bb)",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f)",
- "schemars 0.8.22",
- "serde",
- "thiserror 1.0.69",
- "uuid",
 ]
 
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2#368a2225b79328514ce0ea9181d8f874019edaa2"
-dependencies = [
- "schemars 0.8.22",
- "serde",
-]
-
-[[package]]
-name = "propolis_types"
-version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -12150,20 +12021,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ron"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd490c5b18261893f14449cbd28cb9c0b637aebf161cd77900bfdedaff21ec32"
-dependencies = [
- "bitflags 2.11.0",
- "once_cell",
- "serde",
- "serde_derive",
- "typeid",
- "unicode-ident",
-]
-
-[[package]]
 name = "rpassword"
 version = "7.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12870,7 +12727,7 @@ version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
 dependencies = [
- "base16ct 0.2.0",
+ "base16ct",
  "der",
  "generic-array",
  "pkcs8",
@@ -13394,7 +13251,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.13.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "propolis-client",
  "regress",
  "reqwest 0.13.2",
  "schemars 0.8.22",
@@ -13612,7 +13469,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "propolis-api-types-versions",
- "propolis_api_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=368a2225b79328514ce0ea9181d8f874019edaa2)",
+ "propolis_api_types",
  "proptest",
  "schemars 0.8.22",
  "serde",
@@ -14922,7 +14779,7 @@ name = "tlvc-text"
 version = "0.3.0"
 source = "git+https://github.com/oxidecomputer/tlvc#e644a21a7ca973ed31499106ea926bd63ebccc6f"
 dependencies = [
- "ron 0.8.1",
+ "ron",
  "serde",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
  "zerocopy 0.6.6",
@@ -17513,7 +17370,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cargo_metadata 0.21.0",
- "cargo_toml 0.21.0",
+ "cargo_toml",
  "clap",
  "dev-tools-common",
  "fs-err 3.3.0",
@@ -17545,15 +17402,6 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "xz2"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388c44dc09d76f1536602ead6d325eb532f5c122f17782bd57fb47baeeb767e2"
-dependencies = [
- "lzma-sys",
 ]
 
 [[package]]
