@@ -311,10 +311,17 @@ impl super::Nexus {
         affinity_group_lookup: &lookup::AffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
     ) -> Result<external::AffinityGroupMember, Error> {
-        let (.., authz_affinity_group) =
+        let (.., authz_group_project, authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
-        let (.., authz_instance, instance) =
+        let (.., authz_instance_project, authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Read).await?;
+
+        if authz_group_project.id() != authz_instance_project.id() {
+            return Err(Error::invalid_request(
+                "instance must be in the same project as the affinity group",
+            ));
+        }
+
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
@@ -340,11 +347,19 @@ impl super::Nexus {
         anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
     ) -> Result<external::AntiAffinityGroupMember, Error> {
-        let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        let (.., authz_instance, instance) =
+        let (.., authz_group_project, authz_anti_affinity_group) =
+            anti_affinity_group_lookup
+                .lookup_for(authz::Action::Modify)
+                .await?;
+        let (.., authz_instance_project, authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Read).await?;
+
+        if authz_group_project.id() != authz_instance_project.id() {
+            return Err(Error::invalid_request(
+                "instance must be in the same project as the anti-affinity group",
+            ));
+        }
+
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
