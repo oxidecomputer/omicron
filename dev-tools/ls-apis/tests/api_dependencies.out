@@ -87,7 +87,7 @@ Oximeter (client: oximeter-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
 
 Propolis (client: propolis-client)
-    consumed by: omicron-nexus (omicron/nexus) via 3 paths
+    consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 Crucible Repair (client: repair-client)
