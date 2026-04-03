@@ -947,7 +947,7 @@ impl SimpleFilter {
     pub(crate) fn as_db_safe_string(&self) -> String {
         let expr = self.value.as_db_safe_string();
         let fn_name = self.cmp.as_db_function_name();
-        format!("{}({}, {})", fn_name, self.ident, expr)
+        format!("{}(\"{}\", {})", fn_name, self.ident, expr)
     }
 
     // Returns an array of bools, where true indicates the point should be kept.
