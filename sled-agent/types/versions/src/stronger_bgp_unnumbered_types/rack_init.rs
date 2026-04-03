@@ -91,12 +91,6 @@ struct UnvalidatedRackInitializeRequest {
     allowed_source_ips: AllowedSourceIps,
 }
 
-#[derive(Debug, Clone)]
-pub struct RackInitializeRequestParams {
-    pub rack_initialize_request: RackInitializeRequest,
-    pub skip_timesync: bool,
-}
-
 impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
     type Error = anyhow::Error;
 

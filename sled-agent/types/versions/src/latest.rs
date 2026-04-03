@@ -189,7 +189,6 @@ pub mod rack_init {
     pub use crate::v20::rack_init::RackInitializeRequestParseError;
 
     pub use crate::v30::rack_init::RackInitializeRequest;
-    pub use crate::v30::rack_init::RackInitializeRequestParams;
 }
 
 pub mod rot {

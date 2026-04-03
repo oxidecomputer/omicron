@@ -879,6 +879,7 @@ dependencies = [
 name = "bootstrap-agent-lockstep-api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dropshot",
  "omicron-common",
  "omicron-passwords",
@@ -7187,6 +7188,7 @@ dependencies = [
 name = "nexus-lockstep-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-api",
  "chrono",
  "futures",
  "iddqd",

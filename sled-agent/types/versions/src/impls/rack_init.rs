@@ -4,8 +4,9 @@
 
 //! Implementations for rack initialization types.
 
+// TODO-john REMOVE ALL THIS
+
 use crate::latest::rack_init::RackInitializeRequest;
-use crate::latest::rack_init::RackInitializeRequestParams;
 use anyhow::{Result, bail};
 use omicron_common::address::{
     AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX, get_64_subnet,
@@ -30,53 +31,6 @@ impl RackInitializeRequest {
     /// Returns the subnet for the `index`-th sled in the rack.
     pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX> {
         get_64_subnet(self.rack_subnet(), index)
-    }
-}
-
-// This custom debug implementation hides the private keys.
-impl std::fmt::Debug for RackInitializeRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // If you find a compiler error here, and you just added a field to this
-        // struct, be sure to add it to the Debug impl below!
-        let RackInitializeRequest {
-            trust_quorum_peers,
-            bootstrap_discovery,
-            ntp_servers,
-            dns_servers,
-            internal_services_ip_pool_ranges,
-            external_dns_ips,
-            external_dns_zone_name,
-            external_certificates: _,
-            recovery_silo,
-            rack_network_config,
-            allowed_source_ips,
-        } = &self;
-
-        f.debug_struct("RackInitializeRequest")
-            .field("trust_quorum_peers", trust_quorum_peers)
-            .field("bootstrap_discovery", bootstrap_discovery)
-            .field("ntp_servers", ntp_servers)
-            .field("dns_servers", dns_servers)
-            .field(
-                "internal_services_ip_pool_ranges",
-                internal_services_ip_pool_ranges,
-            )
-            .field("external_dns_ips", external_dns_ips)
-            .field("external_dns_zone_name", external_dns_zone_name)
-            .field("external_certificates", &"<redacted>")
-            .field("recovery_silo", recovery_silo)
-            .field("rack_network_config", rack_network_config)
-            .field("allowed_source_ips", allowed_source_ips)
-            .finish()
-    }
-}
-
-impl RackInitializeRequestParams {
-    pub fn new(
-        rack_initialize_request: RackInitializeRequest,
-        skip_timesync: bool,
-    ) -> RackInitializeRequestParams {
-        RackInitializeRequestParams { rack_initialize_request, skip_timesync }
     }
 }
 
