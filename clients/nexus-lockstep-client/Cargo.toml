@@ -8,7 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-bootstrap-agent-lockstep-api.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 chrono.workspace = true
 futures.workspace = true
 iddqd.workspace = true

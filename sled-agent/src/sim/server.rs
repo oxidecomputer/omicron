@@ -17,7 +17,7 @@ use crate::rack_setup::{
 };
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
-use bootstrap_agent_lockstep_api::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;

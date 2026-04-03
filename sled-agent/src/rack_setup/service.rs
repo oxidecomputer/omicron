@@ -75,11 +75,10 @@ use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
-use bootstrap_agent_lockstep_api::RackInitializeRequest as Config;
-use bootstrap_agent_lockstep_api::RssStep;
-use bootstrap_agent_lockstep_api::{
-    BootstrapAddressDiscovery, RackInitializeRequest,
-};
+use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
+use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RssStep;
 use camino::{Utf8Path, Utf8PathBuf};
 use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
@@ -1827,7 +1826,7 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use anyhow::Context;
-    use bootstrap_agent_lockstep_api::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{

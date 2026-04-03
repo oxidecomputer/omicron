@@ -11,9 +11,9 @@
 use super::http_entrypoints::BootstrapServerContext;
 use crate::rack_setup::service::RackInitializeRequestParams;
 use bootstrap_agent_lockstep_api::BootstrapAgentLockstepApi;
-use bootstrap_agent_lockstep_api::RackInitializeRequest;
-use bootstrap_agent_lockstep_api::RackOperationStatus;
 use bootstrap_agent_lockstep_api::bootstrap_agent_lockstep_api_mod;
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };

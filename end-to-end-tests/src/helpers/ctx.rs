@@ -4,7 +4,7 @@
 
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result, anyhow};
-use bootstrap_agent_lockstep_api::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use chrono::Utc;
 use hickory_resolver::ResolveErrorKind;
 use hickory_resolver::proto::ProtoErrorKind;

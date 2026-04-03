@@ -6,7 +6,7 @@
 
 use anyhow::anyhow;
 use anyhow::bail;
-use bootstrap_agent_lockstep_api::RackInitializeRequest as Config;
+use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
 use chrono::Utc;
 use iddqd::IdOrdMap;
 use iddqd::errors::DuplicateItem;
@@ -1326,8 +1326,8 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bootstrap_agent_lockstep_api::BootstrapAddressDiscovery;
-    use bootstrap_agent_lockstep_api::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
+    use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;

@@ -7,7 +7,7 @@
 use crate::deployment::Blueprint;
 use crate::external_api::hardware::Baseboard;
 use crate::external_api::physical_disk::PhysicalDiskKind;
-use bootstrap_agent_lockstep_api::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;

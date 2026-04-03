@@ -10,7 +10,7 @@ use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
 use crate::TEST_SUITE_PASSWORD_HASH;
 use anyhow::Result;
-use bootstrap_agent_lockstep_api::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Utc;

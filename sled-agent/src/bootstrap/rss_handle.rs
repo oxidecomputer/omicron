@@ -10,7 +10,7 @@ use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use bootstore::schemes::v0 as bootstore;
-use bootstrap_agent_lockstep_api::RssStep;
+use bootstrap_agent_lockstep_types::RssStep;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
