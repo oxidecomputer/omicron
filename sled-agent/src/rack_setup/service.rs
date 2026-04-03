@@ -76,6 +76,7 @@ use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_api::RackInitializeRequest as Config;
+use bootstrap_agent_lockstep_api::RssStep;
 use bootstrap_agent_lockstep_api::{
     BootstrapAddressDiscovery, RackInitializeRequest,
 };
@@ -118,7 +119,6 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
-use sled_agent_types::rack_ops::RssStep;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;

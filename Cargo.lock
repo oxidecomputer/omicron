@@ -889,6 +889,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
+ "strum 0.27.2",
 ]
 
 [[package]]
