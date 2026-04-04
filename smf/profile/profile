@@ -4,7 +4,7 @@ PATH+=:/opt/ooce/bin
 case "$HOSTNAME" in
     oxz_switch)
 	# Add tools like xcvradm, swadm & ddmadm to the PATH by default
-	PATH+=:/opt/oxide/bin:/opt/oxide/dendrite/bin:/opt/oxide/mg-ddm/bin:/opt/oxide/omdb/bin:/opt/oxide/mgd/bin
+	PATH+=:/opt/oxide/bin:/opt/oxide/dendrite/bin:/opt/oxide/mg-ddm/bin:/opt/oxide/omdb/bin:/opt/oxide/mgd/bin:/opt/oxide/gateway-cli/bin
 	;;
     oxz_cockroachdb*)
 	PATH+=:/opt/oxide/cockroachdb/bin
