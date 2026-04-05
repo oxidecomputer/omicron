@@ -299,11 +299,18 @@ impl TryFrom<&LsApis> for LoadArgs {
         let self_manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR")
             .context("expected CARGO_MANIFEST_DIR in environment")?;
         let self_manifest_dir = Utf8PathBuf::from(self_manifest_dir_str);
+        // The API manifest is at the root of this particular package.
         let api_manifest_path = args
             .api_manifest
             .clone()
             .unwrap_or_else(|| self_manifest_dir.join("api-manifest.toml"));
-        Ok(LoadArgs { api_manifest_path })
+
+        // This package is two levels down from the workspace root.
+        let mut workspace_root = self_manifest_dir;
+        workspace_root.pop();
+        workspace_root.pop();
+
+        Ok(LoadArgs { workspace_root, api_manifest_path })
     }
 }
 

@@ -127,7 +127,8 @@ impl SystemApis {
         let api_metadata: AllApiMetadata =
             parse_toml_file(&args.api_manifest_path)?;
         // Load Cargo metadata and validate it against the manifest.
-        let (workspaces, warnings) = Workspaces::load(&api_metadata)?;
+        let (workspaces, warnings) =
+            Workspaces::load(&api_metadata, &args.workspace_root)?;
         if !warnings.is_empty() {
             // We treat these warnings as fatal here.
             for e in warnings {
