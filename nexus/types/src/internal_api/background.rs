@@ -909,6 +909,56 @@ pub struct SitrepGcStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_analysis` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FmAnalysisStatus {
+    pub parent_sitrep_id: Option<SitrepUuid>,
+    pub inv_collection_id: Option<CollectionUuid>,
+    pub outcome: fm_analysis::Outcome,
+}
+
+pub mod fm_analysis {
+    use super::*;
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct PreparationStatus {
+        pub errors: Vec<String>,
+        pub report: crate::fm::AnalysisInputReport,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    #[allow(clippy::large_enum_variant)]
+    pub enum Outcome {
+        /// Fault management analysis was not performed as no inventory
+        /// collection has been loaded.
+        WaitingForInventory,
+
+        /// Preparing analysis input failed.
+        PreparationError(String),
+
+        /// Preparation succeeded and analysis was performed.
+        RanAnalysis { prep_status: PreparationStatus, outcome: AnalysisOutcome },
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum AnalysisOutcome {
+        /// An error occurred during analysis.
+        Error(String),
+
+        /// Analysis produced a sitrep identical to the current sitrep,
+        /// so we threw it away and did nothing.
+        Unchanged,
+
+        /// Analysis produced a new sitrep, but we failed to make it
+        /// the current sitrep.
+        NotCommitted { sitrep_id: SitrepUuid, error: String },
+
+        /// Analysis produced a new sitrep, which was saved and made the current
+        /// sitrep.
+        Committed { sitrep_id: SitrepUuid },
+    }
+}
+
 /// The status of a `fm_rendezvous` background task activation.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FmRendezvousStatus {
