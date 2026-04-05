@@ -230,7 +230,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 new_ereport_ids.len()
             )?;
             for ereport_id in new_ereport_ids {
-                writeln!(f, "{:indent$}- ereport {ereport_id}", "")?;
+                writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
             }
         } else {
             writeln!(
@@ -254,7 +254,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     open_cases.len()
                 )?;
                 for (case_id, metadata) in open_cases {
-                    writeln!(f, "{:indent$}- case {case_id}", "")?;
+                    writeln!(f, "{:indent$}* case {case_id}", "")?;
                     metadata.display_multiline(indent + 2, None).fmt(f)?;
                 }
             }
@@ -277,7 +277,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     ClosedCaseReport { metadata, unmarked_ereports },
                 ) in closed_cases_copied_forward
                 {
-                    writeln!(f, "{:indent$}- case {case_id}", "")?;
+                    writeln!(f, "{:indent$}* case {case_id}", "")?;
                     let indent = indent + 2;
                     metadata.display_multiline(indent, None).fmt(f)?;
                     writeln!(
@@ -287,7 +287,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                         ""
                     )?;
                     for ereport_id in unmarked_ereports {
-                        writeln!(f, "{:indent$}- ereport {ereport_id}", "")?;
+                        writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
                     }
                 }
             }
