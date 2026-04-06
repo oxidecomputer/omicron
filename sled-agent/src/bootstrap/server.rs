@@ -6,12 +6,9 @@
 
 use super::BootstrapError;
 use super::RssAccessError;
-use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use super::config::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use super::http_entrypoints;
 use super::http_entrypoints_lockstep;
 use super::views::SledAgentResponse;
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
@@ -38,6 +35,9 @@ use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
+use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_ledger as ledger;
