@@ -84,10 +84,9 @@ async fn save_ereports(
         dropshot::PaginationOrder::Ascending,
     );
     while let Some(p) = paginator.next() {
-        // Cancel-safe: DB query can be eagerly cancelled.
         let pagparams = p.current_pagparams();
         let ereports = tokio::select! {
-            _ = collection.cancelled() => break,
+            _ = collection.cancelled() => return Ok(()),
             result = datastore.ereport_fetch_matching(
                 &opctx, &filters, &pagparams
             ) => {
