@@ -6,6 +6,7 @@
 //! zone.
 
 use crate::ThisSledSwitchZoneUnderlayIpAddr;
+use crate::dpd_reconciler::port_reconciler::PortReconciler;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use dpd_client::Client;
@@ -17,18 +18,26 @@ use slog::info;
 use std::time::Duration;
 
 mod nat;
+mod port_reconciler;
 
 pub use nat::DpdNatReconcilerStatus;
+pub use nat::DpdNatReconcilerStatusNatEntry;
+pub use nat::DpdNatReconcilerStatusNatEntryFailure;
+pub use port_reconciler::DpdPortOperationFailure;
+pub use port_reconciler::DpdPortReconcilerStatus;
 
 #[derive(Debug, Clone)]
 pub struct DpdReconcilerStatus {
+    /// Result of reconciling port settings
+    pub port_settings_status: DpdPortReconcilerStatus,
     /// Result of reconciling service zone NAT entries
     pub nat_status: DpdNatReconcilerStatus,
 }
 
 pub(crate) struct DpdReconciler {
     client: Client,
-    _switch_slot: ThisSledSwitchSlot,
+    switch_slot: ThisSledSwitchSlot,
+    port_reconciler: PortReconciler,
 }
 
 impl Reconciler for DpdReconciler {
@@ -75,7 +84,9 @@ impl Reconciler for DpdReconciler {
             },
         );
 
-        Self { client, _switch_slot: switch_slot }
+        let port_reconciler = PortReconciler::default();
+
+        Self { client, switch_slot, port_reconciler }
     }
 
     async fn do_reconciliation(
@@ -83,7 +94,15 @@ impl Reconciler for DpdReconciler {
         system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
-        // TODO implement port reconciliation
+        let port_settings_status = self
+            .port_reconciler
+            .reconcile(
+                &self.client,
+                &system_networking_config.rack_network_config,
+                self.switch_slot,
+                log,
+            )
+            .await;
 
         let nat_status = if let Some(nat_entries) =
             system_networking_config.service_zone_nat_entries.as_ref()
@@ -96,9 +115,10 @@ impl Reconciler for DpdReconciler {
         info!(
             log,
             "dpd reconciliation completed";
+            &port_settings_status,
             &nat_status,
         );
 
-        DpdReconcilerStatus { nat_status }
+        DpdReconcilerStatus { port_settings_status, nat_status }
     }
 }

@@ -29,6 +29,18 @@ use tokio::task::JoinHandle;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ThisSledSwitchSlot(SwitchSlot);
 
+impl PartialEq<SwitchSlot> for ThisSledSwitchSlot {
+    fn eq(&self, other: &SwitchSlot) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<ThisSledSwitchSlot> for SwitchSlot {
+    fn eq(&self, other: &ThisSledSwitchSlot) -> bool {
+        *self == other.0
+    }
+}
+
 impl ThisSledSwitchSlot {
     #[cfg(test)]
     pub(crate) const TEST_FAKE: Self = Self(SwitchSlot::Switch0);
