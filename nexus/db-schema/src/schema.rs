@@ -1630,6 +1630,15 @@ allow_tables_to_appear_in_same_query!(
     support_bundle_data_selection_ereports,
 );
 
+table! {
+    support_bundle_config (singleton) {
+        singleton -> Bool,
+        target_free_percent -> Int8,
+        min_keep_percent -> Int8,
+        time_modified -> Timestamptz,
+    }
+}
+
 /* hardware inventory */
 
 table! {

@@ -903,6 +903,7 @@ Commands:
   quiesce                view or modify the quiesce status
   reconfigurator-config  interact with reconfigurator config
   sagas                  view sagas, create and complete demo sagas
+  support-bundle-config  interact with support bundle auto-deletion config
   sleds                  interact with sleds
   support-bundles        interact with support bundles [aliases: sb]
   trust-quorum           interact with the trust quorum
