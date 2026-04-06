@@ -395,18 +395,6 @@ impl Ingester {
                 Ok(ereports) => {
                     return Some(ereports.into_inner());
                 }
-                Err(gateway_client::Error::ErrorResponse(rsp))
-                    if rsp.error_code.as_deref() == Some("InvalidSp") =>
-                {
-                    slog::debug!(
-                        &opctx.log,
-                        "ereport collection: MGS claims there is no SP in this slot";
-                        "committed_ena" => ?committed_ena,
-                        "start_ena" => ?start_ena,
-                        "restart_id" => ?restart_id,
-                        "gateway_addr" => %addr,
-                    );
-                }
                 Err(e) => {
                     slog::warn!(
                         &opctx.log,
