@@ -5,6 +5,11 @@ on:
       - '.github/workflows/check-opte-ver.yml'
       - 'Cargo.toml'
       - 'tools/opte_version'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   check-opte-ver:
     runs-on: ubuntu-22.04
