@@ -708,8 +708,11 @@ impl DataStore {
                         }
                     }
 
-                    Self::support_bundle_data_selection_delete_on_conn(&conn, vec![id])
-                        .await?;
+                    Self::support_bundle_data_selection_delete_on_conn(
+                        &conn,
+                        vec![id],
+                    )
+                    .await?;
                     diesel::delete(dsl::support_bundle)
                         .filter(dsl::id.eq(id))
                         .execute_async(&conn)

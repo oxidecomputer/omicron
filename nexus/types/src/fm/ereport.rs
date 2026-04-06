@@ -280,9 +280,7 @@ pub struct EreportFiltersParams {
 impl TryFrom<EreportFiltersParams> for EreportFilters {
     type Error = Error;
 
-    fn try_from(
-        params: EreportFiltersParams,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(params: EreportFiltersParams) -> Result<Self, Self::Error> {
         let EreportFiltersParams {
             start_time,
             end_time,
@@ -296,9 +294,7 @@ impl TryFrom<EreportFiltersParams> for EreportFilters {
         if let Some(t) = end_time {
             f = f.with_end_time(t)?;
         }
-        f = f
-            .with_serials(only_serials)
-            .with_classes(only_classes);
+        f = f.with_serials(only_serials).with_classes(only_classes);
         Ok(f)
     }
 }
