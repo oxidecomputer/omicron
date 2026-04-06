@@ -243,7 +243,16 @@ pub struct LldpPortConfig {
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
 /// equalization settings to improve signal integrity.
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Hash,
+    JsonSchema,
+    daft::Diffable,
 )]
 pub struct TxEqConfig {
     /// Pre-cursor tap1
@@ -307,7 +316,16 @@ pub enum SwitchSlot {
 
 /// Switchport Speed options
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    daft::Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
@@ -333,7 +351,16 @@ pub enum PortSpeed {
 
 /// Switchport FEC options
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    daft::Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum PortFec {

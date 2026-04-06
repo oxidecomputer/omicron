@@ -13552,6 +13552,7 @@ dependencies = [
  "gateway-client",
  "gateway-types",
  "httpmock",
+ "iddqd",
  "macaddr",
  "mg-admin-client",
  "omicron-common",
@@ -13565,6 +13566,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "test-strategy",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
