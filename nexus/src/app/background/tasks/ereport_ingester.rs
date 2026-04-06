@@ -75,7 +75,8 @@ impl SpEreportIngester {
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
-        use gateway_client::types::{SpIdentifier, SpIgnition, SpIgnitionInfo};
+        use gateway_client::types::{SpIdentifier, SpIgnitionInfo};
+        use gateway_types::ignition::SpIgnition;
 
         let mut status = SpEreportIngesterStatus::default();
         if self.disabled {
@@ -158,9 +159,9 @@ impl SpEreportIngester {
 
         for SpIgnitionInfo { details, id } in sps {
             let ignition_type = match details {
-                SpIgnition::Yes { id, .. } => id,
-                SpIgnition::No => {
-                    // This SP is not present; skip it.
+                SpIgnition::Present { id, .. } if details.is_sp_running() => id,
+                _ => {
+                    // This SP is not present or is powered off; skip it.
                     status.sps_not_present += 1;
                     continue;
                 }
