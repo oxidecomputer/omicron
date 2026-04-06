@@ -629,6 +629,29 @@ sled agent.
 ################################################################################
 
 [[intra_deployment_unit_only_edges]]
+server = "propolis-server"
+client = "sled-agent-client"
+note = """
+propolis-server calls into sled-agent RoT attestation endpoints. propolis-server
+and sled-agent are deployed in the same deployment unit, and propolis-server
+only talks to the sled-agent running on its local sled.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/propolis/blob/2c9d705/lib/propolis/src/attestation/server.rs#L324-L328",
+    "https://github.com/oxidecomputer/propolis/blob/2c9d705/bin/propolis-server/src/main.rs#L326-L337",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "propolis-server"
+client = "propolis-client"
+note = """
+propolis-server now depends on sled-agent-client. sled-agent-client includes
+propolis-client but does not actually use it. this needs to be cleaned up.
+"""
+permalinks = [
+]
+
+[[intra_deployment_unit_only_edges]]
 server = "ddmd"
 client = "dpd-client"
 note = """
