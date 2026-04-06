@@ -8,7 +8,11 @@ use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
+use base64::Engine;
+use bootstrap_agent_lockstep_client::types::ReplicatedNetworkConfig;
+use bootstrap_agent_lockstep_client::types::ReplicatedNetworkConfigContents;
 use clap::Args;
 use clap::Subcommand;
 use sled_agent_client::types::NodeStatus;
@@ -18,6 +22,8 @@ use sled_agent_client::types::OperatorSwitchZonePolicy;
 #[derive(Debug, Args)]
 pub struct SledAgentArgs {
     /// URL of the Sled internal API
+    ///
+    /// This is typically port 12345 on a sled's underlay network IP address.
     #[clap(
         long,
         env = "OMDB_SLED_AGENT_URL",
@@ -25,6 +31,17 @@ pub struct SledAgentArgs {
         help_heading = CONNECTION_OPTIONS_HEADING,
     )]
     sled_agent_url: Option<String>,
+
+    /// URL of the sled bootstrap-agent-lockstep API
+    ///
+    /// This is typically port 8080 on a sled's bootstrap network IP address.
+    #[clap(
+        long,
+        env = "OMDB_BOOTSTRAP_LOCKSTEP_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
+    bootstrap_lockstep_url: Option<String>,
 
     #[command(subcommand)]
     command: SledAgentCommands,
@@ -40,6 +57,10 @@ enum SledAgentCommands {
     /// control the switch zone policy
     #[clap(subcommand)]
     SwitchZonePolicy(SwitchZonePolicyCommands),
+
+    /// print information about the replicated network config
+    #[clap(subcommand)]
+    NetworkConfig(NetworkConfigCommands),
 
     /// print information about the local bootstore node
     #[clap(subcommand)]
@@ -69,6 +90,12 @@ enum SwitchZonePolicyCommands {
     /// This is extremely dangerous! If used incorrectly, it can render the rack
     /// inaccessible.
     DangerDangerDisable,
+}
+
+#[derive(Debug, Subcommand)]
+enum NetworkConfigCommands {
+    /// show the current contents of the replicated network config
+    Show,
 }
 
 #[derive(Debug, Subcommand)]
@@ -102,30 +129,50 @@ impl SledAgentArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        // This is a little goofy. The sled URL is required, but can come
-        // from the environment, in which case it won't be on the command line.
-        let Some(sled_agent_url) = &self.sled_agent_url else {
-            bail!(
-                "sled URL must be specified with --sled-agent-url or \
-                OMDB_SLED_AGENT_URL"
-            );
+        // We require either a sled_agent_url or a bootstrap_lockstep_url, but
+        // we don't know which one until we match on `self.command` below. Wrap
+        // the conversion from URL-to-client in a closure so we only bail out if
+        // we're missing a URL argument we actually need.
+
+        // Helper to create a sled-agent client.
+        let make_sa_client = || -> anyhow::Result<_> {
+            let Some(sled_agent_url) = &self.sled_agent_url else {
+                bail!(
+                    "sled URL must be specified with --sled-agent-url or \
+                     OMDB_SLED_AGENT_URL"
+                );
+            };
+            Ok(sled_agent_client::Client::new(sled_agent_url, log.clone()))
         };
-        let client =
-            sled_agent_client::Client::new(sled_agent_url, log.clone());
+
+        // Helper to create a bootstrap-agent-lockstep client.
+        let make_ba_lockstep_client = || -> anyhow::Result<_> {
+            let Some(bootstrap_lockstep_url) = &self.bootstrap_lockstep_url
+            else {
+                bail!(
+                    "bootstrap lockstep URL must be specified with \
+                     --bootstrap-lockstep-url or OMDB_BOOTSTRAP_LOCKSTEP_URL"
+                );
+            };
+            Ok(bootstrap_agent_lockstep_client::Client::new(
+                bootstrap_lockstep_url,
+                log.clone(),
+            ))
+        };
 
         match &self.command {
             SledAgentCommands::Zones(ZoneCommands::List) => {
-                cmd_zones_list(&client).await
+                cmd_zones_list(&make_sa_client()?).await
             }
             SledAgentCommands::SwitchZonePolicy(
                 SwitchZonePolicyCommands::Get,
-            ) => cmd_switch_zone_policy_get(&client).await,
+            ) => cmd_switch_zone_policy_get(&make_sa_client()?).await,
             SledAgentCommands::SwitchZonePolicy(
                 SwitchZonePolicyCommands::Enable,
             ) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_switch_zone_policy_put(
-                    &client,
+                    &make_sa_client()?,
                     OperatorSwitchZonePolicy::StartIfSwitchPresent,
                     token,
                 )
@@ -136,21 +183,24 @@ impl SledAgentArgs {
             ) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_switch_zone_policy_put(
-                    &client,
+                    &make_sa_client()?,
                     OperatorSwitchZonePolicy::StopDespiteSwitchPresence,
                     token,
                 )
                 .await
             }
+            SledAgentCommands::NetworkConfig(NetworkConfigCommands::Show) => {
+                cmd_network_config_show(&make_ba_lockstep_client()?).await
+            }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
-                cmd_bootstore_status(&client).await
+                cmd_bootstore_status(&make_sa_client()?).await
             }
             SledAgentCommands::TrustQuorum(TrustQuorumCommands::Status) => {
-                cmd_trust_quorum_status(&client).await
+                cmd_trust_quorum_status(&make_sa_client()?).await
             }
             SledAgentCommands::TrustQuorum(
                 TrustQuorumCommands::ProxyStatus(args),
-            ) => cmd_trust_quorum_proxy_status(&client, args).await,
+            ) => cmd_trust_quorum_proxy_status(&make_sa_client()?, args).await,
         }
     }
 }
@@ -210,6 +260,58 @@ async fn cmd_switch_zone_policy_put(
         .await
         .context("setting policy")?;
     cmd_switch_zone_policy_get(client).await
+}
+
+/// Runs `omdb sled-agent network-config show`
+async fn cmd_network_config_show(
+    client: &bootstrap_agent_lockstep_client::Client,
+) -> anyhow::Result<()> {
+    let ReplicatedNetworkConfig { contents } = client
+        .network_config_contents_for_debug()
+        .await
+        .context("failed to fetch network config contents")?
+        .into_inner();
+    let Some(contents) = contents else {
+        println!(
+            "no network contents available yet - \
+             this is normal if RSS has not yet started"
+        );
+        return Ok(());
+    };
+
+    let ReplicatedNetworkConfigContents { base64_blob, generation } = contents;
+    println!("network config generation: {generation}");
+
+    let blob = {
+        let mut output = Vec::new();
+        match base64::engine::general_purpose::STANDARD
+            .decode_vec(&base64_blob, &mut output)
+        {
+            Ok(()) => output,
+            Err(err) => {
+                println!("raw data (expected base64): {base64_blob}");
+                return Err(
+                    anyhow!(err).context("failed to decode base64 blob")
+                );
+            }
+        }
+    };
+
+    let decoded: serde_json::Value = match serde_json::from_slice(&blob) {
+        Ok(value) => value,
+        Err(err) => {
+            println!(
+                "raw blob (expected JSON): {}",
+                String::from_utf8_lossy(&blob)
+            );
+            return Err(anyhow!(err).context("failed to decode blob as JSON"));
+        }
+    };
+
+    println!("network config contents:");
+    println!("{decoded:#}"); // `:#` format induces pretty-printing
+
+    Ok(())
 }
 
 /// Runs `omdb sled-agent bootstore status`

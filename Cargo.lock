@@ -8782,6 +8782,8 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "async-trait",
+ "base64 0.22.1",
+ "bootstrap-agent-lockstep-client",
  "bytes",
  "camino",
  "camino-tempfile",
