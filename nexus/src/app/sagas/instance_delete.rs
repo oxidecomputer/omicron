@@ -10,10 +10,11 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{debug, info};
 use steno::ActionError;
 
@@ -24,7 +25,7 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
-    pub boundary_switches: HashSet<SwitchLocation>,
+    pub boundary_switches: HashSet<SwitchSlot>,
 }
 
 // instance delete saga: actions
@@ -93,7 +94,7 @@ async fn sid_delete_instance_record(
         .datastore()
         .project_delete_instance(&opctx, &params.authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -111,7 +112,7 @@ async fn sid_delete_network_interfaces(
         .datastore()
         .instance_delete_all_network_interfaces(&opctx, &params.authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
@@ -131,13 +132,13 @@ async fn sid_delete_dendrite_config(
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
         .instance_delete_dpd_config(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -170,7 +171,7 @@ async fn sid_leave_multicast_groups(
             InstanceUuid::from_untyped_uuid(instance_id),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         osagactx.log(),
@@ -197,12 +198,12 @@ async fn sid_deallocate_external_ip(
             params.authz_instance.id(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     osagactx
         .datastore()
         .detach_floating_ips_by_instance_id(&opctx, params.authz_instance.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -219,7 +220,7 @@ async fn sid_detach_external_subnets(
         .datastore()
         .instance_detach_external_subnets(&opctx, params.authz_instance.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -246,7 +247,7 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use sled_agent_types::early_networking::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
     use uuid::Uuid;
 
@@ -280,7 +281,7 @@ mod test {
             serialized_authn: Serialized::for_opctx(&opctx),
             authz_instance,
             instance,
-            boundary_switches: HashSet::from([SwitchLocation::Switch0]),
+            boundary_switches: HashSet::from([SwitchSlot::Switch0]),
         }
     }
 

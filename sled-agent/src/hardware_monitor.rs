@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A task that listens for hardware events from the
+//! A task that listens for changes in the [`HardwareView`] from the
 //! [`sled_hardware::HardwareManager`] and dispatches them to other parts
 //! of the bootstrap agent and sled-agent code.
 
@@ -10,12 +10,12 @@ use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use sled_agent_config_reconciler::RawDisksSender;
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
-use sled_hardware::{HardwareManager, HardwareUpdate};
+use sled_hardware::{HardwareManager, HardwareView};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
-use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, oneshot, watch};
+use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 /// A handle controlling the behavior of a [`HardwareMonitor`]
 #[derive(Debug, Clone)]
@@ -52,14 +52,11 @@ pub struct HardwareMonitor {
     // Receive a onetime notification that the ServiceManager is ready
     service_manager_ready_rx: oneshot::Receiver<ServiceManager>,
 
-    // Receive messages from the [`HardwareManager`]
-    hardware_rx: broadcast::Receiver<HardwareUpdate>,
+    // Receive current view of hardware from the [`HardwareManager`]
+    hardware_view_rx: watch::Receiver<HardwareView>,
 
     // Receive the operator's policy controlling the switch zone
     switch_zone_policy_rx: watch::Receiver<OperatorSwitchZonePolicy>,
-
-    // A reference to the hardware manager
-    hardware_manager: HardwareManager,
 
     // A handle to send raw disk updates to the config-reconciler system.
     raw_disks_tx: RawDisksSender,
@@ -96,8 +93,8 @@ impl HardwareMonitor {
         let (sled_agent_started_tx, sled_agent_started_rx) = oneshot::channel();
         let (service_manager_ready_tx, service_manager_ready_rx) =
             oneshot::channel();
-        let baseboard = hardware_manager.baseboard();
-        let hardware_rx = hardware_manager.monitor();
+        let hardware_view_rx = hardware_manager.subscribe();
+        let baseboard = hardware_view_rx.borrow().baseboard();
         let log = log.new(o!("component" => "HardwareMonitor"));
         let (switch_zone_policy_tx, switch_zone_policy_rx) =
             watch::channel(OperatorSwitchZonePolicy::StartIfSwitchPresent);
@@ -106,9 +103,8 @@ impl HardwareMonitor {
             baseboard,
             sled_agent_started_rx,
             service_manager_ready_rx,
-            hardware_rx,
+            hardware_view_rx,
             switch_zone_policy_rx,
-            hardware_manager: hardware_manager.clone(),
             raw_disks_tx,
             sled_agent: None,
             service_manager: None,
@@ -150,14 +146,25 @@ impl HardwareMonitor {
                         policy,
                     ).await;
                 }
-                update = self.hardware_rx.recv() => {
-                    info!(
-                        self.log,
-                        "Received hardware update message";
-                        "update" => ?update,
-                    );
-                    self.handle_hardware_update(update.clone()).await
-            },
+                result = self.hardware_view_rx.changed() => {
+                    match result {
+                        Ok(()) => {
+                            info!(
+                                self.log,
+                                "Received notification hardware \
+                                 view has changed"
+                            );
+                            self.check_latest_hardware_snapshot().await;
+                        }
+                        Err(_recv_error) => {
+                            // The `HardwareManager` monitoring task is an
+                            // infinite loop - the only way for us to get
+                            // an error from `changed()` here is if it panicked,
+                            // so we will propagate such a panic.
+                            panic!("Hardware manager monitor task panicked");
+                        }
+                    }
+                }
                 Ok(()) = self.switch_zone_policy_rx.changed() => {
                     let policy = self.current_switch_zone_policy();
                     info!(
@@ -177,70 +184,6 @@ impl HardwareMonitor {
     // that we've read the current value).
     fn current_switch_zone_policy(&mut self) -> OperatorSwitchZonePolicy {
         *self.switch_zone_policy_rx.borrow_and_update()
-    }
-
-    // Handle an update from the [`HardwareMonitor`]
-    async fn handle_hardware_update(
-        &mut self,
-        update: Result<HardwareUpdate, RecvError>,
-    ) {
-        match update {
-            Ok(update) => match update {
-                HardwareUpdate::TofinoAvailable => {
-                    info!(
-                        self.log,
-                        "Hardware monitor got TofinoAvailable message"
-                    );
-                    let policy = self.current_switch_zone_policy();
-                    self.ensure_switch_zone_activated_or_deactivated(
-                        true, policy,
-                    )
-                    .await
-                }
-                HardwareUpdate::TofinoUnavailable => {
-                    info!(
-                        self.log,
-                        "Hardware monitor got TofinoUnavailable message"
-                    );
-                    let policy = self.current_switch_zone_policy();
-                    self.ensure_switch_zone_activated_or_deactivated(
-                        false, policy,
-                    )
-                    .await
-                }
-                HardwareUpdate::TofinoDeviceChange => {
-                    info!(
-                        self.log,
-                        "Hardware monitor got TofinoDeviceChange message"
-                    );
-                    if let Some(sled_agent) = &mut self.sled_agent {
-                        sled_agent.notify_nexus_about_self(&self.log).await;
-                    }
-                }
-                HardwareUpdate::DiskAdded(disk) => {
-                    self.raw_disks_tx
-                        .add_or_update_raw_disk(disk.into(), &self.log);
-                }
-                HardwareUpdate::DiskRemoved(disk) => {
-                    self.raw_disks_tx
-                        .remove_raw_disk(disk.identity(), &self.log);
-                }
-                HardwareUpdate::DiskUpdated(disk) => {
-                    self.raw_disks_tx
-                        .add_or_update_raw_disk(disk.into(), &self.log);
-                }
-            },
-            Err(broadcast::error::RecvError::Lagged(count)) => {
-                warn!(self.log, "Hardware monitor missed {count} messages");
-                self.check_latest_hardware_snapshot().await;
-            }
-            Err(broadcast::error::RecvError::Closed) => {
-                // The `HardwareManager` monitoring task is an infinite loop -
-                // the only way for us to get `Closed` here is if it panicked,
-                // so we will propagate such a panic.
-                panic!("Hardware manager monitor task panicked");
-            }
-        }
     }
 
     async fn ensure_switch_zone_activated_or_deactivated(
@@ -284,51 +227,41 @@ impl HardwareMonitor {
         };
 
         if should_activate {
-            if let Err(e) = service_manager
-                .activate_switch(
-                    self.sled_agent
-                        .as_ref()
-                        .map(|sa| sa.switch_zone_underlay_info()),
-                    self.baseboard.clone(),
-                )
-                .await
+            if let Err(e) =
+                service_manager.activate_switch(self.baseboard.clone()).await
             {
                 error!(self.log, "Failed to activate switch"; e);
             }
         } else {
             if let Err(e) = service_manager.deactivate_switch().await {
-                warn!(self.log, "Failed to deactivate switch: {e}");
+                warn!(self.log, "Failed to deactivate switch"; e);
             }
         }
     }
 
-    // Observe the current hardware state manually.
+    // Act on the current hardware snapshot.
     //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
+    // We use this on startup and any time the snapshot changes.
     async fn check_latest_hardware_snapshot(&mut self) {
-        let underlay_network = if let Some(sled_agent) = &self.sled_agent {
+        if let Some(sled_agent) = &self.sled_agent {
             sled_agent.notify_nexus_about_self(&self.log).await;
-            Some(sled_agent.switch_zone_underlay_info())
-        } else {
-            None
-        };
+        }
 
+        let snapshot = self.hardware_view_rx.borrow_and_update().clone();
         info!(
             self.log, "Checking current full hardware snapshot";
-            "underlay_network_info" => ?underlay_network,
-            "disks" => ?self.hardware_manager.disks(),
+            "snapshot" => ?snapshot,
         );
 
         let policy = self.current_switch_zone_policy();
         self.ensure_switch_zone_activated_or_deactivated(
-            self.hardware_manager.is_scrimlet_asic_available(),
+            snapshot.is_scrimlet_asic_available(),
             policy,
         )
         .await;
 
         self.raw_disks_tx.set_raw_disks(
-            self.hardware_manager.disks().into_values().map(RawDisk::from),
+            snapshot.into_disks().into_values().map(RawDisk::from),
             &self.log,
         );
     }

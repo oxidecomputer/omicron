@@ -3,6 +3,7 @@ use nexus_db_queries::db::{identity::Resource, model::Instance};
 use num_integer::Integer;
 use omicron_common::api::external::Error;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::io::{self, Cursor, Write};
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ impl InstanceCiData for Instance {
             build_vfat(&meta_data, &self.user_data).map_err(|err| {
                 Error::internal_error(&format!(
                     "failed to create cidata volume: {}",
-                    err
+                    InlineErrorChain::new(&err)
                 ))
             })?;
         Ok(cidata)

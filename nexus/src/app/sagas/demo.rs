@@ -22,6 +22,7 @@ use super::NexusActionContext;
 use super::{ActionRegistry, NexusSaga, SagaInitError};
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DemoSagaUuid;
 use serde::Deserialize;
@@ -121,10 +122,8 @@ async fn demo_wait(sagactx: NexusActionContext) -> Result<(), ActionError> {
     let log = osagactx.log();
     info!(log, "demo saga: begin wait"; "id" => %demo_id);
     let rx = {
-        let mut demo_sagas = osagactx
-            .nexus()
-            .demo_sagas()
-            .map_err(ActionError::action_failed)?;
+        let mut demo_sagas =
+            osagactx.nexus().demo_sagas().map_err(saga_action_failed)?;
         demo_sagas.subscribe(demo_id)
     };
     match rx.await {
@@ -137,7 +136,7 @@ async fn demo_wait(sagactx: NexusActionContext) -> Result<(), ActionError> {
                 "id" => %demo_id,
                 "error" => #?error,
             );
-            Err(ActionError::action_failed(Error::internal_error(&format!(
+            Err(saga_action_failed(Error::internal_error(&format!(
                 "demo saga wait failed: {:#}",
                 error
             ))))

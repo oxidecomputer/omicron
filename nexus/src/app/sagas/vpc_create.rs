@@ -13,6 +13,7 @@ use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use nexus_types::external_api::{internet_gateway, vpc};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -166,12 +167,12 @@ async fn svc_create_vpc(
         system_router_id,
         params.vpc_create.clone(),
     )
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
     let (authz_vpc, db_vpc) = osagactx
         .datastore()
         .project_create_vpc(&opctx, &params.authz_project, vpc)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok((authz_vpc, db_vpc))
 }
 
@@ -228,7 +229,7 @@ async fn svc_create_router(
         .datastore()
         .vpc_create_router(&opctx, &authz_vpc, router)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(authz_router)
 }
 
@@ -316,7 +317,7 @@ async fn svc_create_route(
         .datastore()
         .router_create_route(&opctx, &authz_router, route)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -363,7 +364,7 @@ async fn svc_create_subnet(
                 "Failed to allocate default IPv6 subnet",
             )
         })
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let subnet = db::model::VpcSubnet::new(
         default_subnet_id,
@@ -411,7 +412,7 @@ async fn svc_create_subnet(
             }
             InsertVpcSubnetError::External(e) => e,
         })
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svc_create_subnet_undo(
@@ -462,7 +463,7 @@ async fn svc_create_subnet_route(
             route_id,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
         .map(|(auth, ..)| auth)
 }
 
@@ -502,12 +503,12 @@ async fn svc_update_firewall(
             params.vpc_create.identity.name.clone().into(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     osagactx
         .datastore()
         .vpc_update_firewall_rules(&opctx, &authz_vpc, rules.clone())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(rules)
 }
@@ -560,40 +561,64 @@ async fn svc_create_gateway(
         .datastore()
         .vpc_create_internet_gateway(&opctx, &authz_vpc, igw)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
-    match osagactx.datastore().ip_pools_fetch_default(&opctx).await {
-        Ok((authz_ip_pool, _db_ip_pool)) => {
-            // Attach the default IP pool to the default gateway.
-            // Failure of this saga takes out the gateway with a cascading delete and
-            // thus this ip pool.
-            osagactx
-                .datastore()
-                .internet_gateway_attach_ip_pool(
-                    &opctx,
-                    &authz_igw,
-                    InternetGatewayIpPool::new(
-                        Uuid::new_v4(),
-                        authz_ip_pool.id(),
-                        authz_igw.id(),
-                        IdentityMetadataCreateParams {
-                            name: "default".parse().unwrap(),
-                            description:
-                                "Automatically attached default IP pool".into(),
-                        },
-                    ),
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
-        }
-        Err(e) => {
-            warn!(
-                opctx.log,
-                "Default ip pool lookup failed: {e}. \
-                Default gateway has no ip pool association",
+    // Attach all default unicast pools for the silo to the default gateway,
+    // one per IP version.
+    let default_pools = osagactx
+        .datastore()
+        .ip_pools_fetch_all_unicast_defaults(&opctx)
+        .await
+        .map_err(saga_action_failed)?;
+
+    if default_pools.v4.is_none() && default_pools.v6.is_none() {
+        warn!(
+            osagactx.log(),
+            "This VPC's silo has no default IP pools of \
+            either IP version, so nothing to attach to the \
+            internet gateway. Instances in this VPC will not \
+            have default outbound connectivity until IP pools \
+            are attached.";
+            "vpc_id" => %vpc_id,
+            "igw_id" => %default_igw_id,
+        );
+        return Ok(authz_igw);
+    }
+
+    // We have at least one IP Pool linked as the default, so attach it to the
+    // internet gateway too.
+    for (authz_ip_pool, name, version) in [
+        (default_pools.v4, "default-v4", "IPv4"),
+        (default_pools.v6, "default-v6", "IPv6"),
+    ] {
+        let Some((authz_ip_pool, _)) = authz_ip_pool else {
+            debug!(
+                osagactx.log(),
+                "No default {version} IP pool for silo, skipping \
+                attachment to default internet gateway";
+                "internet_gateway_id" => %authz_igw.id(),
             );
-        }
-    };
+            continue;
+        };
+        osagactx
+            .datastore()
+            .internet_gateway_attach_ip_pool(
+                &opctx,
+                &authz_igw,
+                InternetGatewayIpPool::new(
+                    Uuid::new_v4(),
+                    authz_ip_pool.id(),
+                    authz_igw.id(),
+                    IdentityMetadataCreateParams {
+                        name: name.parse().unwrap(),
+                        description: "Automatically attached default IP pool"
+                            .into(),
+                    },
+                ),
+            )
+            .await
+            .map_err(saga_action_failed)?;
+    }
 
     Ok(authz_igw)
 }
@@ -634,13 +659,13 @@ async fn svc_notify_sleds(
         .nexus()
         .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
         .vpc_increment_rpw_version(&opctx, db_vpc.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }

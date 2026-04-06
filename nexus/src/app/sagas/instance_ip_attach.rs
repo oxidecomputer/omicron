@@ -12,6 +12,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz};
 use nexus_db_model::{IpAttachState, NatEntry};
 use nexus_types::external_api::external_ip;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
@@ -100,10 +101,10 @@ async fn siia_begin_attach_ip(
                     osagactx
                         .nexus()
                         .ip_pool_lookup(&opctx, name_or_id)
-                        .map_err(ActionError::action_failed)?
+                        .map_err(saga_action_failed)?
                         .lookup_for(authz::Action::CreateChild)
                         .await
-                        .map_err(ActionError::action_failed)?
+                        .map_err(saga_action_failed)?
                         .0,
                 )
             } else {
@@ -120,7 +121,7 @@ async fn siia_begin_attach_ip(
                     false,
                 )
                 .await
-                .map_err(ActionError::action_failed)
+                .map_err(saga_action_failed)
                 .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
                     external_ip: Some(external_ip),
                     do_saga,
@@ -136,7 +137,7 @@ async fn siia_begin_attach_ip(
                 false,
             )
             .await
-            .map_err(ActionError::action_failed)
+            .map_err(saga_action_failed)
             .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
                 external_ip: Some(external_ip),
                 do_saga,
@@ -243,7 +244,7 @@ async fn siia_nat_undo(
         .nexus()
         .delete_dpd_config_by_entry(&opctx, &nat_entry)
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
     {
         error!(log, "siia_nat_undo: failed to notify DPD: {e}");
     }
@@ -301,7 +302,7 @@ async fn siia_complete_attach(
             )
         })
         .and_then(TryInto::try_into)
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[derive(Debug)]

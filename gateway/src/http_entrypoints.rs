@@ -65,6 +65,7 @@ use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
 use gateway_types::update::UpdateAbortBody;
 use omicron_uuid_kinds::GenericUuid;
+use slog_error_chain::InlineErrorChain;
 use std::io::Cursor;
 use std::num::NonZeroU8;
 use std::str;
@@ -822,7 +823,9 @@ impl GatewayApi for GatewayImpl {
 
             let mut cursor = Cursor::new(Vec::new());
             raw_dump.write_zip(&mut cursor).map_err(|err| {
-                HttpError::for_internal_error(err.to_string())
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                )
             })?;
 
             let base64_zip = base64::engine::general_purpose::STANDARD

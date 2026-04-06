@@ -22,6 +22,7 @@ use nexus_types::external_api::instance::{
 };
 use nexus_types::external_api::{instance, ip_pool, multicast};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
@@ -32,7 +33,7 @@ use omicron_uuid_kinds::{
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -49,7 +50,7 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: instance::InstanceCreate,
-    pub boundary_switches: HashSet<SwitchLocation>,
+    pub boundary_switches: HashSet<SwitchSlot>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -479,14 +480,14 @@ async fn sic_associate_ssh_keys(
         .authn
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let (.., authz_user) = LookupPath::new(&opctx, datastore)
         .silo_user_actor(&actor)
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
         .lookup_for(authz::Action::ListChildren)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     datastore
         .ssh_keys_batch_assign(
@@ -507,7 +508,7 @@ async fn sic_associate_ssh_keys(
             }),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -526,7 +527,7 @@ async fn sic_associate_ssh_keys_undo(
     datastore
         .instance_ssh_keys_delete(&opctx, instance_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -544,7 +545,7 @@ async fn sic_add_to_anti_affinity_group(
         .anti_affinity_group_id(group.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     datastore
         .anti_affinity_group_member_instance_add(
             &opctx,
@@ -552,7 +553,7 @@ async fn sic_add_to_anti_affinity_group(
             instance_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -593,7 +594,7 @@ async fn sic_create_network_interface_undo(
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let interface_deleted = match LookupPath::new(&opctx, datastore)
         .instance_network_interface_id(interface_id)
@@ -651,13 +652,13 @@ async fn create_custom_network_interface(
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let (.., authz_vpc) = LookupPath::new(&opctx, datastore)
         .project_id(saga_params.project_id)
         .vpc_name(&db::model::Name::from(interface_params.vpc_name.clone()))
         .lookup_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // TODO-correctness: It seems racy to fetch the subnet and create the
     // interface in separate requests, but outside of a transaction. This
@@ -671,7 +672,7 @@ async fn create_custom_network_interface(
         ))
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         *interface_id,
@@ -680,7 +681,7 @@ async fn create_custom_network_interface(
         interface_params.identity.clone(),
         interface_params.ip_config.clone(),
     )
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
     datastore
         .instance_create_network_interface(
             &opctx,
@@ -701,7 +702,7 @@ async fn create_custom_network_interface(
             }
         })
         .map_err(InsertNicError::into_external)
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -764,14 +765,14 @@ async fn create_default_primary_network_interface(
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, datastore)
         .project_id(*project_id)
         .vpc_name(&internal_default_name)
         .vpc_subnet_name(&internal_default_name)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         *interface_id,
         *instance_id,
@@ -779,7 +780,7 @@ async fn create_default_primary_network_interface(
         interface_params.identity.clone(),
         interface_params.ip_config.clone(),
     )
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
     datastore
         .instance_create_network_interface(
             &opctx,
@@ -800,7 +801,7 @@ async fn create_default_primary_network_interface(
             }
         })
         .map_err(InsertNicError::into_external)
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -835,13 +836,13 @@ async fn sic_allocate_instance_snat_ip_impl(
     let (.., pool) = datastore
         .ip_pools_fetch_default_by_version(&opctx, ip_version)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let pool_id = pool.identity.id;
 
     datastore
         .allocate_instance_snat_ip(&opctx, ip_id, instance_id, pool_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -918,10 +919,10 @@ async fn sic_allocate_instance_external_ip(
                     osagactx
                         .nexus()
                         .ip_pool_lookup(&opctx, &name_or_id)
-                        .map_err(ActionError::action_failed)?
+                        .map_err(saga_action_failed)?
                         .lookup_for(authz::Action::CreateChild)
                         .await
-                        .map_err(ActionError::action_failed)?
+                        .map_err(saga_action_failed)?
                         .0,
                 )
             } else {
@@ -938,7 +939,7 @@ async fn sic_allocate_instance_external_ip(
                     true,
                 )
                 .await
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
                 .0
         }
         // Set the parent of an existing floating IP to the new instance's ID.
@@ -953,14 +954,12 @@ async fn sic_allocate_instance_external_ip(
             }
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
             if authz_project.id() != project_id {
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(
-                        "floating IP must be in the same project as the instance",
-                    ),
-                ));
+                return Err(saga_action_failed(Error::invalid_request(
+                    "floating IP must be in the same project as the instance",
+                )));
             }
 
             let ip_version = match db_fip.ip {
@@ -977,7 +976,7 @@ async fn sic_allocate_instance_external_ip(
                     true,
                 )
                 .await
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
                 .0
         }
     };
@@ -994,7 +993,7 @@ async fn sic_allocate_instance_external_ip(
             nexus_db_model::IpAttachState::Attached,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(Some(ip))
 }
@@ -1050,7 +1049,7 @@ async fn sic_allocate_instance_external_ip_undo(
                     nexus_db_model::IpAttachState::Detached,
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             if n_rows != 1 {
                 error!(
@@ -1102,7 +1101,7 @@ async fn sic_join_instance_multicast_group(
             join_spec.ip_version,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Add the instance as a member of the multicast group in "Joining" state.
     //
@@ -1129,7 +1128,7 @@ async fn sic_join_instance_multicast_group(
                 );
                 return Ok(Some(()));
             }
-            e => return Err(ActionError::action_failed(e)),
+            e => return Err(saga_action_failed(e)),
         }
     }
 
@@ -1230,7 +1229,7 @@ async fn ensure_instance_disk_attach_state(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // disk name now.  See oxidecomputer/omicron#1536.
@@ -1239,7 +1238,7 @@ async fn ensure_instance_disk_attach_state(
         .disk_name(&disk_name)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     if attached {
         datastore
@@ -1250,12 +1249,12 @@ async fn ensure_instance_disk_attach_state(
                 MAX_DISKS_PER_INSTANCE,
             )
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     } else {
         datastore
             .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     }
 
     Ok(())
@@ -1282,13 +1281,13 @@ async fn sic_create_instance_record(
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let instance = osagactx
         .datastore()
         .project_create_instance(&opctx, &authz_project, new_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(instance)
 }
@@ -1386,19 +1385,19 @@ async fn sic_set_boot_disk(
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .project_id(params.project_id)
         .disk_name_owned(boot_disk.into())
         .lookup_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     datastore
         .instance_set_boot_disk(&opctx, &authz_instance, Some(authz_disk.id()))
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1420,14 +1419,14 @@ async fn sic_set_boot_disk_undo(
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // If there was a boot disk, clear it. If there was not a boot disk,
     // this is a no-op.
     datastore
         .instance_set_boot_disk(&opctx, &authz_instance, None)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1448,9 +1447,9 @@ async fn sic_move_to_stopped(
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
         generation: db::model::Generation::from(
-            instance_record.runtime_state.generation.next(),
+            instance_record.state_generation.next(),
         ),
-        ..instance_record.runtime_state
+        ..instance_record.runtime()
     };
 
     // If this node is being replayed, this instance may already have been
@@ -1462,7 +1461,7 @@ async fn sic_move_to_stopped(
     {
         match e {
             Error::ObjectNotFound { .. } => return Ok(()),
-            e => return Err(ActionError::action_failed(e)),
+            e => return Err(saga_action_failed(e)),
         }
     }
 
@@ -1496,7 +1495,7 @@ pub mod test {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::SledAgent;
-    use sled_agent_types::early_networking::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
     use uuid::Uuid;
 
@@ -1550,7 +1549,7 @@ pub mod test {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
             },
-            boundary_switches: HashSet::from([SwitchLocation::Switch0]),
+            boundary_switches: HashSet::from([SwitchSlot::Switch0]),
         }
     }
 
@@ -1637,7 +1636,6 @@ pub mod test {
             )
             .await
             .unwrap()
-            .runtime_state
             .disk_state
             == "detached"
     }

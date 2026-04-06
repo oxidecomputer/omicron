@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -54,6 +54,26 @@ pub struct AddressLotBlockCreate {
     pub last_address: IpAddr,
 }
 
+/// A loopback address is an address that is assigned to a rack switch but is
+/// not associated with any particular port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LoopbackAddress {
+    /// The id of the loopback address.
+    pub id: Uuid,
+
+    /// The address lot block this address came from.
+    pub address_lot_block_id: Uuid,
+
+    /// The id of the rack where this loopback address is assigned.
+    pub rack_id: Uuid,
+
+    /// Switch location where this loopback address is assigned.
+    pub switch_location: String,
+
+    /// The loopback IP address and prefix length.
+    pub address: oxnet::IpNet,
+}
+
 /// Parameters for creating a loopback address on a particular rack switch.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LoopbackAddressCreate {
@@ -64,7 +84,7 @@ pub struct LoopbackAddressCreate {
     /// The rack containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
-    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
+    // TODO: #3604 Consider using `SwitchSlot` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,
@@ -87,7 +107,7 @@ pub struct LoopbackAddressPath {
     pub rack_id: Uuid,
 
     /// The switch location to use when selecting the loopback address.
-    pub switch_location: Name,
+    pub switch_slot: Name,
 
     /// The IP address and subnet mask to use when selecting the loopback
     /// address.
@@ -99,6 +119,26 @@ pub struct LoopbackAddressPath {
 }
 
 // SWITCH PORT SETTINGS
+
+/// A switch port represents a physical external port on a rack switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPort {
+    /// The id of the switch port.
+    pub id: Uuid,
+
+    /// The rack this switch port belongs to.
+    pub rack_id: Uuid,
+
+    /// The switch location of this switch port.
+    pub switch_location: String,
+
+    /// The name of this switch port.
+    pub port_name: Name,
+
+    /// The primary settings group of this switch port. Will be `None` until
+    /// this switch port is configured.
+    pub port_settings_id: Option<Uuid>,
+}
 
 /// Parameters for creating a port settings group.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -549,7 +589,7 @@ impl JsonSchema for BgpMessageHistory {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SwitchBgpHistory {
     /// Switch this message history is associated with.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 
     /// Message history indexed by peer address.
     pub history: HashMap<String, BgpMessageHistory>,
@@ -678,7 +718,7 @@ pub struct LldpPortPathSelector {
     pub rack_id: Uuid,
 
     /// A switch location to use when selecting switch ports.
-    pub switch_location: Name,
+    pub switch_slot: Name,
 
     /// A name to use when selecting switch ports.
     pub port: Name,
@@ -705,7 +745,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 /// The current state of a BGP peer.
@@ -751,7 +791,7 @@ pub struct BgpImportedRouteIpv4 {
     pub id: u32,
 
     /// Switch the route is imported into.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 // BGP EXPORTED (old HashMap-based type)

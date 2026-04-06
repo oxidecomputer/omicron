@@ -5,17 +5,18 @@
 //! Helpers for running health checks from the sled agent
 
 use illumos_utils::svcs::Svcs;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use slog::Logger;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tokio::time::MissedTickBehavior;
 use tokio::time::interval;
 
-pub(crate) async fn poll_smf_services_in_maintenance(
+pub(crate) async fn poll_smf_services_enabled_not_online(
     log: Logger,
-    smf_services_in_maintenance_tx: watch::Sender<
-        Result<SvcsInMaintenanceResult, String>,
+    smf_services_enabled_not_online_tx: watch::Sender<
+        SvcsEnabledNotOnlineResult,
     >,
 ) {
     // We poll every minute to verify the health of all services. This interval
@@ -29,17 +30,45 @@ pub(crate) async fn poll_smf_services_in_maintenance(
 
     loop {
         interval.tick().await;
-        match Svcs::in_maintenance(&log).await {
+        match Svcs::enabled_not_online(&log).await {
             // There isn't anything waiting for changes because we only look at
             // the health check status when an inventory request comes in. This
             // means we can safely use `send_modify` instead of
             // `send_if_modified()`.
-            Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Err(e.to_string());
-            }),
-            Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Ok(svcs);
-            }),
+            Err(e) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = SvcsEnabledNotOnlineResult::SvcsCmdError(
+                        execution_err_to_svcs_error(e),
+                    )
+                })
+            }
+            Ok(svcs) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                        svcs.into(),
+                    );
+                })
+            }
         };
+    }
+}
+
+fn execution_err_to_svcs_error(
+    err: illumos_utils::ExecutionError,
+) -> SvcsError {
+    match err {
+        illumos_utils::ExecutionError::ExecutionStart { command, err } => {
+            SvcsError::ExecutionStart { command, err: err.to_string() }
+        }
+        illumos_utils::ExecutionError::CommandFailure(e) => {
+            SvcsError::CommandFailure(e.to_string())
+        }
+        illumos_utils::ExecutionError::ContractFailure { msg, err } => {
+            SvcsError::ContractFailure { msg, err: err.to_string() }
+        }
+        illumos_utils::ExecutionError::ParseFailure(e) => {
+            SvcsError::ParseFailure(e)
+        }
+        illumos_utils::ExecutionError::NotRunning => SvcsError::NotRunning,
     }
 }

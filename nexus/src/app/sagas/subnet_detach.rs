@@ -19,6 +19,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::db::datastore::ExternalSubnetCompleteOpResult;
 use nexus_types::external_api::external_subnet;
+use nexus_types::saga::saga_action_failed;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -81,7 +82,7 @@ async fn ssd_begin_detach_subnet(
             &params.authz_subnet,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn ssd_begin_detach_subnet_undo(
@@ -144,9 +145,7 @@ async fn ssd_notify_dpd(
     if !do_saga {
         return Ok(());
     }
-    delete_subnet_attachment_from_dpd(&sagactx, subnet.subnet)
-        .await
-        .map_err(ActionError::action_failed)
+    delete_subnet_attachment_from_dpd(&sagactx, subnet.subnet).await
 }
 
 async fn ssd_notify_dpd_undo(
@@ -183,9 +182,7 @@ async fn ssd_notify_opte(
     let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
     let subnet =
         sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
-    delete_subnet_attachment_from_opte(&sagactx, ids, subnet)
-        .await
-        .map_err(ActionError::action_failed)
+    delete_subnet_attachment_from_opte(&sagactx, ids, subnet).await
 }
 
 async fn ssd_notify_opte_undo(
@@ -237,7 +234,7 @@ async fn ssd_complete_detach(
             warn!(log, "ssd_complete_detach ran more than once");
             Ok(subnet.into())
         }
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 

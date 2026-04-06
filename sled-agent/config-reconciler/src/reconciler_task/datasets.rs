@@ -21,6 +21,7 @@ use crate::dataset_serialization_task::RekeyResult;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::disk::DatasetConfig;

@@ -68,14 +68,14 @@ NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRulePr
 NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 
 impl DatabaseString for VpcFirewallRuleProtocol {
-    type Error = <external::VpcFirewallRuleProtocol as FromStr>::Err;
+    type Error = external::Error;
 
     fn to_database_string(&self) -> Cow<'_, str> {
-        self.0.to_string().into()
+        self.0.to_api_string().into()
     }
 
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
-        s.parse::<external::VpcFirewallRuleProtocol>().map(Self)
+        external::VpcFirewallRuleProtocol::from_api_string(s).map(Self)
     }
 }
 

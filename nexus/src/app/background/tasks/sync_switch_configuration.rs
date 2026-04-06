@@ -56,15 +56,17 @@ use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::ParseSwitchLocationError;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
@@ -172,29 +174,20 @@ impl SwitchPortSettingsManager {
         opctx: &OpContext,
         log: &slog::Logger,
     ) -> Result<
-        Vec<(SwitchLocation, nexus_db_model::SwitchPort, PortSettingsChange)>,
+        Vec<(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)>,
         serde_json::Value,
     > {
         let mut changes = Vec::new();
         for port in port_list {
-            let location: SwitchLocation =
-                match port.switch_location.clone().parse() {
-                    Ok(location) => location,
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to parse switch location";
-                            "switch_location" => ?port.switch_location,
-                            "error" => ?e
-                        );
-                        continue;
-                    }
-                };
-
+            let switch_slot = SwitchSlot::from(port.switch_slot);
             let id = match port.port_settings_id {
                 Some(id) => id,
                 _ => {
-                    changes.push((location, port, PortSettingsChange::Clear));
+                    changes.push((
+                        switch_slot,
+                        port,
+                        PortSettingsChange::Clear,
+                    ));
                     continue;
                 }
             };
@@ -202,7 +195,7 @@ impl SwitchPortSettingsManager {
             info!(
                 log,
                 "fetching switch port settings";
-                "switch_location" => ?location,
+                "switch_slot" => ?switch_slot,
                 "port" => ?port,
             );
 
@@ -231,7 +224,7 @@ impl SwitchPortSettingsManager {
             };
 
             changes.push((
-                location,
+                switch_slot,
                 port,
                 PortSettingsChange::Apply(Box::new(settings)),
             ));
@@ -242,9 +235,8 @@ impl SwitchPortSettingsManager {
     async fn db_loopback_addresses(
         &mut self,
         opctx: &OpContext,
-        log: &slog::Logger,
     ) -> Result<
-        HashSet<(SwitchLocation, IpAddr)>,
+        HashSet<(SwitchSlot, IpAddr)>,
         omicron_common::api::external::Error,
     > {
         let values = self
@@ -252,24 +244,11 @@ impl SwitchPortSettingsManager {
             .loopback_address_list(opctx, &DataPageParams::max_page())
             .await?;
 
-        let mut set: HashSet<(SwitchLocation, IpAddr)> = HashSet::new();
+        let mut set: HashSet<(SwitchSlot, IpAddr)> = HashSet::new();
 
         // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_location, address, .. } in values.iter() {
-            let location: SwitchLocation = match switch_location.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to parse switch location for loopback address";
-                        "address" => %address,
-                        "location" => switch_location,
-                        "error" => ?e,
-                    );
-                    continue;
-                }
-            };
-            set.insert((location, address.ip()));
+        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
+            set.insert((SwitchSlot::from(*switch_slot), address.ip()));
         }
 
         Ok(set)
@@ -304,17 +283,7 @@ impl SwitchPortSettingsManager {
                     })?,
                 required_rx: spec.required_rx.0.into(),
                 mode: spec.mode.into(),
-                switch: spec.switch.parse().map_err(
-                    |e: ParseSwitchLocationError| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: failed to parse switch \
-                                 name: {}: {:?}",
-                                spec.switch, e,
-                            ),
-                        }
-                    },
-                )?,
+                switch: spec.switch_slot.into(),
             };
             result.push(config);
         }
@@ -467,15 +436,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
 
                 info!(&log, "checking for changes to loopback addresses");
-                match self.db_loopback_addresses(opctx, &log).await {
+                match self.db_loopback_addresses(opctx).await {
                     Ok(desired_loopback_addresses) => {
                         let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 
-                        let loopbacks_to_add: Vec<(SwitchLocation, IpAddr)> = desired_loopback_addresses
+                        let loopbacks_to_add: Vec<(SwitchSlot, IpAddr)> = desired_loopback_addresses
                             .difference(&current_loopback_addresses)
                             .map(|i| (i.0, i.1))
                             .collect();
-                        let loopbacks_to_del: Vec<(SwitchLocation, IpAddr)> = current_loopback_addresses
+                        let loopbacks_to_del: Vec<(SwitchSlot, IpAddr)> = current_loopback_addresses
                             .difference(&desired_loopback_addresses)
                             .map(|i| (i.0, i.1))
                             .collect();
@@ -502,15 +471,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
                 // calculate and apply switch zone SMF changes
                 //
-                let uplinks = uplinks(&changes);
+                let uplinks = uplinks(&changes, &log);
 
                 // yeet the messages
-                for (location, config) in &uplinks {
+                for (switch_slot, config) in &uplinks {
                     let client: &sled_agent_client::Client =
-                        match scrimlet_sled_agent_clients.get(location) {
+                        match scrimlet_sled_agent_clients.get(switch_slot) {
                             Some(client) => client,
                             None => {
-                                error!(log, "sled-agent client is missing, cannot send updates"; "location" => %location);
+                                error!(log, "sled-agent client is missing, cannot send updates"; "switch_slot" => ?switch_slot);
                                 continue;
                             },
                         };
@@ -518,7 +487,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     info!(
                         &log,
                         "applying SMF config uplink updates to switch zone";
-                        "switch_location" => ?location,
+                        "switch_slot" => ?switch_slot,
                         "config" => ?config,
                     );
                     if let Err(e) = client
@@ -530,7 +499,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(
                             log,
                             "error while applying smf updates to switch zone";
-                            "location" => %location,
+                            "switch_slot" => ?switch_slot,
                             "error" => %DisplayErrorChain::new(&e)
                         );
                     }
@@ -542,16 +511,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // build a list of desired settings for each switch
                 let mut desired_bgp_configs: HashMap<
-                        SwitchLocation, (ApplyRequest, BestpathFanoutRequest)
+                        SwitchSlot, (ApplyRequest, BestpathFanoutRequest)
                         > = HashMap::new();
 
                 // we currently only support one bgp config per switch
-                let mut switch_bgp_config: HashMap<SwitchLocation, (Uuid, BgpConfig)> = HashMap::new();
+                let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
                 let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix>> = HashMap::new();
 
-                for (location, port, change) in &changes {
+                for (switch_slot, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
                         continue;
                     };
@@ -561,10 +530,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
 
                     for peer in &settings.bgp_peers {
-                        let bgp_config_id = peer.bgp_config_id;
+                        let bgp_config_id = peer.bgp_config_id();
+                        let port_settings_id = peer.port_settings_id();
+                        let peer = peer.as_bgp_peer();
 
                         // since we only have one bgp config per switch, we only need to fetch it once
-                        let bgp_config = match switch_bgp_config.entry(*location) {
+                        let bgp_config = match switch_bgp_config.entry(*switch_slot) {
                             Entry::Occupied(occupied_entry) => {
                                 let (existing_id, existing_config) = occupied_entry.get().clone();
                                 // verify peers don't have differing configs
@@ -574,7 +545,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     error!(
                                         log,
                                         "peers do not have matching asn (only one asn allowed per switch)";
-                                        "switch" => ?location,
+                                        "switch_slot" => ?switch_slot,
                                         "first_config_id" => ?existing_id,
                                         "second_config_id" => ?bgp_config_id,
                                     );
@@ -594,7 +565,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         error!(
                                             log,
                                             "error while fetching bgp peer config from db";
-                                            "location" => %location,
+                                            "switch_slot" => ?switch_slot,
                                             "port_name" => %port.port_name,
                                             "error" => %DisplayErrorChain::new(&e)
                                         );
@@ -631,7 +602,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     error!(
                                         log,
                                         "error while fetching bgp announcements from db";
-                                        "location" => %location,
+                                        "switch_slot" => ?switch_slot,
                                         "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
                                         "error" => %DisplayErrorChain::new(&e)
                                     );
@@ -656,12 +627,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
-                        let ttl = peer.min_ttl.map(|x| x.0);
+                        let ttl = peer.min_ttl;
 
                         // Determine if this is a numbered or unnumbered peer
                         // (None or unspecified address = unnumbered)
                         let peer_addr = match peer.addr {
-                            Some(addr) if !addr.ip().is_unspecified() => Some(addr),
+                            Some(addr) if !addr.is_unspecified() => Some(addr),
                             _ => None,
                         };
 
@@ -669,7 +640,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
-                            peer.port_settings_id,
+                            port_settings_id,
                             &peer.interface_name.to_string(),
                             peer_addr,
                         ).await {
@@ -693,7 +664,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
-                            peer.port_settings_id,
+                            port_settings_id,
                             &peer.interface_name.to_string(),
                             peer_addr,
                         ).await {
@@ -761,7 +732,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
-                            peer.port_settings_id,
+                            port_settings_id,
                             &peer.interface_name.to_string(),
                             peer_addr,
                         ).await {
@@ -831,20 +802,20 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         if let Some(addr) = peer_addr {
                             // now that the peer passes the above validations, add it to the list for configuration
                             let peer_config = BgpPeerConfig {
-                                name: format!("{}", addr.ip()),
-                                host: format!("{}:179", addr.ip()),
-                                hold_time: peer.hold_time.0.into(),
-                                idle_hold_time: peer.idle_hold_time.0.into(),
-                                delay_open: peer.delay_open.0.into(),
-                                connect_retry: peer.connect_retry.0.into(),
-                                keepalive: peer.keepalive.0.into(),
+                                name: format!("{}", addr),
+                                host: format!("{}:179", addr),
+                                hold_time: peer.hold_time.into(),
+                                idle_hold_time: peer.idle_hold_time.into(),
+                                delay_open: peer.delay_open.into(),
+                                connect_retry: peer.connect_retry.into(),
+                                keepalive: peer.keepalive.into(),
                                 resolution: BGP_SESSION_RESOLUTION,
                                 passive: false,
-                                remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                                remote_asn: peer.remote_asn,
                                 min_ttl: ttl,
                                 md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
-                                local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                                multi_exit_discriminator: peer.multi_exit_discriminator,
+                                local_pref: peer.local_pref,
                                 enforce_first_as: peer.enforce_first_as,
                                 communities: communities.into_iter().map(|c| c.community.0).collect(),
                                 ipv4_unicast: Some(Ipv4UnicastConfig{
@@ -857,7 +828,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: import_policy6,
                                     export_policy: export_policy6,
                                 }),
-                                vlan_id: peer.vlan_id.map(|x| x.0),
+                                vlan_id: peer.vlan_id,
                                 //TODO plumb these out to the external API
                                 connect_retry_jitter: Some(JitterRange {
                                     max: 1.0,
@@ -885,18 +856,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             let peer_config = UnnumberedBgpPeerConfig {
                                 name: format!("unnumbered-{}", port.port_name),
                                 interface: format!("tfport{}_0", port.port_name),
-                                hold_time: peer.hold_time.0.into(),
-                                idle_hold_time: peer.idle_hold_time.0.into(),
-                                delay_open: peer.delay_open.0.into(),
-                                connect_retry: peer.connect_retry.0.into(),
-                                keepalive: peer.keepalive.0.into(),
+                                hold_time: peer.hold_time.into(),
+                                idle_hold_time: peer.idle_hold_time.into(),
+                                delay_open: peer.delay_open.into(),
+                                connect_retry: peer.connect_retry.into(),
+                                keepalive: peer.keepalive.into(),
                                 resolution: BGP_SESSION_RESOLUTION,
                                 passive: false,
-                                remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                                remote_asn: peer.remote_asn,
                                 min_ttl: ttl,
                                 md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
-                                local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                                multi_exit_discriminator: peer.multi_exit_discriminator,
+                                local_pref: peer.local_pref,
                                 enforce_first_as: peer.enforce_first_as,
                                 communities: communities.into_iter().map(|c| c.community.0).collect(),
                                 ipv4_unicast: Some(Ipv4UnicastConfig{
@@ -909,14 +880,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: import_policy6,
                                     export_policy: export_policy6,
                                 }),
-                                vlan_id: peer.vlan_id.map(|x| x.0),
+                                vlan_id: peer.vlan_id,
                                 connect_retry_jitter: Some(JitterRange {
                                     max: 1.0,
                                     min: 0.75,
                                 }),
                                 deterministic_collision_resolution: false,
                                 idle_hold_jitter: None,
-                                router_lifetime: peer.router_lifetime.0,
+                                router_lifetime: peer.router_lifetime,
                             };
 
                             // update the stored vec if it exists, create a new on if it doesn't exist
@@ -931,10 +902,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     }
 
-                    let (config_id, request_bgp_config) = match switch_bgp_config.get(location) {
+                    let (config_id, request_bgp_config) = match switch_bgp_config.get(switch_slot) {
                         Some(config) => config,
                         None => {
-                            info!(log, "no bgp config found for switch, skipping."; "switch" => ?location);
+                            info!(log, "no bgp config found for switch, skipping."; "switch" => ?switch_slot);
                             continue;
                         },
                     };
@@ -946,7 +917,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             error!(
                                 log,
                                 "no prefixes to announce found for bgp config";
-                                "switch" => ?location,
+                                "switch" => ?switch_slot,
                                 "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
                                 "bgp_config_id" => ?config_id,
                             );
@@ -954,7 +925,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-                    match desired_bgp_configs.entry(*location) {
+                    match desired_bgp_configs.entry(*switch_slot) {
                         Entry::Occupied(mut occupied_entry) => {
                             let (config, _) = occupied_entry.get_mut();
                             // peers are the only per-port part of the config.
@@ -983,7 +954,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     error!(
                                         log,
                                         "Bgp config max_paths was set to zero! Configuring with default value of 1!";
-                                        "switch" => ?location,
+                                        "switch" => ?switch_slot,
                                         "bgp_config_id" => ?config_id,
                                     );
                                     std::num::NonZeroU8::MIN
@@ -997,18 +968,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }
 
-                for (location, (config, fanout)) in &desired_bgp_configs {
-                    let client = match mgd_clients.get(location) {
+                for (switch_slot, (config, fanout)) in &desired_bgp_configs {
+                    let client = match mgd_clients.get(switch_slot) {
                         Some(client) => client,
                         None => {
-                            error!(log, "no mgd client found for switch"; "switch_location" => ?location);
+                            error!(log, "no mgd client found for switch"; "switch_slot" => ?switch_slot);
                             continue;
                         },
                     };
                     info!(
                         &log,
                         "applying bgp config";
-                        "switch_location" => ?location,
+                        "switch_slot" => ?switch_slot,
                         "config" => ?config,
                     );
                     if let Err(e) = client.bgp_apply_v2(config).await {
@@ -1086,18 +1057,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let mut ports: Vec<PortConfig> = vec![];
 
-                for (location, port, change) in &changes {
+                for (switch_slot, port, change) in &changes {
                     let PortSettingsChange::Apply(info) = change else {
                         continue;
                     };
 
-                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.to_string()).await {
+                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *switch_slot, port.port_name.to_string()).await {
                         Ok(v) => v,
                         Err(e) => {
                             error!(
                                 log,
                                 "failed to fetch bgp peer config for switch port";
-                                "switch_location" => ?location,
+                                "switch_slot" => ?switch_slot,
                                 "port" => &port.port_name.to_string(),
                                 "error" => %DisplayErrorChain::new(&e)
                             );
@@ -1129,6 +1100,34 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 log,
                                 "failed to convert database peer configs to \
                                  API peer configs";
+                                "switch_slot" => ?switch_slot,
+                                "port" => &port.port_name.to_string(),
+                                InlineErrorChain::new(&err),
+                            );
+                            continue;
+                        }
+                    };
+
+                    let addresses = match info
+                        .addresses
+                        .iter()
+                        .map(|a| {
+                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
+                             Ok(UplinkAddressConfig {
+                                 address,
+                                 vlan_id: a.vlan_id
+                             })
+                        })
+                        .collect::<Result<_, InvalidIpAddrError>>()
+                    {
+                        Ok(addresses) => addresses,
+                        Err(err) => {
+                            error!(
+                                log,
+                                "failed to convert database uplink addresses \
+                                 to API uplink addresses";
+                                "switch_slot" => ?switch_slot,
+                                "port" => &port.port_name.to_string(),
                                 InlineErrorChain::new(&err),
                             );
                             continue;
@@ -1136,15 +1135,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let mut port_config = PortConfig {
-                        addresses: info
-                            .addresses
-                            .iter()
-                            .map(|a|
-                                 UplinkAddressConfig {
-                                     address: if a.address.addr().is_unspecified() {None} else {Some(a.address)},
-                                     vlan_id: a.vlan_id
-                                 }
-                            ).collect(),
+                        addresses,
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1162,7 +1153,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 rib_priority: r.rib_priority.map(|x| x.0),
                             })
                             .collect(),
-                        switch: *location,
+                        switch: *switch_slot,
                         uplink_port_fec: info
                             .links
                             .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
@@ -1194,11 +1185,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
-                        // For unnumbered peers (addr is UNSPECIFIED), pass None
-                        let peer_addr_for_lookup = if peer.addr.is_unspecified() {
-                            None
-                        } else {
-                            Some(IpNetwork::from(peer.addr))
+                        // For unnumbered peers, pass None
+                        //
+                        // TODO-cleanup Push `RouterPeerAddress` down to all the
+                        // datastore methods below instead of an `Option`.
+                        let peer_addr_for_lookup = match peer.addr {
+                            RouterPeerType::Unnumbered { .. } => None,
+                            RouterPeerType::Numbered { ip } => {
+                                Some(IpAddr::from(ip))
+                            }
                         };
 
                         peer.communities = match self
@@ -1465,12 +1460,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
-                    for (location, client) in &scrimlet_sled_agent_clients {
+                    for (switch_slot, client) in &scrimlet_sled_agent_clients {
                         if let Err(e) = client.write_network_bootstore_config(&write_request).await {
                             error!(
                                 log,
                                 "error updating bootstore";
-                                "location" => %location,
+                                "switch_slot" => ?switch_slot,
                                 "request" => ?write_request,
                                 "error" => %e,
                             )
@@ -1619,15 +1614,15 @@ async fn ensure_loopback_deleted(
 }
 
 async fn add_loopback_addresses_to_switch(
-    loopbacks_to_add: &[(SwitchLocation, IpAddr)],
-    dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
+    loopbacks_to_add: &[(SwitchSlot, IpAddr)],
+    dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
     log: &slog::Logger,
 ) {
-    for (location, address) in loopbacks_to_add {
-        let client = match dpd_clients.get(location) {
+    for (switch_slot, address) in loopbacks_to_add {
+        let client = match dpd_clients.get(switch_slot) {
             Some(v) => v,
             None => {
-                error!(log, "dpd_client is missing, cannot create loopback addresses"; "location" => %location);
+                error!(log, "dpd_client is missing, cannot create loopback addresses"; "switch_slot" => ?switch_slot);
                 continue;
             }
         };
@@ -1642,15 +1637,15 @@ async fn add_loopback_addresses_to_switch(
 }
 
 async fn delete_loopback_addresses_from_switch(
-    loopbacks_to_del: &[(SwitchLocation, IpAddr)],
-    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
+    loopbacks_to_del: &[(SwitchSlot, IpAddr)],
+    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
     log: &slog::Logger,
 ) {
-    for (location, address) in loopbacks_to_del {
-        let client = match dpd_clients.get(location) {
+    for (switch_slot, address) in loopbacks_to_del {
+        let client = match dpd_clients.get(switch_slot) {
             Some(v) => v,
             None => {
-                error!(log, "dpd_client is missing, cannot delete loopback addresses"; "location" => %location);
+                error!(log, "dpd_client is missing, cannot delete loopback addresses"; "switch_slot" => ?switch_slot);
                 continue;
             }
         };
@@ -1662,20 +1657,20 @@ async fn delete_loopback_addresses_from_switch(
 }
 
 async fn switch_loopback_addresses(
-    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
+    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
     log: &slog::Logger,
-) -> HashSet<(SwitchLocation, IpAddr)> {
-    let mut current_loopback_addresses: HashSet<(SwitchLocation, IpAddr)> =
+) -> HashSet<(SwitchSlot, IpAddr)> {
+    let mut current_loopback_addresses: HashSet<(SwitchSlot, IpAddr)> =
         HashSet::new();
 
-    for (location, client) in dpd_clients {
+    for (switch_slot, client) in dpd_clients {
         let ipv4_loopbacks = match client.loopback_ipv4_list().await {
             Ok(v) => v,
             Err(e) => {
                 error!(
                     log,
                     "error fetching ipv4 loopback addresses from switch";
-                    "location" => %location,
+                    "switch_slot" => ?switch_slot,
                     "error" => %e,
                 );
                 continue;
@@ -1688,7 +1683,7 @@ async fn switch_loopback_addresses(
                 error!(
                     log,
                     "error fetching ipv6 loopback addresses from switch";
-                    "location" => %location,
+                    "switch_slot" => ?switch_slot,
                     "error" => %e,
                 );
                 continue;
@@ -1697,28 +1692,24 @@ async fn switch_loopback_addresses(
 
         for entry in ipv4_loopbacks.iter() {
             current_loopback_addresses
-                .insert((*location, IpAddr::V4(entry.addr)));
+                .insert((*switch_slot, IpAddr::V4(entry.addr)));
         }
 
         for entry in ipv6_loopbacks.iter().filter(|x| x.tag == OMICRON_DPD_TAG)
         {
             current_loopback_addresses
-                .insert((*location, IpAddr::V6(entry.addr)));
+                .insert((*switch_slot, IpAddr::V6(entry.addr)));
         }
     }
     current_loopback_addresses
 }
 
 fn uplinks(
-    changes: &[(
-        SwitchLocation,
-        nexus_db_model::SwitchPort,
-        PortSettingsChange,
-    )],
-) -> HashMap<SwitchLocation, Vec<HostPortConfig>> {
-    let mut uplinks: HashMap<SwitchLocation, Vec<HostPortConfig>> =
-        HashMap::new();
-    for (location, port, change) in changes {
+    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
+    log: &slog::Logger,
+) -> HashMap<SwitchSlot, Vec<HostPortConfig>> {
+    let mut uplinks: HashMap<SwitchSlot, Vec<HostPortConfig>> = HashMap::new();
+    for (switch_slot, port, change) in changes {
         let PortSettingsChange::Apply(config) = change else {
             continue;
         };
@@ -1757,25 +1748,40 @@ fn uplinks(
             None
         };
 
+        let addrs = match config
+            .addresses
+            .iter()
+            .map(|a| {
+                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
+                 Ok(UplinkAddressConfig {
+                     address,
+                     vlan_id: a.vlan_id
+                 })
+            })
+            .collect::<Result<_, InvalidIpAddrError>>()
+        {
+            Ok(addresses) => addresses,
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to convert database uplink addresses to \
+                     API uplink addresses";
+                    "switch_slot" => ?switch_slot,
+                    "port" => &port.port_name.to_string(),
+                    InlineErrorChain::new(&err),
+                );
+                continue;
+            }
+        };
+
         let config = HostPortConfig {
             port: port.port_name.to_string(),
-            addrs: config
-                .addresses
-                .iter()
-                .map(|a| UplinkAddressConfig {
-                    address: if a.address.addr().is_unspecified() {
-                        None
-                    } else {
-                        Some(a.address)
-                    },
-                    vlan_id: a.vlan_id,
-                })
-                .collect(),
+            addrs,
             lldp,
             tx_eq,
         };
 
-        match uplinks.entry(*location) {
+        match uplinks.entry(*switch_slot) {
             Entry::Occupied(mut occupied_entry) => {
                 occupied_entry.get_mut().push(config);
             }
@@ -1788,20 +1794,20 @@ fn uplinks(
 }
 
 fn build_sled_agent_clients(
-    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
+    mappings: &HashMap<SwitchSlot, std::net::Ipv6Addr>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, sled_agent_client::Client> {
-    let sled_agent_clients: HashMap<SwitchLocation, sled_agent_client::Client> =
+) -> HashMap<SwitchSlot, sled_agent_client::Client> {
+    let sled_agent_clients: HashMap<SwitchSlot, sled_agent_client::Client> =
         mappings
             .iter()
-            .map(|(location, addr)| {
+            .map(|(switch_slot, addr)| {
                 // build sled agent address from switch zone address
                 let addr = get_sled_address(Ipv6Subnet::new(*addr));
                 let client = sled_agent_client::Client::new(
                     &format!("http://{}", addr),
                     log.clone(),
                 );
-                (*location, client)
+                (*switch_slot, client)
             })
             .collect();
     sled_agent_clients
@@ -1832,16 +1838,15 @@ enum SwitchStaticRoute {
 type SwitchStaticRoutes = HashSet<SwitchStaticRoute>;
 
 fn static_routes_to_del(
-    current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
-    desired_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
-) -> HashMap<SwitchLocation, DeleteStaticRouteRequest> {
-    let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRouteRequest> =
+    current_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
+    desired_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
+) -> HashMap<SwitchSlot, DeleteStaticRouteRequest> {
+    let mut routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest> =
         HashMap::new();
 
     // find routes to remove
-    for (switch_location, routes_on_switch) in &current_static_routes {
-        if let Some(routes_wanted) = desired_static_routes.get(switch_location)
-        {
+    for (switch_slot, routes_on_switch) in &current_static_routes {
+        if let Some(routes_wanted) = desired_static_routes.get(switch_slot) {
             let mut result = DeleteStaticRouteRequest::default();
             // if it's on the switch but not desired (in our db), it should be removed
             let stale_routes = routes_on_switch.difference(routes_wanted);
@@ -1865,7 +1870,7 @@ fn static_routes_to_del(
                     }
                 }
             }
-            routes_to_del.insert(*switch_location, result);
+            routes_to_del.insert(*switch_slot, result);
         } else {
             // if no desired routes are present, all routes on this switch should be deleted
             let mut result = DeleteStaticRouteRequest::default();
@@ -1889,7 +1894,7 @@ fn static_routes_to_del(
                     }
                 }
             }
-            routes_to_del.insert(*switch_location, result);
+            routes_to_del.insert(*switch_slot, result);
         };
     }
 
@@ -1907,23 +1912,22 @@ fn static_routes_to_del(
 
 #[allow(clippy::type_complexity)]
 fn static_routes_to_add(
-    desired_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
-    current_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
+    desired_static_routes: &HashMap<SwitchSlot, SwitchStaticRoutes>,
+    current_static_routes: &HashMap<SwitchSlot, SwitchStaticRoutes>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, AddStaticRouteRequest> {
-    let mut routes_to_add: HashMap<SwitchLocation, AddStaticRouteRequest> =
+) -> HashMap<SwitchSlot, AddStaticRouteRequest> {
+    let mut routes_to_add: HashMap<SwitchSlot, AddStaticRouteRequest> =
         HashMap::new();
 
     // find routes to add
-    for (switch_location, routes_wanted) in desired_static_routes {
-        let routes_on_switch = match current_static_routes.get(&switch_location)
-        {
+    for (switch_slot, routes_wanted) in desired_static_routes {
+        let routes_on_switch = match current_static_routes.get(&switch_slot) {
             Some(routes) => routes,
             None => {
                 warn!(
                     &log,
                     "no discovered routes from switch. it is possible that an earlier api call failed.";
-                    "switch_location" => ?switch_location,
+                    "switch_slot" => ?switch_slot,
                 );
                 continue;
             }
@@ -1951,7 +1955,7 @@ fn static_routes_to_add(
             }
         }
 
-        routes_to_add.insert(*switch_location, result);
+        routes_to_add.insert(*switch_slot, result);
     }
 
     // filter out switches with no routes to add
@@ -1968,16 +1972,12 @@ fn static_routes_to_add(
 
 fn static_routes_in_db(
     log: &Logger,
-    changes: &[(
-        SwitchLocation,
-        nexus_db_model::SwitchPort,
-        PortSettingsChange,
-    )],
-) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
-    let mut routes_from_db: HashMap<SwitchLocation, SwitchStaticRoutes> =
+    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
+) -> HashMap<SwitchSlot, SwitchStaticRoutes> {
+    let mut routes_from_db: HashMap<SwitchSlot, SwitchStaticRoutes> =
         HashMap::new();
 
-    for (location, _port, change) in changes {
+    for (switch_slot, _port, change) in changes {
         // we only need to check for ports that have a configuration present. No config == no routes.
         let PortSettingsChange::Apply(settings) = change else {
             continue;
@@ -2036,7 +2036,7 @@ fn static_routes_in_db(
             };
         }
 
-        match routes_from_db.entry(*location) {
+        match routes_from_db.entry(*switch_slot) {
             Entry::Occupied(mut occupied_entry) => {
                 occupied_entry.get_mut().extend(routes);
             }
@@ -2051,22 +2051,18 @@ fn static_routes_in_db(
 // apply changes for each port
 // if we encounter an error, we log it and keep going instead of bailing
 async fn apply_switch_port_changes(
-    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
-    changes: &[(
-        SwitchLocation,
-        nexus_db_model::SwitchPort,
-        PortSettingsChange,
-    )],
+    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
+    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
     log: &slog::Logger,
 ) {
-    for (location, switch_port, change) in changes {
-        let client = match dpd_clients.get(&location) {
+    for (switch_slot, switch_port, change) in changes {
+        let client = match dpd_clients.get(&switch_slot) {
             Some(client) => client,
             None => {
                 error!(
                     &log,
-                    "no DPD client for switch location";
-                    "switch_location" => ?location
+                    "no DPD client for switch switch_slot";
+                    "switch_location" => ?switch_slot
                 );
                 continue;
             }
@@ -2081,7 +2077,7 @@ async fn apply_switch_port_changes(
                     &log,
                     "failed to parse switch port id";
                     "db_switch_port_name" => ?switch_port.port_name,
-                    "switch_location" => ?location,
+                    "switch_location" => ?switch_slot,
                     "error" => format!("{:#}", e)
                 );
                 continue;
@@ -2096,7 +2092,7 @@ async fn apply_switch_port_changes(
                         log,
                         "failed to retrieve port setttings from switch";
                         "switch_port_id" => ?port_name,
-                        "switch_location" => ?location,
+                        "switch_location" => ?switch_slot,
                         "error" => format!("{:#}", e)
                     );
                     continue;
@@ -2129,7 +2125,7 @@ async fn apply_switch_port_changes(
                             &log,
                             "failed to convert switch port settings";
                             "switch_port_id" => ?port_name,
-                            "switch_location" => ?location,
+                            "switch_location" => ?switch_slot,
                             "switch_port_settings_id" => ?settings.settings.id(),
                             "error" => format!("{:#}", e)
                         );
@@ -2142,7 +2138,7 @@ async fn apply_switch_port_changes(
                         &log,
                         "port settings up to date, skipping";
                         "switch_port_id" => ?port_name,
-                        "switch_location" => ?location,
+                        "switch_location" => ?switch_slot,
                         "switch_port_settings_id" => ?settings.settings.id(),
                     );
                     continue;
@@ -2152,7 +2148,7 @@ async fn apply_switch_port_changes(
                 info!(
                     &log,
                     "applying settings to switch port";
-                    "switch_location" => ?location,
+                    "switch_location" => ?switch_slot,
                     "port_id" => ?dpd_port_id,
                     "settings" => ?dpd_port_settings,
                 );
@@ -2170,7 +2166,7 @@ async fn apply_switch_port_changes(
                             &log,
                             "failed to apply switch port settings";
                             "switch_port_id" => ?port_name,
-                            "switch_location" => ?location,
+                            "switch_location" => ?switch_slot,
                             "error" => format!("{:#}", e)
                         );
                     }
@@ -2181,7 +2177,7 @@ async fn apply_switch_port_changes(
                 info!(
                     &log,
                     "clearing switch port settings";
-                    "switch_location" => ?location,
+                    "switch_location" => ?switch_slot,
                     "port_id" => ?dpd_port_id,
                 );
 
@@ -2190,7 +2186,7 @@ async fn apply_switch_port_changes(
                         &log,
                         "port settings up to date, skipping";
                         "switch_port_id" => ?port_name,
-                        "switch_location" => ?location,
+                        "switch_location" => ?switch_slot,
                     );
                     continue;
                 }
@@ -2202,7 +2198,7 @@ async fn apply_switch_port_changes(
                             &log,
                             "failed to clear switch port settings";
                             "switch_port_id" => ?port_name,
-                            "switch_location" => ?location,
+                            "switch_location" => ?switch_slot,
                             "error" => format!("{:#}", e)
                         );
                     }
@@ -2213,12 +2209,12 @@ async fn apply_switch_port_changes(
 }
 
 async fn static_routes_on_switch(
-    mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
+    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
+) -> HashMap<SwitchSlot, SwitchStaticRoutes> {
     let mut routes_on_switch = HashMap::new();
 
-    for (location, client) in mgd_clients {
+    for (switch_slot, client) in mgd_clients {
         let v4_static_routes = match client.static_list_v4_routes().await {
             Ok(routes) => routes.into_inner(),
             Err(e) => {
@@ -2226,7 +2222,7 @@ async fn static_routes_on_switch(
                     &log,
                     "unable to retrieve v4 routes from switch";
                     "error" => e.to_string(),
-                    "switch_location" => ?location,
+                    "switch_location" => ?switch_slot,
                 );
                 continue;
             }
@@ -2238,7 +2234,7 @@ async fn static_routes_on_switch(
                     &log,
                     "unable to retrieve v6 routes from switch";
                     "error" => e.to_string(),
-                    "switch_location" => ?location,
+                    "switch_location" => ?switch_slot,
                 );
                 continue;
             }
@@ -2290,24 +2286,24 @@ async fn static_routes_on_switch(
                 };
             }
         }
-        routes_on_switch.insert(*location, flattened);
+        routes_on_switch.insert(*switch_slot, flattened);
     }
     routes_on_switch
 }
 
 async fn delete_static_routes(
-    mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
-    routes_to_del: HashMap<SwitchLocation, DeleteStaticRouteRequest>,
+    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
+    routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest>,
     log: &slog::Logger,
 ) {
-    for (switch_location, request) in routes_to_del {
-        let client = match mgd_clients.get(&switch_location) {
+    for (switch_slot, request) in routes_to_del {
+        let client = match mgd_clients.get(&switch_slot) {
             Some(client) => client,
             None => {
                 error!(
                     &log,
-                    "mgd client not found for switch location";
-                    "switch_location" => ?switch_location,
+                    "mgd client not found for switch slot";
+                    "switch_slot" => ?switch_slot,
                 );
                 continue;
             }
@@ -2316,14 +2312,14 @@ async fn delete_static_routes(
         info!(
             &log,
             "removing static routes";
-            "switch_location" => ?switch_location,
+            "switch_slot" => ?switch_slot,
             "request" => ?request,
         );
         if let Err(e) = client.static_remove_v4_route(&request.v4).await {
             error!(
                 &log,
                 "failed to delete v4 routes from mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );
@@ -2332,7 +2328,7 @@ async fn delete_static_routes(
             error!(
                 &log,
                 "failed to delete v6 routes from mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );
@@ -2341,18 +2337,18 @@ async fn delete_static_routes(
 }
 
 async fn add_static_routes(
-    mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
-    routes_to_add: HashMap<SwitchLocation, AddStaticRouteRequest>,
+    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
+    routes_to_add: HashMap<SwitchSlot, AddStaticRouteRequest>,
     log: &slog::Logger,
 ) {
-    for (switch_location, request) in routes_to_add {
-        let client = match mgd_clients.get(&switch_location) {
+    for (switch_slot, request) in routes_to_add {
+        let client = match mgd_clients.get(&switch_slot) {
             Some(client) => client,
             None => {
                 error!(
                     &log,
-                    "mgd client not found for switch location";
-                    "switch_location" => ?switch_location,
+                    "mgd client not found for switch slot";
+                    "switch_slot" => ?switch_slot,
                 );
                 continue;
             }
@@ -2361,14 +2357,14 @@ async fn add_static_routes(
         info!(
             &log,
             "adding static routes";
-            "switch_location" => ?switch_location,
+            "switch_slot" => ?switch_slot,
             "request" => ?request,
         );
         if let Err(e) = client.static_add_v4_route(&request.v4).await {
             error!(
                 &log,
                 "failed to add v4 routes to mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );
@@ -2377,7 +2373,7 @@ async fn add_static_routes(
             error!(
                 &log,
                 "failed to add v6 routes to mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );

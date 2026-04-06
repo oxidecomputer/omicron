@@ -20,6 +20,10 @@ target release (generation 1): unset
 active nexus zone generation: 1
 active nexus zones: inferred from generation
 not-yet nexus zones: inferred from generation
+cockroachdb settings:
+    state fingerprint::   (none)
+    version::::::::::::   (none)
+    preserve downgrade:   (not set)
 planner config:
     add zones with mupdate override:   false
 
@@ -722,6 +726,8 @@ planning report:
 
 * adding zones despite being blocked, because: target release generation is 1
 * zone updates waiting on zone add blockers
+Measurement updates:
+Waiting on zone add/update blockers
 
 
 
@@ -2132,7 +2138,9 @@ COCKROACH STATUS
 
 
 NTP STATUS
-    No NTP zones reported timesync information
+    Zone 0ab3dbe9-8387-4600-b097-cb71ee91ee83: NTP reports that time is synced
+    Zone 18b3781d-571b-4d7c-b65d-18a452e5a64a: NTP reports that time is synced
+    Zone ac5bb28e-91d5-42f3-a57a-d84e1c414c17: NTP reports that time is synced
 
 INTERNAL DNS STATUS
     Zone 4692cc31-6eb6-437c-9634-9688663d06ae: Internal DNS generation @ 1
@@ -2155,6 +2163,8 @@ planning report:
 
 * adding zones despite being blocked, because: target release generation is 1
 * zone updates waiting on zone add blockers
+Measurement updates:
+Waiting on zone add/update blockers
 
 
 

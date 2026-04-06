@@ -112,6 +112,7 @@ use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -322,7 +323,7 @@ impl DbUrlOptions {
         Fut: Future<Output = anyhow::Result<T>>,
     {
         let datastore = self.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
         let result = f(opctx, datastore.clone()).await;
         datastore.terminate().await;
         result
@@ -2187,7 +2188,6 @@ async fn cmd_db_rack_list(
     struct RackRow {
         id: String,
         initialized: bool,
-        tuf_base_url: String,
         rack_subnet: String,
     }
 
@@ -2203,7 +2203,6 @@ async fn cmd_db_rack_list(
     let rows = rack_list.into_iter().map(|rack| RackRow {
         id: rack.id().to_string(),
         initialized: rack.initialized,
-        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
         rack_subnet: rack
             .rack_subnet
             .map(|subnet| subnet.to_string())
@@ -4651,7 +4650,7 @@ async fn cmd_db_instance_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
-    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+    let active_vmm = if let Some(id) = instance.propolis_id {
         let fetch_result = vmm_dsl::vmm
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
@@ -4775,7 +4774,7 @@ async fn cmd_db_instance_info(
         nexus_state,
         generation,
         time_last_auto_restarted,
-    } = instance.runtime_state;
+    } = instance.runtime();
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
     let effective_state =
         InstanceStateComputer::new(&instance, active_vmm.as_ref())
@@ -5095,12 +5094,9 @@ async fn cmd_db_instance_info(
                     cpu_platform: _,
                     time_created,
                     time_deleted,
-                    runtime:
-                        db::model::VmmRuntimeState {
-                            time_state_updated: _,
-                            generation,
-                            state,
-                        },
+                    time_state_updated: _,
+                    generation,
+                    state,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow {
@@ -7733,8 +7729,9 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime:
-            db::model::VmmRuntimeState { state, generation, time_state_updated },
+        state,
+        generation,
+        time_state_updated,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7837,12 +7834,9 @@ async fn cmd_db_vmm_list(
                 propolis_ip: _,
                 propolis_port: _,
                 cpu_platform: _,
-                runtime:
-                    db::model::VmmRuntimeState {
-                        state,
-                        generation,
-                        time_state_updated: _,
-                    },
+                time_state_updated: _,
+                generation,
+                state,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7884,7 +7878,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip,
                 propolis_port,
-                ref runtime,
+                time_state_updated,
                 ..
             } = it.0;
             VerboseVmmRow {
@@ -7895,7 +7889,7 @@ async fn cmd_db_vmm_list(
                     propolis_port.into(),
                 ),
                 time_created,
-                time_updated: runtime.time_state_updated,
+                time_updated: time_state_updated,
             }
         }
     }
@@ -8163,8 +8157,9 @@ async fn cmd_db_trust_quorum_list_configs(
     }
 
     let limit = fetch_opts.fetch_limit;
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(args.rack_id);
     let configs = datastore
-        .tq_list_config(opctx, args.rack_id, &first_page::<i64>(limit))
+        .tq_list_config(opctx, authz_tq, &first_page::<i64>(limit))
         .await
         .context("listing trust quorum configurations")?;
 

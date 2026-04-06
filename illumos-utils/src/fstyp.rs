@@ -17,7 +17,7 @@ pub enum Error {
     #[error("fstype output is not valid UTF-8: {0}")]
     NotValidUtf8(#[from] std::string::FromUtf8Error),
 
-    #[error("fstyp execution error: {0}")]
+    #[error("fstyp execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error("Failed to find zpool name from fstyp")]

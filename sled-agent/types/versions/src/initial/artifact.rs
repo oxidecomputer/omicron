@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use omicron_common::api::external::Generation;
-use omicron_common::ledger::Ledgerable;
+use omicron_ledger::Ledgerable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;

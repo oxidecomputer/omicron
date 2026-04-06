@@ -123,27 +123,26 @@ impl super::Nexus {
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
-        let use_the_pantry = if let Some(attach_instance_id) =
-            &db_disk.runtime_state.attach_instance_id
-        {
-            let (.., authz_instance) =
-                LookupPath::new(opctx, &self.db_datastore)
-                    .instance_id(*attach_instance_id)
-                    .lookup_for(authz::Action::Read)
+        let use_the_pantry =
+            if let Some(attach_instance_id) = &db_disk.attach_instance_id {
+                let (.., authz_instance) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .instance_id(*attach_instance_id)
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+
+                let instance_state = self
+                    .datastore()
+                    .instance_fetch_with_vmm(&opctx, &authz_instance)
                     .await?;
 
-            let instance_state = self
-                .datastore()
-                .instance_fetch_with_vmm(&opctx, &authz_instance)
-                .await?;
-
-            // If a Propolis _may_ exist, send the snapshot request there,
-            // otherwise use the pantry.
-            instance_state.vmm().is_none()
-        } else {
-            // This disk is not attached to an instance, use the pantry.
-            true
-        };
+                // If a Propolis _may_ exist, send the snapshot request there,
+                // otherwise use the pantry.
+                instance_state.vmm().is_none()
+            } else {
+                // This disk is not attached to an instance, use the pantry.
+                true
+            };
 
         let attach_instance_id = disk.runtime().attach_instance_id;
 

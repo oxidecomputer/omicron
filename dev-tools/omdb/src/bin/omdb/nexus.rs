@@ -52,11 +52,15 @@ use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
+use nexus_types::internal_api::background::AuditLogCleanupStatus;
+use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
+use nexus_types::internal_api::background::FmAnalysisStatus;
+use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -69,6 +73,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -80,6 +85,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -1166,12 +1172,7 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
                 last.iteration,
                 reason_str(&last.reason)
             );
-            print!(
-                "    started at {} ({}s ago) and ran for {:.3}ms\n",
-                humantime::format_rfc3339_millis(last.start_time.into()),
-                (Utc::now() - last.start_time).num_seconds(),
-                std::time::Duration::from(last.elapsed.clone()).as_millis(),
-            );
+            print_run_time(last.start_time, last.elapsed.clone().into(), 4)
         }
     };
 
@@ -1181,6 +1182,16 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     if let LastResult::Completed(completed) = &bgtask.last {
         print_task_details(&bgtask, &completed.details);
     }
+}
+
+fn print_run_time(start_time: DateTime<Utc>, elapsed: Duration, indent: usize) {
+    print!(
+        "{:>indent$}started at {} ({}s ago) and ran for {:.3}ms\n",
+        "",
+        humantime::format_rfc3339_millis(start_time.into()),
+        (Utc::now() - start_time).num_seconds(),
+        elapsed.as_millis(),
+    );
 }
 
 /// Interprets the unstable, schemaless output from each particular background
@@ -1218,6 +1229,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "attached_subnet_manager" => {
             print_task_attached_subnet_manager_status(details);
+        }
+        "audit_log_cleanup" => {
+            print_task_audit_log_cleanup(details);
+        }
+        "audit_log_timeout_incomplete" => {
+            print_task_audit_log_timeout_incomplete(details);
         }
         "blueprint_planner" => {
             print_task_blueprint_planner(details);
@@ -1270,6 +1287,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
         }
+        "reconfigurator_config_watcher" => {
+            print_task_reconfigurator_config_watcher(details);
+        }
         "region_replacement" => {
             print_task_region_replacement(details);
         }
@@ -1294,6 +1314,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
         }
+        "session_cleanup" => {
+            print_task_session_cleanup(details);
+        }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
         }
@@ -1312,11 +1335,17 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
         }
+        "fm_analysis" => {
+            print_task_fm_analysis(details);
+        }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
         }
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
+        }
+        "fm_rendezvous" => {
+            print_task_fm_rendezvous(details);
         }
         "trust_quorum_manager" => {
             print_task_trust_quorum_manager(details);
@@ -2260,8 +2289,8 @@ fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
             if dendrite.is_empty() {
                 println!("   no dendrite instances found");
             } else {
-                for (loc, details) in dendrite.iter() {
-                    println!("   dendrite instance on switch {loc}");
+                for (switch_slot, details) in dendrite.iter() {
+                    println!("   dendrite instance on switch {switch_slot:?}");
                     println!(
                         "     n_subnets_removed={}",
                         details.n_subnets_removed
@@ -2311,6 +2340,16 @@ fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
                 println!("    > {line}");
             }
         }
+    }
+}
+
+fn print_task_reconfigurator_config_watcher(details: &serde_json::Value) {
+    match details.get("config_updated").and_then(|v| v.as_bool()) {
+        Some(updated) => println!("    config updated: {updated}"),
+        None => eprintln!(
+            "warning: failed to interpret task details: {:?}",
+            details
+        ),
     }
 }
 
@@ -2660,6 +2699,95 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
             }
         }
     }
+}
+
+fn print_task_audit_log_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<AuditLogCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "rows deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const MAX_DELETE: &str = "max deleted per activation:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, MAX_DELETE, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.rows_deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!(
+                "    {MAX_DELETE:<WIDTH$}{}",
+                status.max_deleted_per_activation
+            );
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
+fn print_task_audit_log_timeout_incomplete(details: &serde_json::Value) {
+    match serde_json::from_value::<AuditLogTimeoutIncompleteStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const TIMED_OUT: &str = "timed_out:";
+            const CUTOFF: &str = "cutoff:";
+            const MAX_UPDATE: &str = "max_timed_out_per_activation:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[TIMED_OUT, CUTOFF, MAX_UPDATE, ERROR]) + 1;
+
+            println!("    {TIMED_OUT:<WIDTH$}{}", status.timed_out);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!(
+                "    {MAX_UPDATE:<WIDTH$}{}",
+                status.max_timed_out_per_activation
+            );
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
+fn print_task_session_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<SessionCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const LIMIT: &str = "limit:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, LIMIT, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!("    {LIMIT:<WIDTH$}{}", status.limit);
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
@@ -3306,6 +3434,82 @@ mod ereporter_status_fields {
     pub const NUM_WIDTH: usize = 4;
 }
 
+fn print_task_fm_analysis(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::fm_analysis::{
+        AnalysisOutcome, Outcome, PreparationStatus,
+    };
+    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
+        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+    pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
+    pub const INV_ID: &str = "current inventory collection ID:";
+    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
+    println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
+    println!("    ===== ========== ======== =======");
+    let (prep_status, analysis_outcome) = match outcome {
+        Outcome::WaitingForInventory => {
+            println!(
+                "    analysis was not performed, as the inventory has\n    \
+                     not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
+            );
+            return;
+        }
+        Outcome::PreparationError(error) => {
+            println!(
+                "{ERRICON} failed to prepare analysis inputs:\n    {error}"
+            );
+            return;
+        }
+        Outcome::RanAnalysis { prep_status, outcome } => (prep_status, outcome),
+    };
+    match analysis_outcome {
+        AnalysisOutcome::Error(error) => {
+            println!("{ERRICON} analysis failed: {error}");
+        }
+        AnalysisOutcome::Unchanged => {
+            println!(
+                "    no changes from the current situation report ({:?})",
+                parent_sitrep_id
+            );
+        }
+        AnalysisOutcome::NotCommitted { sitrep_id, error } => {
+            println!(
+                "    analysis succeeded, but the sitrep was not committed!"
+            );
+            println!("    sitrep ID: {sitrep_id:?}");
+            println!("    error:     {error}");
+        }
+        AnalysisOutcome::Committed { sitrep_id } => {
+            println!("    analyzed the situation, and committed a new sitrep!");
+            println!("    sitrep ID: {sitrep_id:?}");
+        }
+    }
+    println!();
+
+    let PreparationStatus { errors, report } = prep_status;
+    println!("{}", report.display_multiline(4));
+    if !errors.is_empty() {
+        println!("{ERRICON}   errors preparing analysis inputs:");
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    // TODO(eliza): eventually there will also be a detailed analysis report,
+    // print that here as well...
+}
+
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
     match serde_json::from_value::<SitrepLoadStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -3335,8 +3539,10 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
-        orphaned_sitreps_found,
         orphaned_sitreps_deleted,
+        sitrep_metadata_batches,
+        batch_size,
+        child_tables,
         errors,
     } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
         Err(error) => {
@@ -3349,22 +3555,207 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
-    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
-    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
-    pub const ERRORS: &str = "errors:";
-    pub const WIDTH: usize =
-        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
-    pub const NUM_WIDTH: usize = 4;
+    const BASE_WIDTH: usize = 40;
+    const NUM_WIDTH: usize = 4;
+
+    // Ensure columns stay aligned even if a child table name is long.
+    let width = child_tables
+        .keys()
+        // We're using two spaces here to match the
+        // "orphaned {name} rows deleted" format string.
+        // Removing "{name}" leaves a space on either side.
+        .map(|name| "orphaned  rows deleted:".len() + name.len() + 1)
+        .fold(BASE_WIDTH, |w, l| w.max(l));
+
     if !errors.is_empty() {
-        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!(
+            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
+            "errors:",
+            errors.len()
+        );
         for error in errors {
             println!("      > {error}")
         }
     }
 
-    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!("    {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
     println!(
-        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+        "    {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
+        "orphaned sitreps deleted:"
+    );
+    println!(
+        "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
+        "  batches:"
+    );
+
+    if child_tables.is_empty() {
+        eprintln!("(!)   warning: no child tables reported (likely a bug)");
+    }
+
+    for (table_name, stats) in &child_tables {
+        println!(
+            "    {:<width$}{:>NUM_WIDTH$}",
+            format!("orphaned {table_name} rows deleted:"),
+            stats.rows_deleted,
+        );
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+    }
+}
+
+fn print_task_fm_rendezvous(details: &serde_json::Value) {
+    fn print_op<T>(
+        name: impl std::fmt::Display,
+        op: &fm_rendezvous::OpStatus<T>,
+        print_details: impl Fn(&T),
+    ) {
+        println!("    {name}:");
+        match op.result {
+            fm_rendezvous::OpResult::Skipped => {
+                println!("(i)   note: this operation was not executed")
+            }
+            fm_rendezvous::OpResult::Executed { start, end } => {
+                if let Ok(elapsed) = start.signed_duration_since(end).to_std() {
+                    print_run_time(start, elapsed, 6);
+                } else {
+                    println!(
+                        "      started at: {} (end time {} less than start time, \
+                        which seems weird?)",
+                        humantime::format_rfc3339_millis(start.into()),
+                        humantime::format_rfc3339_millis(end.into()),
+                    );
+                }
+            }
+        }
+
+        print_details(&op.details)
+    }
+
+    let FmRendezvousStatus { sitrep_id, alerts, ereport_marking: marking } =
+        match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+    match sitrep_id {
+        Some(id) => println!("    current sitrep: {id}"),
+        None => println!(
+            "(i) no FM situation report loaded, so rendezvous was not \
+             performed",
+        ),
+    }
+    print_op(
+        "creating requested alerts",
+        &alerts,
+        |fm_rendezvous::AlertCreationStatus {
+             total_alerts_requested,
+             current_sitrep_alerts_requested,
+             alerts_created,
+             errors,
+         }| {
+            let already_created =
+                total_alerts_requested - alerts_created - errors.len();
+            const REQUESTED: &str = "alerts requested:";
+            const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+            const CREATED: &str = "  created in this activation:";
+            const ALREADY_CREATED: &str = "  already created:";
+            const ERRORS: &str = "  errors:";
+            const WIDTH: usize = const_max_len(&[
+                REQUESTED,
+                REQUESTED_THIS_SITREP,
+                CREATED,
+                ALREADY_CREATED,
+                ERRORS,
+            ]) + 1;
+            pub const NUM_WIDTH: usize = 4;
+            println!(
+                "      {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+                current_sitrep_alerts_requested
+            );
+            println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
+            println!(
+                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+            );
+            println!(
+                "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                warn_if_nonzero(errors.len()),
+                errors.len()
+            );
+            for error in errors {
+                println!("        > {error}");
+            }
+        },
+    );
+    print_op(
+        "marking ereports as seen",
+        &marking,
+        |fm_rendezvous::EreportMarkingStatus {
+             batch_size,
+             batches,
+             total_ereports_in_sitrep,
+             ereports_not_marked_in_sitrep,
+             ereports_marked_seen,
+             errors,
+         }| {
+            const IN_SITREP: &str = "total ereports in sitrep:";
+            const NOT_ALREADY_MARKED: &str =
+                "not marked when the sitrep was loaded:";
+            const MARKED_SEEN: &str = "  marked seen by this activation:";
+            const ALREADY_MARKED: &str = "  already marked seen:";
+            const BATCH_SIZE: &str = "batch size:";
+            const BATCHES: &str = "batches:";
+            const ERRORS: &str = "errors:";
+            const WIDTH: usize = const_max_len(&[
+                IN_SITREP,
+                NOT_ALREADY_MARKED,
+                MARKED_SEEN,
+                ALREADY_MARKED,
+                ERRORS,
+                BATCH_SIZE,
+                BATCHES,
+            ]) + 1;
+            pub const NUM_WIDTH: usize = 4;
+            println!(
+                "      {IN_SITREP:<WIDTH$}{total_ereports_in_sitrep:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {NOT_ALREADY_MARKED:<WIDTH$}{ereports_not_marked_in_sitrep:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {MARKED_SEEN:<WIDTH$}{ereports_marked_seen:>NUM_WIDTH$}"
+            );
+            // This subtraction really shouldn't underflow, since
+            // `ereports_marked_seen`, which is the sum of records
+            // updated by the queries marking ereports as seen, will
+            // always be less than or equal to
+            // `ereports_not_marked_in_sitrep` which is the number of
+            // ereport IDs passed as *inputs* to those queries. But,
+            // since OMDB needs to basically work even in the face of
+            // Nexus bugs, we'll saturate here instead of panicking,
+            // just in case.
+            let already_marked = ereports_not_marked_in_sitrep
+                .saturating_sub(*ereports_marked_seen);
+            println!(
+                "      {ALREADY_MARKED:<WIDTH$}{already_marked:>NUM_WIDTH$}"
+            );
+            println!("      {BATCH_SIZE:<WIDTH$}{batch_size:>NUM_WIDTH$}");
+            println!("      {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+            println!(
+                "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                warn_if_nonzero(errors.len()),
+                errors.len()
+            );
+            for error in errors {
+                println!("        > {error}");
+            }
+        },
     );
 }
 
@@ -3381,7 +3772,6 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
             return;
         }
     };
-
     match status {
         TrustQuorumManagerStatus::PerRackStatus { statuses, errors } => {
             if statuses.is_empty() && errors.is_empty() {
@@ -4308,7 +4698,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     //    most recent inventory collection
     use nexus_db_queries::context::OpContext;
 
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
@@ -4418,7 +4808,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
 
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the disk so we can lookup identity information.
@@ -4639,7 +5029,7 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.

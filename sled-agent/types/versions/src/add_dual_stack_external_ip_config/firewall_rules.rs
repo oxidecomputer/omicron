@@ -4,9 +4,9 @@
 
 //! Firewall rule types for version `ADD_DUAL_STACK_EXTERNAL_IP_CONFIG`.
 
+use crate::v10::instance::ResolvedVpcFirewallRule;
 use crate::{v9, v10};
 use omicron_common::api::external;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

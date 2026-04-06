@@ -1,0 +1,39 @@
+[package]
+name = "nexus-fm"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[features]
+testing = [
+    "omicron-test-utils",
+    "nexus-reconfigurator-planning",
+    "ereport-types",
+]
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+iddqd.workspace = true
+nexus-types.workspace = true
+omicron-uuid-kinds.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+typed-rng.workspace = true
+
+# deps for test utils
+omicron-test-utils = { workspace = true, optional = true }
+nexus-reconfigurator-planning = { workspace = true, optional = true }
+ereport-types = { workspace = true, optional = true }
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true
+nexus-reconfigurator-planning.workspace = true
+ereport-types.workspace = true

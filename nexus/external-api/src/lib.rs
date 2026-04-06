@@ -48,6 +48,7 @@ use openapiv3::OpenAPI;
 mod v2025_11_20_00_local;
 mod v2026_01_01_00_local;
 mod v2026_01_30_00_local;
+mod v2026_03_24_00_local;
 
 api_versions!([
     // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
@@ -78,6 +79,13 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
+    (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
+    (2026_03_23_00, RENAME_PREFIX_LEN),
+    (2026_03_14_00, MULTICAST_DROP_MVLAN),
+    (2026_03_12_00, CAPITALIZE_DESCRIPTIONS),
+    (2026_03_06_01, SWITCH_SLOT_ENUM),
+    (2026_03_06_00, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (2026_03_02_00, ADD_TIME_FIELDS_TO_USERS),
     (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
     (2026_02_19_00, REMOVE_SLED_ADD),
@@ -501,7 +509,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Lists resource quotas for all silos
+    /// List resource quotas for all silos
     #[endpoint {
         method = GET,
         path = "/v1/system/silo-quotas",
@@ -2512,7 +2520,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/utilization",
         tags = ["system/subnet-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_SUBNET_POOL_UTILIZATION_REMAINING..,
     }]
     async fn system_subnet_pool_utilization_view(
         rqctx: RequestContext<Self::Context>,
@@ -2521,6 +2529,26 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::subnet_pool::SubnetPoolUtilization>,
         HttpError,
     >;
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        operation_id = "system_subnet_pool_utilization_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_SUBNET_POOL_UTILIZATION_REMAINING,
+    }]
+    async fn system_subnet_pool_utilization_view_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
+        HttpError,
+    > {
+        Ok(Self::system_subnet_pool_utilization_view(rqctx, path_params)
+            .await?
+            .map(v2026_01_16_01::subnet_pool::SubnetPoolUtilization::from))
+    }
 
     /// Fetch subnet pool utilization
     #[endpoint {
@@ -2537,12 +2565,16 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
         HttpError,
     > {
-        Self::system_subnet_pool_utilization_view(rqctx, path_params).await
+        Self::system_subnet_pool_utilization_view_v2026_02_09_00(
+            rqctx,
+            path_params,
+        )
+        .await
     }
 
     // External Subnets
 
-    /// List external subnets in a project
+    /// List external subnets
     #[endpoint {
         method = GET,
         path = "/v1/external-subnets",
@@ -2559,12 +2591,12 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create an external subnet
+    /// Create external subnet
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets",
         tags = ["external-subnets"],
-        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
+        versions = VERSION_RENAME_PREFIX_LEN..,
     }]
     async fn external_subnet_create(
         rqctx: RequestContext<Self::Context>,
@@ -2575,7 +2607,30 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create an external subnet
+    /// Create external subnet
+    #[endpoint {
+        operation_id = "external_subnet_create",
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_RENAME_PREFIX_LEN,
+    }]
+    async fn external_subnet_create_v2026_01_22_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::external_subnet::ExternalSubnetCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    > {
+        let subnet_params = subnet_params.map(Into::into);
+        Self::external_subnet_create(rqctx, query_params, subnet_params).await
+    }
+
+    /// Create external subnet
     #[endpoint {
         operation_id = "external_subnet_create",
         method = POST,
@@ -2595,10 +2650,15 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let subnet_params = subnet_params.try_map(TryInto::try_into)?;
-        Self::external_subnet_create(rqctx, query_params, subnet_params).await
+        Self::external_subnet_create_v2026_01_22_01(
+            rqctx,
+            query_params,
+            subnet_params,
+        )
+        .await
     }
 
-    /// Fetch an external subnet
+    /// Fetch external subnet
     #[endpoint {
         method = GET,
         path = "/v1/external-subnets/{external_subnet}",
@@ -2614,7 +2674,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Update an external subnet
+    /// Update external subnet
     #[endpoint {
         method = PUT,
         path = "/v1/external-subnets/{external_subnet}",
@@ -2631,7 +2691,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Delete an external subnet
+    /// Delete external subnet
     #[endpoint {
         method = DELETE,
         path = "/v1/external-subnets/{external_subnet}",
@@ -2644,7 +2704,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Attach an external subnet to an instance
+    /// Attach external subnet to instance
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/attach",
@@ -2661,7 +2721,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Detach an external subnet from an instance
+    /// Detach external subnet from instance
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/detach",
@@ -2695,7 +2755,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create a floating IP
+    /// Create floating IP
     ///
     /// A specific IP address can be reserved, or an IP can be auto-allocated
     /// from a specific pool or the silo's default pool.
@@ -2893,7 +2953,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
     }]
     async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -2902,6 +2962,33 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::multicast::MulticastGroup>>,
         HttpError,
     >;
+
+    /// List multicast groups
+    ///
+    /// Response includes the mvlan field (always null)
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn multicast_group_list_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_08_00::multicast::MulticastGroup>>,
+        HttpError,
+    > {
+        Self::multicast_group_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
 
     /// List multicast groups
     #[endpoint {
@@ -2918,17 +3005,17 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::multicast::MulticastGroup>>,
         HttpError,
     > {
-        Self::multicast_group_list(rqctx, query_params).await.map(
-            |HttpResponseOk(page)| {
+        Self::multicast_group_list_v2026_01_08_00(rqctx, query_params)
+            .await
+            .map(|HttpResponseOk(page)| {
                 HttpResponseOk(ResultsPage {
                     items: page.items.into_iter().map(Into::into).collect(),
                     next_page: page.next_page,
                 })
-            },
-        )
+            })
     }
 
-    /// Create a multicast group
+    /// Create multicast group
     ///
     /// Deprecated: Groups are created implicitly when adding members in newer
     /// API versions.
@@ -2964,14 +3051,36 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
     }]
     async fn multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::multicast::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<latest::multicast::MulticastGroup>, HttpError>;
 
-    /// Fetch a multicast group
+    /// Fetch multicast group
+    ///
+    /// Response includes the mvlan field (always null)
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn multicast_group_view_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_08_00::multicast::MulticastGroupPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_08_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        Self::multicast_group_view(rqctx, path_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch multicast group
     ///
     /// The group can be specified by name or UUID.
     #[endpoint {
@@ -2989,12 +3098,12 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let path = path_params.map(Into::into);
-        Self::multicast_group_view(rqctx, path)
+        Self::multicast_group_view_v2026_01_08_00(rqctx, path)
             .await
             .map(|resp| resp.map(Into::into))
     }
 
-    /// Update a multicast group
+    /// Update multicast group
     ///
     /// Deprecated: groups are managed implicitly through member operations.
     #[endpoint {
@@ -3171,7 +3280,7 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let path = path_params.map(Into::into);
-        Self::multicast_group_view(rqctx, path)
+        Self::multicast_group_view_v2026_01_08_00(rqctx, path)
             .await
             .map(|resp| resp.map(Into::into))
     }
@@ -3305,7 +3414,7 @@ pub trait NexusExternalApi {
     }
 
     // TODO-correctness See note about instance create.  This should be async.
-    /// Create a disk
+    /// Create disk
     #[endpoint {
         operation_id = "disk_create",
         method = POST,
@@ -4256,7 +4365,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create new system-wide x.509 certificate
+    /// Create system-wide x.509 certificate
     ///
     /// This certificate is automatically used by the Oxide Control plane to serve
     /// external connections.
@@ -4357,35 +4466,111 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_create(
         rqctx: RequestContext<Self::Context>,
         new_loopback_address: TypedBody<
             latest::networking::LoopbackAddressCreate,
         >,
-    ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::LoopbackAddress>,
+        HttpError,
+    >;
+
+    /// Create loopback address
+    #[endpoint {
+        operation_id = "networking_loopback_address_create",
+        method = POST,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_loopback_address: TypedBody<
+            v2025_11_20_00::networking::LoopbackAddressCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::networking::LoopbackAddress>,
+        HttpError,
+    > {
+        let new_loopback_address =
+            new_loopback_address.try_map(TryInto::try_into)?;
+        Self::networking_loopback_address_create(rqctx, new_loopback_address)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     /// Delete loopback address
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_delete(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::networking::LoopbackAddressPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Delete loopback address
+    #[endpoint {
+        operation_id = "networking_loopback_address_delete",
+        method = DELETE,
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_delete_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v2025_11_20_00::networking::LoopbackAddressPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let path = path.try_map(TryInto::try_into)?;
+        Self::networking_loopback_address_delete(rqctx, path).await
+    }
+
     /// List loopback addresses
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LoopbackAddress>>,
+        HttpError,
+    >;
+
+    /// List loopback addresses
+    #[endpoint {
+        operation_id = "networking_loopback_address_list",
+        method = GET,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::networking::LoopbackAddress>,
+        >,
+        HttpError,
+    > {
+        Self::networking_loopback_address_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// Create switch port settings
     #[endpoint {
@@ -4501,19 +4686,51 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/switch-port",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedById<latest::networking::SwitchPortPageSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::SwitchPort>>,
+        HttpError,
+    >;
+
+    /// List switch ports
+    #[endpoint {
+        operation_id = "networking_switch_port_list",
+        method = GET,
+        path = "/v1/system/hardware/switch-port",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::networking::SwitchPortPageSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::networking::SwitchPort>>,
+        HttpError,
+    > {
+        Self::networking_switch_port_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// Get switch port status
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/switch-port/{port}/status",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_status(
         rqctx: RequestContext<Self::Context>,
@@ -4521,11 +4738,31 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseOk<latest::switch::SwitchLinkState>, HttpError>;
 
+    /// Get switch port status
+    #[endpoint {
+        operation_id = "networking_switch_port_status",
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/status",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<latest::switch::SwitchLinkState>, HttpError>
+    {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_status(rqctx, path_params, query_params)
+            .await
+    }
+
     /// Apply switch port settings
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/switch-port/{port}/settings",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_apply_settings(
         rqctx: RequestContext<Self::Context>,
@@ -4534,11 +4771,36 @@ pub trait NexusExternalApi {
         settings_body: TypedBody<latest::networking::SwitchPortApplySettings>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Apply switch port settings
+    #[endpoint {
+        operation_id = "networking_switch_port_apply_settings",
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_apply_settings_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+        settings_body: TypedBody<latest::networking::SwitchPortApplySettings>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_apply_settings(
+            rqctx,
+            path_params,
+            query_params,
+            settings_body,
+        )
+        .await
+    }
+
     /// Clear switch port settings
     #[endpoint {
         method = DELETE,
         path = "/v1/system/hardware/switch-port/{port}/settings",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_clear_settings(
         rqctx: RequestContext<Self::Context>,
@@ -4546,11 +4808,34 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Fetch the LLDP configuration for a switch port
+    /// Clear switch port settings
+    #[endpoint {
+        operation_id = "networking_switch_port_clear_settings",
+        method = DELETE,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_clear_settings_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_clear_settings(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
+    /// Fetch LLDP configuration for switch port
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/switch-port/{port}/lldp/config",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_lldp_config_view(
         rqctx: RequestContext<Self::Context>,
@@ -4558,11 +4843,34 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
 
-    /// Update the LLDP configuration for a switch port
+    /// Fetch LLDP configuration for switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_config_view",
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_config_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_config_view(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
+    /// Update LLDP configuration for switch port
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/switch-port/{port}/lldp/config",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_lldp_config_update(
         rqctx: RequestContext<Self::Context>,
@@ -4571,11 +4879,36 @@ pub trait NexusExternalApi {
         config: TypedBody<LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Fetch the LLDP neighbors seen on a switch port
+    /// Update LLDP configuration for switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_config_update",
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_config_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_config_update(
+            rqctx,
+            path_params,
+            query_params,
+            config,
+        )
+        .await
+    }
+
+    /// Fetch LLDP neighbors for switch port
     #[endpoint {
         method = GET,
-        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors",
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_lldp_neighbors(
         rqctx: RequestContext<Self::Context>,
@@ -4583,7 +4916,29 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
 
-    /// Create new BGP configuration
+    /// Fetch LLDP neighbors for switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_neighbors",
+        method = GET,
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_neighbors_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::networking::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+        let path_params = path_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_neighbors(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
+    /// Create BGP configuration
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/bgp",
@@ -4595,7 +4950,7 @@ pub trait NexusExternalApi {
         config: TypedBody<latest::networking::BgpConfigCreate>,
     ) -> Result<HttpResponseCreated<latest::networking::BgpConfig>, HttpError>;
 
-    /// Create new BGP configuration
+    /// Create BGP configuration
     #[endpoint {
         operation_id = "networking_bgp_config_create",
         method = POST,
@@ -4860,32 +5215,85 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/bfd-enable",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_enable(
         rqctx: RequestContext<Self::Context>,
         session: TypedBody<latest::networking::BfdSessionEnable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Enable BFD session
+    #[endpoint {
+        operation_id = "networking_bfd_enable",
+        method = POST,
+        path = "/v1/system/networking/bfd-enable",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_enable_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<v2025_11_20_00::networking::BfdSessionEnable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let session = session.try_map(TryInto::try_into)?;
+        Self::networking_bfd_enable(rqctx, session).await
+    }
+
     /// Disable BFD session
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/bfd-disable",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_disable(
         rqctx: RequestContext<Self::Context>,
         session: TypedBody<latest::networking::BfdSessionDisable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Disable BFD session
+    #[endpoint {
+        operation_id = "networking_bfd_disable",
+        method = POST,
+        path = "/v1/system/networking/bfd-disable",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_disable_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<v2025_11_20_00::networking::BfdSessionDisable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let session = session.try_map(TryInto::try_into)?;
+        Self::networking_bfd_disable(rqctx, session).await
+    }
+
     /// Get BFD status
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/bfd-status",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::bfd::BfdStatus>>, HttpError>;
+
+    /// Get BFD status
+    #[endpoint {
+        operation_id = "networking_bfd_status",
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2025_11_20_00::bfd::BfdStatus>>, HttpError>
+    {
+        Self::networking_bfd_status(rqctx).await.map(|response| {
+            response
+                .map(|statuses| statuses.into_iter().map(From::from).collect())
+        })
+    }
 
     /// Get user-facing services IP allowlist
     #[endpoint {
@@ -5728,11 +6136,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
     }]
     async fn vpc_firewall_rules_view(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// List firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_view",
+        method = GET,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_view_v2026_03_24_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+    ) -> Result<HttpResponseOk<v2026_03_24_00_local::VpcFirewallRules>, HttpError>
+    {
+        Self::vpc_firewall_rules_view(rqctx, query_params).await.and_then(
+            |resp| resp.try_map(TryInto::try_into).map_err(HttpError::from),
+        )
+    }
 
     // Note: the limits in the below comment come from the firewall rules model
     // file, nexus/db-model/src/vpc_firewall_rule.rs.
@@ -5755,12 +6182,35 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
     }]
     async fn vpc_firewall_rules_update(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
-        router_params: TypedBody<VpcFirewallRuleUpdateParams>,
+        update: TypedBody<VpcFirewallRuleUpdateParams>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// Replace firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_update",
+        method = PUT,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_update_v2026_03_24_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        update: TypedBody<v2026_03_24_00_local::VpcFirewallRuleUpdateParams>,
+    ) -> Result<HttpResponseOk<v2026_03_24_00_local::VpcFirewallRules>, HttpError>
+    {
+        let body = update.map(Into::into);
+        Self::vpc_firewall_rules_update(rqctx, query_params, body)
+            .await
+            .and_then(|resp| {
+                resp.try_map(TryInto::try_into).map_err(HttpError::from)
+            })
+    }
 
     // VPC Routers
 
@@ -6135,7 +6585,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::RackPath>,
     ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
 
-    /// Retrieve the rack cluster membership status
+    /// Fetch rack cluster membership status
     ///
     /// Returns the status for the most recent change, or a specific version if
     /// one is specified.
@@ -6483,8 +6933,10 @@ pub trait NexusExternalApi {
         params: TypedBody<latest::update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Clear system recovery status
+    ///
     /// Instructs the system that a system recovery operation ("mupdate") was
-    /// completed using the software in the specified release
+    /// completed using the software in the specified release.
     ///
     /// The system recovery operation is used to bypass the control plane to
     /// deploy known-working software when the control plane itself is not
@@ -6908,7 +7360,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Download the index of a support bundle
+    /// Download support bundle index
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
@@ -6920,7 +7372,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the contents of a support bundle
+    /// Download support bundle contents
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
@@ -6932,7 +7384,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download a file within a support bundle
+    /// Download file from support bundle
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
@@ -6944,7 +7396,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the metadata of a support bundle
+    /// Download support bundle metadata
     #[endpoint {
         method = HEAD,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
@@ -6956,7 +7408,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the metadata of a file within the support bundle
+    /// Download metadata of file in support bundle
     #[endpoint {
         method = HEAD,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
@@ -6968,7 +7420,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Create a new support bundle
+    /// Create support bundle
     #[endpoint {
         method = POST,
         path = "/experimental/v1/system/support-bundles",
@@ -6982,7 +7434,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Delete an existing support bundle
+    /// Delete support bundle
     ///
     /// May also be used to cancel a support bundle which is currently being
     /// collected, or to remove metadata for a support bundle that has failed.
@@ -6996,7 +7448,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Update a support bundle
+    /// Update support bundle
     #[endpoint {
         method = PUT,
         path = "/experimental/v1/system/support-bundles/{bundle_id}",
@@ -7178,7 +7630,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::console::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Get a redirect straight to the IdP
+    /// Get redirect to IdP
     ///
     /// Console uses this to avoid having to ask the API anything about the IdP. It
     /// already knows the IdP name from the path, so it can just link to this path
@@ -7195,7 +7647,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::console::LoginUrlQuery>,
     ) -> Result<HttpResponseFound, HttpError>;
 
-    /// Authenticate a user via SAML
+    /// Authenticate user via SAML
     #[endpoint {
         method = POST,
         path = "/login/{silo_name}/saml/{provider_name}",
@@ -7219,7 +7671,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::console::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Authenticate a user via username and password
+    /// Authenticate user via username and password
     #[endpoint {
         method = POST,
         path = "/v1/login/{silo_name}/local",

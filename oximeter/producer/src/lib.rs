@@ -173,9 +173,11 @@ impl Server {
         // clone of the provided logger, and then add the DTrace and Dropshot
         // loggers on top of it.
         let base_logger = match log {
-            LogConfig::Config(conf) => conf
-                .to_logger("metric-server")
-                .map_err(|msg| Error::Server(msg.to_string()))?,
+            LogConfig::Config(conf) => {
+                conf.to_logger("metric-server").map_err(|msg| {
+                    Error::Server(InlineErrorChain::new(&msg).to_string())
+                })?
+            }
             LogConfig::Logger(log) => log.clone(),
         };
         let (drain, registration) = slog_dtrace::with_drain(base_logger);
