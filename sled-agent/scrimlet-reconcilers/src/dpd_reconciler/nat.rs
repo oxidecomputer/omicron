@@ -74,12 +74,7 @@ impl slog::KV for DpdNatReconcilerStatus {
             ),
             DpdNatReconcilerStatus::FailedReadingCurrentDpdNatEntries(
                 reason,
-            ) => serializer.emit_arguments(
-                skipped_key.into(),
-                &format_args!(
-                    "failed to read current entries from dpd: {reason}"
-                ),
-            ),
+            ) => serializer.emit_str(skipped_key.into(), reason),
             DpdNatReconcilerStatus::InvalidSystemNetworkingConfig(reason) => {
                 serializer.emit_arguments(
                     skipped_key.into(),
