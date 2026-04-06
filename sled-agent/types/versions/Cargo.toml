@@ -9,29 +9,31 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
+bootstore.workspace = true
+byte-wrapper.workspace = true
 camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
 iddqd.workspace = true
-illumos-utils.workspace = true
 indent_write.workspace = true
-async-trait.workspace = true
-bootstore.workspace = true
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 slog.workspace = true
+propolis-api-types-versions.workspace = true
 propolis_api_types.workspace = true
 proptest = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, features = ["hex", "schemars_0_8"] }
-serde_human_bytes.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
 sled-hardware-types.workspace = true
+slog-error-chain.workspace = true
 strum.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
@@ -40,9 +42,11 @@ tufaceous-artifact.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true
+toml.workspace = true
 
 [features]
 testing = ["dep:proptest", "dep:test-strategy"]

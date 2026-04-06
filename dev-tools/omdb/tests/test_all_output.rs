@@ -9,6 +9,7 @@
 
 use dropshot::Method;
 use expectorate::assert_contents;
+use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
@@ -16,10 +17,10 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_common::api::external::SwitchLocation;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -130,18 +131,29 @@ async fn test_omdb_usage_errors() {
     assert_contents("tests/usage_errors.out", &output);
 }
 
-#[nexus_test(extra_sled_agents = 1)]
-async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+#[tokio::test]
+async fn test_omdb_success_cases() {
+    // Use a custom ControlPlaneBuilder so we can enable background tasks
+    // which might otherwise be disabled.
+    // We want it enabled here so the omdb is realistic.
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_omdb_success_cases")
+            .with_extra_sled_agents(1)
+            .customize_nexus_config(&|config| {
+                config.pkg.background_tasks.sp_ereport_ingester.disable = false;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
     clear_omdb_env();
 
     let cmd_path = path_to_executable(CMD_OMDB);
 
-    let postgres_url = cptestctx.database.listen_url();
+    let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_lockstep_url =
         format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let mgs_url = cptestctx
         .gateway
-        .get(&SwitchLocation::Switch0)
+        .get(&SwitchSlot::Switch0)
         .expect("nexus_test always sets up MGS on switch 0")
         .client
         .baseurl();
@@ -332,6 +344,10 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
 
+    // The `reconfigurator_config_watcher` task's output depends on
+    // whether it has had time to complete an activation.
+    redactor.field("config updated:", r"\w+");
+
     // The `tuf_artifact_replication` task's output depends on how
     // many sleds happened to register with Nexus before its first
     // execution. These redactions work around the issue described in
@@ -364,9 +380,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     for args in invocations {
         println!("running commands with args: {:?}", args);
-        let p = postgres_url.to_string();
+        let p = postgres_url.clone();
         let u = nexus_lockstep_url.clone();
-        let g = mgs_url.clone();
+        let g = mgs_url.to_owned();
         let ox = ox_url.clone();
         let ch = ch_url.clone();
         do_run_extra(
@@ -438,6 +454,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &ox_url,
         ox_test_producer,
     );
+
+    cptestctx.teardown().await;
 }
 
 /// Verify that we properly deal with cases where:

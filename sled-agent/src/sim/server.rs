@@ -16,7 +16,7 @@ use crate::rack_setup::{
     from_sockaddr_to_external_floating_addr,
 };
 use crate::sim::SimulatedUpstairs;
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -67,6 +67,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
+use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -110,7 +111,6 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            config.nexus_address,
             Arc::clone(&nexus_client),
             simulated_upstairs.clone(),
             sled_index,
@@ -226,7 +226,12 @@ impl Server {
                 },
             );
 
-            sled_agent.create_zpool(zpool_id, physical_disk_id, zpool.size);
+            sled_agent.create_zpool(
+                zpool_id,
+                physical_disk_id,
+                zpool.size,
+                zpool.health,
+            );
             let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id);
@@ -338,9 +343,7 @@ pub async fn run_standalone_server(
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
     let (drain, registration) = slog_dtrace::with_drain(
-        logging
-            .to_logger("sled-agent")
-            .map_err(|message| anyhow!("initializing logger: {}", message))?,
+        logging.to_logger("sled-agent").context("initializing logger")?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
@@ -359,9 +362,9 @@ pub async fn run_standalone_server(
 
     // Start the Internal DNS server
     let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
-        dns_server::TransientServer::new_with_address(&log, addr.into()).await?
+        TransientDnsServer::new_with_address(&log, addr.into()).await?
     } else {
-        dns_server::TransientServer::new(&log).await?
+        TransientDnsServer::new(&log).await?
     };
     let mut dns_config_builder = DnsConfigBuilder::new();
 

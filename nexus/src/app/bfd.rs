@@ -6,12 +6,14 @@ use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::bfd;
 use nexus_types::external_api::networking;
-use omicron_common::api::{external::Error, internal::shared::SwitchLocation};
+use omicron_common::api::external::Error;
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::SwitchSlot;
 
 impl super::Nexus {
-    async fn mg_client_for_switch_location(
+    async fn mg_client_for_switch_slot(
         &self,
-        switch: SwitchLocation,
+        switch: SwitchSlot,
     ) -> Result<mg_admin_client::Client, Error> {
         let mg_client: mg_admin_client::Client = self
             .mg_clients()
@@ -21,10 +23,13 @@ impl super::Nexus {
             })?
             .get(&switch)
             .ok_or_else(|| {
-                Error::not_found_by_name(
-                    omicron_common::api::external::ResourceType::Switch,
-                    &switch.to_string().parse().unwrap(),
-                )
+                // TODO-correctness Only having one switch shouldn't be an
+                // error; this will be fixed by
+                // <https://github.com/oxidecomputer/omicron/pull/9979> or
+                // <https://github.com/oxidecomputer/omicron/pull/9533>.
+                Error::internal_error(&format!(
+                    "failed to find switch {switch:?}"
+                ))
             })?
             .clone();
 
@@ -68,8 +73,8 @@ impl super::Nexus {
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
         let mut result = Vec::new();
-        for s in &[SwitchLocation::Switch0, SwitchLocation::Switch1] {
-            let mg_client = self.mg_client_for_switch_location(*s).await?;
+        for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
+            let mg_client = self.mg_client_for_switch_slot(switch_slot).await?;
             let status = mg_client
                 .get_bfd_peers()
                 .await
@@ -89,16 +94,16 @@ impl super::Nexus {
                         BfdPeerState::Init => bfd::BfdState::Init,
                         BfdPeerState::AdminDown => bfd::BfdState::AdminDown,
                     },
-                    switch: s.to_string().parse().unwrap(),
+                    switch_slot,
                     local: Some(info.config.listen),
                     detection_threshold: info.config.detection_threshold,
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {
-                            omicron_common::api::external::BfdMode::SingleHop
+                            BfdMode::SingleHop
                         }
                         mg_admin_client::types::SessionMode::MultiHop => {
-                            omicron_common::api::external::BfdMode::MultiHop
+                            BfdMode::MultiHop
                         }
                     },
                 })

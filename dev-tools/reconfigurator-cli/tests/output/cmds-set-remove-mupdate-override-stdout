@@ -63,6 +63,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -119,6 +126,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -171,6 +185,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -227,6 +248,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -269,6 +297,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -315,6 +350,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -357,6 +399,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -451,6 +500,13 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (was active, config generation 3):
 -   would have removed mupdate override:   00000000-0000-0000-0000-000000000000
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+-   unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -491,6 +547,13 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
 +   will remove mupdate override:   (none) -> ffffffff-ffff-ffff-ffff-ffffffffffff
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -544,6 +607,13 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active, config generation 3 -> 4):
     will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -593,6 +663,13 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
   sled b82ede02-399c-48c6-a1de-411df4fa49a7 (active, config generation 3 -> 4):
 *   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -631,6 +708,13 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3 -> 4):
 -   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> (none)
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -672,6 +756,13 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled 00320471-945d-413c-85e7-03e091a70b3c (active, config generation 2):
 +   will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
++   unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -750,6 +841,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     -------------------------------------
     vendor   model   serial   disposition
@@ -782,6 +880,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -840,6 +945,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -892,6 +1004,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -948,6 +1067,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -992,6 +1118,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1033,6 +1166,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:

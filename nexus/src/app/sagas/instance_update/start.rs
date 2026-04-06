@@ -6,13 +6,16 @@
 
 use super::{
     ACTION_GENERATE_ID, ActionRegistry, INSTANCE_LOCK, INSTANCE_LOCK_ID,
-    NexusActionContext, NexusSaga, RealParams, SagaDoActualInstanceUpdate,
-    SagaInitError, UpdatesRequired,
+    NexusActionContext, NexusSaga, RETRY_WARN_AFTER, RealParams,
+    SagaDoActualInstanceUpdate, SagaInitError, UpdatesRequired,
 };
 use crate::app::saga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::{authn, authz};
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
+use omicron_common::backoff;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node, SagaResultErr};
 use uuid::Uuid;
@@ -87,30 +90,149 @@ async fn siu_lock_instance(
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
+    let instance_id = authz_instance.id();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
-    info!(
+    debug!(
         osagactx.log(),
         "instance update: attempting to lock instance";
-        "instance_id" => %authz_instance.id(),
+        "instance_id" => %instance_id,
         "saga_id" => %lock_id,
     );
 
-    let locked = osagactx
-        .datastore()
-        .instance_updater_lock(&opctx, authz_instance, lock_id)
-        .await;
-    match locked {
-        Ok(lock) => Ok(Some(lock)),
-        // Don't return an error if we can't take the lock. This saga will
-        // simply not start the real instance update saga, rather than having to unwind.
-        Err(instance::UpdaterLockError::AlreadyLocked) => Ok(None),
-        // Okay, that's a real error. Time to die!
-        Err(instance::UpdaterLockError::Query(e)) => {
-            Err(ActionError::action_failed(e))
-        }
-    }
+    // /!\ EXTREMELY IMPORTANT WARNING /!\
+    //
+    // We are about to attempt to acquire the instance record's updater lock. If
+    // this succeeds, this saga node should output `Some(UpdaterLock)`, which
+    // will result in an actual update saga being started with that lock. If the
+    // instance record is already locked by another saga, we will instead return
+    // `Ok(None)`, and this start saga will complete without starting a real
+    // update saga.
+    //
+    // However, there is a third possible outcome of the query that attempts to
+    // lock the instance record: we may encounter a database error that does NOT
+    // indicate that the lock is already held. In that case, this action MUST
+    // continue retrying the lock operation forever until it either succeeds or
+    // indicates that another saga has the lock, in order to satisfy the
+    // distributed saga requirement that exuting an action must be idempotent.
+    // Retrying indefinitely is necessary to ensure idempotency because it is
+    // possible that a previous execution of this action *did* succesfully
+    // acquire the lock but crashed before it completed.
+    //
+    // As aan example of why this is important, consider a particularly
+    // unlucky sequence of a Nexus crash followed by a transient database error
+    // could leave the instance record permanently locked by this (now failed)
+    // saga. The scenario in which this would occur is as follows:
+    //
+    // 1. A Nexus starts executing this action, successfully locks the instance
+    //    record, and then crashes *before* marking the saga node as having
+    //    completed.
+    // 2. Subsequently, a new Nexus resumes executing the saga and runs this
+    //    action again. It hits a query failure trying to lock the instance
+    //    record, returns an `ActionFailed` error, and unwinds.
+    // 3. Because the saga node has not *completed*, our undo action
+    //    (`siu_instance_lock_undo()`), will *not* execute, so the instance
+    //    record remains locked, but this saga has now failed, so no one will
+    //    ever unlock the instance.
+    //
+    // Due to this potential danger, we shall retry the lock operation forever
+    // until it either succeeds or indicates that the instance has already been
+    // locked by another saga. Because the lock operation is idempotent if *our*
+    // updater ID is the one inside the lock, it is fine if this node executes
+    // multiple times. Retrying indefinitely is reasonable here based on the
+    // assumption that if we can't talk to the database, our only options are to
+    // keep retrying or unwind, and unwinding *also* requires that we be able to
+    // talk to the database, so we may as well retry. We will complain loudly if
+    // we've been retrying for a long time, or if the error seems to be "our
+    // fault" (a client error).
+    backoff::retry_notify_ext(
+        // This is an internal service query to CockroachDB.
+        backoff::retry_policy_internal_service(),
+        || async {
+            let result = osagactx
+                .datastore()
+                .instance_updater_lock(&opctx, authz_instance, lock_id)
+                .await;
+            match result {
+                Ok(lock) => {
+                    info!(
+                        osagactx.log(),
+                        "instance update: lock acquired!";
+                        "instance_id" => %instance_id,
+                        "saga_id" => %lock_id,
+                        "lock" => ?lock,
+                    );
+                    Ok(Some(lock))
+                }
+                // Don't return an error if we can't take the lock. This
+                // saga will simply not start the real instance update
+                // saga, rather than having to unwind.
+                Err(instance::UpdaterLockError::AlreadyLocked) => {
+                    info!(
+                        osagactx.log(),
+                        "instance update: instance already locked, giving up";
+                        "instance_id" => %instance_id,
+                        "saga_id" => %lock_id,
+                    );
+                    Ok(None)
+                }
+                // Retry database errors that *don't* indicate the lock
+                // is already held forever.
+                Err(instance::UpdaterLockError::Query(e)) => {
+                    Err(backoff::BackoffError::transient(e))
+                }
+            }
+        },
+        |error, call_count, total_duration| {
+            let http_error = dropshot::HttpError::from(error.clone());
+            if http_error.status_code.is_client_error() {
+                // A "client error" here indicates that we probably sent a query
+                // to the database that will never succeed. This should
+                // hopefully never happen, and probably indicates a programmer
+                // error in the lock operation. However, if we don't keep
+                // retrying, the instance may remain locked forever, so we shall
+                // just keep seeing if it will ever succeed.
+                error!(
+                    osagactx.log(),
+                    "instance update: client error while trying to lock \
+                     instance (likely requires support intervention), \
+                     retrying anyway...";
+                     "instance_id" => %instance_id,
+                     "saga_id" => %lock_id,
+                    "error" => &error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            } else if total_duration > RETRY_WARN_AFTER {
+                // This error was probably not our fault, but man, we've been
+                // retrying for kind of a while now. Better complain about it.
+                warn!(
+                    osagactx.log(),
+                    "instance update: server error while attempting to lock \
+                     instance, retrying...";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %lock_id,
+                    "error" => &error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            } else {
+                info!(
+                    osagactx.log(),
+                    "instance update: server error while attempting to lock \
+                     instance, retrying...";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %lock_id,
+                    "error" => &error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            }
+        },
+    )
+    .await
+    .map_err(saga_action_failed)
 }
 
 async fn siu_lock_instance_undo(
@@ -170,7 +292,7 @@ async fn siu_fetch_state_and_start_real_saga(
     let state = datastore
         .instance_fetch_all(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Determine what updates are required based on the instance's current
     // state snapshot. If there are updates to perform, execute the "real"
@@ -216,7 +338,7 @@ async fn siu_fetch_state_and_start_real_saga(
             // that we release the lock.
             .map_err(|e| {
                 nexus.background_tasks.task_instance_updater.activate();
-                ActionError::action_failed(e)
+                saga_action_failed(e)
             })?;
         let child_result = nexus
             .sagas
@@ -226,14 +348,14 @@ async fn siu_fetch_state_and_start_real_saga(
             // and release the lock.
             .map_err(|e| {
                 nexus.background_tasks.task_instance_updater.activate();
-                ActionError::action_failed(e)
+                saga_action_failed(e)
             })?
             .start()
             .await
             // And, if we can't start it, we need to unwind.
             .map_err(|e| {
                 nexus.background_tasks.task_instance_updater.activate();
-                ActionError::action_failed(e)
+                saga_action_failed(e)
             })?
             .wait_until_stopped()
             .await
@@ -265,9 +387,9 @@ async fn siu_fetch_state_and_start_real_saga(
                     // Otherwise, the child saga could not inherit the lock for
                     // some other reason. That means we MUST unwind to ensure
                     // the lock is released.
-                    return Err(ActionError::action_failed(
-                        "child saga failed to inherit lock".to_string(),
-                    ));
+                    return Err(saga_action_failed(Error::internal_error(
+                        "child saga failed to inherit lock",
+                    )));
                 }
             }
             Err(error) => {
@@ -301,7 +423,7 @@ async fn siu_fetch_state_and_start_real_saga(
         datastore
             .instance_updater_unlock(&opctx, &authz_instance, &orig_lock)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
         // If we're releasing the lock, check if we should activate the
         // instance reincarnation background task to reincarnate this
         // instance. A previous activation may have not been able to

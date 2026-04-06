@@ -39,13 +39,13 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
@@ -1371,7 +1371,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
-                            health_monitor: HealthMonitorInventory::new(),
+                            smf_services_enabled_not_online:
+                                SvcsEnabledNotOnlineResult::DataUnavailable,
                             reference_measurements: IdOrdMap::new(),
                         },
                     )

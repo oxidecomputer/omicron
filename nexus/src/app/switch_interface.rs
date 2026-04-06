@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use db::model::{LoopbackAddress, Name};
+use db::model::LoopbackAddress;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -11,9 +11,10 @@ use nexus_db_queries::db;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::{
-    CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    CreateResult, DataPageParams, DeleteResult, ListResultVec,
 };
 use oxnet::IpNet;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -22,12 +23,12 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         address: IpNet,
     ) -> LookupResult<lookup::LoopbackAddress<'a>> {
         Ok(LookupPath::new(opctx, &self.db_datastore).loopback_address(
             rack_id,
-            switch_location,
+            switch_slot.into(),
             address.into(),
         ))
     }
@@ -38,8 +39,6 @@ impl super::Nexus {
         params: networking::LoopbackAddressCreate,
     ) -> CreateResult<LoopbackAddress> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        validate_switch_location(params.switch_location.as_str())?;
 
         // Just a check to make sure a valid rack id was passed in.
         self.rack_lookup(&opctx, &params.rack_id).await?;
@@ -66,13 +65,13 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         address: IpNet,
     ) -> DeleteResult {
         let loopback_address_lookup = self.loopback_address_lookup(
             &opctx,
             rack_id,
-            switch_location,
+            switch_slot,
             address,
         )?;
 
@@ -98,13 +97,4 @@ impl super::Nexus {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         self.db_datastore.loopback_address_list(opctx, pagparams).await
     }
-}
-
-pub fn validate_switch_location(switch_location: &str) -> Result<(), Error> {
-    if switch_location != "switch0" && switch_location != "switch1" {
-        return Err(Error::invalid_request(
-            "Switch location must be switch0 or switch1",
-        ));
-    }
-    Ok(())
 }

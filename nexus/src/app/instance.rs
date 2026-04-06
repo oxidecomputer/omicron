@@ -64,7 +64,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::ExternalIpConfig;
-use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::ExternalIps;
 use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
@@ -84,6 +83,8 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::IpAddr;
@@ -135,7 +136,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // a 4xx error. So, instead, we construct an internal error and
                 // then munge its status code.
                 // See https://github.com/oxidecomputer/dropshot/issues/693
-                let mut error = HttpError::for_internal_error(e.to_string());
+                let mut error = HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                );
                 error.status_code = if e.is_timeout() {
                     ErrorStatusCode::GATEWAY_TIMEOUT
                 } else {
@@ -930,9 +933,7 @@ impl super::Nexus {
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
 
-        if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state != DbVmmState::Running
-        {
+        if vmm.is_none() || vmm.as_ref().unwrap().state != DbVmmState::Running {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
             ));
@@ -1652,7 +1653,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.generation.next(),
+            gen_: initial_vmm.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating
@@ -1686,8 +1687,12 @@ impl super::Nexus {
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
+                let runtime: db::model::VmmRuntimeState =
+                    state.vmm_state.into();
                 Ok(db::model::Vmm {
-                    runtime: state.vmm_state.into(),
+                    time_state_updated: runtime.time_state_updated,
+                    generation: runtime.generation,
+                    state: runtime.state,
                     ..initial_vmm.clone()
                 })
             }
@@ -1740,7 +1745,7 @@ impl super::Nexus {
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
-            generation: db::model::Generation(vmm.runtime.generation.next()),
+            generation: db::model::Generation(vmm.generation.next()),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
@@ -2090,7 +2095,7 @@ impl super::Nexus {
             .await?;
 
         if let Some(vmm) = state.vmm() {
-            match vmm.runtime.state {
+            match vmm.state {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
                 | DbVmmState::Migrating => Ok((
@@ -2609,7 +2614,7 @@ impl super::Nexus {
 
 fn build_external_ip_config(
     ips: &[ExternalIp],
-) -> Result<Option<ExternalIpConfig>, Error> {
+) -> Result<ExternalIpConfig, Error> {
     // Partition into concrete IPv4 and IPv6 addresses, using subset of data
     // needed for the concrete conversions only.
     let (ipv4, ipv6): (Vec<_>, Vec<_>) =
@@ -2629,24 +2634,17 @@ fn build_external_ip_config(
                 attach_state: ip.state,
             }),
         });
-    let ipv4_config = if ipv4.is_empty() {
+    let v4 = if ipv4.is_empty() {
         None
     } else {
         Some(build_concrete_external_ip_config(ipv4)?)
     };
-    let ipv6_config = if ipv6.is_empty() {
+    let v6 = if ipv6.is_empty() {
         None
     } else {
         Some(build_concrete_external_ip_config(ipv6)?)
     };
-    match (ipv4_config, ipv6_config) {
-        (None, None) => Ok(None),
-        (None, Some(v6)) => Ok(Some(ExternalIpConfig::V6(v6))),
-        (Some(v4), None) => Ok(Some(ExternalIpConfig::V4(v4))),
-        (Some(v4), Some(v6)) => {
-            Ok(Some(ExternalIpConfig::DualStack { v4, v6 }))
-        }
-    }
+    Ok(ExternalIpConfig { v4, v6 })
 }
 
 // Subset of an `ExternalIp` needed to build the `ExternalIpConfig` for the
@@ -2665,10 +2663,9 @@ fn build_concrete_external_ip_config<T>(
 where
     T: ConcreteIp,
 {
-    let mut builder = ExternalIpConfigBuilder::new();
-    let mut seen_snat_ip = false;
-    let mut seen_ephemeral_ip = false;
-    let mut floating_ips = Vec::new();
+    let mut source_nat = None;
+    let mut ephemeral_ip = None;
+    let mut floating_ips = BTreeSet::new();
     for ip in ips.iter() {
         if ip.attach_state != IpAttachState::Attached {
             return Err(Error::unavail(
@@ -2677,9 +2674,8 @@ where
             ));
         }
         match ip.kind {
-            IpKind::SNat if !seen_snat_ip => {
-                seen_snat_ip = true;
-                let source_nat =
+            IpKind::SNat if source_nat.is_none() => {
+                source_nat = Some(
                     SourceNatConfig::new(ip.ip, ip.first_port, ip.last_port)
                         .map_err(|e| {
                             Error::internal_error(
@@ -2688,29 +2684,31 @@ where
                                 )
                                 .as_str(),
                             )
-                        })?;
-                builder = builder.with_source_nat(source_nat);
+                        })?,
+                );
             }
             IpKind::SNat => {
                 return Err(Error::internal_error(
                     "Expected at most one SNAT IP address for an instance",
                 ));
             }
-            IpKind::Ephemeral if !seen_ephemeral_ip => {
-                seen_ephemeral_ip = true;
-                builder = builder.with_ephemeral_ip(ip.ip);
+            IpKind::Ephemeral if ephemeral_ip.is_none() => {
+                ephemeral_ip = Some(ip.ip);
             }
             IpKind::Ephemeral => {
                 return Err(Error::internal_error(
                     "Expected at most 1 Ephemeral IP for an instance",
                 ));
             }
-            IpKind::Floating => floating_ips.push(ip.ip),
+            IpKind::Floating => {
+                floating_ips.insert(ip.ip);
+            }
         }
     }
 
     // Ensure limit to the number of non-SNAT IPs.
-    let n_external_ips = usize::from(seen_ephemeral_ip) + floating_ips.len();
+    let n_external_ips =
+        usize::from(ephemeral_ip.is_some()) + floating_ips.len();
     if n_external_ips > MAX_EXTERNAL_IPS_PER_INSTANCE {
         return Err(Error::internal_error(
             format!(
@@ -2721,11 +2719,7 @@ where
             .as_str(),
         ));
     }
-    builder.with_floating_ips(floating_ips).build().map_err(|e| {
-        Error::internal_error(
-            format!("Failed to build external IPs: {e}").as_str(),
-        )
-    })
+    Ok(ExternalIps { source_nat, ephemeral_ip, floating_ips })
 }
 
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the
@@ -2887,7 +2881,7 @@ fn instance_start_allowed(
                 // If a previous start saga failed and left behind a VMM in the
                 // SagaUnwound state, allow a new start saga to try to overwrite
                 // it.
-                Some(vmm) if vmm.runtime.state == DbVmmState::SagaUnwound => {
+                Some(vmm) if vmm.state == DbVmmState::SagaUnwound => {
                     debug!(
                         log,
                         "instance's last VMM's start saga unwound, OK to start";
@@ -2905,7 +2899,7 @@ fn instance_start_allowed(
                             "instance is {s:?} but still has an active VMM";
                             "instance_id" => %instance.id(),
                             "propolis_id" => %vmm.id,
-                            "propolis_state" => ?vmm.runtime.state,
+                            "propolis_state" => ?vmm.state,
                             "start_reason" => ?reason);
 
                     Err(Error::InternalError {
@@ -2920,7 +2914,7 @@ fn instance_start_allowed(
         }
         InstanceState::Stopping => {
             let (propolis_id, propolis_state) = match vmm.as_ref() {
-                Some(vmm) => (Some(vmm.id), Some(vmm.runtime.state)),
+                Some(vmm) => (Some(vmm.id), Some(vmm.state)),
                 None => (None, None),
             };
             debug!(log, "instance's VMM is still in the process of stopping";
@@ -3102,7 +3096,7 @@ mod tests {
     fn test_instance_start_allowed_when_no_vmm() {
         let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        instance.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3121,9 +3115,9 @@ mod tests {
             "test_instance_start_allowed_when_vmm_in_saga_unwound",
         );
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
-        vmm.runtime.state = DbVmmState::SagaUnwound;
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
             instance_start_allowed(
@@ -3141,7 +3135,7 @@ mod tests {
         let logctx =
             test_setup_log("test_instance_start_forbidden_while_creating");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        instance.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3158,9 +3152,9 @@ mod tests {
     fn test_instance_start_idempotent_if_active() {
         let logctx = test_setup_log("test_instance_start_idempotent_if_active");
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
-        vmm.runtime.state = DbVmmState::Starting;
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -3172,7 +3166,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Running;
+        vmm.state = DbVmmState::Running;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -3184,7 +3178,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Rebooting;
+        vmm.state = DbVmmState::Rebooting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -3196,7 +3190,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Migrating;
+        vmm.state = DbVmmState::Migrating;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
             instance_start_allowed(

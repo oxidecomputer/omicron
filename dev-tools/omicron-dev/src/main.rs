@@ -6,6 +6,7 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
+use gateway_client::ClientInfo as _;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use nexus_config::NexusConfig;
@@ -171,11 +172,11 @@ impl RunAllArgs {
             cptestctx.silo_name,
             cptestctx.external_dns_zone_name,
         );
-        for (location, gateway) in &cptestctx.gateway {
+        for (switch_slot, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:     {} ({})",
+                "omicron-dev: management gateway:     {} ({:?})",
                 gateway.client.baseurl(),
-                location,
+                switch_slot,
             );
         }
         println!(

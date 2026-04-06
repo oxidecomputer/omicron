@@ -10,15 +10,17 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
-    AddressLotKind, BfdMode, IdentityMetadata, IdentityMetadataCreateParams,
-    ImportExportPolicy, LinkFec, LinkSpeed, Name, NameOrId, ObjectIdentity,
-    SwitchLocation,
+    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, LinkFec,
+    LinkSpeed, Name, NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::TxEqConfig;
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;
 
@@ -52,6 +54,26 @@ pub struct AddressLotBlockCreate {
     pub last_address: IpAddr,
 }
 
+/// A loopback address is an address that is assigned to a rack switch but is
+/// not associated with any particular port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LoopbackAddress {
+    /// The id of the loopback address.
+    pub id: Uuid,
+
+    /// The address lot block this address came from.
+    pub address_lot_block_id: Uuid,
+
+    /// The id of the rack where this loopback address is assigned.
+    pub rack_id: Uuid,
+
+    /// Switch location where this loopback address is assigned.
+    pub switch_location: String,
+
+    /// The loopback IP address and prefix length.
+    pub address: oxnet::IpNet,
+}
+
 /// Parameters for creating a loopback address on a particular rack switch.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LoopbackAddressCreate {
@@ -62,7 +84,7 @@ pub struct LoopbackAddressCreate {
     /// The rack containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
-    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
+    // TODO: #3604 Consider using `SwitchSlot` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,
@@ -85,7 +107,7 @@ pub struct LoopbackAddressPath {
     pub rack_id: Uuid,
 
     /// The switch location to use when selecting the loopback address.
-    pub switch_location: Name,
+    pub switch_slot: Name,
 
     /// The IP address and subnet mask to use when selecting the loopback
     /// address.
@@ -97,6 +119,26 @@ pub struct LoopbackAddressPath {
 }
 
 // SWITCH PORT SETTINGS
+
+/// A switch port represents a physical external port on a rack switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPort {
+    /// The id of the switch port.
+    pub id: Uuid,
+
+    /// The rack this switch port belongs to.
+    pub rack_id: Uuid,
+
+    /// The switch location of this switch port.
+    pub switch_location: String,
+
+    /// The name of this switch port.
+    pub port_name: Name,
+
+    /// The primary settings group of this switch port. Will be `None` until
+    /// this switch port is configured.
+    pub port_settings_id: Option<Uuid>,
+}
 
 /// Parameters for creating a port settings group.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -206,36 +248,6 @@ pub struct LinkConfigCreate {
 
     /// Optional tx_eq settings.
     pub tx_eq: Option<TxEqConfig>,
-}
-
-/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
-/// equalization settings to improve signal integrity.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct TxEqConfig {
-    /// Pre-cursor tap1
-    pub pre1: Option<i32>,
-    /// Pre-cursor tap2
-    pub pre2: Option<i32>,
-    /// Main tap
-    pub main: Option<i32>,
-    /// Post-cursor tap2
-    pub post2: Option<i32>,
-    /// Post-cursor tap1
-    pub post1: Option<i32>,
-}
-
-impl From<omicron_common::api::internal::shared::TxEqConfig> for TxEqConfig {
-    fn from(
-        x: omicron_common::api::internal::shared::TxEqConfig,
-    ) -> TxEqConfig {
-        TxEqConfig {
-            pre1: x.pre1,
-            pre2: x.pre2,
-            main: x.main,
-            post2: x.post2,
-            post1: x.post1,
-        }
-    }
 }
 
 /// The LLDP configuration associated with a port.
@@ -456,6 +468,27 @@ pub struct BgpPeer {
     pub vlan_id: Option<u16>,
 }
 
+/// Represents a BGP announce set by id. The id can be used with other API calls
+/// to view and manage the announce set.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAnnounceSet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// A BGP announcement tied to an address lot block.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAnnouncement {
+    /// The id of the set this announcement is a part of.
+    pub announce_set_id: Uuid,
+
+    /// The address block the IP network being announced is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP network being announced.
+    pub network: oxnet::IpNet,
+}
+
 /// Parameters for creating a named set of BGP announcements.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpAnnounceSetCreate {
@@ -527,6 +560,46 @@ pub struct BgpConfigCreate {
 pub struct BgpStatusSelector {
     /// A name or id of the BGP configuration to get status for
     pub name_or_id: NameOrId,
+}
+
+// BGP MESSAGE HISTORY
+
+/// Opaque object representing BGP message history for a given BGP peer. The
+/// contents of this object are not yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BgpMessageHistory(pub(crate) mg_admin_client::types::MessageHistory);
+
+impl JsonSchema for BgpMessageHistory {
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        generator.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "BgpMessageHistory".to_owned()
+    }
+}
+
+/// BGP message history for a particular switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SwitchBgpHistory {
+    /// Switch this message history is associated with.
+    pub switch: SwitchSlot,
+
+    /// Message history indexed by peer address.
+    pub history: HashMap<String, BgpMessageHistory>,
+}
+
+/// BGP message history for rack switches.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AggregateBgpMessageHistory {
+    /// BGP history organized by switch.
+    pub(crate) switch_histories: Vec<SwitchBgpHistory>,
 }
 
 // BFD
@@ -645,7 +718,7 @@ pub struct LldpPortPathSelector {
     pub rack_id: Uuid,
 
     /// A switch location to use when selecting switch ports.
-    pub switch_location: Name,
+    pub switch_slot: Name,
 
     /// A name to use when selecting switch ports.
     pub port: Name,
@@ -672,7 +745,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: external::SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 /// The current state of a BGP peer.
@@ -718,35 +791,7 @@ pub struct BgpImportedRouteIpv4 {
     pub id: u32,
 
     /// Switch the route is imported into.
-    pub switch: SwitchLocation,
-}
-
-// TODO: these conversion impls between initial types and
-// `omicron_common::api::external` types should live in the later version
-// module that introduced the shape change. They currently live here because
-// `omicron-common-versions` does not yet exist.
-impl TryFrom<external::BgpImported> for BgpImportedRouteIpv4 {
-    type Error = String;
-
-    fn try_from(value: external::BgpImported) -> Result<Self, Self::Error> {
-        let external::BgpImported { prefix, nexthop, id, switch } = value;
-
-        let prefix = match prefix {
-            oxnet::IpNet::V4(ipv4_net) => Ok(ipv4_net),
-            oxnet::IpNet::V6(ipv6_net) => {
-                Err(format!("prefix must be Ipv4Net but it is {ipv6_net}"))
-            }
-        }?;
-
-        let nexthop = match nexthop {
-            IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
-            IpAddr::V6(ipv6_addr) => {
-                Err(format!("nexthop must be Ipv4Addr but it is {ipv6_addr}"))
-            }
-        }?;
-
-        Ok(Self { prefix, nexthop, id, switch })
-    }
+    pub switch: SwitchSlot,
 }
 
 // BGP EXPORTED (old HashMap-based type)
@@ -758,29 +803,6 @@ impl TryFrom<external::BgpImported> for BgpImportedRouteIpv4 {
 pub struct BgpExported {
     /// Exported routes indexed by peer address.
     pub exports: HashMap<String, Vec<oxnet::Ipv4Net>>,
-}
-
-// TODO: see above comment on `TryFrom<external::BgpImported>`.
-impl From<Vec<external::BgpExported>> for BgpExported {
-    fn from(values: Vec<external::BgpExported>) -> Self {
-        let mut out = Self::default();
-
-        for export in values {
-            let oxnet::IpNet::V4(net) = export.prefix else {
-                continue;
-            };
-            match out.exports.entry(export.peer_id) {
-                Entry::Occupied(mut occupied_entry) => {
-                    occupied_entry.get_mut().push(net);
-                }
-                Entry::Vacant(vacant_entry) => {
-                    vacant_entry.insert(vec![net]);
-                }
-            }
-        }
-
-        out
-    }
 }
 
 // BGP CONFIG (old version without max_paths)
@@ -799,27 +821,6 @@ pub struct BgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<String>,
-}
-
-// TODO: these conversion impls between initial types and
-// `omicron_common::api::external` types should live in the later version
-// module that introduced the shape change. They currently live here because
-// `omicron-common-versions` does not yet exist.
-impl From<external::BgpConfig> for BgpConfig {
-    fn from(new: external::BgpConfig) -> Self {
-        BgpConfig { identity: new.identity, asn: new.asn, vrf: new.vrf }
-    }
-}
-
-impl From<BgpConfig> for external::BgpConfig {
-    fn from(old: BgpConfig) -> external::BgpConfig {
-        external::BgpConfig {
-            identity: old.identity,
-            asn: old.asn,
-            vrf: old.vrf,
-            max_paths: Default::default(),
-        }
-    }
 }
 
 // SWITCH PORT SETTINGS (old response type with required BgpPeer.addr)

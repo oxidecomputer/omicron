@@ -21,6 +21,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
 use serde_urlencoded;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::LazyLock;
@@ -382,10 +383,18 @@ async fn serve_static(
     };
 
     let file = File::open(&path_to_read).await.map_err(|e| {
-        not_found(&format!("accessing {:?}: {:#}", path_to_read, e))
+        not_found(&format!(
+            "accessing {:?}: {}",
+            path_to_read,
+            InlineErrorChain::new(&e)
+        ))
     })?;
     let metadata = file.metadata().await.map_err(|e| {
-        not_found(&format!("accessing {:?}: {:#}", path_to_read, e))
+        not_found(&format!(
+            "accessing {:?}: {}",
+            path_to_read,
+            InlineErrorChain::new(&e)
+        ))
     })?;
     resp = resp.header(http::header::CONTENT_LENGTH, metadata.len());
 

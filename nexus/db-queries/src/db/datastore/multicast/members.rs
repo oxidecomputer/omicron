@@ -39,9 +39,8 @@ use crate::db::pagination::paginated;
 /// - **SSM (232.0.0.0/8, ff3x::/32)**: Always use `specific_sources` per RFC 4607.
 ///   The `has_any_source_member` flag is ignored because API validation
 ///   prevents SSM joins without sources.
-/// - **ASM**: Currently always passes `None` to DPD (Dendrite doesn't support
-///   ASM filtering yet). TODO: if `has_any_source_member` is true, skip
-///   switch-level filtering; otherwise use `specific_sources`.
+/// - **ASM**: If `has_any_source_member` is true, passes `None` to DPD
+///   (no switch-level filtering). Otherwise uses `specific_sources`.
 /// - **OPTE**: Always uses per-member source lists for fine-grained filtering,
 ///   regardless of switch-level behavior.
 ///
@@ -57,8 +56,8 @@ pub struct SourceFilterState {
 
     /// True if any member has empty `source_ips` (wants any source).
     ///
-    /// For ASM groups: currently unused (Dendrite doesn't support ASM filtering).
-    /// TODO: when true, switch-level filtering will be disabled.
+    /// For ASM groups: when true, switch-level source filtering is disabled
+    /// (sources passed as `None` to Dendrite).
     /// For SSM groups: ignored per RFC 4607 (API validation prevents SSM joins
     /// without sources).
     pub has_any_source_member: bool,
@@ -930,7 +929,6 @@ mod tests {
                 description: "Creating test group".to_string(),
             },
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };

@@ -3893,6 +3893,13 @@
           "nexthop"
         ]
       },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
+      },
       "RssStep": {
         "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
         "oneOf": [
@@ -7416,28 +7423,6 @@
           }
         ]
       },
-      "UplinkAddressConfig": {
-        "type": "object",
-        "properties": {
-          "address": {
-            "nullable": true,
-            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
-          },
-          "vlan_id": {
-            "nullable": true,
-            "description": "The VLAN id (if any) associated with this address.",
-            "default": null,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        }
-      },
       "UplinkPreflightStepId": {
         "oneOf": [
           {
@@ -7569,14 +7554,16 @@
         ]
       },
       "UserSpecifiedBgpPeerConfig": {
-        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.\n\n[`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig",
+        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.",
         "type": "object",
         "properties": {
           "addr": {
-            "nullable": true,
             "description": "Address of the peer.",
-            "type": "string",
-            "format": "ip"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterPeerAddr"
+              }
+            ]
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",
@@ -7701,9 +7688,11 @@
           "router_lifetime": {
             "description": "Router lifetime in seconds for unnumbered BGP peers.",
             "default": 0,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -7715,6 +7704,7 @@
           }
         },
         "required": [
+          "addr",
           "asn",
           "port"
         ],
@@ -7728,13 +7718,13 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of [`PortConfig`].\n\nAll of [`PortConfig`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfig`]. So this has all of the fields other than the port name.\n\n[`PortConfig`]: omicron_common::api::internal::shared::PortConfig",
+        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
         "type": "object",
         "properties": {
           "addresses": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UplinkAddressConfig"
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -7792,7 +7782,7 @@
         "additionalProperties": false
       },
       "UserSpecifiedRackNetworkConfig": {
-        "description": "User-specified parts of [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).",
+        "description": "User-specified parts of `RackNetworkConfig`.",
         "type": "object",
         "properties": {
           "bgp": {
@@ -7833,6 +7823,31 @@
           "infra_ip_last",
           "switch0",
           "switch1"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRouterPeerAddr": {
+        "type": "string"
+      },
+      "UserSpecifiedUplinkAddressConfig": {
+        "description": "User-specified version of [`sled_agent_types::early_networking::UplinkAddressConfig`].\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address to be used on the uplink.",
+            "type": "string"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ],
         "additionalProperties": false
       },

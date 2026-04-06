@@ -27,11 +27,13 @@ use nexus_test_utils::resource_helpers;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
-use nexus_types::external_api::image;
+use nexus_types::external_api::instance;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::sled;
 use nexus_types::external_api::snapshot;
@@ -2749,25 +2751,8 @@ async fn test_create_read_only_disk_from_snapshot(
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    // Define an image
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a base disk from this image, which we will then create a snapshot
     // from in order to create our read-only disk from that snapshot.
@@ -2947,25 +2932,8 @@ async fn test_cannot_snapshot_read_only_disk(
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    // Define an image
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a base disk from this image, which we will then create a snapshot
     // from in order to create our read-only disk from that snapshot.
@@ -3195,6 +3163,124 @@ async fn test_read_only_disk_different_vcr(
     gather_ids(&mut volume_2_ids, &vcr_2);
 
     assert_eq!(volume_1_ids.intersection(&volume_2_ids).count(), 0);
+}
+
+/// Test that deleting a local storage disk retries through transient sled
+/// agent errors.
+///
+/// This exercises the retry loop in `sdd_delete_local_storage` by:
+///
+/// 1. Creating a local storage disk and starting an instance with it.
+/// 2. Stopping the instance and detaching the disk.
+/// 3. Injecting transient 503 errors into the simulated sled agent.
+/// 4. Deleting the disk and verifying the saga retries and succeeds.
+///
+/// Time is paused so that exponential backoff sleeps resolve quickly.
+#[nexus_test]
+async fn test_delete_local_storage_disk_retries_on_transient_error(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    let local_disk_name: Name = "local-disk".parse().unwrap();
+    let instance_name = "local-disk-instance";
+
+    // Create a local storage disk.
+    let disks_url = get_disks_url();
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: local_disk_name.clone(),
+                    description: "local storage disk".to_string(),
+                },
+                disk_backend: disk::DiskBackend::Local {},
+                size: ByteCount::from_gibibytes_u32(1),
+            }))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("created local storage disk");
+
+    // Create an instance with the local disk attached and start it. Starting
+    // the instance triggers `sled_reservation_create`, which allocates a
+    // dataset for the local storage disk. Without this allocation, the disk
+    // delete saga short-circuits and never reaches the retry loop.
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: local_disk_name.clone() },
+        )],
+        Vec::<instance::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate the instance transitioning to Running so the start saga
+    // completes (including local storage allocation).
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Stop the instance so we can detach and delete the disk.
+    set_instance_state(client, instance_name, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Detach the disk.
+    let url_instance_detach_disk =
+        get_disk_detach_url(&instance.identity.id.into());
+    disk_post(client, &url_instance_detach_disk, local_disk_name.clone()).await;
+
+    // Inject transient failures into local storage operations on the sled
+    // agent. The disk delete saga's `sdd_delete_local_storage` action will
+    // retry through these. 8 errors comfortably exceeds backon's default
+    // max_times of 3 (catching the regression fixed by #9993), while keeping
+    // virtual time low enough that background task timers don't cause excessive
+    // real I/O during auto-advance.
+    cptestctx.first_sled_agent().set_local_storage_error_count(8);
+
+    // Pausing the timer turns on Tokio's auto-advance behavior, making backoff
+    // sleeps resolve instantly.
+    tokio::time::pause();
+
+    // Delete the disk. This triggers the disk delete saga, which must retry
+    // in the face of injected errors.
+    let disk_url = get_disk_url("local-disk");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("disk delete should succeed after retrying transient errors");
+
+    tokio::time::resume();
+
+    assert_eq!(
+        cptestctx.first_sled_agent().local_storage_error_remaining(),
+        0,
+        "not all injected errors were consumed; \
+         the retry loop may not have been exercised"
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("disk should no longer exist");
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

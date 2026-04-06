@@ -619,7 +619,9 @@ fn display_sleds(
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            health_monitor,
+            // TODO-K[omicron#9516]: This is temporarily hidden until we add the
+            // smf_services_enabled_not_online data to the DB in a follow up PR.
+            smf_services_enabled_not_online: _,
             reference_measurements,
         } = sled;
 
@@ -670,9 +672,12 @@ fn display_sleds(
             writeln!(indented, "zpools")?;
         }
         for zpool in zpools {
-            let Zpool { id, total_size, .. } = zpool;
+            let Zpool { id, total_size, health, .. } = zpool;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            writeln!(indent2, "{id}: total size: {total_size}")?;
+            writeln!(
+                indent2,
+                "{id}: total size: {total_size} health: {health}"
+            )?;
         }
 
         if !datasets.is_empty() {
@@ -894,40 +899,6 @@ fn display_sleds(
                         /* use_z */ true,
                     )
                 )?;
-            }
-        }
-
-        // TODO-K[omicron#9516]: This is temporarily hidden until we add the
-        // health monitor types to the DB. Once those have been integrated,
-        // we'll show health monitor status when everything is healthy as well.
-        if !health_monitor.is_empty() {
-            writeln!(indented, "HEALTH MONITOR")?;
-            let mut indent2 = IndentWriter::new("  ", &mut indented);
-            match &health_monitor.smf_services_in_maintenance {
-                Ok(svcs) => {
-                    if !svcs.is_empty() {
-                        if let Some(time_of_status) = &svcs.time_of_status {
-                            writeln!(
-                                indent2,
-                                "SMF services in maintenance at {}:",
-                                time_of_status.to_rfc3339_opts(
-                                    SecondsFormat::Millis,
-                                    /* use_z */ true,
-                                )
-                            )?;
-                        }
-                        let mut indent3 = IndentWriter::new("  ", &mut indent2);
-                        for svc in &svcs.services {
-                            writeln!(indent3, "{svc}")?;
-                        }
-                    }
-                }
-                Err(e) => {
-                    writeln!(
-                        indent2,
-                        "failed to retrieve SMF services in maintenance: {e}"
-                    )?;
-                }
             }
         }
 
@@ -1284,7 +1255,7 @@ fn display_sled_config(
             .with(tabled::settings::Style::empty())
             .with(tabled::settings::Padding::new(2, 1, 0, 0))
             .to_string();
-        writeln!(indented, "MEASUREMENTS: {}", zones.len())?;
+        writeln!(indented, "MEASUREMENTS: {}", measurements.len())?;
         writeln!(indented, "{table}")?;
     }
 

@@ -6,6 +6,10 @@
 
 use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
+use sled_agent_types::inventory::ZpoolHealth;
+use sled_agent_types::inventory::ZpoolHealthParseError;
+use slog_error_chain::SlogInlineError;
+use std::num::ParseIntError;
 use std::str::FromStr;
 use tokio::process::Command;
 
@@ -16,82 +20,58 @@ const ZPOOL: &str = "/usr/sbin/zpool";
 pub const ZPOOL_MOUNTPOINT_ROOT: &str = "/";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-#[error("Failed to parse output: {0}")]
-pub struct ParseError(String);
+pub enum ZpoolInfoParseError {
+    #[error(transparent)]
+    ZpoolHealth(#[from] ZpoolHealthParseError),
+    #[error("zpool list output: missing field `{0}`")]
+    MissingField(&'static str),
+    #[error("zpool list output: failed to parse field `{field}`")]
+    IntegerField {
+        field: &'static str,
+        #[source]
+        err: ParseIntError,
+    },
+}
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
-    #[error("Zpool execution error: {0}")]
+    #[error("Zpool execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
-    Parse(#[from] ParseError),
+    Parse(#[from] ZpoolInfoParseError),
 
     #[error("No Zpools found")]
     NoZpools,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create zpool: {err}")]
+#[error("Failed to create zpool")]
 pub struct CreateError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to destroy zpool: {err}")]
+#[error("Failed to destroy zpool")]
 pub struct DestroyError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to list zpools: {err}")]
+#[error("Failed to list zpools")]
 pub struct ListError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get info for zpool '{name}': {err}")]
+#[error("Failed to get info for zpool '{name}'")]
 pub struct GetInfoError {
     name: String,
     #[source]
     err: Error,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ZpoolHealth {
-    /// The device is online and functioning.
-    Online,
-    /// One or more components are degraded or faulted, but sufficient
-    /// replicas exist to continue functioning.
-    Degraded,
-    /// One or more components are degraded or faulted, and insufficient
-    /// replicas exist to continue functioning.
-    Faulted,
-    /// The device was explicitly taken offline by "zpool offline".
-    Offline,
-    /// The device was physically removed.
-    Removed,
-    /// The device could not be opened.
-    Unavailable,
-}
-
-impl FromStr for ZpoolHealth {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ONLINE" => Ok(ZpoolHealth::Online),
-            "DEGRADED" => Ok(ZpoolHealth::Degraded),
-            "FAULTED" => Ok(ZpoolHealth::Faulted),
-            "OFFLINE" => Ok(ZpoolHealth::Offline),
-            "REMOVED" => Ok(ZpoolHealth::Removed),
-            "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ParseError(format!("Unrecognized zpool 'health': {}", s))),
-        }
-    }
 }
 
 /// Describes a Zpool.
@@ -141,16 +121,13 @@ impl ZpoolInfo {
 }
 
 impl FromStr for ZpoolInfo {
-    type Err = ParseError;
+    type Err = ZpoolInfoParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
-        let expected_field = |name| {
-            ParseError(format!("Missing '{}' value in zpool list output", name))
-        };
-        let failed_to_parse = |name, err| {
-            ParseError(format!("Failed to parse field '{}': {}", name, err))
-        };
+        let expected_field = |name| ZpoolInfoParseError::MissingField(name);
+        let failed_to_parse =
+            |field, err| ZpoolInfoParseError::IntegerField { field, err };
 
         let mut values = s.trim().split_whitespace();
         let name =
@@ -367,11 +344,9 @@ mod test {
 
         // Similar to the prior test case, just omit "health".
         let input = format!("{} {} {} {}", name, size, allocated, free);
-        let result: Result<ZpoolInfo, ParseError> = input.parse();
+        let result = input.parse::<ZpoolInfo>();
 
-        let expected_err = ParseError(
-            "Missing 'health' value in zpool list output".to_owned(),
-        );
+        let expected_err = ZpoolInfoParseError::MissingField("health");
         assert_eq!(result.unwrap_err(), expected_err,);
     }
 }

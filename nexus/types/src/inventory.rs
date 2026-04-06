@@ -38,7 +38,6 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -48,6 +47,8 @@ use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
 use sled_agent_types_versions::latest::inventory::SingleMeasurementInventory;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
+use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -568,11 +569,17 @@ pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,
     pub total_size: ByteCount,
+    pub health: ZpoolHealth,
 }
 
 impl Zpool {
     pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
-        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
+        Zpool {
+            time_collected,
+            id: pool.id,
+            total_size: pool.total_size,
+            health: pool.health,
+        }
     }
 }
 
@@ -643,7 +650,7 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
-    pub health_monitor: HealthMonitorInventory,
+    pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 

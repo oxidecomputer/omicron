@@ -123,13 +123,13 @@ pub fn dpd_client<N: NexusServer>(
 ) -> dpd_client::Client {
     // Get the first available dendrite instance and extract the values we need
     let dendrite_guard = cptestctx.dendrite.read().unwrap();
-    let (switch_location, dendrite_instance) = dendrite_guard
+    let (switch_slot, dendrite_instance) = dendrite_guard
         .iter()
         .next()
         .expect("No dendrite instances running for test");
 
     // Copy the values we need while the guard is still alive
-    let switch_location = *switch_location;
+    let switch_slot = *switch_slot;
     let port = dendrite_instance.port;
     drop(dendrite_guard);
 
@@ -137,7 +137,7 @@ pub fn dpd_client<N: NexusServer>(
         tag: String::from("nexus-test"),
         log: cptestctx.logctx.log.new(slog::o!(
             "component" => "DpdClient",
-            "switch" => switch_location.to_string()
+            "switch_slot" => format!("{switch_slot:?}"),
         )),
     };
 

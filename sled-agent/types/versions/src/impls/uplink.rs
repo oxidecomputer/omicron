@@ -4,8 +4,8 @@
 
 //! Implementations for uplink types.
 
+use crate::latest::early_networking::PortConfig;
 use crate::latest::uplink::HostPortConfig;
-use omicron_common::api::internal::shared::rack_init::PortConfig;
 
 impl From<PortConfig> for HostPortConfig {
     fn from(x: PortConfig) -> Self {

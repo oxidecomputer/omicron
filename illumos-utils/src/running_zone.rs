@@ -26,6 +26,7 @@ use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::SlogInlineError;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
@@ -45,7 +46,7 @@ pub enum ServiceError {
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
-#[error("Error running command in zone '{zone}': {err}")]
+#[error("Error running command in zone '{zone}'")]
 pub struct RunCommandError {
     zone: String,
     #[source]
@@ -55,7 +56,7 @@ pub struct RunCommandError {
 /// Errors returned from [`RunningZone::boot`].
 #[derive(thiserror::Error, Debug)]
 pub enum BootError {
-    #[error("Error booting zone: {0}")]
+    #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
@@ -64,19 +65,20 @@ pub enum BootError {
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
 
-    #[error("Zone booted, but running a command experienced an error: {0}")]
+    #[error("Zone booted, but running a command experienced an error")]
     RunCommandError(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum EnsureAddressError {
     #[error(
-        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}"
+        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name"
     )]
     AddrObject {
         request: AddressRequest,
         zone: String,
+        #[source]
         err: crate::addrobj::ParseError,
     },
 
@@ -86,8 +88,12 @@ pub enum EnsureAddressError {
     #[error(transparent)]
     GetAddressesError(#[from] crate::zone::GetAddressesError),
 
-    #[error("Failed ensuring link-local address in {zone}: {err}")]
-    LinkLocal { zone: String, err: crate::ExecutionError },
+    #[error("Failed ensuring link-local address in {zone}")]
+    LinkLocal {
+        zone: String,
+        #[source]
+        err: crate::ExecutionError,
+    },
 
     #[error("Failed to find non-link-local address in {zone}")]
     NoDhcpV6Addr { zone: String },
@@ -456,7 +462,7 @@ impl RunningZone {
                         self.inner.log,
                         "No non link-local address yet (retrying in {:?})",
                         delay;
-                        "error" => ?error
+                        error
                     );
                 },
             )
@@ -714,23 +720,6 @@ impl InstalledZone {
     /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
     pub const ROOT_FS_PATH: &'static str = "root";
 
-    /// Returns the name of a zone, based on the base zone name plus any unique
-    /// identifying info.
-    ///
-    /// The zone name is based on:
-    /// - A unique Oxide prefix ("oxz_")
-    /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique UUID
-    ///
-    /// This results in a zone name which is distinct across different zpools,
-    /// but stable and predictable across reboots.
-    pub fn get_zone_name(
-        zone_type: &str,
-        unique_name: Option<OmicronZoneUuid>,
-    ) -> String {
-        crate::zone::zone_name(zone_type, unique_name)
-    }
-
     /// Get the name of the bootstrap VNIC in the zone, if any.
     pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
         self.bootstrap_vnic.as_ref().map(|link| link.name())
@@ -986,7 +975,7 @@ impl<'a> ZoneBuilder<'a> {
         let temp_dir = fake_cfg.temp_dir;
         (|| {
             let zone_type = self.zone_type?;
-            let full_zone_name = InstalledZone::get_zone_name(
+            let full_zone_name = crate::zone::zone_name(
                 zone_type,
                 self.unique_name,
             );
@@ -1052,8 +1041,7 @@ impl<'a> ZoneBuilder<'a> {
                 err,
             })?;
 
-        let full_zone_name =
-            InstalledZone::get_zone_name(zone_type, unique_name);
+        let full_zone_name = crate::zone::zone_name(zone_type, unique_name);
 
         // Look for the image within `file_source.search_paths`, in order.
         let zone_image_path = file_source

@@ -10,24 +10,32 @@ use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::queries::external_subnet::MAX_ATTACHED_SUBNETS_PER_INSTANCE;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::assert_subnet_pool_utilization;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_default_subnet_pool;
 use nexus_test_utils::resource_helpers::create_external_subnet_in_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::external_subnet as external_subnet_types;
 use nexus_types::external_api::external_subnet::ExternalSubnet;
 use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo;
+use nexus_types::identity::Resource as _;
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -88,6 +96,9 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
             .await;
     let _project = create_project(client, PROJECT_NAME).await;
 
+    // Pool has a /24 member = 256 addresses capacity, nothing allocated yet.
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 256.0).await;
+
     // Sanity check, can we CRUD a single subnet.
     let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -95,7 +106,7 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -111,6 +122,10 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(external_subnet.subnet, ip_subnet);
     assert_eq!(external_subnet.identity.name.as_str(), EXTERNAL_SUBNET_NAME);
+
+    // /28 = 16 addresses allocated from the 256-address pool.
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 16.0, 256.0).await;
+
     let time_created = external_subnet.identity.time_created;
     assert_eq!(time_created, external_subnet.identity.time_modified);
 
@@ -169,6 +184,9 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("failed to make request");
 
+    // Deleting the subnet should free its allocation.
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 256.0).await;
+
     // And it should really be gone.
     let via_list =
         NexusRequest::object_get(client, &external_subnets_url(PROJECT_NAME))
@@ -203,7 +221,7 @@ async fn external_subnet_pagination(cptestctx: &ControlPlaneTestContext) {
                 description: String::from("A test external subnet"),
             },
             allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-                prefix_len: 28,
+                prefix_length: 28,
                 pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
                 },
@@ -220,6 +238,10 @@ async fn external_subnet_pagination(cptestctx: &ControlPlaneTestContext) {
         assert!(member_subnet.is_supernet_of(&external_subnet.subnet));
         subnets.push(external_subnet);
     }
+
+    // 10 /28 subnets = 160 addresses allocated from the 256-address pool.
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 160.0, 256.0)
+        .await;
 
     // We're using name url, so sort everything by that.
     subnets.sort_by(|a, b| a.identity.name.cmp(&b.identity.name));
@@ -303,7 +325,7 @@ async fn attach_test_impl(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -318,6 +340,7 @@ async fn attach_test_impl(
     .execute_and_parse_unwrap::<ExternalSubnet>()
     .await;
     assert!(member_subnet.is_supernet_of(&external_subnet.subnet));
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 16.0, 256.0).await;
 
     // Create an instance and wait for it to go to the desired state.
     let nexus = &cptestctx.server.server_context().nexus;
@@ -422,7 +445,7 @@ async fn cannot_attach_subnet_in_another_project(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -490,7 +513,7 @@ async fn cannot_attach_subnet_attached_to_another_instance(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -575,7 +598,7 @@ async fn cannot_detach_subnet_that_is_not_attached(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -646,7 +669,7 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
                 description: String::from("A test external subnet"),
             },
             allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-                prefix_len: 30,
+                prefix_length: 30,
                 pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
                 },
@@ -665,6 +688,11 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
         let _ = attach_external_subnet(client, INSTANCE_NAME, &name).await;
     }
 
+    // Each /30 = 4 addresses. MAX subnets allocated so far.
+    let allocated = f64::from(MAX_ATTACHED_SUBNETS_PER_INSTANCE) * 4.0;
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, allocated, 256.0)
+        .await;
+
     // Create one more external subnet.
     let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -672,7 +700,7 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 30,
+            prefix_length: 30,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -687,6 +715,15 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
     .execute_and_parse_unwrap::<ExternalSubnet>()
     .await;
     assert!(member_subnet.is_supernet_of(&external_subnet.subnet));
+
+    // One more /30 allocated.
+    assert_subnet_pool_utilization(
+        client,
+        SUBNET_POOL_NAME,
+        allocated + 4.0,
+        256.0,
+    )
+    .await;
 
     // Trying to attach it to the instance should fail.
     NexusRequest::expect_failure_with_body(
@@ -728,7 +765,7 @@ async fn cannot_delete_attached_external_subnet(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -841,6 +878,9 @@ async fn external_subnet_create_name_conflict(
     )
     .await;
 
+    // One /28 = 16 addresses allocated.
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 16.0, 256.0).await;
+
     // Second create with the same name should return ObjectAlreadyExists,
     // not 500.
     let create_params = external_subnet_types::ExternalSubnetCreate {
@@ -849,7 +889,7 @@ async fn external_subnet_create_name_conflict(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
@@ -868,6 +908,9 @@ async fn external_subnet_create_name_conflict(
         "error message should contain the subnet name: {}",
         error.message,
     );
+
+    // The failed create should not have allocated anything extra.
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 16.0, 256.0).await;
 }
 
 // https://github.com/oxidecomputer/omicron/issues/9872
@@ -885,7 +928,7 @@ async fn external_subnet_create_nonexistent_pool(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name("no-such-pool".parse().unwrap()),
             },
@@ -899,6 +942,175 @@ async fn external_subnet_create_nonexistent_pool(
     )
     .await;
     assert_eq!(error.error_code.as_deref(), Some("ObjectNotFound"));
+}
+
+/// Limited collaborators should be able to do the full external subnet
+/// lifecycle: create, list, read, update, attach, detach, delete.
+#[nexus_test]
+async fn test_limited_collaborator_external_subnet_lifecycle(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Setup infrastructure as privileged user.
+    let _pool =
+        create_default_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4)
+            .await;
+    create_subnet_pool_member(
+        client,
+        SUBNET_POOL_NAME,
+        "8.8.8.0/24".parse().unwrap(),
+    )
+    .await;
+    let (_v4_pool, _v6_pool) = create_default_ip_pools(client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Create a limited collaborator user.
+    let silo: silo::Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let authn = AuthnMode::SiloUser(limited_user.id);
+
+    // Create an external subnet.
+    let create_params = external_subnet_types::ExternalSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
+            description: String::from("A test external subnet"),
+        },
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
+            prefix_length: 28,
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
+            },
+        },
+    };
+    let subnet = NexusRequest::objects_post(
+        client,
+        &external_subnets_url(PROJECT_NAME),
+        &create_params,
+    )
+    .authn_as(authn.clone())
+    .execute_and_parse_unwrap::<ExternalSubnet>()
+    .await;
+    assert_eq!(subnet.identity.name.as_str(), EXTERNAL_SUBNET_NAME);
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 16.0, 256.0).await;
+
+    // List external subnets.
+    let list: ResultsPage<ExternalSubnet> =
+        NexusRequest::object_get(client, &external_subnets_url(PROJECT_NAME))
+            .authn_as(authn.clone())
+            .execute_and_parse_unwrap()
+            .await;
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].identity.id, subnet.identity.id);
+
+    // Read the external subnet.
+    let read = NexusRequest::object_get(
+        client,
+        &external_subnet_url(EXTERNAL_SUBNET_NAME, PROJECT_NAME),
+    )
+    .authn_as(authn.clone())
+    .execute_and_parse_unwrap::<ExternalSubnet>()
+    .await;
+    assert_eq!(read.identity.id, subnet.identity.id);
+
+    // Update the external subnet.
+    let updates = external_subnet_types::ExternalSubnetUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("updated description")),
+        },
+    };
+    let updated = NexusRequest::object_put(
+        client,
+        &external_subnet_url(EXTERNAL_SUBNET_NAME, PROJECT_NAME),
+        Some(&updates),
+    )
+    .authn_as(authn.clone())
+    .execute_and_parse_unwrap::<ExternalSubnet>()
+    .await;
+    assert_eq!(updated.identity.description.as_str(), "updated description");
+
+    // Create a stopped instance to attach the subnet to.
+    create_instance_with(
+        client,
+        PROJECT_NAME,
+        INSTANCE_NAME,
+        &Default::default(),
+        vec![],
+        vec![],
+        /* start = */ false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+
+    // Attach the subnet.
+    let attach_url =
+        external_subnet_attach_url(EXTERNAL_SUBNET_NAME, PROJECT_NAME);
+    let attached = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &attach_url)
+            .body(Some(&external_subnet_types::ExternalSubnetAttach {
+                instance: INSTANCE_NAME.parse::<Name>().unwrap().into(),
+            }))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(authn.clone())
+    .execute_and_parse_unwrap::<ExternalSubnet>()
+    .await;
+    assert!(attached.instance_id.is_some());
+
+    // Detach the subnet.
+    let detach_url =
+        external_subnet_detach_url(EXTERNAL_SUBNET_NAME, PROJECT_NAME);
+    let detached = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &detach_url)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(authn.clone())
+    .execute_and_parse_unwrap::<ExternalSubnet>()
+    .await;
+    assert!(detached.instance_id.is_none());
+
+    // Delete the subnet.
+    NexusRequest::object_delete(
+        client,
+        &external_subnet_url(EXTERNAL_SUBNET_NAME, PROJECT_NAME),
+    )
+    .authn_as(authn.clone())
+    .execute()
+    .await
+    .expect("limited collaborator should be able to delete external subnet");
+
+    // Verify it's gone and utilization is back to zero.
+    let list: ResultsPage<ExternalSubnet> =
+        NexusRequest::object_get(client, &external_subnets_url(PROJECT_NAME))
+            .authn_as(authn.clone())
+            .execute_and_parse_unwrap()
+            .await;
+    assert!(list.items.is_empty());
+    assert_subnet_pool_utilization(client, SUBNET_POOL_NAME, 0.0, 256.0).await;
 }
 
 // Verify that creating a subnet from a pool that exists but is not linked to
@@ -929,7 +1141,7 @@ async fn external_subnet_create_unlinked_pool(
             description: String::from("A test external subnet"),
         },
         allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
-            prefix_len: 28,
+            prefix_length: 28,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },

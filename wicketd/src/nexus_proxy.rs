@@ -11,6 +11,7 @@ use slog::Logger;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -92,7 +93,7 @@ impl Inner {
         let (stream, log) = match result {
             Ok((stream, peer)) => (stream, self.log.new(o!("peer" => peer))),
             Err(err) => {
-                warn!(self.log, "accept() failed"; "err" => %err);
+                warn!(self.log, "accept() failed"; InlineErrorChain::new(&err));
                 return;
             }
         };
@@ -148,7 +149,7 @@ async fn run_proxy(
                 warn!(
                     log, "failed to connect to Nexus";
                     "nexus_addrs" => ?nexus_addrs,
-                    "err" => %err,
+                    InlineErrorChain::new(&err),
                 );
                 return;
             }
@@ -157,7 +158,7 @@ async fn run_proxy(
     let log = match nexus_stream.peer_addr() {
         Ok(addr) => log.new(o!("nexus_addr" => addr)),
         Err(err) => log.new(o!("nexus_addr" =>
-                       format!("failed to read Nexus peer addr: {err}"))),
+                       format!("failed to read Nexus peer addr: {}", InlineErrorChain::new(&err)))),
     };
     info!(log, "connected to Nexus");
 
@@ -172,7 +173,7 @@ async fn run_proxy(
             );
         }
         Err(err) => {
-            warn!(log, "error proxying data to Nexus"; "err" => %err);
+            warn!(log, "error proxying data to Nexus"; InlineErrorChain::new(&err));
         }
     }
 }

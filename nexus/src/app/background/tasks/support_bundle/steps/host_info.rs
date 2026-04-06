@@ -19,6 +19,7 @@ use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
+use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 
 pub async fn spawn_query_all_sleds(
@@ -269,7 +270,7 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let output_path = output_dir.join("logs.zip");
+            let zipfile_path = output_dir.join("logs.zip");
 
             // Ensure the logs output directory exists.
             tokio::fs::create_dir_all(&output_dir).await.with_context(
@@ -278,22 +279,21 @@ async fn save_zone_log_zip_or_error(
 
             // Stream the log zip file to disk.
             let mut file =
-                tokio::fs::File::create(&output_path).await.with_context(
-                    || format!("failed to create log zip file: {output_path}"),
+                tokio::fs::File::create(&zipfile_path).await.with_context(
+                    || format!("failed to create log zip file: {zipfile_path}"),
                 )?;
 
-            let stream = bytestream.into_inner().map(|chunk| {
-                chunk.map_err(|e| std::io::Error::other(e.to_string()))
-            });
+            let stream = bytestream
+                .into_inner()
+                .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
 
             // Unzip the log file into the same directory.
-            let output_path_unzip = output_dir.join("unzipped_logs");
-            let zipfile_path = output_path.clone();
+            let zip_path = zipfile_path.clone();
             tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_path_unzip, &zipfile_path)
+                extract_zip_file(&output_dir, &zip_path)
             })
             .await
             .map_err(|join_error| {
@@ -302,12 +302,12 @@ async fn save_zone_log_zip_or_error(
             })??;
 
             // Clean up the zip file that was written to disk.
-            if let Err(e) = tokio::fs::remove_file(&output_path).await {
+            if let Err(e) = tokio::fs::remove_file(&zipfile_path).await {
                 error!(
                     logger,
                     "failed to cleanup temporary logs zip file";
-                    "error" => %e,
-                    "file" => %output_path,
+                    InlineErrorChain::new(&e),
+                    "file" => %zipfile_path,
 
                 );
             }

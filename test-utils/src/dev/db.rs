@@ -733,13 +733,19 @@ impl CockroachInstance {
 
 impl Drop for CockroachInstance {
     fn drop(&mut self) {
-        // TODO-cleanup Ideally at this point we would run self.cleanup() to
-        // kill the child process, wait for it to exit, and then clean up the
-        // temporary directory.  However, we don't have an executor here with
-        // which to run async/await code.  We could create one here, but it's
-        // not clear how safe or sketchy that would be.  Instead, we expect that
-        // the caller has done the cleanup already.  This won't always happen,
-        // particularly for ungraceful failures.
+        // NOTE: Ideally, we'd share this logic with self.cleanup() to tear down
+        // the child process. However, there are a couple distinctions from that
+        // pathway we must consider here:
+        //
+        // 1. drop is not asynchronous, so we don't have the benefits of using
+        //    our tokio executor to run async/await code.
+        // 2. If self.cleanup() has not been invoked, we want to gracefully
+        //    preserve the database for post-mortem debugging. This is often
+        //    the case for e.g. a test which has failed before invoking cleanup,
+        //    and which is bailing out. We can also take this pathway when the
+        //    calling code has forgotten to call "cleanup", and is leaking the
+        //    database, but that's a bug - and choosing to flush and terminate
+        //    via SIGTERM wouldn't be wrong in that case either.
         if self.child_process.is_some() || self.temp_dir.is_some() {
             eprintln!(
                 "WARN: dropped CockroachInstance without cleaning it up first \
@@ -747,10 +753,35 @@ impl Drop for CockroachInstance {
                 temporary directory leaked)"
             );
 
-            // Still, make a best effort.
-            #[allow(unused_must_use)]
+            // Send SIGTERM so CockroachDB can flush its WAL to disk, making the
+            // leaked temp directory useful for post-mortem debugging.
+            //
+            // Background: test CRDB instances might set
+            // `kv.raft_log.disable_synchronization_unsafe = true`
+            // which skips per-commit fdatasync for performance. Data is still
+            // written to the WAL but may only exist in Pebble's user-space
+            // write buffer. SIGTERM triggers Pebble's DB.Close() which flushes
+            // and fsyncs the WAL before exiting.
+            //
+            // See also:
+            // - https://github.com/oxidecomputer/cockroach/blob/release-22.1-oxide/pkg/cli/start_unix.go#L37
+            // - https://github.com/oxidecomputer/omicron/issues/10085
             if let Some(child_process) = self.child_process.as_mut() {
-                child_process.start_kill();
+                let pid = self.pid as libc::pid_t;
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+
+                // Poll the child_process until it exits.
+                //
+                // Note that nextest has a timeout for tests
+                // with the filter 'rdeps(omicron-test-utils)'.
+                //
+                // As a consequence, we can loop "as long as the test runner
+                // lets us" waiting for CockroachDB to gracefully terminate. In
+                // reality, this is typically on the order of ~one second after
+                // a test failure.
+                while let Ok(None) = child_process.try_wait() {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
             }
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
@@ -1210,6 +1241,7 @@ mod test {
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
     use std::env;
     use std::path::Path;
@@ -1384,9 +1416,9 @@ mod test {
 
         fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
             panic!(
-                "failed to remove temporary directory {}: {:?}",
+                "failed to remove temporary directory {}: {}",
                 directory.display(),
-                e
+                InlineErrorChain::new(&e)
             )
         });
     }
@@ -1900,6 +1932,92 @@ mod test {
             ))
         );
         assert_eq!(addr.port(), 12345);
+    }
+
+    // Test that data written to CockroachDB survives when the instance is
+    // dropped without calling cleanup(). This exercises the Drop impl path
+    // that fires during test failures (when cleanup is unreachable due to
+    // a panic) or when cleanup is accidentally omitted.
+    //
+    // With `disable_synchronization_unsafe = true`, committed data may
+    // only exist in Pebble's user-space write buffer (not yet write()-ed
+    // to the WAL file on disk). A graceful shutdown (SIGTERM) triggers
+    // Pebble's DB.Close() which flushes and fsyncs the WAL, making data
+    // durable. SIGKILL destroys the process immediately, losing any
+    // buffered WAL data.
+    //
+    // See: https://github.com/oxidecomputer/omicron/issues/10085
+    #[tokio::test]
+    async fn test_data_survives_drop_without_cleanup() {
+        let store_dir = tempdir().expect("failed to create temp dir");
+        let data_dir = store_dir.path().join("data");
+
+        // Start CRDB with a persistent store directory
+        let starter = new_builder()
+            .store_dir(&data_dir)
+            .build()
+            .expect("failed to build starter");
+        let database = starter.start().await.expect("failed to start CRDB");
+
+        // Enable the unsafe sync setting (as setup_database does)
+        database
+            .disable_synchronization()
+            .await
+            .expect("failed to disable sync");
+
+        // Write a single canary row — this is the value we check after restart.
+        let client = database.connect().await.expect("failed to connect");
+        client
+            .batch_execute(
+                "CREATE DATABASE test_db; \
+                 USE test_db; \
+                 CREATE TABLE test_data (id INT PRIMARY KEY, payload STRING); \
+                 INSERT INTO test_data (id, payload) \
+                 VALUES (99999, 'canary');",
+            )
+            .await
+            .expect("canary insert failed");
+
+        // Drop without cleanup — this triggers the Drop impl.
+        // Save the temp dir path so we can clean it up after
+        // verification (the Drop impl intentionally leaks it).
+        let leaked_temp_dir = database.temp_dir().to_owned();
+        drop(client);
+        drop(database);
+
+        // Restart CRDB on the same store directory.
+        let starter2 = new_builder()
+            .store_dir(&data_dir)
+            .build()
+            .expect("failed to build second starter");
+        let mut database2 =
+            starter2.start().await.expect("failed to restart CRDB");
+
+        let client2 = database2.connect().await.expect("failed to reconnect");
+
+        // Check that the canary row survived.
+        let rows = client2
+            .query(
+                "SELECT payload FROM test_db.test_data WHERE id = 99999",
+                &[],
+            )
+            .await
+            .expect("canary query failed");
+        assert_eq!(
+            rows.len(),
+            1,
+            "canary row (id=99999) did not survive shutdown"
+        );
+        let payload: String = rows[0].get(0);
+        assert_eq!(payload, "canary", "canary row has wrong payload");
+
+        client2.cleanup().await.expect("client2 cleanup failed");
+        database2.cleanup().await.expect("database2 cleanup failed");
+
+        // Clean up the temp dir leaked by the first instance's Drop.
+        fs::remove_dir_all(&leaked_temp_dir)
+            .await
+            .expect("failed to clean up leaked temp dir");
     }
 
     // Tests the way `process_exited()` checks and interprets the exit status

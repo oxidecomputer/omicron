@@ -5,6 +5,7 @@
 use futures::Future;
 use slog::Logger;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 
 use crate::api::external::Error;
 use crate::backoff::BackoffError;
@@ -24,14 +25,14 @@ pub enum ProgenitorOperationRetryError<E> {
 
     /// The retry loop progenitor operation saw a permanent client error
     #[error("permanent error")]
-    ProgenitorError(#[source] progenitor_client::Error<E>),
+    ProgenitorError(#[source] progenitor_client010::Error<E>),
 }
 
 impl<E> ProgenitorOperationRetryError<E> {
     pub fn is_not_found(&self) -> bool {
         match &self {
             ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                progenitor_client::Error::ErrorResponse(rv) => {
+                progenitor_client010::Error::ErrorResponse(rv) => {
                     match rv.status() {
                         http::StatusCode::NOT_FOUND => true,
 
@@ -69,7 +70,7 @@ pub struct ProgenitorOperationRetry<
     T,
     E: std::fmt::Debug,
     F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    Fut: Future<Output = Result<T, progenitor_client010::Error<E>>>,
     BF: FnMut() -> BFut,
     BFut: Future<Output = Result<bool, Error>>,
 > {
@@ -82,9 +83,9 @@ pub struct ProgenitorOperationRetry<
 
 impl<T, E, F, Fut, BF, BFut> ProgenitorOperationRetry<T, E, F, Fut, BF, BFut>
 where
-    E: std::fmt::Debug,
+    E: std::fmt::Debug + 'static,
     F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    Fut: Future<Output = Result<T, progenitor_client010::Error<E>>>,
     BF: FnMut() -> BFut,
     BFut: Future<Output = Result<bool, Error>>,
 {
@@ -120,21 +121,21 @@ where
                     }
 
                     match f.await {
-                        Err(progenitor_client::Error::CommunicationError(e)) => {
+                        Err(progenitor_client010::Error::CommunicationError(e)) => {
                             warn!(
                                 log,
-                                "saw transient communication error {}, retrying...",
-                                e,
+                                "saw transient communication error, retrying...";
+                                InlineErrorChain::new(&e),
                             );
 
                             Err(BackoffError::transient(
                                 ProgenitorOperationRetryError::ProgenitorError(
-                                    progenitor_client::Error::CommunicationError(e)
+                                    progenitor_client010::Error::CommunicationError(e)
                                 )
                             ))
                         }
 
-                        Err(progenitor_client::Error::ErrorResponse(
+                        Err(progenitor_client010::Error::ErrorResponse(
                             response_value,
                         )) => {
                             match response_value.status() {
@@ -143,7 +144,7 @@ where
                                 | http::StatusCode::TOO_MANY_REQUESTS => {
                                     Err(BackoffError::transient(
                                         ProgenitorOperationRetryError::ProgenitorError(
-                                            progenitor_client::Error::ErrorResponse(
+                                            progenitor_client010::Error::ErrorResponse(
                                                 response_value
                                             )
                                         )
@@ -153,7 +154,7 @@ where
                                 // Anything else is a permanent error
                                 _ => Err(BackoffError::Permanent(
                                     ProgenitorOperationRetryError::ProgenitorError(
-                                        progenitor_client::Error::ErrorResponse(
+                                        progenitor_client010::Error::ErrorResponse(
                                             response_value
                                         )
                                     )
@@ -162,7 +163,7 @@ where
                         }
 
                         Err(e) => {
-                            warn!(log, "saw permanent error {}, aborting", e,);
+                            warn!(log, "saw permanent error, aborting"; InlineErrorChain::new(&e),);
 
                             Err(BackoffError::Permanent(
                                 ProgenitorOperationRetryError::ProgenitorError(e)
@@ -176,7 +177,7 @@ where
             |error: ProgenitorOperationRetryError<E>, delay| {
                 warn!(
                     log,
-                    "failed external call ({:?}), will retry in {:?}", error, delay,
+                    "failed external call, will retry in {:?}", delay; InlineErrorChain::new(&error),
                 );
             },
         )

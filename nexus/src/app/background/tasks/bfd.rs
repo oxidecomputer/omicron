@@ -18,8 +18,10 @@ use mg_admin_client::ClientInfo;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use omicron_common::api::external::{DataPageParams, SwitchLocation};
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
+use sled_agent_types::early_networking::SwitchSlot;
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::HashSet,
     hash::Hash,
@@ -39,7 +41,7 @@ impl BfdManager {
 }
 
 struct BfdSessionKey {
-    switch: SwitchLocation,
+    switch: SwitchSlot,
     local: Option<IpAddr>,
     remote: IpAddr,
     detection_threshold: u8,
@@ -57,7 +59,7 @@ impl BfdSessionKey {
 
 impl Hash for BfdSessionKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.switch.to_string().hash(state);
+        self.switch.hash(state);
         self.remote.hash(state);
     }
 }
@@ -73,7 +75,7 @@ impl Eq for BfdSessionKey {}
 impl From<BfdSession> for BfdSessionKey {
     fn from(value: BfdSession) -> Self {
         Self {
-            switch: value.switch.parse().unwrap(), //TODO unwrap
+            switch: value.switch_slot.into(),
             remote: value.remote.ip(),
             local: value.local.map(|x| x.ip()),
             detection_threshold: value
@@ -182,8 +184,9 @@ impl BackgroundTask for BfdManager {
                 let mg = match mgd_clients.get(&x.switch) {
                     Some(mg) => mg,
                     None => {
-                        error!(&log, "failed to get mg client";
-                            "switch" => x.switch.to_string(),
+                        error!(
+                            log, "failed to get mg client";
+                            "switch" => ?x.switch,
                         );
                         continue;
                     }
@@ -201,9 +204,10 @@ impl BackgroundTask for BfdManager {
                     })
                     .await
                 {
-                    error!(&log, "failed to add bfd peer to switch daemon";
-                        "error" => e.to_string(),
-                        "switch" => x.switch.to_string(),
+                    error!(
+                        log, "failed to add bfd peer to switch daemon";
+                        "switch" => ?x.switch,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }
@@ -212,16 +216,18 @@ impl BackgroundTask for BfdManager {
                 let mg = match mgd_clients.get(&x.switch) {
                     Some(mg) => mg,
                     None => {
-                        error!(&log, "failed to get mg client";
-                            "switch" => x.switch.to_string(),
+                        error!(
+                            log, "failed to get mg client";
+                            "switch" => ?x.switch,
                         );
                         continue;
                     }
                 };
                 if let Err(e) = mg.remove_bfd_peer(&x.remote).await {
-                    error!(&log, "failed to remove bfd peer from switch daemon";
-                        "error" => e.to_string(),
-                        "switch" => x.switch.to_string(),
+                    error!(
+                        log, "failed to remove bfd peer from switch daemon";
+                        "switch" => ?x.switch,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }

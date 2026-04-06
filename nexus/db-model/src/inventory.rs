@@ -93,6 +93,7 @@ use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -2258,6 +2259,48 @@ impl From<InvNvmeDiskFirmware>
     }
 }
 
+// See [`sled_agent_types::inventory::ZpoolHealth`].
+impl_enum_type!(
+    InvZpoolHealthEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvZpoolHealth;
+
+    // Enum values
+    Online => b"online"
+    Degraded => b"degraded"
+    Faulted => b"faulted"
+    Offline => b"offline"
+    Removed => b"removed"
+    Unavailable => b"unavailable"
+);
+
+impl From<ZpoolHealth> for InvZpoolHealth {
+    fn from(value: ZpoolHealth) -> Self {
+        match value {
+            ZpoolHealth::Online => InvZpoolHealth::Online,
+            ZpoolHealth::Degraded => InvZpoolHealth::Degraded,
+            ZpoolHealth::Faulted => InvZpoolHealth::Faulted,
+            ZpoolHealth::Offline => InvZpoolHealth::Offline,
+            ZpoolHealth::Removed => InvZpoolHealth::Removed,
+            ZpoolHealth::Unavailable => InvZpoolHealth::Unavailable,
+        }
+    }
+}
+
+impl From<InvZpoolHealth> for ZpoolHealth {
+    fn from(value: InvZpoolHealth) -> Self {
+        match value {
+            InvZpoolHealth::Online => ZpoolHealth::Online,
+            InvZpoolHealth::Degraded => ZpoolHealth::Degraded,
+            InvZpoolHealth::Faulted => ZpoolHealth::Faulted,
+            InvZpoolHealth::Offline => ZpoolHealth::Offline,
+            InvZpoolHealth::Removed => ZpoolHealth::Removed,
+            InvZpoolHealth::Unavailable => ZpoolHealth::Unavailable,
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::Zpool`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_zpool)]
@@ -2267,6 +2310,7 @@ pub struct InvZpool {
     pub id: DbTypedUuid<ZpoolKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub total_size: ByteCount,
+    pub health: InvZpoolHealth,
 }
 
 impl InvZpool {
@@ -2281,6 +2325,7 @@ impl InvZpool {
             id: zpool.id.into(),
             sled_id: sled_id.into(),
             total_size: zpool.total_size.into(),
+            health: zpool.health.into(),
         }
     }
 }
@@ -2291,6 +2336,7 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
             time_collected: pool.time_collected,
             id: pool.id.into(),
             total_size: *pool.total_size,
+            health: pool.health.into(),
         }
     }
 }

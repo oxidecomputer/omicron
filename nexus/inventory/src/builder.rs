@@ -675,7 +675,8 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             file_source_resolver: inventory.file_source_resolver,
-            health_monitor: inventory.health_monitor,
+            smf_services_enabled_not_online: inventory
+                .smf_services_enabled_not_online,
             reference_measurements: inventory.reference_measurements,
         };
 
@@ -718,6 +719,15 @@ impl CollectionBuilder {
             metrics.get_metric_unsigned(CockroachMetric::RangesUnderreplicated);
         status.liveness_live_nodes =
             metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
+        self.found_cockroach_status(node_id, status);
+    }
+
+    /// Record pre-built status for a CockroachDB node
+    pub fn found_cockroach_status(
+        &mut self,
+        node_id: InternalNodeId,
+        status: CockroachStatus,
+    ) {
         self.cockroach_status.insert(node_id, status);
     }
 

@@ -4,11 +4,10 @@
 
 use crate::latest::instance::{VmmSpec, VmmStateRequested};
 use propolis_api_types::instance_spec::{
-    SpecKey,
+    Component, SpecKey,
     components::backends::{
         CrucibleStorageBackend, FileStorageBackend, VirtioNetworkBackend,
     },
-    v0::ComponentV0,
 };
 
 impl std::fmt::Display for VmmStateRequested {
@@ -34,7 +33,7 @@ impl VmmSpec {
     ) -> impl Iterator<Item = (&SpecKey, &CrucibleStorageBackend)> {
         self.0.components.iter().filter_map(
             |(key, component)| match component {
-                ComponentV0::CrucibleStorageBackend(be) => Some((key, be)),
+                Component::CrucibleStorageBackend(be) => Some((key, be)),
                 _ => None,
             },
         )
@@ -45,7 +44,7 @@ impl VmmSpec {
     ) -> impl Iterator<Item = (&SpecKey, &VirtioNetworkBackend)> {
         self.0.components.iter().filter_map(
             |(key, component)| match component {
-                ComponentV0::VirtioNetworkBackend(be) => Some((key, be)),
+                Component::VirtioNetworkBackend(be) => Some((key, be)),
                 _ => None,
             },
         )
@@ -56,7 +55,7 @@ impl VmmSpec {
     ) -> impl Iterator<Item = (&SpecKey, &FileStorageBackend)> {
         self.0.components.iter().filter_map(
             |(key, component)| match component {
-                ComponentV0::FileStorageBackend(be) => Some((key, be)),
+                Component::FileStorageBackend(be) => Some((key, be)),
                 _ => None,
             },
         )

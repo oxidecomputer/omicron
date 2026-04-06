@@ -34,7 +34,7 @@ Maghemite DDM Admin (client: ddm-admin-client)
 
 DNS Server (client: dns-service-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 Dendrite DPD (client: dpd-client)
     consumed by: ddmd (maghemite/ddmd) via 2 paths
@@ -49,6 +49,7 @@ Downstairs Controller (debugging only) (client: dsc-client)
 
 Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
+    consumed by: lldpd (lldp/lldpd) via 1 path
     consumed by: mgd (maghemite/mgd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 4 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
@@ -62,7 +63,7 @@ LLDP daemon (client: lldpd-client)
     consumed by: tfportd (dendrite/tfportd) via 1 path
 
 Maghemite MG Admin (client: mg-admin-client)
-    consumed by: omicron-nexus (omicron/nexus) via 1 path
+    consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Nexus Internal API (client: nexus-client)
@@ -86,7 +87,7 @@ Oximeter (client: oximeter-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
 
 Propolis (client: propolis-client)
-    consumed by: omicron-nexus (omicron/nexus) via 3 paths
+    consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 Crucible Repair (client: repair-client)

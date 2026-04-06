@@ -25,7 +25,6 @@ use nexus_types::external_api::certificate;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_subnet;
 use nexus_types::external_api::floating_ip;
-use nexus_types::external_api::hardware;
 use nexus_types::external_api::identity_provider;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
@@ -67,6 +66,8 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -130,11 +131,6 @@ pub static HARDWARE_SLED_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
-pub static DEMO_UNINITIALIZED_SLED: LazyLock<hardware::UninitializedSledId> =
-    LazyLock::new(|| hardware::UninitializedSledId {
-        serial: "demo-serial".to_string(),
-        part: "demo-part".to_string(),
-    });
 
 pub const SUPPORT_BUNDLES_URL: &'static str =
     "/experimental/v1/system/support-bundles";
@@ -161,7 +157,7 @@ pub static DEMO_PROBE_URL: LazyLock<String> = LazyLock::new(|| {
 pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(
     || {
         format!(
-            "/v1/system/hardware/switch-port/qsfp0/status?rack_id={}&switch_location=switch0",
+            "/v1/system/hardware/switch-port/qsfp0/status?rack_id={}&switch_slot=switch0",
             RACK_UUID
         )
     },
@@ -169,7 +165,7 @@ pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(
 pub static DEMO_SWITCH_PORT_LLDP_CONFIG_URL: LazyLock<String> = LazyLock::new(
     || {
         format!(
-            "/v1/system/hardware/switch-port/qsfp0/lldp/config?rack_id={}&switch_location=switch0",
+            "/v1/system/hardware/switch-port/qsfp0/lldp/config?rack_id={}&switch_slot=switch0",
             RACK_UUID
         )
     },
@@ -901,7 +897,7 @@ pub const DEMO_SWITCH_PORT_URL: &'static str =
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_slot={}",
             uuid::Uuid::new_v4(),
             "switch0",
         )
@@ -914,7 +910,7 @@ pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
 /* TODO requires dpd access
 pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "/v1/system/hardware/switch-port/qsfp7/status?rack_id={}&switch_location={}",
+        "/v1/system/hardware/switch-port/qsfp7/status?rack_id={}&switch_slot={}",
         uuid::Uuid::new_v4(),
         "switch0",
     )
@@ -935,7 +931,7 @@ pub static DEMO_LOOPBACK_CREATE: LazyLock<networking::LoopbackAddressCreate> =
     LazyLock::new(|| networking::LoopbackAddressCreate {
         address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
         rack_id: uuid::Uuid::new_v4(),
-        switch_location: "switch0".parse().unwrap(),
+        switch_slot: SwitchSlot::Switch0,
         address: "203.0.113.99".parse().unwrap(),
         mask: 24,
         anycast: false,
@@ -1029,14 +1025,14 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
         remote: "10.0.0.1".parse().unwrap(),
         detection_threshold: 3,
         required_rx: 1000000,
-        switch: "switch0".parse().unwrap(),
-        mode: omicron_common::api::external::BfdMode::MultiHop,
+        switch_slot: SwitchSlot::Switch0,
+        mode: BfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =
     LazyLock::new(|| networking::BfdSessionDisable {
         remote: "10.0.0.1".parse().unwrap(),
-        switch: "switch0".parse().unwrap(),
+        switch_slot: SwitchSlot::Switch0,
     });
 
 // Project Images
@@ -1068,7 +1064,7 @@ pub static DEMO_IMAGE_CREATE: LazyLock<image::ImageCreate> =
             name: DEMO_IMAGE_NAME.clone(),
             description: String::from(""),
         },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        source: image::ImageSource::Snapshot { id: uuid::Uuid::new_v4() },
         os: "fake-os".to_string(),
         version: "1.0".to_string(),
     });
@@ -1261,7 +1257,7 @@ pub static DEMO_EXTERNAL_SUBNET_CREATE: LazyLock<
         description: String::from("an external subnet"),
     },
     allocator: external_subnet::ExternalSubnetAllocator::Auto {
-        prefix_len: 24,
+        prefix_length: 24,
         pool_selector: ip_pool::PoolSelector::default(),
     },
 });
@@ -2003,7 +1999,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &DEMO_SUBNET_POOL_UTILIZATION_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_CURRENT_SILO_SUBNET_POOLS_URL,
@@ -2950,13 +2946,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: "/v1/system/hardware/sleds",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_UNINITIALIZED_SLED)
-                            .unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &SLED_INSTANCES_URL,
@@ -3112,6 +3102,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: "/v1/system/update/target-release",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/recovery-finish",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Put(

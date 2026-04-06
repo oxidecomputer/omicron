@@ -15,8 +15,8 @@ use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::internal::shared::SwitchLocation;
 use serde_json::json;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 
 /// Background task that periodically prunes soft-deleted entries
@@ -83,9 +83,9 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
                 }
             };
 
-            for location in [SwitchLocation::Switch0, SwitchLocation::Switch1] {
-                if !dpd_clients.contains_key(&location) {
-                    let message = format!("dendrite for {location} is unavailable, cannot perform nat cleanup");
+            for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
+                if !dpd_clients.contains_key(&switch_slot) {
+                    let message = format!("dendrite for {switch_slot:?} is unavailable, cannot perform nat cleanup");
                     error!(log, "{message}");
                     return json!({"error": message});
                 }

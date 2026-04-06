@@ -15,6 +15,13 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -140,6 +147,13 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     -------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition 
@@ -260,6 +274,13 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -384,6 +405,13 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -505,6 +533,13 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -651,5 +686,7 @@ planning report:
   * nexus zone on sled affab35f-600a-4109-8ea0-34a067a4e0bc from source install dataset
   * nexus zone on sled affab35f-600a-4109-8ea0-34a067a4e0bc from source install dataset
 * zone updates waiting on discretionary zones
+Measurement updates:
+Waiting on zone add/update blockers
 
 

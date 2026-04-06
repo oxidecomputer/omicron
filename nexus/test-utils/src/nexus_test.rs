@@ -24,7 +24,6 @@ use nexus_test_interface::NexusServer;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll;
@@ -34,11 +33,12 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
-use slog::debug;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use transient_dns_server::TransientDnsServer;
 
 pub struct ControlPlaneBuilder<'a> {
     // required
@@ -112,15 +112,14 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
-    pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite:
-        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
+    pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     /// Ports of stopped dendrite instances (for use by start_dendrite)
-    pub stopped_dendrite_ports: RwLock<HashMap<SwitchLocation, u16>>,
-    pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
+    pub stopped_dendrite_ports: RwLock<HashMap<SwitchSlot, u16>>,
+    pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
-    pub external_dns: dns_server::TransientServer,
-    pub internal_dns: dns_server::TransientServer,
+    pub external_dns: TransientDnsServer,
+    pub internal_dns: TransientDnsServer,
     pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
@@ -218,22 +217,19 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     /// Stop a Dendrite instance for testing failure scenarios.
     ///
     /// Stores the port so that [`Self::restart_dendrite`] can restart on the same port.
-    pub async fn stop_dendrite(
-        &self,
-        switch_location: omicron_common::api::external::SwitchLocation,
-    ) {
+    pub async fn stop_dendrite(&self, switch_slot: SwitchSlot) {
         use slog::debug;
         let log = &self.logctx.log;
-        debug!(log, "Stopping Dendrite for {switch_location}");
+        debug!(log, "Stopping Dendrite"; "switch_slot" => ?switch_slot);
 
         let dendrite_opt =
-            { self.dendrite.write().unwrap().remove(&switch_location) };
+            { self.dendrite.write().unwrap().remove(&switch_slot) };
         if let Some(mut dendrite) = dendrite_opt {
             // Store the port for later restart via start_dendrite
             self.stopped_dendrite_ports
                 .write()
                 .unwrap()
-                .insert(switch_location, dendrite.port);
+                .insert(switch_slot, dendrite.port);
             dendrite.cleanup().await.unwrap();
         }
     }
@@ -245,13 +241,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     ///
     /// Works both when Dendrite is currently running (will stop and restart)
     /// or when it was previously stopped via [`Self::stop_dendrite`].
-    pub async fn restart_dendrite(
-        &self,
-        switch_location: omicron_common::api::external::SwitchLocation,
-    ) {
+    pub async fn restart_dendrite(&self, switch_slot: SwitchSlot) {
         // Get port either from running instance or from stored port after stop
         // Extract from mutex first to avoid holding lock across await
-        let old = self.dendrite.write().unwrap().remove(&switch_location);
+        let old = self.dendrite.write().unwrap().remove(&switch_slot);
         let port = if let Some(mut old) = old {
             let port = old.port;
             old.cleanup().await.unwrap();
@@ -261,11 +254,11 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             self.stopped_dendrite_ports
                 .write()
                 .unwrap()
-                .remove(&switch_location)
+                .remove(&switch_slot)
                 .expect("Dendrite not running and no stored port from stop_dendrite")
         };
 
-        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs = self.gateway.get(&switch_slot).unwrap();
         let mgs_addr = std::net::SocketAddrV6::new(
             std::net::Ipv6Addr::LOCALHOST,
             mgs.port,
@@ -304,7 +297,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             }
         }
 
-        self.dendrite.write().unwrap().insert(switch_location, dendrite);
+        self.dendrite.write().unwrap().insert(switch_slot, dendrite);
     }
 
     pub async fn teardown(mut self) {
@@ -365,7 +358,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
     let log = &starter.logctx.log;
-    debug!(log, "Ensuring seed tarball exists");
+    slog::debug!(log, "Ensuring seed tarball exists");
 
     // Start up a ControlPlaneTestContext, which tautologically sets up
     // everything needed for a simulated control plane.

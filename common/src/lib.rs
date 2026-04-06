@@ -23,7 +23,6 @@ pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod disk;
-pub mod ledger;
 pub mod policy;
 pub mod progenitor_operation_retry;
 pub mod resolvable_files;
@@ -96,6 +95,11 @@ impl<T> std::fmt::Debug for NoDebug<T> {
     }
 }
 
+/// Produce an OpenAPI schema describing a hex string of a specific byte length.
+///
+/// Used by versioned sled-agent types to preserve schema compatibility. New
+/// code should use `byte_wrapper::HexArray<N>` which implements `JsonSchema`
+/// directly.
 pub fn hex_schema<const N: usize>(
     generator: &mut schemars::SchemaGenerator,
 ) -> schemars::schema::Schema {

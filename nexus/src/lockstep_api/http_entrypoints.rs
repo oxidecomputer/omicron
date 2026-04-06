@@ -23,6 +23,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
 use http::StatusCode;
+use nexus_db_queries::authz;
 use nexus_lockstep_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -32,9 +33,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::hardware::{
-    UninitializedSled, UninitializedSledId,
-};
+use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::rack::RackMembershipConfigPathParams;
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
@@ -579,24 +578,6 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             .await
     }
 
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
-            Ok(HttpResponseCreated(SledId { id }))
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn sled_expunge(
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<SledSelector>,
@@ -1100,15 +1081,17 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path_params = path_params.into_inner();
-        let rack_id = RackUuid::from_untyped_uuid(path_params.rack_id);
         let epoch = query_params.into_inner().epoch;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
+            let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                RackUuid::from_untyped_uuid(path_params.rack_id),
+            );
             let config = if let Some(epoch) = epoch {
-                nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?
+                nexus.datastore().tq_get_config(&opctx, authz_tq, epoch).await?
             } else {
-                nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?
+                nexus.datastore().tq_get_latest_config(&opctx, authz_tq).await?
             };
             if let Some(config) = config {
                 Ok(HttpResponseOk(config))

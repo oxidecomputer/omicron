@@ -275,27 +275,33 @@ async fn sp_info(
     // of the sensor as well as the retrieved value.
     //
     for c in &components.components {
-        for s in mgs_client
-            .sp_component_get(&type_, slot, &c.component)
-            .await?
-            .iter()
-            .filter_map(|detail| match detail {
-                SpComponentDetails::Measurement { kind, name, value } => Some(
-                    (Sensor { name: name.clone(), kind: *kind }, Some(*value)),
-                ),
-                SpComponentDetails::MeasurementError { kind, name, error } => {
-                    match error {
-                        MeasurementErrorCode::NoReading
-                        | MeasurementErrorCode::NotPresent => None,
-                        _ => Some((
-                            Sensor { name: name.clone(), kind: *kind },
-                            None,
-                        )),
+        let details =
+            match mgs_client.sp_component_get(&type_, slot, &c.component).await
+            {
+                Ok(s) => s,
+                Err(gateway_client::Error::ErrorResponse(rsp))
+                    if rsp.error_code.as_deref()
+                        == Some("UnsupportedComponentDetails") =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
+        for s in details.iter().filter_map(|detail| match detail {
+            SpComponentDetails::Measurement { kind, name, value } => {
+                Some((Sensor { name: name.clone(), kind: *kind }, Some(*value)))
+            }
+            SpComponentDetails::MeasurementError { kind, name, error } => {
+                match error {
+                    MeasurementErrorCode::NoReading
+                    | MeasurementErrorCode::NotPresent => None,
+                    _ => {
+                        Some((Sensor { name: name.clone(), kind: *kind }, None))
                     }
                 }
-                _ => None,
-            })
-        {
+            }
+            _ => None,
+        }) {
             devices.insert(DeviceIdentifier::Device(c.component.clone()), s);
         }
     }
@@ -512,7 +518,7 @@ fn sp_info_csv<R: std::io::Read>(
                                             "line {}: unrecognized value \
                                             \"{}\" in field {}",
                                             position.line(),
-                                            record[ndx + len].to_string(),
+                                            &record[ndx + len],
                                             ndx + len
                                         );
                                     }

@@ -2,14 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::SledMode;
+use std::collections::HashMap;
+
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
+use crate::{HardwareView, SledMode};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use slog::Logger;
-use std::collections::HashMap;
-use tokio::sync::broadcast;
+use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NvmeFormattingError {
@@ -65,11 +66,7 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn is_scrimlet_asic_available(&self) -> bool {
-        unimplemented!("Accessing hardware unsupported on non-illumos");
-    }
-
-    pub fn monitor(&self) -> broadcast::Receiver<super::HardwareUpdate> {
+    pub fn subscribe(&self) -> watch::Receiver<HardwareView> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 }

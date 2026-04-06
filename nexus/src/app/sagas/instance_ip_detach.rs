@@ -14,6 +14,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::IpAttachState;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::{Error, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
@@ -79,7 +80,7 @@ async fn siid_begin_detach_ip(
             let eph_ips = datastore
                 .instance_lookup_ephemeral_ips(&opctx, instance_id)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             let eip = match ip_version {
                 Some(v) => eph_ips.get((*v).into()),
@@ -88,7 +89,7 @@ async fn siid_begin_detach_ip(
                     (None, None) => None,
                     // Says "two" because that's the max (one per IP version).
                     (Some(_), Some(_)) => {
-                        return Err(ActionError::action_failed(
+                        return Err(saga_action_failed(
                             Error::invalid_request(
                                 "instance has two ephemeral IPs; \
                                  specify ip_version to select which to detach",
@@ -106,7 +107,7 @@ async fn siid_begin_detach_ip(
                         instance_id,
                     )
                     .await
-                    .map_err(ActionError::action_failed)
+                    .map_err(saga_action_failed)
                     .map(|external_ip| ModifyStateForExternalIp {
                         do_saga: external_ip.is_some(),
                         external_ip,
@@ -129,7 +130,7 @@ async fn siid_begin_detach_ip(
             }
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
             datastore
                 .floating_ip_begin_detach(
@@ -139,7 +140,7 @@ async fn siid_begin_detach_ip(
                     false,
                 )
                 .await
-                .map_err(ActionError::action_failed)
+                .map_err(saga_action_failed)
                 .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
                     external_ip: Some(external_ip),
                     do_saga,
@@ -268,7 +269,7 @@ async fn siid_complete_detach(
         .external_ip
         .map(TryInto::try_into)
         .transpose()
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[derive(Debug)]

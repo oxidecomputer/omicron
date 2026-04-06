@@ -17,6 +17,7 @@ use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_vpc;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
@@ -25,7 +26,6 @@ use nexus_test_utils::resource_helpers::projects_list;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
-use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
@@ -279,6 +279,8 @@ async fn test_project_deletion_with_floating_ip(
 async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    let _test = DiskTest::new(&cptestctx).await;
+
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
@@ -287,27 +289,10 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;
 
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    };
-
-    let images_url = format!("/v1/images?project={}", name);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    let image = create_project_image(client, name, "not-alpine").await;
 
     assert_eq!(
-        "project to be deleted contains a project image: alpine-edge",
+        "project to be deleted contains a project image: not-alpine",
         delete_project_expect_fail(&url, &client).await,
     );
 

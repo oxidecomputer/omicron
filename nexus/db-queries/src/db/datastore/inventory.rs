@@ -112,12 +112,12 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -2687,7 +2687,7 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let batch = paginated(
                     dsl::inv_sled_agent,
                     dsl::sled_id,
                     &p.current_pagparams(),
@@ -2700,7 +2700,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
-                rows.append(&mut batch);
+                rows.extend(batch);
             }
 
             rows
@@ -3382,7 +3382,7 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let batch = paginated(
                     dsl::inv_omicron_sled_config_zone,
                     dsl::id,
                     &p.current_pagparams(),
@@ -3395,7 +3395,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                zones.append(&mut batch);
+                zones.extend(batch);
             }
 
             zones
@@ -4297,7 +4297,8 @@ impl DataStore {
                 file_source_resolver,
                 // TODO-K[omicron#9516]: Actually query the DB when there is
                 // something there
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),

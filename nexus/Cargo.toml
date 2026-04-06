@@ -89,6 +89,7 @@ paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 progenitor-client.workspace = true
+progenitor-extras.workspace = true
 propolis-client.workspace = true
 qorb.workspace = true
 rand.workspace = true
@@ -96,7 +97,8 @@ range-requests.workspace = true
 ref-cast.workspace = true
 rdb-types.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["http2", "json"] }
+reqwest012 = { workspace = true }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
@@ -136,6 +138,7 @@ nexus-db-lookup.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true
+nexus-fm.workspace = true
 nexus-inventory.workspace = true
 nexus-metrics-producer-gc.workspace = true
 nexus-reconfigurator-execution.workspace = true
@@ -176,6 +179,7 @@ hubtools.workspace = true
 hyper-rustls.workspace = true
 nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-fm = { workspace = true, features = ["testing"] }
 nexus-lockstep-client.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
@@ -197,6 +201,7 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
+tokio-test.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true

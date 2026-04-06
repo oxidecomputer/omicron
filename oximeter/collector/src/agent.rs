@@ -679,6 +679,7 @@ mod tests {
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::types::ProducerResults;
+    use oximeter_types::producer::ProducerDetails;
     use reqwest::StatusCode;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -702,11 +703,69 @@ mod tests {
     // collections which fail in the "unreachability" test below.
     const N_COLLECTIONS: u64 = 5;
 
-    // Period these tests wait using `tokio::time::advance()` before checking
-    // their test conditions.
-    const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
-        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
-    );
+    /// Maximum simulated time to wait for a collection to complete.
+    const COLLECTION_TIMEOUT: Duration = Duration::from_secs(60);
+
+    /// Return a watch receiver for the given producer's collection details.
+    fn details_watcher(
+        collector: &OximeterAgent,
+        id: Uuid,
+    ) -> tokio::sync::watch::Receiver<ProducerDetails> {
+        collector
+            .collection_tasks
+            .lock()
+            .unwrap()
+            .get(&id)
+            .unwrap()
+            .details_watcher()
+    }
+
+    /// Pause time and advance it one collection at a time, waiting for each
+    /// collection to complete before advancing to the next. Time is
+    /// intentionally left paused when this function returns, since some callers
+    /// (e.g. `verify_producer_details`) continue to advance time manually
+    /// afterward.
+    ///
+    /// This avoids the flake described in #8636, where blindly advancing time
+    /// could cause the collection timer to fire while a previous collection was
+    /// still in-flight, overflowing the bounded channel and recording spurious
+    /// `FailedCollection` entries.
+    ///
+    /// The approach: advance time in small increments until the details watch
+    /// channel signals that a collection completed, then repeat. By waiting for
+    /// each collection to finish before continuing, we ensure the channel is
+    /// drained before the next timer tick fires.
+    async fn advance_n_collections(
+        collector: &OximeterAgent,
+        id: Uuid,
+        n: u64,
+    ) {
+        const TIMEOUT: Duration = COLLECTION_TIMEOUT;
+        let mut details_rx = details_watcher(collector, id);
+        // Mark current state as seen so has_changed() only reflects
+        // new updates from this point forward.
+        details_rx.borrow_and_update();
+        tokio::time::pause();
+        for i in 0..n {
+            let start = Instant::now();
+            // Advance time until this collection completes.
+            loop {
+                assert!(
+                    start.elapsed() < TIMEOUT,
+                    "timed out waiting for collection {i} after \
+                    {:?} of simulated time",
+                    start.elapsed(),
+                );
+                tokio::time::advance(TICK_INTERVAL).await;
+                if details_rx.has_changed().expect(
+                    "producer details watch channel closed unexpectedly",
+                ) {
+                    details_rx.borrow_and_update();
+                    break;
+                }
+            }
+        }
+    }
 
     #[derive(
         Clone,
@@ -801,26 +860,20 @@ mod tests {
             address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
+        let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Step time for a few collections.
-        //
-        // Due to scheduling variations, we don't verify the number of
-        // collections we expect based on time, but we instead check that every
-        // collection that _has_ occurred bumps the counter.
-        tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Advance time one collection at a time, waiting for each to
+        // complete before proceeding. This avoids overflowing the
+        // collection task's bounded channel on slow/loaded machines.
+        advance_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
         let rx = collector
             .collection_tasks
             .lock()
             .unwrap()
-            .values()
-            .next()
+            .get(&id)
             .unwrap()
             .statistics();
         let stats = rx.await.unwrap();
@@ -868,22 +921,19 @@ mod tests {
             )),
             interval: COLLECTION_INTERVAL,
         };
+        let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Step time until there has been exactly `N_COLLECTIONS` collections.
-        tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Advance time one collection at a time, waiting for each to
+        // complete before proceeding.
+        advance_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
         let rx = collector
             .collection_tasks
             .lock()
             .unwrap()
-            .values()
-            .next()
+            .get(&id)
             .unwrap()
             .statistics();
         let stats = rx.await.unwrap();
@@ -936,72 +986,40 @@ mod tests {
             address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
+        let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Step time for a few collections.
-        //
-        // Due to scheduling variations, we don't verify the number of
-        // collections we expect based on time, but we instead check that every
-        // collection that _has_ occurred bumps the counter.
-        tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Advance time one collection at a time, waiting for each to
+        // complete before proceeding.
+        advance_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
         let rx = collector
             .collection_tasks
             .lock()
             .unwrap()
-            .values()
-            .next()
+            .get(&id)
             .unwrap()
             .statistics();
         let stats = rx.await.unwrap();
 
-        // The collections _should_ always fail due to a 500, but it's possible
-        // that we also get collections failing because there's already one in
-        // progress. See
-        // https://github.com/oxidecomputer/omicron/issues/7255#issuecomment-2711537164
-        // for example.
-        //
-        // Sum over all the expected reasons to get the correct count. We should
-        // never get anything but a 500, or possibly an in-progress error.
-        dbg!(&stats.failed_collections);
-        let count: usize = stats
-            .failed_collections
-            .iter()
-            .map(|(reason, value)| {
-                let value = match reason {
-                    FailureReason::CollectionsInProgress => value,
-                    FailureReason::Other(sc)
-                        if sc == &StatusCode::INTERNAL_SERVER_ERROR =>
-                    {
-                        value
-                    }
-                    _ => panic!("Unexpected failure reason: {reason:?}"),
-                };
-                value.datum.value() as usize
-            })
-            .sum();
-        assert!(count != 0);
-
-        // In any case, we should never have a _successful_ collection.
+        // Every collection should have failed with a 500.
         assert_eq!(stats.collections.datum.value(), 0);
+        assert_eq!(stats.failed_collections.len(), 1);
+        let error_count = stats
+            .failed_collections
+            .get(&FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR))
+            .unwrap()
+            .datum
+            .value();
+        assert_eq!(error_count, N_COLLECTIONS);
 
-        // The server may have handled a request that we've not yet recorded on
-        // our collection task side, so we allow the server count to be greater
-        // than our own. But since the collection task is single-threaded, it
-        // cannot ever be more than _one_ greater than our count, since we
-        // should increment that counter before making another request to the
-        // server.
         let server_count = collection_count.load(Ordering::SeqCst);
-        assert!(
-            count == server_count || count + 1 == server_count,
+        assert_eq!(
+            error_count as usize, server_count,
             "number of collections reported by the collection \
-            task ({count}) differs from the number reported by the always-ded \
-            producer server itself ({server_count})"
+            task ({error_count}) differs from the number reported by the \
+            always-ded producer server itself ({server_count})"
         );
         logctx.cleanup_successful();
     }
@@ -1132,11 +1150,8 @@ mod tests {
         let details = collector.producer_details(id).unwrap();
         println!("{details:#?}");
 
-        // Ensure we get some collections from it.
-        tokio::time::pause();
-        while collection_count.load(Ordering::SeqCst) < 1 {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // Ensure we get at least one collection from it.
+        advance_n_collections(&collector, id, 1).await;
 
         // Now, drop and recreate the server, and register with the same ID at a
         // different address.
@@ -1163,10 +1178,25 @@ mod tests {
             same UUID",
         );
 
-        // We should eventually collect from it again.
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
+        let mut details_rx = details_watcher(&collector, id);
+        let start = Instant::now();
+        loop {
+            assert!(
+                start.elapsed() < COLLECTION_TIMEOUT,
+                "timed out waiting for collection from re-registered producer",
+            );
             tokio::time::advance(TICK_INTERVAL).await;
+            if details_rx
+                .has_changed()
+                .expect("producer details watch channel closed unexpectedly")
+            {
+                details_rx.borrow_and_update();
+                // Only break once a new collection has actually completed
+                // (not just a producer info update).
+                if collection_count.load(Ordering::SeqCst) >= 1 {
+                    break;
+                }
+            }
         }
         let details = collector.producer_details(id).unwrap();
         println!("{details:#?}");

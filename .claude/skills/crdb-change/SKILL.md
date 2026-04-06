@@ -14,6 +14,10 @@ Generate database changes for this repository. This includes changes to:
 
 Follow these steps in order. Do not skip ahead.
 
+### Step 0: Read the README
+
+You MUST read `schema/crdb/README.adoc` first. Pay attention to important instructions and limitations, such as the requirement for idempotency and the inability to rename columns.
+
 ### Step 1: Ascertain the scope of the request
 
 If not already provided, prompt the user whether they'd like to:
@@ -77,7 +81,11 @@ In `nexus/db-model/src/schema_versions.rs`, bump `SCHEMA_VERSION`.
 
 In `nexus/db-model/src/schema_versions.rs`, add the new version to the `KNOWN_VERSIONS` list.
 
-### Step 8: Test the migration
+### Step 8: Generate verification files
+
+Run `EXPECTORATE=overwrite cargo nextest run -p nexus-db-model 'test_migration_verification_files'` to auto-generate `.verify.sql` files for any migration steps that contain backfill-prone DDL (`CREATE INDEX`, `ADD CONSTRAINT`, `ALTER COLUMN SET NOT NULL`, or `ADD COLUMN` with `NOT NULL` / non-null `DEFAULT` / `STORED` computed columns). Check in any generated files alongside the migration. If your migration doesn't contain backfill-prone DDL, no files are generated and this step is a no-op.
+
+### Step 9: Test the migration
 
 Run `cargo nextest run -p omicron-nexus schema` to verify that the migration is correct.
 
@@ -97,7 +105,3 @@ When creating a migration that affects existing data (like adding columns to exi
 - Add the version to the `get_migration_checks()` map.
 
 This ensures old rows can be migrated smoothly in production.
-
-## Reference
-
-Consult `schema/crdb/README.adoc` for more information.

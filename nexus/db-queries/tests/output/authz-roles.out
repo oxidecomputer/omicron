@@ -788,11 +788,11 @@ resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
   fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                   !  !  !  !  !  !  !  !
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -1077,7 +1077,7 @@ resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
   fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -1704,6 +1704,23 @@ resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50"
   fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50": trust quorum configuration
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

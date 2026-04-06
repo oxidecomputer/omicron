@@ -30,6 +30,7 @@ use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
+use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
@@ -81,8 +82,7 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, PrivateIpConfig,
-    RackNetworkConfig, SledIdentifiers,
+    ExternalIpConfig, ExternalIps, PrivateIpConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -93,6 +93,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
@@ -115,6 +116,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -130,16 +132,20 @@ const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
-    #[error("Failed to initialize CockroachDb: {err}")]
+    #[error("Failed to initialize CockroachDb")]
     CockroachInit {
         #[source]
         err: RunCommandError,
     },
 
-    #[error("Cannot serialize TOML to file: {path}: {err}")]
-    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
+    #[error("Cannot serialize TOML to file: {path}")]
+    TomlSerialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: toml::ser::Error,
+    },
 
-    #[error("Failed to perform I/O: {message}: {err}")]
+    #[error("Failed to perform I/O: {message}")]
     Io {
         message: String,
         #[source]
@@ -152,16 +158,16 @@ pub enum Error {
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
 
-    #[error("Switch zone error: {0}")]
-    SwitchZone(anyhow::Error),
+    #[error("Switch zone error")]
+    SwitchZone(#[source] anyhow::Error),
 
-    #[error("Failed to issue SMF command: {0}")]
+    #[error("Failed to issue SMF command")]
     SmfCommand(#[from] illumos_utils::smf_helper::Error),
 
     #[error("{}", display_zone_init_errors(.0))]
     ZoneInitialize(Vec<(String, Box<Error>)>),
 
-    #[error("Failed to do '{intent}' by running command in zone: {err}")]
+    #[error("Failed to do '{intent}' by running command in zone")]
     ZoneCommand {
         intent: String,
         #[source]
@@ -185,7 +191,7 @@ pub enum Error {
         err: Box<illumos_utils::zone::DeleteAddressError>,
     },
 
-    #[error("Failed to boot zone: {0}")]
+    #[error("Failed to boot zone")]
     ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
@@ -194,46 +200,48 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
-    #[error("Failed to access underlay device: {0}")]
+    #[error("Failed to access underlay device")]
     Underlay(#[from] underlay::Error),
 
-    #[error("Failed to create OPTE port for service {}: {err}", service.report_str())]
+    #[error("Failed to create OPTE port for service {}", service.report_str())]
     ServicePortCreation {
         service: ZoneKind,
+        #[source]
         err: Box<illumos_utils::opte::Error>,
     },
 
-    #[error("Error contacting dpd: {0}")]
+    #[error("Error contacting dpd")]
     DpdError(#[from] DpdError<DpdTypes::Error>),
 
-    #[error("Failed to create Vnic in the switch zone: {0}")]
-    SwitchZoneVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create Vnic in the switch zone")]
+    SwitchZoneVnicCreation(#[source] illumos_utils::dladm::CreateVnicError),
 
-    #[error("Failed to add GZ addresses: {message}: {err}")]
+    #[error("Failed to add GZ addresses: {message}")]
     GzAddress {
         message: String,
+        #[source]
         err: illumos_utils::zone::EnsureGzAddressError,
     },
 
     #[error("Could not initialize service {service} as requested: {message}")]
     BadServiceRequest { service: String, message: String },
 
-    #[error("Failed to get address: {0}")]
+    #[error("Failed to get address")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
 
-    #[error("Execution error: {0}")]
+    #[error("Execution error")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
 
-    #[error("Error resolving DNS name: {0}")]
+    #[error("Error resolving DNS name")]
     ResolveError(#[from] internal_dns_resolver::ResolveError),
 
-    #[error("Serde error: {0}")]
+    #[error("Serde error")]
     SerdeError(#[from] serde_json::Error),
 
     #[error("Sidecar revision error")]
@@ -254,8 +262,8 @@ pub enum Error {
     #[error("Requested generation {0} with different zones than before")]
     RequestedConfigConflicts(Generation),
 
-    #[error("Error migrating old-format services ledger: {0:#}")]
-    ServicesMigration(anyhow::Error),
+    #[error("Error migrating old-format services ledger")]
+    ServicesMigration(#[source] anyhow::Error),
 
     #[error(
         "Invalid filesystem_pool in new zone config: \
@@ -275,7 +283,7 @@ pub enum Error {
 
     #[error(
         "Couldn't find requested zone image ({hash}) for \
-        {zone_kind:?} {id} in artifact store: {err}"
+        {zone_kind:?} {id} in artifact store"
     )]
     ZoneArtifactNotFound {
         hash: ArtifactHash,
@@ -284,6 +292,9 @@ pub enum Error {
         #[source]
         err: crate::artifact_store::Error,
     },
+
+    #[error("internal error: sled-agent started multiple times")]
+    SledAgentStartedMultipleTimes,
 }
 
 impl Error {
@@ -302,38 +313,40 @@ impl From<Error> for omicron_common::api::external::Error {
             | Error::InvalidFilesystemPoolZoneConfig { .. }
             | Error::ZoneIsRunningOnRamdisk { .. } => {
                 omicron_common::api::external::Error::invalid_request(
-                    &err.to_string(),
+                    // InlineErrorChain is not strictly necessary here, but use it in case that
+                    // changes later on.
+                    &InlineErrorChain::new(&err).to_string(),
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                omicron_common::api::external::Error::conflict(&err.to_string())
+                // InlineErrorChain also isn't strictly necessary here.
+                omicron_common::api::external::Error::conflict(
+                    InlineErrorChain::new(&err).to_string(),
+                )
             }
             _ => omicron_common::api::external::Error::InternalError {
-                internal_message: err.to_string(),
+                internal_message: InlineErrorChain::new(&err).to_string(),
             },
         }
     }
-}
-
-/// Information describing the underlay network, used when activating the switch
-/// zone.
-#[derive(Debug, Clone)]
-pub struct UnderlayInfo {
-    pub ip: Ipv6Addr,
-    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     if errors.len() == 1 {
         return format!(
             "Failed to initialize zone: {} errored with {}",
-            errors[0].0, errors[0].1
+            errors[0].0,
+            InlineErrorChain::new(&errors[0].1)
         );
     }
 
     let mut output = format!("Failed to initialize {} zones:\n", errors.len());
     for (zone_name, error) in errors {
-        output.push_str(&format!("  - {}: {}\n", zone_name, error));
+        output.push_str(&format!(
+            "  - {}: {}\n",
+            zone_name,
+            InlineErrorChain::new(&error)
+        ));
     }
     output
 }
@@ -450,7 +463,6 @@ struct SwitchZoneConfig {
     id: Uuid,
     addresses: Vec<Ipv6Addr>,
     services: Vec<SwitchService>,
-    underlay_info: Option<UnderlayInfo>,
 }
 
 /// Describes one of several services that may be deployed in a switch zone
@@ -609,14 +621,15 @@ pub struct ServiceManagerInner {
 
 // Late-binding information, only known once the sled agent is up and
 // operational.
-struct SledAgentInfo {
-    config: Config,
-    port_manager: PortManager,
-    resolver: Resolver,
-    underlay_address: Ipv6Addr,
-    rack_id: Uuid,
-    rack_network_config: Option<RackNetworkConfig>,
-    metrics_queue: MetricsRequestQueue,
+pub(crate) struct SledAgentInfo {
+    pub(crate) config: Config,
+    pub(crate) port_manager: PortManager,
+    pub(crate) resolver: Resolver,
+    pub(crate) underlay_address: Ipv6Addr,
+    pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
+    pub(crate) rack_id: Uuid,
+    pub(crate) rack_network_config_rx: watch::Receiver<RackNetworkConfig>,
+    pub(crate) metrics_queue: MetricsRequestQueue,
 }
 
 #[derive(Clone)]
@@ -810,35 +823,19 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    pub async fn sled_agent_started(
+    pub(crate) async fn sled_agent_started(
         &self,
-        config: Config,
-        port_manager: PortManager,
-        underlay_address: Ipv6Addr,
-        rack_id: Uuid,
-        rack_network_config: Option<RackNetworkConfig>,
-        metrics_queue: MetricsRequestQueue,
+        sled_info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(
             &self.inner.log, "sled agent started";
-            "underlay_address" => underlay_address.to_string(),
+            "underlay_address" => %sled_info.underlay_address,
         );
+        let metrics_queue = sled_info.metrics_queue.clone();
         self.inner
             .sled_info
-            .set(SledAgentInfo {
-                config,
-                port_manager,
-                resolver: Resolver::new_from_ip(
-                    self.inner.log.new(o!("component" => "DnsResolver")),
-                    underlay_address,
-                )?,
-                underlay_address,
-                rack_id,
-                rack_network_config,
-                metrics_queue: metrics_queue.clone(),
-            })
-            .map_err(|_| "already set".to_string())
-            .expect("Sled Agent should only start once");
+            .set(sled_info)
+            .map_err(|_| Error::SledAgentStartedMultipleTimes)?;
 
         // At this point, we've already started up the switch zone, but the
         // VNICs inside it cannot have been tracked by the sled-agent's metrics
@@ -1093,26 +1090,15 @@ impl ServiceManager {
             port_manager,
             underlay_address,
             resolver,
-            rack_network_config,
+            rack_network_config_rx,
             ..
         } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
-
-        let Some(rack_network_config) = rack_network_config.as_ref() else {
-            // If we're in a test/dev environments with no uplinks, we have
-            // nothing to do; print a warning in the (hopefully unlikely) event
-            // we land here on a real rack.
-            warn!(
-                self.inner.log,
-                "No rack network config present; skipping OPTE NAT config",
-            );
-            return Ok(vec![]);
-        };
 
         let uplinked_switch_zone_addrs =
             EarlyNetworkSetup::new(&self.inner.log)
                 .lookup_uplinked_switch_zone_underlay_addrs(
                     resolver,
-                    rack_network_config,
+                    rack_network_config_rx,
                     WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT,
                 )
                 .await;
@@ -1137,16 +1123,13 @@ impl ServiceManager {
                 zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
             ) => {
                 let eip = match external_ip {
-                    IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ipv4])
-                        .build()
-                        .map(Into::into),
-                    IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ipv6])
-                        .build()
-                        .map(Into::into),
-                }
-                .expect("guaranteed to have exactly one floating IP");
+                    IpAddr::V4(ipv4) => {
+                        ExternalIpConfig::new_floating_ipv4(*ipv4)
+                    }
+                    IpAddr::V6(ipv6) => {
+                        ExternalIpConfig::new_floating_ipv6(*ipv6)
+                    }
+                };
                 (zone_type.kind(), nic, eip)
             }
             Some(
@@ -1157,16 +1140,13 @@ impl ServiceManager {
                 },
             ) => {
                 let eip = match dns_address.ip() {
-                    IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![ipv4])
-                        .build()
-                        .map(Into::into),
-                    IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![ipv6])
-                        .build()
-                        .map(Into::into),
-                }
-                .expect("guaranteed to have exactly one floating IP");
+                    IpAddr::V4(ipv4) => {
+                        ExternalIpConfig::new_floating_ipv4(ipv4)
+                    }
+                    IpAddr::V6(ipv6) => {
+                        ExternalIpConfig::new_floating_ipv6(ipv6)
+                    }
+                };
                 (zone_type.kind(), nic, eip)
             }
             Some(
@@ -1175,17 +1155,9 @@ impl ServiceManager {
                 },
             ) => {
                 let eip = if let Some(snat) = snat_cfg.try_as_ipv4() {
-                    ExternalIpConfigBuilder::new()
-                        .with_source_nat(snat)
-                        .build()
-                        .expect("guaranteed to have exactly one SNAT")
-                        .into()
+                    ExternalIpConfig::new_ipv4_source_nat(snat)
                 } else if let Some(snat) = snat_cfg.try_as_ipv6() {
-                    ExternalIpConfigBuilder::new()
-                        .with_source_nat(snat)
-                        .build()
-                        .expect("guaranteed to have exactly one SNAT")
-                        .into()
+                    ExternalIpConfig::new_ipv6_source_nat(snat)
                 } else {
                     unreachable!("Generic SNAT IP must be IPv4 or IPv6");
                 };
@@ -1199,12 +1171,6 @@ impl ServiceManager {
         // Nexus will plumb them down later but services' default OPTE
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
-        //
-        // This is kind of silly, but we wrap the external IP configuration in
-        // an option and immediately unwrap it below. The PortCreateParams is
-        // used for instances, which technically can have no external IP
-        // configuration at all, hence it being optional there.
-        let external_ips = Some(external_ips);
         let port = port_manager
             .create_port(PortCreateParams {
                 nic,
@@ -1218,9 +1184,6 @@ impl ServiceManager {
                 service: zone_kind,
                 err: Box::new(err),
             })?;
-        let Some(external_ips) = external_ips else {
-            unreachable!("wrapped into Option::Some(_) above");
-        };
         let nat_data = extract_nat_data_for_external_ip_config(&external_ips);
 
         for dpd_client in &dpd_clients {
@@ -1253,7 +1216,7 @@ impl ServiceManager {
             let log_failure = |error, _| {
                 warn!(
                     self.inner.log, "failed to create NAT entry for service";
-                    "error" => ?error,
+                    InlineErrorChain::new(&error),
                     "zone_type" => zone_kind.report_str(),
                 );
             };
@@ -3241,7 +3204,7 @@ impl ServiceManager {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&["/usr/platform/oxide/bin/tmpx", "-Z"]);
         if let Err(e) = execute(cmd) {
-            warn!(self.inner.log, "Updating [wu]tmpx databases failed: {}", e);
+            warn!(self.inner.log, "Updating [wu]tmpx databases failed"; e);
         }
     }
 
@@ -3286,12 +3249,9 @@ impl ServiceManager {
         }
     }
 
-    /// Ensures that a switch zone exists with the provided IP adddress.
-    pub async fn activate_switch(
+    /// Ensures that a switch zone exists.
+    pub(crate) async fn activate_switch(
         &self,
-        // If we're reconfiguring the switch zone with an underlay address, we
-        // also need the rack network config to set tfport uplinks.
-        underlay_info: Option<UnderlayInfo>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -3378,19 +3338,17 @@ impl ServiceManager {
             }
         };
 
-        let mut addresses = if let Some(info) = &underlay_info {
-            vec![info.ip]
+        let maybe_underlay_ip =
+            self.inner.sled_info.get().map(|info| info.local_switch_zone_ip);
+        let mut addresses = if let Some(ip) = maybe_underlay_ip {
+            vec![Ipv6Addr::from(ip)]
         } else {
             vec![]
         };
         addresses.push(Ipv6Addr::LOCALHOST);
 
-        let request = SwitchZoneConfig {
-            id: Uuid::new_v4(),
-            addresses,
-            services,
-            underlay_info,
-        };
+        let request =
+            SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
         self.ensure_switch_zone(Some(request), filesystems, data_links).await?;
 
@@ -3405,7 +3363,8 @@ impl ServiceManager {
     // <https://github.com/oxidecomputer/omicron/issues/8970> for details.
     async fn ensure_switch_zone_uplinks_configured_loop(
         &self,
-        underlay_info: &UnderlayInfo,
+        switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
@@ -3413,23 +3372,11 @@ impl ServiceManager {
         // but we probably don't want to use backoff here.
         const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-        // We can only ensure uplinks if we have a rack network config.
-        //
-        // It'd be surprising to have `underlay_info` containing our underlay IP
-        // without a rack network config, but it is technically possible. These
-        // bits of information are ledgered separately, and we could have
-        // ledgered our underlay IP, then crashed before the bootstore gossip
-        // happened to tell us the rack network config, and are now restarting.
-        let Some(rack_network_config) = &underlay_info.rack_network_config
-        else {
-            return;
-        };
-
         loop {
             match self
                 .ensure_switch_zone_uplinks_configured(
-                    underlay_info.ip,
-                    &rack_network_config,
+                    switch_zone_ip,
+                    rack_network_config_rx,
                 )
                 .await
             {
@@ -3474,14 +3421,14 @@ impl ServiceManager {
     // uplinks from `rack_network_config` to assign.
     async fn ensure_switch_zone_uplinks_configured(
         &self,
-        switch_zone_ip: Ipv6Addr,
-        rack_network_config: &RackNetworkConfig,
+        switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
         // Configure uplinks via DPD in our switch zone.
         let our_ports = EarlyNetworkSetup::new(log)
-            .init_switch_config(rack_network_config, switch_zone_ip)
+            .init_switch_config(rack_network_config_rx, switch_zone_ip)
             .await?
             .into_iter()
             .map(From::from)
@@ -3545,8 +3492,8 @@ impl ServiceManager {
         for port_config in &our_ports {
             for addr in &port_config.addrs {
                 usmfh.addpropvalue_type(
-                    &format!("uplinks/{}_0", port_config.port,),
-                    &addr.to_string(),
+                    format!("uplinks/{}_0", port_config.port),
+                    addr.to_uplinkd_smf_property(),
                     "astring",
                 )?;
             }
@@ -3559,7 +3506,9 @@ impl ServiceManager {
                 apv(
                     &lsmfh,
                     &format!("{group_name}/status"),
-                    &Some(lldp_config.status.to_string()),
+                    &Some(
+                        lldp_config.status.to_lldpd_smf_property().to_owned(),
+                    ),
                 )?;
                 apv(
                     &lsmfh,
@@ -3731,7 +3680,18 @@ impl ServiceManager {
                         }) {
                         Ok(_) => (),
                         Err(e) => {
-                            if e.to_string().contains("entry exists") {
+                            fn route_already_exists(
+                                e: &dyn std::error::Error,
+                            ) -> bool {
+                                e.to_string().contains("entry exists")
+                                    || match e.source() {
+                                        Some(source) => {
+                                            route_already_exists(source)
+                                        }
+                                        None => false,
+                                    }
+                            }
+                            if route_already_exists(&e) {
                                 info!(
                                     self.inner.log,
                                     "Underlay route already exists";
@@ -4056,7 +4016,16 @@ impl ServiceManager {
 
                 // We also need to ensure any uplinks are configured. Spawn a
                 // task that goes into an infinite retry loop until it succeeds.
-                if let Some(underlay_info) = request.underlay_info.clone() {
+                let maybe_our_underlay_info =
+                    self.inner.sled_info.get().map(|sled_info| {
+                        (
+                            sled_info.local_switch_zone_ip,
+                            sled_info.rack_network_config_rx.clone(),
+                        )
+                    });
+                if let Some((switch_zone_ip, rack_network_config_rx)) =
+                    maybe_our_underlay_info
+                {
                     if let Some(old_worker) = worker.take() {
                         old_worker.stop().await;
                     }
@@ -4066,7 +4035,8 @@ impl ServiceManager {
                         exit_tx,
                         initializer: tokio::task::spawn(async move {
                             me.ensure_switch_zone_uplinks_configured_loop(
-                                &underlay_info,
+                                switch_zone_ip,
+                                &rack_network_config_rx,
                                 exit_rx,
                             )
                             .await;
@@ -4116,7 +4086,7 @@ impl ServiceManager {
     async fn try_initialize_switch_zone(
         &self,
         sled_zone: &mut SwitchZoneState,
-    ) -> Result<Option<UnderlayInfo>, Error> {
+    ) -> Result<Option<SwitchZoneConfig>, Error> {
         let SwitchZoneState::Initializing {
             request,
             filesystems,
@@ -4141,7 +4111,6 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
-        let underlay_info = request.underlay_info.clone();
 
         // Even though we've initialized the zone, the `worker` task may still
         // be running to configure uplinks. If we drop `worker` now it will
@@ -4150,13 +4119,14 @@ impl ServiceManager {
         // https://github.com/oxidecomputer/omicron/issues/8970 and
         // https://github.com/oxidecomputer/omicron/issues/9182 are strongly
         // related.
+        let request = request.clone();
         let worker = worker.take();
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
             worker,
         };
-        Ok(underlay_info)
+        Ok(Some(request))
     }
 
     // Body of a tokio task responsible for running until the switch zone is
@@ -4172,25 +4142,17 @@ impl ServiceManager {
 
         // First, go into a loop to bring up the switch zone; retry until we
         // succeed or are told to give up via `exit_rx`.
-        let underlay_info = loop {
+        let request_used_to_initialize = loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
+                    Ok(Some(request)) => break request,
                     Ok(None) => {
                         info!(
                             self.inner.log,
-                            "initialized switch zone \
-                             (no underlay info available yet)",
+                            "switch zone already initialized",
                         );
                         return;
-                    }
-                    Ok(Some(underlay_info)) => {
-                        info!(
-                            self.inner.log,
-                            "initialized switch zone (underlay info \
-                             available: will attempt uplink configuration)",
-                        );
-                        break underlay_info;
                     }
                     Err(e) => {
                         warn!(
@@ -4221,10 +4183,50 @@ impl ServiceManager {
             };
         };
 
-        // Then go into a loop trying to configure our uplinks. As above, retry
-        // until we succeed or are told to stop.
+        // If we have our underlay info and we _had_ the underlay info when we
+        // initialized the switch zone above, also go into a loop trying to
+        // configure our uplinks. As above, retry until we succeed or are told
+        // to stop.
+        let (switch_zone_ip, rack_network_config_rx) =
+            match self.inner.sled_info.get() {
+                Some(sled_info) => {
+                    if request_used_to_initialize.addresses.contains(
+                        &Ipv6Addr::from(sled_info.local_switch_zone_ip),
+                    ) {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone (underlay info \
+                             available: will attempt uplink configuration)",
+                        );
+                        (
+                            sled_info.local_switch_zone_ip,
+                            sled_info.rack_network_config_rx.clone(),
+                        )
+                    } else {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone - underlay info is \
+                             available now, but it wasn't when switch zone \
+                             initialization started; will not attempt uplink \
+                             configuration (but will reconfigure the switch \
+                             zone shortly)"
+                        );
+                        return;
+                    }
+                }
+                None => {
+                    info!(
+                        self.inner.log,
+                        "initialized switch zone \
+                         (no underlay info available yet)",
+                    );
+                    return;
+                }
+            };
+
         self.ensure_switch_zone_uplinks_configured_loop(
-            &underlay_info,
+            switch_zone_ip,
+            &rack_network_config_rx,
             exit_rx,
         )
         .await;
@@ -4275,11 +4277,11 @@ fn extract_nat_data_for_external_ip_config(
     external_ips: &ExternalIpConfig,
 ) -> Vec<NatData> {
     let mut nat_data = Vec::new();
-    if let Some(cfg) = external_ips.ipv4_config() {
+    if let Some(cfg) = external_ips.v4.as_ref() {
         nat_data
             .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
     }
-    if let Some(cfg) = external_ips.ipv6_config() {
+    if let Some(cfg) = external_ips.v6.as_ref() {
         nat_data
             .append(&mut extract_nat_data_for_concrete_external_ip_config(cfg));
     }
@@ -4290,7 +4292,7 @@ fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
     cfg: &ExternalIps<T>,
 ) -> Vec<NatData> {
     let mut nat_data = Vec::new();
-    if let Some(snat) = cfg.source_nat() {
+    if let Some(snat) = cfg.source_nat.as_ref() {
         let (first_port, last_port) = snat.port_range_raw();
         nat_data.push(NatData {
             ip: snat.ip.into_ipaddr(),
@@ -4298,14 +4300,14 @@ fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
             last_port,
         });
     }
-    if let Some(ip) = cfg.ephemeral_ip() {
+    if let Some(ip) = cfg.ephemeral_ip.as_ref() {
         nat_data.push(NatData {
             ip: ip.into_ipaddr(),
             first_port: 0,
             last_port: MAX_PORT,
         });
     }
-    for ip in cfg.floating_ips() {
+    for ip in cfg.floating_ips.iter() {
         nat_data.push(NatData {
             ip: ip.into_ipaddr(),
             first_port: 0,

@@ -21,6 +21,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server,
 };
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -106,7 +107,13 @@ async fn do_run() -> Result<(), CmdError> {
         },
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
-            zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
+            zpools: vec![
+                ConfigZpool {
+                    size: 1 << 40,
+                    health: ZpoolHealth::Online
+                };
+                10
+            ],
             ip: (*args.sled_agent_addr.ip()).into(),
         },
         hardware: ConfigHardware {

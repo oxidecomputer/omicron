@@ -16,19 +16,39 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(233, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(250, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
 /// If you want to change the Omicron database schema, you must update this.
-static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
+pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
     vec![
         // +- The next version goes here!  Duplicate this line, uncomment
         // |  the *second* copy, then update that copy for your version,
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(233, "bundle-state-index"),
+        KnownVersion::new(250, "bundle-state-index"),
+        KnownVersion::new(249, "fm-support-bundle-request"),
+        KnownVersion::new(248, "cleanup-orphaned-subnet-pool-silo-links"),
+        KnownVersion::new(247, "remove-tuf-base-url"),
+        KnownVersion::new(246, "ereport-marked-seen"),
+        KnownVersion::new(245, "rename-default-igw-ip-pool"),
+        KnownVersion::new(244, "ereporter-restart-order-is-bad-actually"),
+        KnownVersion::new(243, "ereporter-restart-order"),
+        KnownVersion::new(242, "ereport-everyone-gets-a-slot"),
+        KnownVersion::new(241, "audit-log-incomplete-timeout"),
+        KnownVersion::new(240, "multicast-drop-mvlan"),
+        KnownVersion::new(239, "fm-alert-request"),
+        KnownVersion::new(238, "fewer-nullable-columns"),
+        KnownVersion::new(237, "switch-slot-enum"),
+        KnownVersion::new(
+            236,
+            "remove-virtual-provisioning-time-modified-default",
+        ),
+        KnownVersion::new(235, "silo-user-group-provision-type-not-null"),
+        KnownVersion::new(234, "inv-zpool-health"),
+        KnownVersion::new(233, "measurement-blueprints"),
         KnownVersion::new(232, "index-backfill-batch-size"),
         KnownVersion::new(231, "bgp-config-max-paths-not-null"),
         KnownVersion::new(230, "bgp-unnumbered-peers"),
@@ -114,175 +134,182 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         KnownVersion::new(150, "add-last-reconciliation-orphaned-datasets"),
         KnownVersion::new(149, "bp-add-target-release-min-gen"),
         KnownVersion::new(148, "clean-misplaced-m2s"),
-        KnownVersion::new(147, "device-auth-request-ttl"),
-        KnownVersion::new(146, "silo-settings-token-expiration"),
-        KnownVersion::new(145, "token-and-session-ids"),
-        KnownVersion::new(144, "inventory-omicron-sled-config"),
-        KnownVersion::new(143, "alerts-renamening"),
-        KnownVersion::new(142, "bp-add-remove-mupdate-override"),
-        KnownVersion::new(141, "caboose-sign-value"),
-        KnownVersion::new(140, "instance-intended-state"),
-        KnownVersion::new(139, "webhooks"),
-        KnownVersion::new(138, "saga-abandoned-state"),
-        KnownVersion::new(137, "oximeter-read-policy"),
-        KnownVersion::new(136, "do-not-provision-flag-for-crucible-dataset"),
-        KnownVersion::new(135, "blueprint-zone-image-source"),
-        KnownVersion::new(134, "crucible-agent-reservation-overhead"),
-        KnownVersion::new(133, "delete-defunct-reservations"),
-        KnownVersion::new(132, "bp-omicron-zone-filesystem-pool-not-null"),
-        KnownVersion::new(131, "tuf-generation"),
-        KnownVersion::new(130, "bp-sled-agent-generation"),
-        KnownVersion::new(129, "create-target-release"),
-        KnownVersion::new(128, "sled-resource-for-vmm"),
-        KnownVersion::new(127, "bp-disk-disposition-expunged-cleanup"),
-        KnownVersion::new(126, "affinity"),
-        KnownVersion::new(125, "blueprint-disposition-expunged-cleanup"),
-        KnownVersion::new(124, "support-read-only-region-replacement"),
-        KnownVersion::new(123, "vpc-subnet-contention"),
-        KnownVersion::new(122, "tuf-artifact-replication"),
-        KnownVersion::new(121, "dataset-to-crucible-dataset"),
-        KnownVersion::new(120, "rendezvous-debug-dataset"),
-        KnownVersion::new(119, "tuf-artifact-key-uuid"),
-        KnownVersion::new(118, "support-bundles"),
-        KnownVersion::new(117, "add-completing-and-new-region-volume"),
-        KnownVersion::new(116, "bp-physical-disk-disposition"),
-        KnownVersion::new(115, "inv-omicron-physical-disks-generation"),
-        KnownVersion::new(114, "crucible-ref-count-records"),
-        KnownVersion::new(113, "add-tx-eq"),
-        KnownVersion::new(112, "blueprint-dataset"),
-        KnownVersion::new(111, "drop-omicron-zone-underlay-address"),
-        KnownVersion::new(110, "clickhouse-policy"),
-        KnownVersion::new(109, "inv-clickhouse-keeper-membership"),
-        KnownVersion::new(108, "internet-gateway"),
-        KnownVersion::new(107, "add-instance-boot-disk"),
-        KnownVersion::new(106, "dataset-kinds-update"),
-        KnownVersion::new(105, "inventory-nvme-firmware"),
-        KnownVersion::new(104, "lookup-bgp-config-indexes"),
-        KnownVersion::new(103, "lookup-instances-by-state-index"),
-        KnownVersion::new(102, "add-instance-auto-restart-cooldown"),
-        KnownVersion::new(101, "auto-restart-policy-v2"),
-        KnownVersion::new(100, "add-instance-last-auto-restarted-timestamp"),
-        KnownVersion::new(99, "blueprint-add-clickhouse-tables"),
-        KnownVersion::new(98, "oximeter-add-time-expunged"),
-        KnownVersion::new(97, "lookup-region-snapshot-by-region-id"),
-        KnownVersion::new(96, "inv-dataset"),
-        KnownVersion::new(95, "turn-boot-on-fault-into-auto-restart"),
-        KnownVersion::new(94, "put-back-creating-vmm-state"),
-        KnownVersion::new(93, "dataset-kinds-zone-and-debug"),
-        KnownVersion::new(92, "lldp-link-config-nullable"),
-        KnownVersion::new(91, "add-management-gateway-producer-kind"),
-        KnownVersion::new(90, "lookup-bgp-config-by-asn"),
-        KnownVersion::new(89, "collapse_lldp_settings"),
-        KnownVersion::new(88, "route-local-pref"),
-        KnownVersion::new(87, "add-clickhouse-server-enum-variants"),
-        KnownVersion::new(86, "snapshot-replacement"),
-        KnownVersion::new(85, "add-migrations-by-time-created-index"),
-        KnownVersion::new(84, "region-read-only"),
-        KnownVersion::new(83, "dataset-address-optional"),
-        KnownVersion::new(82, "region-port"),
-        KnownVersion::new(81, "add-nullable-filesystem-pool"),
-        KnownVersion::new(80, "add-instance-id-to-migrations"),
-        KnownVersion::new(79, "nic-spoof-allow"),
-        KnownVersion::new(78, "vpc-subnet-routing"),
-        KnownVersion::new(77, "remove-view-for-v2p-mappings"),
-        KnownVersion::new(76, "lookup-region-snapshot-by-snapshot-id"),
-        KnownVersion::new(75, "add-cockroach-zone-id-to-node-id"),
-        KnownVersion::new(74, "add-migration-table"),
-        KnownVersion::new(73, "add-vlan-to-uplink"),
-        KnownVersion::new(72, "fix-provisioning-counters"),
-        KnownVersion::new(71, "add-saga-unwound-vmm-state"),
-        KnownVersion::new(70, "separate-instance-and-vmm-states"),
-        KnownVersion::new(69, "expose-stage0"),
-        KnownVersion::new(68, "filter-v2p-mapping-by-instance-state"),
-        KnownVersion::new(67, "add-instance-updater-lock"),
-        KnownVersion::new(66, "blueprint-crdb-preserve-downgrade"),
-        KnownVersion::new(65, "region-replacement"),
-        KnownVersion::new(64, "add-view-for-v2p-mappings"),
-        KnownVersion::new(63, "remove-producer-base-route-column"),
-        KnownVersion::new(62, "allocate-subnet-decommissioned-sleds"),
-        KnownVersion::new(61, "blueprint-add-sled-state"),
-        KnownVersion::new(60, "add-lookup-vmm-by-sled-id-index"),
-        KnownVersion::new(59, "enforce-first-as-default"),
-        KnownVersion::new(58, "insert-default-allowlist"),
-        KnownVersion::new(57, "add-allowed-source-ips"),
-        KnownVersion::new(56, "bgp-oxpop-features"),
-        KnownVersion::new(55, "add-lookup-sled-by-policy-and-state-index"),
-        KnownVersion::new(54, "blueprint-add-external-ip-id"),
-        KnownVersion::new(53, "drop-service-table"),
-        KnownVersion::new(52, "blueprint-physical-disk"),
-        KnownVersion::new(51, "blueprint-disposition-column"),
-        KnownVersion::new(50, "add-lookup-disk-by-volume-id-index"),
-        KnownVersion::new(49, "physical-disk-state-and-policy"),
-        KnownVersion::new(48, "add-metrics-producers-time-modified-index"),
-        KnownVersion::new(47, "add-view-for-bgp-peer-configs"),
-        KnownVersion::new(46, "first-named-migration"),
-        // The first many schema versions only vary by major or patch number and
-        // their path is predictable based on the version number.  (This was
-        // historically a problem because two pull requests both adding a new
-        // schema version might merge cleanly but produce an invalid result.)
-        KnownVersion::legacy(45, 0),
-        KnownVersion::legacy(44, 0),
-        KnownVersion::legacy(43, 0),
-        KnownVersion::legacy(42, 0),
-        KnownVersion::legacy(41, 0),
-        KnownVersion::legacy(40, 0),
-        KnownVersion::legacy(39, 0),
-        KnownVersion::legacy(38, 0),
-        KnownVersion::legacy(37, 1),
-        KnownVersion::legacy(37, 0),
-        KnownVersion::legacy(36, 0),
-        KnownVersion::legacy(35, 0),
-        KnownVersion::legacy(34, 0),
-        KnownVersion::legacy(33, 1),
-        KnownVersion::legacy(33, 0),
-        KnownVersion::legacy(32, 0),
-        KnownVersion::legacy(31, 0),
-        KnownVersion::legacy(30, 0),
-        KnownVersion::legacy(29, 0),
-        KnownVersion::legacy(28, 0),
-        KnownVersion::legacy(27, 0),
-        KnownVersion::legacy(26, 0),
-        KnownVersion::legacy(25, 0),
-        KnownVersion::legacy(24, 0),
-        KnownVersion::legacy(23, 1),
-        KnownVersion::legacy(23, 0),
-        KnownVersion::legacy(22, 0),
-        KnownVersion::legacy(21, 0),
-        KnownVersion::legacy(20, 0),
-        KnownVersion::legacy(19, 0),
-        KnownVersion::legacy(18, 0),
-        KnownVersion::legacy(17, 0),
-        KnownVersion::legacy(16, 0),
-        KnownVersion::legacy(15, 0),
-        KnownVersion::legacy(14, 0),
-        KnownVersion::legacy(13, 0),
-        KnownVersion::legacy(12, 0),
-        KnownVersion::legacy(11, 0),
-        KnownVersion::legacy(10, 0),
-        KnownVersion::legacy(9, 0),
-        KnownVersion::legacy(8, 0),
-        KnownVersion::legacy(7, 0),
-        KnownVersion::legacy(6, 0),
-        KnownVersion::legacy(5, 0),
-        KnownVersion::legacy(4, 0),
-        KnownVersion::legacy(3, 3),
-        KnownVersion::legacy(3, 2),
-        KnownVersion::legacy(3, 1),
-        KnownVersion::legacy(3, 0),
-        KnownVersion::legacy(2, 0),
-        KnownVersion::legacy(1, 0),
     ]
 });
 
 /// The earliest supported schema version.
-pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(1, 0, 0);
+///
+/// Note that we no longer need the actual migration to get to this version, but
+/// this version should match the "base" schema we save in
+/// schema/crdb/dbinit-base.sql
+pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(148, 0, 0);
+
+/// Parse the schema version from the header of a `dbinit-base.sql` file.
+///
+/// Looks for a line of the form `-- Schema version: X.Y.Z` and returns the
+/// parsed version.
+pub fn parse_base_schema_version(
+    content: &str,
+) -> Result<Version, anyhow::Error> {
+    for line in content.lines() {
+        if line.starts_with("-- Schema version:") {
+            let version_str = line
+                .strip_prefix("-- Schema version:")
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Invalid schema version line format")
+                })?
+                .trim();
+            return Version::parse(version_str).with_context(|| {
+                format!("Failed to parse base schema version: {}", version_str)
+            });
+        }
+    }
+    bail!("Could not find schema version in base file header")
+}
 
 /// The version where "db_metadata_nexus" was added.
 pub const DB_METADATA_NEXUS_SCHEMA_VERSION: Version = Version::new(185, 0, 0);
 
+/// A validated SQL identifier (or enum variant value) that is safe to
+/// interpolate into SQL strings.
+///
+/// Permits only `[a-zA-Z0-9_]` characters, which covers all valid
+/// SQL identifiers and our enum variant values.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SqlIdentifier(String);
+
+impl SqlIdentifier {
+    pub fn new(s: impl Into<String>) -> Result<Self, anyhow::Error> {
+        let s = s.into();
+        if s.is_empty() {
+            bail!("SQL identifier must not be empty");
+        }
+        if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            bail!("SQL identifier contains invalid characters: {s:?}");
+        }
+        Ok(SqlIdentifier(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SqlIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// A schema-changing (DDL) operation detected in a migration file.
+///
+/// Used at test time to generate verification queries for operations that
+/// involve async backfill in CockroachDB (e.g., CREATE INDEX, ADD
+/// CONSTRAINT). The generated queries are written to `.verify.sql` files
+/// by an expectorate test and read at runtime.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum SchemaChangeInfo {
+    /// `ALTER TABLE ... ADD CONSTRAINT ...` (CHECK, UNIQUE, FK)
+    ///
+    /// CockroachDB adds the constraint in `Validating` state, then
+    /// runs an async validation job that scans existing rows to
+    /// verify they satisfy the constraint.
+    AlterTableAddConstraint {
+        table_name: SqlIdentifier,
+        constraint_name: SqlIdentifier,
+        not_valid: bool,
+    },
+
+    /// `CREATE [UNIQUE] INDEX ...`
+    ///
+    /// CockroachDB runs an async backfill job to populate the index
+    /// over all existing rows. See issue #9866.
+    CreateIndex { table_name: SqlIdentifier, index_name: SqlIdentifier },
+
+    /// Any DDL that does not involve an async backfill or validation
+    /// job (e.g., CREATE TABLE, DROP TABLE, ALTER TYPE ADD VALUE).
+    OtherDdl,
+}
+
+impl SchemaChangeInfo {
+    /// Returns a verification SQL query for backfill-prone operations.
+    ///
+    /// Only operations that involve an async data backfill or validation in
+    /// CockroachDB need verification. Returns `None` for metadata-only
+    /// operations.
+    ///
+    /// The returned query uses the `SELECT CAST(IF(...) AS BOOL)` pattern:
+    /// it succeeds silently when the condition is met and throws an error
+    /// (causing `batch_execute_async` to fail) when it is not.
+    pub fn verification_query(&self) -> Option<String> {
+        match self {
+            SchemaChangeInfo::CreateIndex { table_name, index_name } => {
+                Some(format!(
+                    "SELECT CAST(\
+                        IF(\
+                            (\
+                                SELECT true WHERE EXISTS (\
+                                    SELECT index_name \
+                                    FROM omicron.crdb_internal.table_indexes \
+                                    WHERE descriptor_name = '{table_name}' \
+                                    AND index_name = '{index_name}'\
+                                )\
+                            ),\
+                            'true',\
+                            'Schema change verification failed: \
+                            index {index_name} on table {table_name} \
+                            does not exist'\
+                        ) AS BOOL\
+                    );"
+                ))
+            }
+            SchemaChangeInfo::AlterTableAddConstraint {
+                table_name,
+                constraint_name,
+                not_valid,
+            } => {
+                // NOT VALID constraints are synchronous — no async
+                // validation job runs, so there is no race to guard
+                // against and no verification query is needed.
+                if *not_valid {
+                    return None;
+                }
+                // Use [SHOW CONSTRAINTS FROM ...] instead of
+                // information_schema.table_constraints because the
+                // latter shows constraints in ALL states including
+                // "Validating" (async validation still in progress).
+                // SHOW CONSTRAINTS provides a `validated` column
+                // that is only true when validation has completed.
+                Some(format!(
+                    "SELECT CAST(\
+                        IF(\
+                            (\
+                                SELECT true WHERE EXISTS (\
+                                    SELECT 1 \
+                                    FROM [SHOW CONSTRAINTS FROM {table_name}] \
+                                    WHERE constraint_name = '{constraint_name}' \
+                                    AND validated = true\
+                                )\
+                            ),\
+                            'true',\
+                            'Schema change verification failed: \
+                            constraint {constraint_name} not found \
+                            on table {table_name}'\
+                        ) AS BOOL\
+                    );"
+                ))
+            }
+            // OtherDdl operations are metadata-only or synchronous.
+            SchemaChangeInfo::OtherDdl => None,
+        }
+    }
+}
+
 /// Describes one version of the database schema
 #[derive(Debug, Clone)]
-struct KnownVersion {
+pub struct KnownVersion {
     /// All versions have an associated SemVer.  We only use the major number in
     /// terms of determining compatibility.
     semver: Version,
@@ -317,6 +344,16 @@ impl KnownVersion {
         let semver = Version::new(major, 0, patch);
         let relative_path = semver.to_string();
         KnownVersion { semver, relative_path }
+    }
+
+    /// Returns the semver for this known version
+    pub fn semver(&self) -> &Version {
+        &self.semver
+    }
+
+    /// Returns the name of this schema
+    pub fn relative_path(&self) -> &str {
+        &self.relative_path
     }
 }
 
@@ -444,6 +481,8 @@ impl SchemaVersion {
         directory: &Utf8Path,
     ) -> Result<SchemaVersion, anyhow::Error> {
         let mut up_sqls = vec![];
+        // Track all .verify.sql files so we can detect orphans.
+        let mut verify_files = std::collections::BTreeSet::new();
         let entries = directory
             .read_dir_utf8()
             .with_context(|| format!("Failed to readdir {directory}"))?;
@@ -456,6 +495,15 @@ impl SchemaVersion {
             // Ensure filename ends with ".sql".
             if pathbuf.extension() != Some("sql") {
                 continue;
+            }
+
+            // Skip .verify.sql files — they're handled separately below.
+            if let Some(stem) = pathbuf.file_stem() {
+                if stem.ends_with(".verify") {
+                    verify_files
+                        .insert(pathbuf.file_name().unwrap().to_string());
+                    continue;
+                }
             }
 
             // Ensure filename begins with "up", and extract anything in between
@@ -539,7 +587,7 @@ impl SchemaVersion {
         }
 
         // This collection of `up*.sql` files is valid. Read them all, in
-        // order.
+        // order, and look for sibling `.verify.sql` files.
         let mut steps = vec![];
         for parsed in up_sqls {
             let sql = std::fs::read_to_string(&parsed.path)
@@ -548,11 +596,37 @@ impl SchemaVersion {
             // the path is `..`. But we got this path from reading the
             // directory, and that process explicitly documents that it skips
             // `..`.
+            let label = parsed.path.file_name().unwrap().to_string();
+
+            // Look for a sibling .verify.sql file (e.g., up.verify.sql
+            // for up.sql, up01.verify.sql for up01.sql).
+            let stem = parsed.path.file_stem().unwrap(); // e.g. "up" or "up01"
+            let verify_filename = format!("{stem}.verify.sql");
+            let verify_path = directory.join(&verify_filename);
+            let verification_sql = if verify_path.exists() {
+                verify_files.remove(&verify_filename);
+                let content = std::fs::read_to_string(&verify_path)
+                    .with_context(|| format!("Cannot read {verify_path}"))?;
+                Some(content)
+            } else {
+                None
+            };
+
             steps.push(SchemaUpgradeStep {
-                label: parsed.path.file_name().unwrap().to_string(),
+                label,
                 sql,
+                verification_sql,
                 non_transactional: parsed.non_transactional,
             });
+        }
+
+        // Check for orphaned .verify.sql files that don't correspond to
+        // any up*.sql file.
+        if let Some(orphan) = verify_files.into_iter().next() {
+            bail!(
+                "orphaned verification file {orphan} has no corresponding \
+                 up*.sql file in {directory}"
+            );
         }
 
         Ok(SchemaVersion { semver, upgrade_from_previous: steps })
@@ -626,6 +700,12 @@ const NON_TRANSACTIONAL_SUFFIX: &str = "-danger-non-transactional";
 pub struct SchemaUpgradeStep {
     label: String,
     sql: String,
+    /// Pre-computed verification SQL read from a sibling `.verify.sql` file.
+    ///
+    /// Generated at test time by an expectorate test that parses each
+    /// migration, detects backfill-prone DDL (CREATE INDEX, ADD CONSTRAINT),
+    /// and produces verification queries.  At runtime we just read the file.
+    verification_sql: Option<String>,
     non_transactional: bool,
 }
 
@@ -639,6 +719,14 @@ impl SchemaUpgradeStep {
     /// Returns the actual SQL to execute for this step
     pub fn sql(&self) -> &str {
         self.sql.as_ref()
+    }
+
+    /// Returns pre-computed verification SQL for this migration step, if any.
+    ///
+    /// This SQL is read from a sibling `.verify.sql` file that is generated
+    /// and kept in sync by an expectorate test.
+    pub fn verification_sql(&self) -> Option<&str> {
+        self.verification_sql.as_deref()
     }
 
     /// Returns whether this step must be executed outside a transaction.
@@ -656,6 +744,328 @@ impl SchemaUpgradeStep {
 mod test {
     use super::*;
     use camino_tempfile::Utf8TempDir;
+    use regex::Regex;
+    use slog_error_chain::InlineErrorChain;
+    use sqlparser::ast::{
+        AlterColumnOperation, AlterTableOperation, Statement, TableConstraint,
+    };
+    use sqlparser::dialect::PostgreSqlDialect;
+    use sqlparser::parser::Parser;
+
+    /// The last schema version that is allowed to have multiple DDL statements
+    /// per migration file.
+    ///
+    /// Versions after this one must have at most one DDL per file, which
+    /// enables us to verify that CockroachDB async backfill operations
+    /// (CREATE INDEX, ALTER TABLE ADD CONSTRAINT, etc.) complete
+    /// successfully before moving on to the next migration step.
+    const LAST_MULTI_DDL_VERSION: u64 = 220;
+
+    /// The result of classifying all DDL in a single migration file.
+    #[derive(Debug, Clone)]
+    struct ClassifiedDdl {
+        /// Individual schema-change operations detected in the file.
+        ///
+        /// A single DDL statement may produce multiple entries (e.g., an
+        /// `ALTER TABLE ... DROP CONSTRAINT ..., ADD CONSTRAINT ...`
+        /// produces two entries).
+        changes: Vec<SchemaChangeInfo>,
+        /// Number of distinct DDL **statements** in the file.
+        ///
+        /// A single `ALTER TABLE` with multiple operations counts as 1.
+        statement_count: usize,
+    }
+
+    /// Extract the last identifier from an `ObjectName`
+    /// (e.g., `omicron.public.foo` → `foo`).
+    fn last_ident(
+        name: &sqlparser::ast::ObjectName,
+    ) -> anyhow::Result<SqlIdentifier> {
+        let s = name
+            .0
+            .last()
+            .and_then(|p| p.as_ident())
+            .map(|i| i.value.clone())
+            .with_context(|| format!("empty ObjectName: {name}"))?;
+        SqlIdentifier::new(s)
+    }
+
+    /// Extract a constraint name from a `TableConstraint`, if one is present.
+    fn constraint_name(
+        tc: &TableConstraint,
+    ) -> Option<anyhow::Result<SqlIdentifier>> {
+        let name = match tc {
+            TableConstraint::Unique(c) => c.name.as_ref(),
+            TableConstraint::PrimaryKey(c) => c.name.as_ref(),
+            TableConstraint::ForeignKey(c) => c.name.as_ref(),
+            TableConstraint::Check(c) => c.name.as_ref(),
+            // Other variants (Index, FulltextOrSpatial) don't carry a
+            // constraint name.
+            _ => return None,
+        };
+        name.map(|i| SqlIdentifier::new(i.value.clone()))
+    }
+
+    // -- Lazily compiled regexes used by the classification helpers. --
+
+    /// Strip STORING(...) clauses from CREATE INDEX.
+    static RE_STORING: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap());
+
+    /// Replace `<type> ARRAY` with `<type>[]` in column definitions.
+    static RE_TYPE_ARRAY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(\w+)\s+ARRAY\s*([,)\n])").unwrap());
+
+    /// Strip IF NOT EXISTS from ADD CONSTRAINT (CRDB-specific).
+    static RE_ADD_CONSTRAINT_INE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap()
+    });
+
+    /// Detect DML / non-DDL statement starts.
+    static RE_DML_START: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?is)^\s*(?:INSERT|UPDATE|DELETE|SELECT|SET|WITH|EXPLAIN|SHOW|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE)\b",
+        )
+        .unwrap()
+    });
+
+    /// Detect CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS.
+    static RE_ALTER_TABLE_PK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?is)^\s*ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS",
+        )
+        .unwrap()
+    });
+
+    /// Detect CREATE [UNIQUE] INDEX statements.
+    static RE_CREATE_INDEX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b").unwrap()
+    });
+
+    /// Detect ALTER TABLE statements.
+    static RE_ALTER_TABLE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)^\s*ALTER\s+TABLE\b").unwrap());
+
+    /// Pre-process a single DDL statement so that `sqlparser` (PostgreSQL
+    /// dialect) can parse it.
+    ///
+    /// Only applies the regexes needed for CREATE INDEX and ALTER TABLE
+    /// statements. The original SQL is always what gets executed against
+    /// the database; this preprocessing is only for classification.
+    fn preprocess_for_sqlparser(stmt: &str) -> String {
+        let mut result = stmt.to_string();
+
+        result = RE_STORING.replace_all(&result, "").to_string();
+        result = RE_TYPE_ARRAY.replace_all(&result, "$1[] $2").to_string();
+        result = RE_ADD_CONSTRAINT_INE.replace_all(&result, "$1").to_string();
+
+        result
+    }
+
+    /// Strip SQL comments and split on semicolons in a single pass,
+    /// respecting single-quoted string literals.
+    ///
+    /// Comments (`-- ...` and `/* ... */`) are removed from the output.
+    /// Semicolons inside string literals or comments are not treated as
+    /// statement separators.  Escaped quotes (`''`) inside strings are
+    /// handled correctly.
+    ///
+    /// Returns trimmed, non-empty statement fragments with comments
+    /// stripped.
+    fn split_and_strip_sql(sql: &str) -> Vec<String> {
+        let mut results = Vec::new();
+        let mut current = String::new();
+        let bytes = sql.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+
+        // States (mutually exclusive)
+        let mut in_string = false;
+        let mut in_line_comment = false;
+        let mut in_block_comment = false;
+
+        while i < len {
+            if in_line_comment {
+                if bytes[i] == b'\n' {
+                    in_line_comment = false;
+                    current.push('\n');
+                }
+                // else: skip comment character
+                i += 1;
+                continue;
+            }
+
+            if in_block_comment {
+                if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
+                    in_block_comment = false;
+                    i += 2; // skip */
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+
+            if in_string {
+                if bytes[i] == b'\'' {
+                    if i + 1 < len && bytes[i + 1] == b'\'' {
+                        // Escaped quote ('') — keep both
+                        current.push('\'');
+                        current.push('\'');
+                        i += 2;
+                        continue;
+                    }
+                    in_string = false;
+                }
+                current.push(bytes[i] as char);
+                i += 1;
+                continue;
+            }
+
+            // Outside any special state
+            if bytes[i] == b'\'' {
+                in_string = true;
+                current.push('\'');
+                i += 1;
+            } else if bytes[i] == b'-' && i + 1 < len && bytes[i + 1] == b'-' {
+                in_line_comment = true;
+                i += 2; // skip --
+            } else if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
+                in_block_comment = true;
+                i += 2; // skip /*
+            } else if bytes[i] == b';' {
+                let trimmed = current.trim().to_string();
+                if !trimmed.is_empty() {
+                    results.push(trimmed);
+                }
+                current.clear();
+                i += 1;
+            } else {
+                current.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+
+        let trimmed = current.trim().to_string();
+        if !trimmed.is_empty() {
+            results.push(trimmed);
+        }
+
+        results
+    }
+
+    /// Parse a SQL migration file and classify all schema-changing (DDL)
+    /// statements it contains.
+    ///
+    /// `label` is a human-readable identifier for error messages (typically
+    /// the filename).
+    ///
+    /// DML statements (INSERT, UPDATE, DELETE, SELECT, SET, etc.) are
+    /// ignored — only DDL is returned.  Only CREATE INDEX and ALTER TABLE
+    /// statements are parsed with `sqlparser`; all other DDL is classified
+    /// as `OtherDdl` without parsing.
+    fn classify_sql_statements(
+        sql: &str,
+        label: &str,
+    ) -> Result<ClassifiedDdl, anyhow::Error> {
+        let mut changes = Vec::new();
+        let mut statement_count = 0;
+
+        for trimmed in split_and_strip_sql(sql) {
+            // Skip DML, session settings, and other non-DDL statements.
+            if RE_DML_START.is_match(&trimmed) {
+                continue;
+            }
+
+            statement_count += 1;
+
+            let might_have_async_backfill = RE_CREATE_INDEX.is_match(&trimmed)
+                || RE_ALTER_TABLE.is_match(&trimmed);
+
+            if !might_have_async_backfill {
+                changes.push(SchemaChangeInfo::OtherDdl);
+                continue;
+            }
+
+            // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS
+            // can't be parsed by sqlparser; just mark as OtherDdl.
+            if RE_ALTER_TABLE_PK.is_match(&trimmed) {
+                changes.push(SchemaChangeInfo::OtherDdl);
+                continue;
+            }
+
+            // CREATE INDEX and ALTER TABLE may produce verification
+            // queries, so we parse them with sqlparser.
+            let preprocessed = preprocess_for_sqlparser(&trimmed);
+            let stmts = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
+                .with_context(|| format!("failed to parse SQL in {label}"))?;
+
+            for stmt in &stmts {
+                match stmt {
+                    Statement::CreateIndex(ci) => {
+                        let idx_name = last_ident(
+                            ci.name.as_ref().with_context(|| {
+                                format!(
+                                    "CREATE INDEX without a name in {label}"
+                                )
+                            })?,
+                        )?;
+                        let tbl = last_ident(&ci.table_name)?;
+                        changes.push(SchemaChangeInfo::CreateIndex {
+                            table_name: tbl,
+                            index_name: idx_name,
+                        });
+                    }
+                    Statement::AlterTable(at) => {
+                        let tbl = last_ident(&at.name)?;
+                        for op in &at.operations {
+                            match op {
+                                AlterTableOperation::AlterColumn {
+                                    column_name: _,
+                                    op: AlterColumnOperation::SetNotNull,
+                                } => {
+                                    changes.push(SchemaChangeInfo::OtherDdl);
+                                }
+                                AlterTableOperation::AddConstraint {
+                                    constraint: tc,
+                                    not_valid,
+                                    ..
+                                } => {
+                                    let cname = constraint_name(tc)
+                                        .with_context(|| {
+                                            format!(
+                                                "ADD CONSTRAINT without \
+                                                     a name on table {tbl} \
+                                                     in {label}"
+                                            )
+                                        })??;
+                                    changes.push(
+                                        SchemaChangeInfo::AlterTableAddConstraint {
+                                            table_name: tbl.clone(),
+                                            constraint_name: cname,
+                                            not_valid: *not_valid,
+                                        },
+                                    );
+                                }
+                                AlterTableOperation::AddColumn { .. } => {
+                                    changes.push(SchemaChangeInfo::OtherDdl);
+                                }
+                                _ => {
+                                    changes.push(SchemaChangeInfo::OtherDdl);
+                                }
+                            }
+                        }
+                    }
+                    // Shouldn't normally happen (we only parse CREATE
+                    // INDEX and ALTER TABLE), but handle gracefully.
+                    _ => {
+                        changes.push(SchemaChangeInfo::OtherDdl);
+                    }
+                }
+            }
+        }
+
+        Ok(ClassifiedDdl { changes, statement_count })
+    }
 
     #[test]
     fn test_known_versions() {
@@ -675,7 +1085,6 @@ mod test {
     // (Test the test function)
     #[test]
     fn test_verify() {
-        // EARLIEST_SUPPORTED_VERSION is somehow wrong
         let error = verify_known_versions(
             [&KnownVersion::legacy(2, 0), &KnownVersion::legacy(3, 0)],
             &Version::new(1, 0, 0),
@@ -685,7 +1094,7 @@ mod test {
         .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            "EARLIEST_SUPPORTED_VERSION is not the earliest in KNOWN_VERSIONS"
+            "Earliest version is not the earliest in KNOWN_VERSIONS"
         );
 
         // SCHEMA_VERSION was not updated
@@ -708,7 +1117,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(2, 0),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(2, 0, 0),
             100,
         )
@@ -725,7 +1134,7 @@ mod test {
                 &KnownVersion::new(2, "dir1"),
                 &KnownVersion::new(2, "dir2"),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(2, 0, 0),
             100,
         )
@@ -742,7 +1151,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(1, 3),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(3, 0, 0),
             100,
         )
@@ -759,7 +1168,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(4, 0),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(4, 0, 0),
             100,
         )
@@ -779,7 +1188,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(3, 2),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(3, 0, 2),
             2,
         )
@@ -795,7 +1204,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(3, 0),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(3, 0, 0),
             2,
         )
@@ -824,7 +1233,7 @@ mod test {
             known_versions.next().expect("expected at least one KNOWN_VERSION");
         ensure!(
             first.semver == *earliest,
-            "EARLIEST_SUPPORTED_VERSION is not the earliest in KNOWN_VERSIONS"
+            "Earliest version is not the earliest in KNOWN_VERSIONS"
         );
 
         let mut prev = first;
@@ -1108,6 +1517,973 @@ mod test {
                 Ok(_) => (),
                 Err(message) => {
                     panic!("unexpected failure on {filenames:?}: {message:?}");
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Tests for SQL classification, preprocessing, and verification
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_classify_create_index() {
+        let sql = "CREATE UNIQUE INDEX IF NOT EXISTS my_idx \
+                    ON omicron.public.my_table (col1, col2) \
+                    WHERE col1 IS NOT NULL;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        let changes = classified.changes;
+        assert_eq!(
+            changes,
+            vec![SchemaChangeInfo::CreateIndex {
+                table_name: SqlIdentifier::new("my_table").unwrap(),
+                index_name: SqlIdentifier::new("my_idx").unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_classify_create_index_with_storing() {
+        // STORING is CRDB-specific; after preprocessing it should be
+        // stripped and the index should still classify correctly.
+        let sql = "CREATE INDEX IF NOT EXISTS my_idx \
+                    ON omicron.public.my_table (col1) \
+                    STORING (col2, col3);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        let changes = classified.changes;
+        assert_eq!(
+            changes,
+            vec![SchemaChangeInfo::CreateIndex {
+                table_name: SqlIdentifier::new("my_table").unwrap(),
+                index_name: SqlIdentifier::new("my_idx").unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_classify_create_index_unnamed_is_error() {
+        // An index without a name can't be verified, so it should be
+        // rejected rather than silently accepted.
+        let sql = "CREATE INDEX ON my_table (col1);";
+        let result = classify_sql_statements(sql, "test");
+        let err = result.unwrap_err();
+        assert!(
+            format!("{err:#}").contains("CREATE INDEX without a name"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn test_classify_dml_ignored() {
+        // DML (INSERT, SELECT, SET, UPDATE) should not produce any
+        // SchemaChangeInfo entries.
+        let sql = "SET LOCAL disallow_full_table_scans = OFF;\n\
+                    INSERT INTO t(id) VALUES (1);\n\
+                    SELECT true;\n\
+                    UPDATE t SET x = 1;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        let changes = classified.changes;
+        assert!(
+            changes.is_empty(),
+            "DML should not be classified as DDL: {changes:?}"
+        );
+    }
+
+    #[test]
+    fn test_classify_alter_table_add_constraint() {
+        // Note: IF NOT EXISTS is stripped during preprocessing (CRDB-specific).
+        let sql = "ALTER TABLE omicron.public.external_ip \
+                    ADD CONSTRAINT IF NOT EXISTS null_project_id \
+                    CHECK (project_id IS NOT NULL);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        let changes = classified.changes;
+        assert_eq!(
+            changes,
+            vec![SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: SqlIdentifier::new("external_ip").unwrap(),
+                constraint_name: SqlIdentifier::new("null_project_id").unwrap(),
+                not_valid: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_classify_add_constraint_unnamed_is_error() {
+        // A constraint without a name can't be verified, so it should be
+        // rejected rather than silently accepted.
+        let sql = "ALTER TABLE my_table ADD CHECK (col > 0);";
+        let result = classify_sql_statements(sql, "test");
+        let err = result.unwrap_err();
+        assert!(
+            format!("{err:#}").contains("ADD CONSTRAINT without a name"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn test_preprocess_storing() {
+        let input = "CREATE INDEX foo ON bar (col1) STORING (col2, col3)";
+        let output = preprocess_for_sqlparser(input);
+        assert!(
+            !output.contains("STORING"),
+            "STORING should be stripped: {output}"
+        );
+        assert!(output.contains("CREATE INDEX foo ON bar (col1)"));
+    }
+
+    #[test]
+    fn test_preprocess_type_array() {
+        let input =
+            "ALTER TABLE t ADD COLUMN addrs INET ARRAY, ADD COLUMN x INT";
+        let output = preprocess_for_sqlparser(input);
+        assert!(
+            !output.contains("ARRAY"),
+            "ARRAY keyword should be replaced with []: {output}"
+        );
+        assert!(output.contains("INET[]"));
+    }
+
+    #[test]
+    fn test_preprocess_add_constraint_if_not_exists() {
+        let input =
+            "ALTER TABLE t ADD CONSTRAINT IF NOT EXISTS my_ck CHECK (x > 0)";
+        let output = preprocess_for_sqlparser(input);
+        assert!(
+            !output.contains("IF NOT EXISTS"),
+            "IF NOT EXISTS should be stripped: {output}"
+        );
+        assert!(output.contains("ADD CONSTRAINT my_ck"));
+    }
+
+    #[test]
+    fn test_classify_mixed_dml_and_ddl() {
+        // DML should be ignored; only DDL should be counted.
+        let sql = "SET LOCAL disallow_full_table_scans = off;\n\
+                    INSERT INTO t (a) VALUES (1);\n\
+                    CREATE TABLE t2 (id INT PRIMARY KEY);\n\
+                    UPDATE t SET a = 2;\n\
+                    CREATE INDEX my_idx ON t2 (id);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 2, "Only DDL should be counted");
+        // CREATE TABLE → OtherDdl, CREATE INDEX → CreateIndex
+        assert_eq!(classified.changes.len(), 2);
+        assert_eq!(classified.changes[0], SchemaChangeInfo::OtherDdl);
+        assert!(
+            matches!(
+                &classified.changes[1],
+                SchemaChangeInfo::CreateIndex { .. }
+            ),
+            "CREATE INDEX should be classified: {:?}",
+            classified.changes[1]
+        );
+    }
+
+    #[test]
+    fn test_classify_other_ddl_varieties() {
+        // Various DDL statements that don't need verification should
+        // all produce OtherDdl with the correct statement_count.
+        for (sql, expected_count) in [
+            ("CREATE TABLE t (id INT PRIMARY KEY);", 1),
+            ("DROP TABLE IF EXISTS t;", 1),
+            ("DROP INDEX IF EXISTS my_idx;", 1),
+            ("CREATE TYPE my_enum AS ENUM ('a', 'b');", 1),
+            ("ALTER TYPE my_enum ADD VALUE 'c';", 1),
+            (
+                "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
+                 DROP TABLE IF EXISTS t2;",
+                2,
+            ),
+            // ADD COLUMN (nullable)
+            ("ALTER TABLE t ADD COLUMN IF NOT EXISTS cpu_family TEXT;", 1),
+            // ADD COLUMN NOT NULL DEFAULT
+            (
+                "ALTER TABLE t ADD COLUMN IF NOT EXISTS max_paths INT NOT NULL DEFAULT 1;",
+                1,
+            ),
+            // ADD COLUMN NOT NULL no default
+            ("ALTER TABLE t ADD COLUMN my_col INT NOT NULL;", 1),
+            // ADD COLUMN nullable non-null default
+            ("ALTER TABLE t ADD COLUMN foo INT DEFAULT 42;", 1),
+            // ADD COLUMN DEFAULT NULL
+            ("ALTER TABLE t ADD COLUMN foo INT DEFAULT NULL;", 1),
+            // ADD COLUMN stored computed
+            (
+                "ALTER TABLE t ADD COLUMN foo INT GENERATED ALWAYS AS (bar + 1) STORED;",
+                1,
+            ),
+            // DROP COLUMN
+            ("ALTER TABLE t DROP COLUMN IF EXISTS active_sled_id;", 1),
+            // ALTER COLUMN SET NOT NULL
+            ("ALTER TABLE t ALTER COLUMN kind SET NOT NULL;", 1),
+            // DROP CONSTRAINT
+            (
+                "ALTER TABLE t DROP CONSTRAINT IF EXISTS null_non_fip_parent_id;",
+                1,
+            ),
+            // ALTER INDEX RENAME
+            ("ALTER INDEX omicron.public.old_idx RENAME TO new_idx;", 1),
+            // ALTER PRIMARY KEY USING COLUMNS
+            ("ALTER TABLE t ALTER PRIMARY KEY USING COLUMNS (a, b);", 1),
+            // CREATE/DROP VIEW (two statements)
+            (
+                "CREATE VIEW IF NOT EXISTS v AS SELECT 1;\n\
+                 DROP VIEW IF EXISTS v;",
+                2,
+            ),
+            // DROP INDEX with CRDB table@index notation
+            (
+                "DROP INDEX IF EXISTS omicron.public.sw_caboose@caboose_properties;",
+                1,
+            ),
+            // ADD COLUMN with semicolon in string literal default
+            ("ALTER TABLE t ADD COLUMN foo TEXT DEFAULT ';';", 1),
+        ] {
+            let classified = classify_sql_statements(sql, "test").unwrap();
+            assert_eq!(
+                classified.statement_count, expected_count,
+                "wrong statement_count for: {sql}"
+            );
+            assert_eq!(
+                classified.changes.len(),
+                expected_count,
+                "wrong changes count for: {sql}"
+            );
+            for change in &classified.changes {
+                assert_eq!(
+                    *change,
+                    SchemaChangeInfo::OtherDdl,
+                    "expected OtherDdl for: {sql}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_one_ddl_enforcement() {
+        // Multiple DDL statements in a single file should produce
+        // statement_count > 1, which the expectorate test uses to
+        // reject new migrations.
+        let sql = "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
+                    CREATE TABLE t2 (id INT PRIMARY KEY);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(
+            classified.statement_count, 2,
+            "Two DDL statements should produce statement_count == 2"
+        );
+    }
+
+    #[test]
+    fn test_multi_ddl_grandfathered() {
+        // For old versions (<= LAST_MULTI_DDL_VERSION), the expectorate
+        // test allows multiple DDL per file and skips verification.
+        // Verify classify_sql_statements can still parse multi-DDL.
+        let sql = "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
+                    CREATE TABLE t2 (id INT PRIMARY KEY);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 2);
+        assert_eq!(classified.changes.len(), 2);
+    }
+
+    #[test]
+    fn test_verification_query_create_index() {
+        let change = SchemaChangeInfo::CreateIndex {
+            table_name: SqlIdentifier::new("sled").unwrap(),
+            index_name: SqlIdentifier::new("sled_by_rack").unwrap(),
+        };
+        let query = change.verification_query();
+        assert!(query.is_some());
+        let query = query.unwrap();
+        assert!(query.contains("crdb_internal.table_indexes"));
+        assert!(query.contains("sled"));
+        assert!(query.contains("sled_by_rack"));
+    }
+
+    #[test]
+    fn test_verification_query_add_constraint() {
+        let change = SchemaChangeInfo::AlterTableAddConstraint {
+            table_name: SqlIdentifier::new("external_ip").unwrap(),
+            constraint_name: SqlIdentifier::new("null_project_id").unwrap(),
+            not_valid: false,
+        };
+        let query = change.verification_query();
+        assert!(query.is_some());
+        let query = query.unwrap();
+        assert!(query.contains("SHOW CONSTRAINTS FROM"));
+        assert!(query.contains("external_ip"));
+        assert!(query.contains("null_project_id"));
+        assert!(query.contains("validated = true"));
+    }
+
+    #[test]
+    fn test_verification_query_add_constraint_not_valid() {
+        let change = SchemaChangeInfo::AlterTableAddConstraint {
+            table_name: SqlIdentifier::new("audit_log").unwrap(),
+            constraint_name: SqlIdentifier::new("my_check").unwrap(),
+            not_valid: true,
+        };
+        // NOT VALID constraints are synchronous (no async validation
+        // job), so no verification query is needed.
+        assert!(change.verification_query().is_none());
+    }
+
+    #[test]
+    fn test_verification_query_other_ddl_returns_none() {
+        assert!(
+            SchemaChangeInfo::OtherDdl.verification_query().is_none(),
+            "OtherDdl should return None"
+        );
+    }
+
+    /// Iterate all known migration versions, classify their SQL, and
+    /// validate (or generate via `EXPECTORATE=overwrite`) the `.verify.sql`
+    /// files.
+    #[test]
+    fn test_migration_verification_files() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let schema_dir =
+            camino::Utf8PathBuf::from(manifest_dir).join("../../schema/crdb");
+
+        let mut version_count = 0;
+        let overwrite = std::env::var_os("EXPECTORATE").as_deref()
+            == Some(std::ffi::OsStr::new("overwrite"));
+
+        for known_version in KNOWN_VERSIONS.iter() {
+            version_count += 1;
+            let version_path = schema_dir.join(&known_version.relative_path);
+
+            // Read the up*.sql files from the directory.
+            let mut up_files: Vec<_> = std::fs::read_dir(&version_path)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Cannot read directory {version_path}: {}",
+                        InlineErrorChain::new(&e)
+                    )
+                })
+                .filter_map(|entry| {
+                    let entry = entry.unwrap();
+                    let path =
+                        camino::Utf8PathBuf::try_from(entry.path()).unwrap();
+                    let stem = path.file_stem()?;
+                    if path.extension() == Some("sql")
+                        && stem.starts_with("up")
+                        && !stem.ends_with(".verify")
+                    {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            up_files.sort();
+
+            // Track which .verify.sql files we expect to find.
+            let mut expected_verify_files = std::collections::BTreeSet::new();
+
+            for up_path in &up_files {
+                let label = up_path.file_name().unwrap();
+                let sql =
+                    std::fs::read_to_string(up_path).unwrap_or_else(|e| {
+                        panic!(
+                            "Cannot read {up_path}: {}",
+                            InlineErrorChain::new(&e)
+                        )
+                    });
+
+                // Classify DDL statements.
+                let classified = classify_sql_statements(&sql, label)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "Failed to classify {label} in version \
+                                 {}: {e:#}",
+                            known_version.semver
+                        )
+                    });
+
+                // Enforce single-DDL-per-file for new versions.
+                if known_version.semver.major > LAST_MULTI_DDL_VERSION {
+                    assert!(
+                        classified.statement_count <= 1,
+                        "migration file {label} in version {} \
+                         contains {} DDL statements, but at most 1 \
+                         is allowed for versions after \
+                         {LAST_MULTI_DDL_VERSION}",
+                        known_version.semver,
+                        classified.statement_count,
+                    );
+                }
+
+                // Determine whether to skip verification for old
+                // multi-DDL versions.
+                let changes = if classified.statement_count > 1 {
+                    // Old versions with multiple DDL — skip verification.
+                    Vec::new()
+                } else {
+                    classified.changes
+                };
+
+                // Build the verification SQL from changes.
+                let verify_queries: Vec<String> = changes
+                    .iter()
+                    .filter_map(|c| c.verification_query())
+                    .collect();
+
+                let stem = up_path.file_stem().unwrap();
+                let verify_filename = format!("{stem}.verify.sql");
+                let verify_path = version_path.join(&verify_filename);
+
+                if verify_queries.is_empty() {
+                    // No verification needed — remove or reject any
+                    // stale .verify.sql file.
+                    if verify_path.exists() {
+                        if overwrite {
+                            std::fs::remove_file(&verify_path).unwrap();
+                        } else {
+                            panic!(
+                                "spurious verification file \
+                                 {verify_path} exists but {label} in \
+                                 version {} does not need verification \
+                                 (run with EXPECTORATE=overwrite to \
+                                 remove it)",
+                                known_version.semver,
+                            );
+                        }
+                    }
+                } else {
+                    expected_verify_files.insert(verify_filename);
+                    let content = format!(
+                        "-- DO NOT EDIT. Generated by test_migration_verification_files.\n{}\n",
+                        verify_queries.join("\n"),
+                    );
+                    expectorate::assert_contents(&verify_path, &content);
+                }
+            }
+
+            // Scan for orphaned .verify.sql files.
+            for entry in std::fs::read_dir(&version_path).unwrap() {
+                let entry = entry.unwrap();
+                let path = camino::Utf8PathBuf::try_from(entry.path()).unwrap();
+                if let Some(stem) = path.file_stem() {
+                    if path.extension() == Some("sql")
+                        && stem.ends_with(".verify")
+                    {
+                        let filename = path.file_name().unwrap().to_string();
+                        if !expected_verify_files.contains(&filename) {
+                            if overwrite {
+                                std::fs::remove_file(&path).unwrap();
+                            } else {
+                                panic!(
+                                    "orphaned verification file \
+                                     {path} has no corresponding \
+                                     up*.sql file in version {} \
+                                     (run with EXPECTORATE=overwrite \
+                                     to remove it)",
+                                    known_version.semver,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // This check is intended to validate that the test isn't misconfigured,
+        // but the actual count doesn't matter much - as long as it's non-zero.
+        assert!(
+            version_count > 1,
+            "Expected > 1 schema versions, found {version_count}"
+        );
+    }
+
+    #[test]
+    fn test_verify_file_skipped_in_load() {
+        // .verify.sql files should not be treated as migration steps.
+        let tempdir = Utf8TempDir::new().unwrap();
+        let up_path = tempdir.path().join("up.sql");
+        let verify_path = tempdir.path().join("up.verify.sql");
+        std::fs::write(&up_path, "CREATE TABLE t (id INT PRIMARY KEY);")
+            .unwrap();
+        std::fs::write(&verify_path, "SELECT 1;").unwrap();
+
+        let result = SchemaVersion::load_from_directory(
+            Version::new(999, 0, 0),
+            tempdir.path(),
+        );
+        let version = result.unwrap();
+        let steps: Vec<_> = version.upgrade_steps().collect();
+        assert_eq!(steps.len(), 1, "Only up.sql should be loaded as a step");
+        assert_eq!(steps[0].label(), "up.sql");
+        assert_eq!(
+            steps[0].verification_sql(),
+            Some("SELECT 1;"),
+            "verification_sql should be read from up.verify.sql"
+        );
+    }
+
+    #[test]
+    fn test_orphaned_verify_file_detected() {
+        // A .verify.sql file with no corresponding up*.sql should
+        // cause an error.
+        let tempdir = Utf8TempDir::new().unwrap();
+        let up_path = tempdir.path().join("up.sql");
+        let orphan_path = tempdir.path().join("up2.verify.sql");
+        std::fs::write(&up_path, "CREATE TABLE t (id INT PRIMARY KEY);")
+            .unwrap();
+        std::fs::write(&orphan_path, "SELECT 1;").unwrap();
+
+        let result = SchemaVersion::load_from_directory(
+            Version::new(999, 0, 0),
+            tempdir.path(),
+        );
+        assert!(result.is_err(), "Orphaned .verify.sql should be rejected");
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("orphaned verification file"),
+            "Error should mention orphaned file: {err}"
+        );
+    }
+
+    #[test]
+    fn test_classify_alter_table_multi_op() {
+        // A single ALTER TABLE with multiple operations should produce
+        // statement_count == 1 but multiple changes.
+        let sql = "ALTER TABLE omicron.public.bgp_peer_config \
+                    DROP CONSTRAINT IF EXISTS bgp_peer_config_addr_unique, \
+                    ADD CONSTRAINT bgp_peer_config_addr_unique \
+                    CHECK (addr IS NOT NULL);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(
+            classified.statement_count, 1,
+            "A single ALTER TABLE is one DDL statement"
+        );
+        assert_eq!(
+            classified.changes.len(),
+            2,
+            "DROP CONSTRAINT + ADD CONSTRAINT = 2 changes"
+        );
+        // DROP CONSTRAINT is now OtherDdl (no verification needed).
+        assert_eq!(classified.changes[0], SchemaChangeInfo::OtherDdl);
+        assert_eq!(
+            classified.changes[1],
+            SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: SqlIdentifier::new("bgp_peer_config").unwrap(),
+                constraint_name: SqlIdentifier::new(
+                    "bgp_peer_config_addr_unique"
+                )
+                .unwrap(),
+                not_valid: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_one_ddl_multi_op_allowed() {
+        // A single ALTER TABLE with multiple operations should produce
+        // statement_count == 1 (allowed even for new versions), and all
+        // changes should be classified for verification.
+        let sql = "ALTER TABLE omicron.public.t \
+                    DROP CONSTRAINT IF EXISTS old_check, \
+                    ADD CONSTRAINT new_check CHECK (x > 0);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(
+            classified.statement_count, 1,
+            "A single ALTER TABLE is one DDL statement"
+        );
+        assert_eq!(
+            classified.changes.len(),
+            2,
+            "Both operations should be classified"
+        );
+        // DROP CONSTRAINT is now OtherDdl.
+        assert_eq!(classified.changes[0], SchemaChangeInfo::OtherDdl);
+        assert_eq!(
+            classified.changes[1],
+            SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: SqlIdentifier::new("t").unwrap(),
+                constraint_name: SqlIdentifier::new("new_check").unwrap(),
+                not_valid: false,
+            }
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Tests for split_and_strip_sql
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_split_and_strip_sql_basic() {
+        let stmts = split_and_strip_sql(
+            "CREATE TABLE t (id INT); CREATE INDEX i ON t (id)",
+        );
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "CREATE TABLE t (id INT)");
+        assert_eq!(stmts[1], "CREATE INDEX i ON t (id)");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolon_in_string() {
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES (';')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES (';')");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_escaped_quote_in_string() {
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES ('it''s;here')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s;here')");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_multiple_strings_with_semicolons() {
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES (';', ';')");
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_trailing_semicolons() {
+        let stmts = split_and_strip_sql("SELECT 1;  ;  ");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_empty_input() {
+        let stmts = split_and_strip_sql("");
+        assert_eq!(stmts.len(), 0);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_no_semicolons() {
+        let stmts = split_and_strip_sql("SELECT 1");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolons_only() {
+        let stmts = split_and_strip_sql(";;;");
+        assert_eq!(stmts.len(), 0);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_string_at_end() {
+        let stmts = split_and_strip_sql("SELECT 'foo'");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 'foo'");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_mixed_real_split_and_string_semicolon() {
+        let stmts = split_and_strip_sql("SELECT ';'; CREATE TABLE t (id INT)");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT ';'");
+        assert_eq!(stmts[1], "CREATE TABLE t (id INT)");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_default_value_with_semicolon() {
+        let stmts = split_and_strip_sql(
+            "ALTER TABLE t ADD COLUMN foo TEXT DEFAULT ';'",
+        );
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_multiline_statement() {
+        let stmts = split_and_strip_sql(
+            "CREATE INDEX foo\n    ON bar (col1)\n    STORING (col2)",
+        );
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_newline_inside_string() {
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('line1\nline2')");
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_multiline_with_split() {
+        let stmts = split_and_strip_sql(
+            "CREATE TABLE t (\n  id INT\n);\nCREATE INDEX i ON t (id)",
+        );
+        assert_eq!(stmts.len(), 2);
+    }
+
+    // --- Comment stripping tests ---
+
+    #[test]
+    fn test_split_and_strip_sql_line_comment_stripped() {
+        let stmts =
+            split_and_strip_sql("SELECT 1; -- this is a comment\nSELECT 2");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_block_comment_stripped() {
+        let stmts = split_and_strip_sql("SELECT /* a comment */ 1; SELECT 2");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT  1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_line_comment_in_string_preserved() {
+        // `--` inside a string literal must NOT be treated as a comment
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('hello -- world')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('hello -- world')");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_block_comment_in_string_preserved() {
+        // `/* */` inside a string literal must NOT be treated as a comment
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES ('a /* b */ c')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('a /* b */ c')");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolon_in_line_comment() {
+        // `;` inside a line comment must NOT split
+        let stmts =
+            split_and_strip_sql("SELECT 1 -- semicolon; here\n; SELECT 2");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolon_in_block_comment() {
+        // `;` inside a block comment must NOT split
+        let stmts = split_and_strip_sql("SELECT 1 /* ; */ ; SELECT 2");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_escaped_quotes_with_comment_chars() {
+        // Escaped quotes followed by comment-like characters
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('it''s -- tricky')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s -- tricky')");
+    }
+
+    // ---------------------------------------------------------------
+    // Proptest for split_and_strip_sql
+    // ---------------------------------------------------------------
+
+    /// Fragment types that can appear in SQL input.
+    #[derive(Debug, Clone)]
+    enum SqlFragment {
+        /// Plain identifier-like text (letters, digits, underscores, spaces)
+        Text(String),
+        /// A SQL string literal: '...' with internal ' escaped to ''
+        StringLiteral(String),
+        /// A line comment: -- ...\n
+        LineComment(String),
+        /// A block comment: /* ... */
+        BlockComment(String),
+        /// A bare semicolon
+        Semicolon,
+        /// Whitespace (spaces and newlines)
+        Whitespace(String),
+    }
+
+    impl SqlFragment {
+        /// Render the fragment to its SQL text representation.
+        fn to_sql(&self) -> String {
+            match self {
+                SqlFragment::Text(t) => t.clone(),
+                SqlFragment::StringLiteral(s) => {
+                    // Escape internal single-quotes by doubling them
+                    format!("'{}'", s.replace('\'', "''"))
+                }
+                SqlFragment::LineComment(c) => format!("--{}\n", c),
+                SqlFragment::BlockComment(c) => format!("/*{}*/", c),
+                SqlFragment::Semicolon => ";".to_string(),
+                SqlFragment::Whitespace(w) => w.clone(),
+            }
+        }
+    }
+
+    /// Build a proptest strategy that generates a Vec of SqlFragments.
+    fn sql_fragment_strategy()
+    -> impl proptest::strategy::Strategy<Value = Vec<SqlFragment>> {
+        use proptest::prelude::*;
+
+        // Sub-strategies for each fragment variant
+        let text_strategy = "[a-zA-Z0-9_ ]{1,20}".prop_map(SqlFragment::Text);
+
+        // String literal contents: arbitrary printable ASCII that avoids
+        // producing control chars. We allow ;  --  /*  */ inside to
+        // stress the parser.
+        let string_literal_strategy = "[a-zA-Z0-9 ;\\-\\*/!@#$]{0,30}"
+            .prop_map(SqlFragment::StringLiteral);
+
+        // Line comment body: no newlines (the fragment adds the trailing \n)
+        let line_comment_strategy =
+            "[a-zA-Z0-9 ;']{0,20}".prop_map(SqlFragment::LineComment);
+
+        // Block comment body: must not contain */ (we filter it out)
+        let block_comment_strategy = "[a-zA-Z0-9 ;'\\-]{0,20}"
+            .prop_filter("block comment body must not contain */", |s| {
+                !s.contains("*/")
+            })
+            .prop_map(SqlFragment::BlockComment);
+
+        let semicolon_strategy = Just(SqlFragment::Semicolon);
+
+        let whitespace_strategy = proptest::sample::select(vec![
+            " ".to_string(),
+            "  ".to_string(),
+            "\n".to_string(),
+            " \n ".to_string(),
+        ])
+        .prop_map(SqlFragment::Whitespace);
+
+        // Combine all variants with roughly equal weight
+        let fragment = prop_oneof![
+            2 => text_strategy,
+            2 => string_literal_strategy,
+            1 => line_comment_strategy,
+            1 => block_comment_strategy,
+            2 => semicolon_strategy,
+            1 => whitespace_strategy,
+        ];
+
+        proptest::collection::vec(fragment, 1..=15)
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_split_and_strip_sql(
+            fragments in sql_fragment_strategy()
+        ) {
+            // Build the input string from fragments
+            let input: String =
+                fragments.iter().map(|f| f.to_sql()).collect();
+
+            let results = split_and_strip_sql(&input);
+
+            // Property 1: never panics (implicit)
+
+            // Property 2: all outputs are non-empty and trimmed
+            for stmt in &results {
+                proptest::prop_assert!(
+                    !stmt.is_empty(),
+                    "output statement must not be empty"
+                );
+                proptest::prop_assert_eq!(
+                    stmt.as_str(),
+                    stmt.trim(),
+                    "output statement must be trimmed"
+                );
+            }
+
+            // Property 3: idempotency — re-parsing any single output
+            // statement should yield exactly itself, since outputs
+            // contain no top-level semicolons or comments.
+            for stmt in &results {
+                let reparsed = split_and_strip_sql(stmt);
+                proptest::prop_assert_eq!(
+                    reparsed.len(),
+                    1,
+                    "re-parsing '{}' should yield exactly 1 statement, got {}",
+                    stmt,
+                    reparsed.len()
+                );
+                proptest::prop_assert_eq!(
+                    &reparsed[0],
+                    stmt,
+                    "re-parsing should be idempotent"
+                );
+            }
+
+            // Property 4: statement count is bounded by semicolons + 1
+            let semicolon_count = fragments
+                .iter()
+                .filter(|f| matches!(f, SqlFragment::Semicolon))
+                .count();
+            proptest::prop_assert!(
+                results.len() <= semicolon_count + 1,
+                "got {} statements but only {} semicolons",
+                results.len(),
+                semicolon_count
+            );
+
+            // Property 5: string literals outside of comments are
+            // preserved verbatim in the correct output statement.
+            //
+            // Walk fragments to determine which "logical statement"
+            // (delimited by Semicolon fragments) each StringLiteral
+            // lands in, then map logical indices to output indices
+            // (skipping empty logical statements that produce no
+            // output).
+            {
+                let mut logical_idx = 0usize;
+                let mut logical_has_content = vec![false];
+                let mut literal_placements: Vec<(usize, String)> = Vec::new();
+
+                for frag in &fragments {
+                    match frag {
+                        SqlFragment::Semicolon => {
+                            logical_idx += 1;
+                            if logical_has_content.len() <= logical_idx {
+                                logical_has_content.push(false);
+                            }
+                        }
+                        SqlFragment::Text(t) => {
+                            if !t.trim().is_empty() {
+                                logical_has_content[logical_idx] = true;
+                            }
+                        }
+                        SqlFragment::StringLiteral(_) => {
+                            logical_has_content[logical_idx] = true;
+                            literal_placements
+                                .push((logical_idx, frag.to_sql()));
+                        }
+                        SqlFragment::Whitespace(_)
+                        | SqlFragment::LineComment(_)
+                        | SqlFragment::BlockComment(_) => {}
+                    }
+                }
+
+                // Map logical statement index → output index,
+                // skipping logical statements with no content.
+                let logical_to_output: Vec<Option<usize>> = {
+                    let mut out_idx = 0usize;
+                    logical_has_content
+                        .iter()
+                        .map(|has| {
+                            if *has {
+                                let idx = out_idx;
+                                out_idx += 1;
+                                Some(idx)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
+
+                for (li, rendered) in &literal_placements {
+                    if let Some(oi) = logical_to_output[*li] {
+                        proptest::prop_assert!(
+                            results[oi].contains(rendered.as_str()),
+                            "string literal {} should appear in output \
+                             statement {}: '{}'",
+                            rendered,
+                            oi,
+                            results[oi]
+                        );
+                    }
                 }
             }
         }

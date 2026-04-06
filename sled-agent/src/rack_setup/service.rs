@@ -72,7 +72,6 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
@@ -87,18 +86,18 @@ use nexus_lockstep_client::{
 };
 use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
 use nexus_types::internal_api::params::ExternalPortDiscovery;
+use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -108,7 +107,7 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
@@ -889,19 +888,10 @@ impl ServiceInner {
                                 rib_priority: r.rib_priority,
                             })
                             .collect(),
-                        addresses: config
-                            .addresses
-                            .iter()
-                            .map(|a| NexusTypes::UplinkAddressConfig {
-                                address: a.address,
-                                vlan_id: a.vlan_id,
-                            })
-                            .collect(),
-                        switch: config.switch.into(),
-                        uplink_port_speed: config.uplink_port_speed.into(),
-                        uplink_port_fec: config
-                            .uplink_port_fec
-                            .map(|fec| fec.into()),
+                        addresses: config.addresses.clone(),
+                        switch: config.switch,
+                        uplink_port_speed: config.uplink_port_speed,
+                        uplink_port_fec: config.uplink_port_fec,
                         autoneg: config.autoneg,
                         bgp_peers: config
                             .bgp_peers
@@ -926,10 +916,6 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
-                                router_lifetime:
-                                    NexusTypes::RouterLifetimeConfig(
-                                        b.router_lifetime.as_u16(),
-                                    ),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {
@@ -985,22 +971,13 @@ impl ServiceInner {
                 bfd: config
                     .bfd
                     .iter()
-                    .map(|spec| {
-                        NexusTypes::BfdPeerConfig {
-                    detection_threshold: spec.detection_threshold,
-                    local: spec.local,
-                    mode: match spec.mode {
-                        omicron_common::api::external::BfdMode::SingleHop => {
-                            NexusTypes::BfdMode::SingleHop
-                        }
-                        omicron_common::api::external::BfdMode::MultiHop => {
-                            NexusTypes::BfdMode::MultiHop
-                        }
-                    },
-                    remote: spec.remote,
-                    required_rx: spec.required_rx,
-                    switch: spec.switch.into(),
-                }
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: spec.mode,
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch,
                     })
                     .collect(),
             }
@@ -1294,16 +1271,8 @@ impl ServiceInner {
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
 
-        let initial_trust_quorum_configuration = if let Some(peers) =
-            &config.trust_quorum_peers
-        {
-            let initial_membership: BTreeSet<_> =
-                peers.iter().cloned().collect();
-            bootstore
-                .init_rack(sled_plan.rack_id.into(), initial_membership)
-                .await?;
-
-            if TRUST_QUORUM_INTEGRATION_ENABLED {
+        let initial_trust_quorum_configuration =
+            if let Some(peers) = &config.trust_quorum_peers {
                 let tq_members: BTreeSet<BaseboardId> = peers
                     .iter()
                     .cloned()
@@ -1325,26 +1294,24 @@ impl ServiceInner {
                 })
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         // Save the relevant network config in the bootstore. We want this to
         // happen before we `initialize_sleds` so each scrimlet (including us)
         // can use its normal boot path of "read network config for our switch
         // from the bootstore".
-        let early_network_config = EarlyNetworkConfig {
-            generation: 1,
-            schema_version: 2,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: Some(config.rack_network_config.clone()),
-            },
-        };
+        //
+        // TODO: In future releases, we will get rid of the bootstore entirely,
+        // and early_network_config will be replicated by the trust quorum
+        // nodes.
+        let early_network_config =
+            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+                rack_network_config: config.rack_network_config.clone(),
+            })
+            .serialize_to_bootstore_with_generation(1);
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         rss_step.update(RssStep::NetworkConfigUpdate);
-        bootstore.update_network_config(early_network_config.into()).await?;
+        bootstore.update_network_config(early_network_config).await?;
 
         rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.
@@ -1388,10 +1355,18 @@ impl ServiceInner {
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
+        //
+        // lookup_uplinked_switch_zone_underlay_addrs() is shared with
+        // sled-agent, which has the rack network config in a watch channel that
+        // changes as Nexus pushes updates in via the bootstore. We don't have
+        // that, but can stuff the (unchanging) config into a watch channel to
+        // fit this API.
+        let (_rack_network_config_tx, rack_network_config_rx) =
+            watch::channel(config.rack_network_config.clone());
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_uplinked_switch_zone_underlay_addrs(
                 &resolver,
-                &config.rack_network_config,
+                &rack_network_config_rx,
                 // We willing to wait forever to find all the switches that have
                 // configured uplinks; if we attempt to proceed without doing
                 // so, we'll fail handing off to Nexus later. (Ideally we could
@@ -1764,9 +1739,9 @@ mod test {
     };
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-        OmicronZoneType, SledCpuFamily, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
+        SledRole, SvcsEnabledNotOnlineResult,
     };
     use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
@@ -1812,7 +1787,8 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
             },
             true,

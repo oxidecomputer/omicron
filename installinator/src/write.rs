@@ -31,6 +31,7 @@ use omicron_common::{
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
+use slog_error_chain::InlineErrorChain;
 use tokio::{
     fs,
     fs::File,
@@ -183,7 +184,7 @@ impl WriteDestination {
                         "identity" => ?disk.identity(),
                         "path" => disk.devfs_path().as_str(),
                         "slot" => disk.slot(),
-                        "boot_image_path_err" => %err,
+                        "boot_image_path_err" => err,
                         "zpool" => %disk.zpool_name(),
                     );
                 }
@@ -594,9 +595,13 @@ impl ArtifactsToWrite<'_> {
             cx,
         )
         .await
-        .map_err(|error| {
-            info!(log, "{error:?}"; "artifact_id" => ?self.host_phase_2_id);
-            error
+        .inspect_err(|error| {
+            info!(
+                log,
+                "Failed to write host phase 2 image";
+                "artifact_id" => ?self.host_phase_2_id,
+                InlineErrorChain::new(&error),
+            );
         })?;
 
         StepSuccess::new(block_size).into()

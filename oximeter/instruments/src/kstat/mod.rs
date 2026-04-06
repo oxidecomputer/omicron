@@ -87,9 +87,13 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(any(feature = "cpu", test))]
+pub mod cpu;
 #[cfg(any(feature = "datalink", test))]
 pub mod link;
 mod sampler;
+#[cfg(any(feature = "zone", test))]
+pub mod zone;
 
 pub use sampler::CollectionDetails;
 pub use sampler::ExpirationBehavior;
@@ -234,6 +238,7 @@ pub trait ConvertNamedData {
     fn as_u32(&self) -> Result<u32, Error>;
     fn as_i64(&self) -> Result<i64, Error>;
     fn as_u64(&self) -> Result<u64, Error>;
+    fn as_str(&self) -> Result<&str, Error>;
 }
 
 impl ConvertNamedData for NamedData<'_> {
@@ -276,6 +281,17 @@ impl ConvertNamedData for NamedData<'_> {
         } else {
             Err(Error::UnexpectedDataType {
                 expected: NamedType::UInt64,
+                found: self.data_type(),
+            })
+        }
+    }
+
+    fn as_str(&self) -> Result<&str, Error> {
+        if let NamedData::String(x) = self {
+            Ok(*x)
+        } else {
+            Err(Error::UnexpectedDataType {
+                expected: NamedType::String,
                 found: self.data_type(),
             })
         }

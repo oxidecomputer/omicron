@@ -17,6 +17,10 @@ target release (generation 1): unset
 active nexus zone generation: 1
 active nexus zones: inferred from generation
 not-yet nexus zones: inferred from generation
+cockroachdb settings:
+    state fingerprint::   (none)
+    version::::::::::::   (none)
+    preserve downgrade:   (not set)
 planner config:
     add zones with mupdate override:   false
 
@@ -45,6 +49,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
