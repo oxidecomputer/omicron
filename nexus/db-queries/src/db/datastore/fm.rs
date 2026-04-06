@@ -1005,6 +1005,9 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(
+                                "deleting orphaned sitrep metadata rows",
+                            )
                     })?;
                 sitreps_deleted += deleted as usize;
 
@@ -1036,6 +1039,10 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "deleting orphaned rows from child table \
+                                 {table:?}",
+                            ))
                     })?;
                 stats.rows_deleted += rows_deleted as usize;
 
@@ -2880,34 +2887,34 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
 
         // Shared counters for all tasks, with Display for panic messages.
-        #[derive(Clone)]
         struct Stats {
-            reads_ok: Arc<AtomicUsize>,
-            reads_err: Arc<AtomicUsize>,
-            inserts: Arc<AtomicUsize>,
-            gc_runs: Arc<AtomicUsize>,
+            reads_ok: AtomicUsize,
+            reads_err: AtomicUsize,
+            inserts: AtomicUsize,
+            gc_runs: AtomicUsize,
         }
 
         impl std::fmt::Display for Stats {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let Self { reads_ok, reads_err, inserts, gc_runs } = self;
                 write!(
                     f,
                     "reads_ok={}, reads_err={}, inserts={}, \
                      gc_runs={}",
-                    self.reads_ok.load(Ordering::Relaxed),
-                    self.reads_err.load(Ordering::Relaxed),
-                    self.inserts.load(Ordering::Relaxed),
-                    self.gc_runs.load(Ordering::Relaxed),
+                    reads_ok.load(Ordering::Relaxed),
+                    reads_err.load(Ordering::Relaxed),
+                    inserts.load(Ordering::Relaxed),
+                    gc_runs.load(Ordering::Relaxed),
                 )
             }
         }
 
-        let stats = Stats {
-            reads_ok: Arc::new(AtomicUsize::new(0)),
-            reads_err: Arc::new(AtomicUsize::new(0)),
-            inserts: Arc::new(AtomicUsize::new(0)),
-            gc_runs: Arc::new(AtomicUsize::new(0)),
-        };
+        let stats = Arc::new(Stats {
+            reads_ok: AtomicUsize::new(0),
+            reads_err: AtomicUsize::new(0),
+            inserts: AtomicUsize::new(0),
+            gc_runs: AtomicUsize::new(0),
+        });
 
         const NUM_WRITERS: usize = 3;
         const NUM_READERS: usize = 10;
@@ -2961,21 +2968,12 @@ mod tests {
                         }
                     }
 
-                    // Insert an empty child so the original isn't
-                    // current and can be deleted.
-                    let child_id = SitrepUuid::new_v4();
-                    let child = fm::Sitrep {
-                        metadata: fm::SitrepMetadata {
-                            id: child_id,
-                            parent_sitrep_id: Some(sitrep_id),
-                            time_created: Utc::now(),
-                            creator_id: OmicronZoneUuid::new_v4(),
-                            comment: "child".to_string(),
-                            inv_collection_id: CollectionUuid::new_v4(),
-                        },
-                        cases: Default::default(),
-                        ereports_by_id: Default::default(),
-                    };
+                    // Insert a child so the original isn't current
+                    // and can be deleted.
+                    let mut child =
+                        make_sitrep_with_cases(&opctx, &datastore).await;
+                    child.metadata.parent_sitrep_id = Some(sitrep_id);
+                    let child_id = child.id();
                     match datastore.fm_sitrep_insert(&opctx, child).await {
                         Ok(()) => {}
                         Err(InsertSitrepError::ParentNotCurrent(_)) => {
@@ -3031,6 +3029,8 @@ mod tests {
                         let guard = live_sitreps.lock().await;
                         if guard.is_empty() {
                             drop(guard);
+                            // No sitreps to read yet — yield to let
+                            // writer tasks make progress.
                             tokio::task::yield_now().await;
                             continue;
                         }
@@ -3041,7 +3041,8 @@ mod tests {
                     match datastore.fm_sitrep_read(&opctx, sitrep_id).await {
                         Ok(read_sitrep) => {
                             slog::debug!(
-                                &log, "read ok";
+                                &log,
+                                "read ok";
                                 "sitrep_id" => %sitrep_id,
                             );
                             // If this doesn't match, we have a torn read!
@@ -3050,7 +3051,8 @@ mod tests {
                         }
                         Err(Error::ObjectNotFound { .. }) => {
                             slog::debug!(
-                                &log, "read not found (expected)";
+                                &log,
+                                "read not found (expected)";
                                 "sitrep_id" => %sitrep_id,
                             );
                             stats.reads_err.fetch_add(1, Ordering::Relaxed);
@@ -3089,7 +3091,8 @@ mod tests {
                             )
                         });
                     slog::info!(
-                        &log, "GC pass complete";
+                        &log,
+                        "GC pass complete";
                         "sitreps_deleted" => result.sitreps_deleted,
                         "child_tables" => ?result.child_tables,
                     );
