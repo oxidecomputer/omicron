@@ -59,6 +59,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
+use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -1333,6 +1334,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
+        }
+        "fm_analysis" => {
+            print_task_fm_analysis(details);
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
@@ -3430,6 +3434,82 @@ mod ereporter_status_fields {
     pub const NUM_WIDTH: usize = 4;
 }
 
+fn print_task_fm_analysis(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::fm_analysis::{
+        AnalysisOutcome, Outcome, PreparationStatus,
+    };
+    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
+        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+    pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
+    pub const INV_ID: &str = "current inventory collection ID:";
+    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
+    println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
+    println!("    ===== ========== ======== =======");
+    let (prep_status, analysis_outcome) = match outcome {
+        Outcome::WaitingForInventory => {
+            println!(
+                "    analysis was not performed, as the inventory has\n    \
+                     not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
+            );
+            return;
+        }
+        Outcome::PreparationError(error) => {
+            println!(
+                "{ERRICON} failed to prepare analysis inputs:\n    {error}"
+            );
+            return;
+        }
+        Outcome::RanAnalysis { prep_status, outcome } => (prep_status, outcome),
+    };
+    match analysis_outcome {
+        AnalysisOutcome::Error(error) => {
+            println!("{ERRICON} analysis failed: {error}");
+        }
+        AnalysisOutcome::Unchanged => {
+            println!(
+                "    no changes from the current situation report ({:?})",
+                parent_sitrep_id
+            );
+        }
+        AnalysisOutcome::NotCommitted { sitrep_id, error } => {
+            println!(
+                "    analysis succeeded, but the sitrep was not committed!"
+            );
+            println!("    sitrep ID: {sitrep_id:?}");
+            println!("    error:     {error}");
+        }
+        AnalysisOutcome::Committed { sitrep_id } => {
+            println!("    analyzed the situation, and committed a new sitrep!");
+            println!("    sitrep ID: {sitrep_id:?}");
+        }
+    }
+    println!();
+
+    let PreparationStatus { errors, report } = prep_status;
+    println!("{}", report.display_multiline(4));
+    if !errors.is_empty() {
+        println!("{ERRICON}   errors preparing analysis inputs:");
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    // TODO(eliza): eventually there will also be a detailed analysis report,
+    // print that here as well...
+}
+
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
     match serde_json::from_value::<SitrepLoadStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -3459,8 +3539,10 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
-        orphaned_sitreps_found,
         orphaned_sitreps_deleted,
+        sitrep_metadata_batches,
+        batch_size,
+        child_tables,
         errors,
     } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
         Err(error) => {
@@ -3473,23 +3555,51 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
-    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
-    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
-    pub const ERRORS: &str = "errors:";
-    pub const WIDTH: usize =
-        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
-    pub const NUM_WIDTH: usize = 4;
+    const BASE_WIDTH: usize = 40;
+    const NUM_WIDTH: usize = 4;
+
+    // Ensure columns stay aligned even if a child table name is long.
+    let width = child_tables
+        .keys()
+        // We're using two spaces here to match the
+        // "orphaned {name} rows deleted" format string.
+        // Removing "{name}" leaves a space on either side.
+        .map(|name| "orphaned  rows deleted:".len() + name.len() + 1)
+        .fold(BASE_WIDTH, |w, l| w.max(l));
+
     if !errors.is_empty() {
-        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!(
+            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
+            "errors:",
+            errors.len()
+        );
         for error in errors {
             println!("      > {error}")
         }
     }
 
-    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!("    {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
     println!(
-        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+        "    {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
+        "orphaned sitreps deleted:"
     );
+    println!(
+        "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
+        "  batches:"
+    );
+
+    if child_tables.is_empty() {
+        eprintln!("(!)   warning: no child tables reported (likely a bug)");
+    }
+
+    for (table_name, stats) in &child_tables {
+        println!(
+            "    {:<width$}{:>NUM_WIDTH$}",
+            format!("orphaned {table_name} rows deleted:"),
+            stats.rows_deleted,
+        );
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+    }
 }
 
 fn print_task_fm_rendezvous(details: &serde_json::Value) {

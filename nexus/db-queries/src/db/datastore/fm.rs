@@ -28,8 +28,6 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::OptionalError;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
@@ -50,9 +48,88 @@ use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// Declares the [`SitrepChildTable`] enum and its associated table/column
+/// metadata. To add a new child table to the sitrep GC, just add a line within
+/// the call to "sitrep_child_tables!" below — the GC loop, omdb display,
+/// and completeness test all adapt automatically.
+///
+/// Syntax:
+/// ```ignore
+/// sitrep_child_tables! {
+///     // The sitrep ID column defaults to "sitrep_id"
+///     MyTable => { table: "fm_my_table" },
+///     // Override the column name if needed:
+///     OtherTable => { table: "fm_other_table", sitrep_id: "sitrep_col" },
+/// }
+/// ```
+macro_rules! sitrep_child_tables {
+    ($(
+        $(#[$meta:meta])*
+        $variant:ident => { table: $table:literal $(, sitrep_id: $col:literal)? }
+    ),* $(,)?) => {
+        /// Identifies a child table of `fm_sitrep` for use in
+        /// orphan-deletion queries. Using an enum (rather than raw strings)
+        /// ensures the table and column names are known at compile time,
+        /// preventing SQL injection.
+        #[derive(
+            Clone, Copy, Debug,
+            PartialEq, Eq, PartialOrd, Ord,
+            strum::VariantArray,
+        )]
+        pub enum SitrepChildTable {
+            $( $(#[$meta])* $variant, )*
+        }
+
+        impl SitrepChildTable {
+            pub const ALL: &[SitrepChildTable] =
+                <Self as strum::VariantArray>::VARIANTS;
+
+            pub const fn table_name(&self) -> &'static str {
+                match self { $( Self::$variant => $table, )* }
+            }
+
+            pub(crate) const fn sitrep_id_column(&self) -> &'static str {
+                match self {
+                    $( Self::$variant =>
+                        sitrep_child_tables!(@sitrep_id $($col)?),
+                    )*
+                }
+            }
+        }
+    };
+
+    // Default column name when none is specified.
+    (@sitrep_id) => { "sitrep_id" };
+    // Explicit column name override.
+    (@sitrep_id $col:literal) => { $col };
+}
+
+sitrep_child_tables! {
+    CaseEreport => { table: "fm_ereport_in_case" },
+    AlertRequest => { table: "fm_alert_request" },
+    Case => { table: "fm_case" },
+}
+
+/// Per-child-table statistics from a single GC pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ChildTableGcStats {
+    pub rows_deleted: usize,
+    pub batches: usize,
+}
+
+/// Result of [`DataStore::fm_sitrep_gc_orphans`], containing the number of
+/// rows deleted from each table.
+pub struct GcOrphansResult {
+    pub sitreps_deleted: usize,
+    pub sitrep_metadata_batches: usize,
+    pub batch_size: u32,
+    pub child_tables: BTreeMap<SitrepChildTable, ChildTableGcStats>,
+}
 
 impl DataStore {
     /// Reads the current [sitrep version](fm::SitrepVersion) from CRDB.
@@ -370,12 +447,14 @@ impl DataStore {
                         alert_requests.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
-                        created_sitrep_id: created_sitrep_id.into(),
-                        closed_sitrep_id: closed_sitrep_id.map(Into::into),
-                        de: de.into(),
-                        comment,
-                        ereports,
+                        metadata: fm::case::Metadata {
+                            created_sitrep_id: created_sitrep_id.into(),
+                            closed_sitrep_id: closed_sitrep_id.map(Into::into),
+                            de: de.into(),
+                            comment,
+                        },
                         alerts_requested,
+                        ereports,
                         support_bundles_requested: iddqd::IdOrdMap::new(),
                     }
                 }));
@@ -471,14 +550,22 @@ impl DataStore {
 
         // Create the sitrep metadata record.
         //
-        // NOTE: we must insert this record before anything else, because it's
-        // how orphaned sitreps are found when performing garbage collection.
-        // Were we to first insert some other records and insert the metadata
-        // record *last*, we could die when we have inserted some sitrep data
-        // but have yet to create the metadata record. If this occurs, those
-        // records could not be easily found by the garbage collection task.
-        // Those (unused) records would then be permanently leaked without
-        // manual human intervention to delete them.
+        // NOTE: we must insert this record before anything else, for two
+        // reasons:
+        //
+        // 1. It's how orphaned sitreps are found when performing garbage
+        //    collection. Were we to first insert some other records and
+        //    insert the metadata record *last*, we could die when we have
+        //    inserted some sitrep data but have yet to create the metadata
+        //    record.
+        //
+        // 2. The GC task's "deeply orphaned" cleanup deletes child rows
+        //    whose sitrep_id has no corresponding fm_sitrep row. If we
+        //    inserted children *before* metadata, a concurrent GC run
+        //    could incorrectly delete those in-progress children.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/10131 for
+        // details.
         diesel::insert_into(sitrep_dsl::fm_sitrep)
             .values(model::SitrepMetadata::from(sitrep.metadata))
             .execute_async(&*conn)
@@ -757,134 +844,16 @@ impl DataStore {
         builder.query()
     }
 
-    /// Lists all orphaned alternative sitreps (paginated by sitrep UUID).
-    ///
-    /// Orphaned sitreps are those which can never be committed to the
-    /// `fm_sitrep_history` table, because their parent sitrep ID is no longer
-    /// the current sitrep. Such sitreps are typically created when multiple
-    /// Nexus instances attempt to generate a new sitrep based on the same
-    /// parent. Only one of these sitreps can "win the race" to be committed to
-    /// the history, and any alternative sitreps are left orphaned. Orphaned
-    /// sitreps will never be read, since sitreps are only read when they are
-    /// current,[^1] so they can safely be deleted at any time.
-    ///
-    /// This query is used by the `fm_sitrep_gc` background task, which is
-    /// responsible for deleting orphaned sitreps.
-    ///
-    /// [^1]: Well, except for by OMDB, but that doesn't count.
-    pub async fn fm_sitrep_list_orphaned(
-        &self,
-        opctx: &OpContext,
-        pagparams: DataPageParams<'_, SitrepUuid>,
-    ) -> ListResultVec<SitrepUuid> {
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // TODO(eliza): there should probably be an authz object for the fm sitrep?
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-        let list = Self::list_orphaned_query(&pagparams)
-            .load_async::<Uuid>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .into_iter()
-            .map(|id| SitrepUuid::from_untyped_uuid(id))
-            .collect();
-        Ok(list)
-    }
-
-    /// Returns the CTE for listing orphaned sitreps.
-    ///
-    /// This query selects the IDs of sitreps where:
-    /// - the sitrep's ID is not present in the `fm_sitrep_history` table
-    /// - AND the sitrep's `parent_sitrep_id` is NOT the current sitrep
-    ///
-    /// This query is paginated by sitrep UUID to avoid performing a full-table
-    /// scan.
-    ///
-    /// This must be performed by a CTE in order to ensure that the
-    /// `fm_sitrep_history` table is locked while we are SELECTing orphans, so
-    /// that a new sitrep cannot be committed in the midst of the scan. If a new
-    /// current sitrep could be inserted while we are SELECTing, any potential
-    /// children of that sitrep would incorrectly be considered orphaned, as
-    /// their parent sitrep ID would not be the same as the one the SELECT
-    /// guards against selecting the children of. Therefore, we cannot perform
-    /// this query against the `watch` channel provided by the
-    /// `fm_sitrep_loader` background task, or by performing a separate query to
-    /// select the current sitrep ID before selecting orphans.
-    fn list_orphaned_query(
-        pagparams: &DataPageParams<'_, SitrepUuid>,
-    ) -> TypedSqlQuery<sql_types::Uuid> {
-        let mut builder = QueryBuilder::new();
-        builder.sql(
-            "WITH current_sitrep_id AS ( \
-                SELECT sitrep_id \
-                FROM omicron.public.fm_sitrep_history \
-                ORDER BY version DESC \
-                LIMIT 1 \
-            ),",
-        );
-
-        // batch AS (
-        //     SELECT s.id, s.parent_sitrep_id
-        //     FROM omicron.public.fm_sitrep s
-        //     WHERE s.id > $1
-        //     ORDER BY s.id
-        //     LIMIT $2
-        // )
-        let (dir, cmp) = match pagparams.direction {
-            PaginationOrder::Ascending => ("ASC", "> "),
-            PaginationOrder::Descending => ("DESC", "< "),
-        };
-        builder.sql(
-            "batch AS ( \
-                SELECT s.id, s.parent_sitrep_id \
-                FROM omicron.public.fm_sitrep s ",
-        );
-        if let Some(marker) = pagparams.marker {
-            builder
-                .sql("WHERE s.id ")
-                .sql(cmp)
-                .param()
-                .bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
-        }
-        builder
-            .sql(" ORDER BY s.id ")
-            .sql(dir)
-            .sql(" LIMIT ")
-            .param()
-            .bind::<sql_types::Int8, _>(i64::from(pagparams.limit.get()))
-            .sql(") ");
-
-        builder.sql(
-            "SELECT id \
-            FROM omicron.public.fm_sitrep \
-            WHERE id IN ( \
-                SELECT b.id \
-                FROM batch b \
-                LEFT JOIN omicron.public.fm_sitrep_history h \
-                    ON h.sitrep_id = b.id \
-                WHERE \
-                    h.sitrep_id IS NULL \
-                AND ( \
-                    ( \
-                        b.parent_sitrep_id IS NULL AND \
-                        (SELECT sitrep_id from current_sitrep_id) IS NOT NULL \
-                    ) \
-                    OR b.parent_sitrep_id != ( \
-                        SELECT sitrep_id FROM current_sitrep_id \
-                    ) \
-                ) \
-            );",
-        );
-        builder.query()
-    }
-
     /// Deletes all sitreps with the provided IDs.
-    pub async fn fm_sitrep_delete_all(
+    #[cfg(test)]
+    async fn fm_sitrep_delete_all(
         &self,
         opctx: &OpContext,
         ids: impl IntoIterator<Item = SitrepUuid>,
     ) -> Result<usize, Error> {
+        use nexus_db_errors::OptionalError;
+        use nexus_db_errors::TransactionError;
+
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
@@ -988,6 +957,244 @@ impl DataStore {
         Ok(sitreps_deleted)
     }
 
+    /// Garbage-collects all orphaned sitrep data in a single transaction:
+    ///
+    /// 1. Deletes orphaned `fm_sitrep` metadata rows (not in history,
+    ///    stale parent).
+    /// 2. Deletes child rows from each child table that are not referenced
+    ///    by sitreps (their `sitrep_id` doesn't exist in `fm_sitrep`).
+    ///    This catches children of sitreps deleted in step 1 (within
+    ///    this transaction) AND children leaked by the race in
+    ///    <https://github.com/oxidecomputer/omicron/issues/10131>.
+    ///
+    /// The transaction prevents torn reads (see
+    /// <https://github.com/oxidecomputer/omicron/issues/9594>).
+    /// Child table cleanup is paginated by `sitrep_id` to avoid full
+    /// table scans.
+    pub async fn fm_sitrep_gc_orphans(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<GcOrphansResult, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // TODO(sean): This should probably be paginated.
+        //
+        // We need to be careful about separating "delete sitrep" from "delete
+        // sitrep child tables" to avoid having torn reads - but we could delete
+        // a bounded number of sitreps, and all their tables, and repeatedly
+        // issue transactions until no additional orphaned sitreps exist.
+        let result = self
+            .transaction_retry_wrapper("fm_sitrep_gc_orphans")
+            .transaction(&conn, |conn| {
+                async move {
+                    // Step 1: Delete orphaned fm_sitrep metadata rows.
+                    let mut sitreps_deleted = 0usize;
+                    let mut sitrep_metadata_batches = 0usize;
+                    {
+                        let mut marker = SitrepUuid::nil();
+                        loop {
+                            sitrep_metadata_batches += 1;
+                            let (deleted, next_marker) =
+                                Self::delete_orphaned_sitrep_metadata_query(
+                                    marker,
+                                    SQL_BATCH_SIZE,
+                                )
+                                .get_result_async::<(i64, Option<Uuid>)>(&conn)
+                                .await?;
+                            sitreps_deleted += deleted as usize;
+
+                            match next_marker {
+                                Some(m) => {
+                                    marker = SitrepUuid::from_untyped_uuid(m)
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+
+                    // Step 2: For each child table, paginate through and
+                    // delete rows whose sitrep_id no longer exists in
+                    // fm_sitrep.
+                    let mut child_tables = BTreeMap::new();
+                    for &table in SitrepChildTable::ALL {
+                        let stats = child_tables
+                            .entry(table)
+                            .or_insert(ChildTableGcStats::default());
+                        let mut marker = SitrepUuid::nil();
+                        loop {
+                            stats.batches += 1;
+                            let (rows_deleted, next_marker) =
+                                Self::deeply_orphaned_batch_query(
+                                    table,
+                                    marker,
+                                    SQL_BATCH_SIZE,
+                                )
+                                .get_result_async::<(i64, Option<Uuid>)>(&conn)
+                                .await?;
+                            stats.rows_deleted += rows_deleted as usize;
+
+                            match next_marker {
+                                Some(m) => {
+                                    marker = SitrepUuid::from_untyped_uuid(m);
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+
+                    Ok(GcOrphansResult {
+                        sitreps_deleted,
+                        sitrep_metadata_batches,
+                        batch_size: SQL_BATCH_SIZE.get(),
+                        child_tables,
+                    })
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        slog::info!(
+            &opctx.log,
+            "sitrep GC completed";
+            "sitreps_deleted" => result.sitreps_deleted,
+            "child_tables" => ?result.child_tables,
+        );
+
+        Ok(result)
+    }
+
+    /// Builds a DELETE query that removes orphaned `fm_sitrep` metadata
+    /// rows in a single paginated batch (sitreps not in history whose
+    /// parent is not current). Returns (rows_deleted, next_marker).
+    ///
+    /// The SQL text of this query is in
+    /// `nexus/db-queries/tests/output/delete_orphaned_sitrep_metadata.sql`.
+    fn delete_orphaned_sitrep_metadata_query(
+        marker: SitrepUuid,
+        batch_size: std::num::NonZeroU32,
+    ) -> TypedSqlQuery<(sql_types::Int8, sql_types::Nullable<sql_types::Uuid>)>
+    {
+        let mut builder = QueryBuilder::new();
+        builder.sql(
+            "WITH current_sitrep_id AS (\
+                SELECT sitrep_id \
+                FROM omicron.public.fm_sitrep_history \
+                ORDER BY version DESC \
+                LIMIT 1\
+            ), \
+            batch AS (\
+                SELECT s.id \
+                FROM omicron.public.fm_sitrep s \
+                LEFT JOIN omicron.public.fm_sitrep_history h \
+                    ON h.sitrep_id = s.id \
+                WHERE \
+                    h.sitrep_id IS NULL \
+                AND s.id > ",
+        );
+        builder.param().bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
+        builder.sql(
+            " AND (\
+                    (\
+                        s.parent_sitrep_id IS NULL AND \
+                        (SELECT sitrep_id FROM current_sitrep_id) IS NOT NULL\
+                    ) \
+                    OR s.parent_sitrep_id != (\
+                        SELECT sitrep_id FROM current_sitrep_id\
+                    )\
+                ) \
+                ORDER BY s.id \
+                LIMIT ",
+        );
+        builder.param().bind::<sql_types::Int8, _>(i64::from(batch_size.get()));
+        builder.sql(
+            "), \
+            deleted AS (\
+                DELETE FROM omicron.public.fm_sitrep \
+                WHERE id IN (SELECT id FROM batch) \
+                RETURNING id\
+            ) \
+            SELECT \
+                (SELECT COUNT(*) FROM deleted) AS rows_deleted, \
+                CASE WHEN (SELECT COUNT(*) FROM batch) >= ",
+        );
+        builder.param().bind::<sql_types::Int8, _>(i64::from(batch_size.get()));
+        builder.sql(
+            " THEN (SELECT MAX(id) FROM batch) \
+                ELSE NULL END AS next_marker",
+        );
+        builder.query()
+    }
+
+    /// Builds a single-round-trip query that:
+    /// 1. Finds a batch of distinct `sitrep_id` values in the child table
+    /// 2. Deletes rows whose `sitrep_id` has no corresponding `fm_sitrep`
+    /// 3. Returns (rows_deleted, next_marker) where next_marker is NULL
+    ///    when there are no more pages
+    ///
+    /// The SQL text of this query is in
+    /// `nexus/db-queries/tests/output/deeply_orphaned_batch_query.sql`.
+    fn deeply_orphaned_batch_query(
+        table: SitrepChildTable,
+        marker: SitrepUuid,
+        batch_size: std::num::NonZeroU32,
+    ) -> TypedSqlQuery<(sql_types::Int8, sql_types::Nullable<sql_types::Uuid>)>
+    {
+        let tbl = table.table_name();
+        let col = table.sitrep_id_column();
+        let mut builder = QueryBuilder::new();
+
+        // batch: paginated scan of distinct sitrep_ids
+        builder.sql("WITH batch AS (SELECT DISTINCT ");
+        builder.sql(col);
+        builder.sql(" FROM omicron.public.");
+        builder.sql(tbl);
+        builder
+            .sql(" WHERE ")
+            .sql(col)
+            .sql(" > ")
+            .param()
+            .bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
+        builder.sql(" ORDER BY ");
+        builder.sql(col);
+        builder
+            .sql(" LIMIT ")
+            .param()
+            .bind::<sql_types::Int8, _>(i64::from(batch_size.get()));
+
+        // deleted: delete deeply-orphaned rows in this batch
+        builder.sql("), deleted AS (DELETE FROM omicron.public.");
+        builder.sql(tbl);
+        builder.sql(" WHERE ");
+        builder.sql(col);
+        builder.sql(
+            " IN (\
+                SELECT b.",
+        );
+        builder.sql(col);
+        builder.sql(
+            " FROM batch b \
+            LEFT JOIN omicron.public.fm_sitrep s ON s.id = b.",
+        );
+        builder.sql(col);
+        builder.sql(" WHERE s.id IS NULL) RETURNING ");
+        builder.sql(col);
+
+        // Final SELECT: return deleted count + next marker
+        builder.sql(
+            ") SELECT \
+                (SELECT COUNT(*) FROM deleted) AS rows_deleted, \
+                CASE WHEN (SELECT COUNT(*) FROM batch) >= ",
+        );
+        builder.param().bind::<sql_types::Int8, _>(i64::from(batch_size.get()));
+        builder.sql(" THEN (SELECT MAX(");
+        builder.sql(col);
+        builder.sql(") FROM batch) ELSE NULL END AS next_marker");
+        builder.query()
+    }
+
     pub async fn fm_sitrep_version_list(
         &self,
         opctx: &OpContext,
@@ -1035,8 +1242,8 @@ pub enum InsertSitrepError {
 mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
-    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::QueryBuilder;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
     use diesel::pg::Pg;
@@ -1047,6 +1254,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
@@ -1092,50 +1300,73 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // Ensure we have the right query contents.
     #[tokio::test]
-    async fn expectorate_sitrep_list_orphans_no_marker() {
-        let pagparams = DataPageParams {
-            marker: None,
-            limit: std::num::NonZeroU32::new(420).unwrap(),
-            direction: dropshot::PaginationOrder::Descending,
-        };
-        let query = DataStore::list_orphaned_query(&pagparams);
+    async fn expectorate_deeply_orphaned_batch_query() {
+        let query = DataStore::deeply_orphaned_batch_query(
+            SitrepChildTable::CaseEreport,
+            SitrepUuid::nil(),
+            SQL_BATCH_SIZE,
+        );
         expectorate_query_contents(
             &query,
-            "tests/output/sitrep_list_orphans_no_marker.sql",
+            "tests/output/deeply_orphaned_batch_query.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn expectorate_sitrep_list_orphans_with_marker() {
-        let pagparams = DataPageParams {
-            marker: Some(&SitrepUuid::nil()),
-            limit: std::num::NonZeroU32::new(420).unwrap(),
-            direction: dropshot::PaginationOrder::Descending,
-        };
-        let query = DataStore::list_orphaned_query(&pagparams);
-        expectorate_query_contents(
-            &query,
-            "tests/output/sitrep_list_orphans_with_marker.sql",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn explain_sitrep_list_orphaned_query() {
-        let logctx = dev::test_setup_log("explain_sitrep_list_orphaned_query");
+    async fn explain_deeply_orphaned_batch_query() {
+        let logctx = dev::test_setup_log("explain_deeply_orphaned_batch_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let pagparams = DataPageParams {
-            marker: None,
-            limit: std::num::NonZeroU32::new(420).unwrap(),
-            direction: dropshot::PaginationOrder::Descending,
-        };
-        let query = DataStore::list_orphaned_query(&pagparams);
+        let query = DataStore::deeply_orphaned_batch_query(
+            SitrepChildTable::CaseEreport,
+            SitrepUuid::nil(),
+            SQL_BATCH_SIZE,
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_delete_orphaned_sitrep_metadata() {
+        let query = DataStore::delete_orphaned_sitrep_metadata_query(
+            SitrepUuid::nil(),
+            SQL_BATCH_SIZE,
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/delete_orphaned_sitrep_metadata.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_delete_orphaned_sitrep_metadata_query() {
+        let logctx = dev::test_setup_log(
+            "explain_delete_orphaned_sitrep_metadata_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::delete_orphaned_sitrep_metadata_query(
+            SitrepUuid::nil(),
+            SQL_BATCH_SIZE,
+        );
         let explanation = query
             .explain_async(&conn)
             .await
@@ -1449,93 +1680,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_sitrep_list_orphaned() {
-        let logctx = dev::test_setup_log("test_sitrep_list_orphaned");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // First, insert an initial sitrep. This should succeed.
-        let sitrep1 = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "test sitrep v1".to_string(),
-                time_created: Utc::now(),
-                parent_sitrep_id: None,
-            },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-        datastore
-            .fm_sitrep_insert(&opctx, sitrep1.clone())
-            .await
-            .expect("inserting initial sitrep should succeed");
-
-        // Now, create some orphaned sitreps which also have no parent.
-        let mut expected_orphans = BTreeSet::new();
-        for i in 1..5 {
-            insert_orphan(
-                &datastore,
-                &opctx,
-                &mut expected_orphans,
-                None,
-                1,
-                i,
-            )
-            .await;
-        }
-
-        // List orphans at the current version.
-        let v1 = datastore
-            .fm_current_sitrep_version(&opctx)
-            .await
-            .unwrap()
-            .expect("should have a version");
-        assert_eq!(dbg!(&v1).id, sitrep1.metadata.id);
-        let listed_orphans = list_orphans(&datastore, &opctx).await.unwrap();
-        assert_eq!(dbg!(&listed_orphans), &expected_orphans);
-
-        // Next, create a new sitrep which descends from sitrep 1.
-        let sitrep2 = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "test sitrep v2".to_string(),
-                time_created: Utc::now(),
-                parent_sitrep_id: Some(sitrep1.metadata.id),
-            },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-        datastore
-            .fm_sitrep_insert(&opctx, sitrep2.clone())
-            .await
-            .expect("inserting child sitrep should succeed");
-
-        // Now, create some orphaned sitreps which also descend from sitrep 1.
-        for i in 1..5 {
-            insert_orphan(
-                &datastore,
-                &opctx,
-                &mut expected_orphans,
-                Some(sitrep1.metadata.id),
-                2,
-                i,
-            )
-            .await;
-        }
-
-        // List orphans at the current version.
-        let listed_orphans = list_orphans(&datastore, &opctx).await.unwrap();
-        assert_eq!(dbg!(&listed_orphans), &expected_orphans);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
     /// Assert that two sitreps are equal, skipping timestamp fields in ereports
     /// and sitrep metadata. These timestamps may lose precision when
     /// round-tripping through cockroachdb and may no longer be "equal".
@@ -1555,10 +1699,13 @@ mod tests {
         for case in &that.cases {
             let fm::Case {
                 id,
-                created_sitrep_id,
-                closed_sitrep_id,
-                comment,
-                de,
+                metadata:
+                    fm::case::Metadata {
+                        created_sitrep_id,
+                        closed_sitrep_id,
+                        comment,
+                        de,
+                    },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: _,
@@ -1578,18 +1725,21 @@ mod tests {
             // :(
             assert_eq!(&expected.id, id, "while checking case {case_id}");
             assert_eq!(
-                &expected.created_sitrep_id, created_sitrep_id,
+                &expected.metadata.created_sitrep_id, created_sitrep_id,
                 "while checking case {case_id}"
             );
             assert_eq!(
-                &expected.closed_sitrep_id, closed_sitrep_id,
+                &expected.metadata.closed_sitrep_id, closed_sitrep_id,
                 "while checking case {case_id}"
             );
             assert_eq!(
-                &expected.comment, comment,
+                &expected.metadata.comment, comment,
                 "while checking case {case_id}"
             );
-            assert_eq!(&expected.de, de, "while checking case {case_id}");
+            assert_eq!(
+                &expected.metadata.de, de,
+                "while checking case {case_id}"
+            );
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
@@ -1640,61 +1790,6 @@ mod tests {
                 alerts_requested, &expected.alerts_requested,
                 "while checking case {case_id}"
             );
-        }
-    }
-
-    async fn list_orphans(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> Result<BTreeSet<SitrepUuid>, Error> {
-        let mut listed_orphans = BTreeSet::new();
-        let mut paginator = Paginator::new(
-            SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Descending,
-        );
-        while let Some(p) = paginator.next() {
-            let orphans = datastore
-                .fm_sitrep_list_orphaned(&opctx, p.current_pagparams())
-                .await?;
-            paginator = p.found_batch(&orphans, &|id| *id);
-            listed_orphans.extend(orphans);
-        }
-        Ok(listed_orphans)
-    }
-
-    async fn insert_orphan(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        orphans: &mut BTreeSet<SitrepUuid>,
-        parent_sitrep_id: Option<SitrepUuid>,
-        v: usize,
-        i: usize,
-    ) {
-        let sitrep = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: format!("test sitrep v{i}; orphan {i}"),
-                time_created: Utc::now(),
-                parent_sitrep_id,
-            },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-        match datastore.fm_sitrep_insert(&opctx, sitrep).await {
-            Ok(_) => {
-                panic!("inserting sitrep v{v} orphan {i} should not succeed")
-            }
-            Err(InsertSitrepError::ParentNotCurrent(id)) => {
-                orphans.insert(id);
-            }
-            Err(InsertSitrepError::Other(e)) => {
-                panic!(
-                    "expected inserting sitrep v{v} orphan {i} to fail because \
-                     its parent is out of date, but saw an unexpected error: {e}"
-                );
-            }
         }
     }
 
@@ -1776,13 +1871,15 @@ mod tests {
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
-                created_sitrep_id: sitrep_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "my cool case".to_string(),
+                },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "my cool case".to_string(),
             }
         };
 
@@ -1809,13 +1906,15 @@ mod tests {
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
-                created_sitrep_id: sitrep_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "break in case of emergency".to_string(),
+                },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "break in case of emergency".to_string(),
             }
         };
 
@@ -2163,6 +2262,600 @@ mod tests {
             Err(Error::NotFound { message: _ }) => {}
             Err(e) => panic!("unexpected error: {e}"),
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that deeply orphaned child rows (whose fm_sitrep metadata
+    /// row doesn't exist) are cleaned up by `fm_sitrep_gc_orphans`.
+    #[tokio::test]
+    async fn test_gc_deeply_orphaned_children() {
+        let logctx = dev::test_setup_log("test_gc_deeply_orphaned_children");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // We need at least one sitrep in history so the GC doesn't think
+        // everything is orphaned in a vacuously-true way.
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1)
+            .await
+            .expect("inserting initial sitrep should succeed");
+
+        // Insert child rows with a sitrep_id that does NOT exist in
+        // fm_sitrep. This simulates the race described in issue #10131:
+        // the metadata row was GC'd, but the inserter created children
+        // after that.
+        let ghost_sitrep_id = SitrepUuid::new_v4();
+        let ghost_case_id = CaseUuid::new_v4();
+
+        // Insert a deeply-orphaned case.
+        diesel::insert_into(case_dsl::fm_case)
+            .values(model::fm::CaseMetadata {
+                id: ghost_case_id.into(),
+                sitrep_id: ghost_sitrep_id.into(),
+                de: nexus_types::fm::DiagnosisEngineKind::PowerShelf.into(),
+                created_sitrep_id: ghost_sitrep_id.into(),
+                closed_sitrep_id: None,
+                comment: "deeply orphaned case".to_string(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned case");
+
+        // Insert a deeply-orphaned alert request.
+        diesel::insert_into(alert_req_dsl::fm_alert_request)
+            .values(model::fm::AlertRequest {
+                id: AlertUuid::new_v4().into(),
+                sitrep_id: ghost_sitrep_id.into(),
+                requested_sitrep_id: ghost_sitrep_id.into(),
+                case_id: ghost_case_id.into(),
+                class: AlertClass::Probe.into(),
+                payload: serde_json::json!({}),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned alert request");
+
+        // Verify the rows exist.
+        let cases_before: i64 = case_dsl::fm_case
+            .filter(case_dsl::sitrep_id.eq(ghost_sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(cases_before, 1, "case should exist before GC");
+
+        let alerts_before: i64 = alert_req_dsl::fm_alert_request
+            .filter(
+                alert_req_dsl::sitrep_id
+                    .eq(ghost_sitrep_id.into_untyped_uuid()),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(alerts_before, 1, "alert request should exist before GC");
+
+        // Verify the ghost sitrep does NOT exist in fm_sitrep.
+        let sitrep_exists: i64 = sitrep_dsl::fm_sitrep
+            .filter(sitrep_dsl::id.eq(ghost_sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(sitrep_exists, 0, "ghost sitrep should NOT exist");
+
+        // Run the unified GC, which should clean up the deeply-orphaned
+        // children (and any normal orphans too).
+        let result =
+            datastore.fm_sitrep_gc_orphans(opctx).await.expect("GC orphans");
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::Case].rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::AlertRequest].rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::CaseEreport].rows_deleted,
+            0, // we didn't insert any
+        );
+
+        // Verify the rows are gone.
+        let cases_after: i64 = case_dsl::fm_case
+            .filter(case_dsl::sitrep_id.eq(ghost_sitrep_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(cases_after, 0, "case should be gone after GC");
+
+        let alerts_after: i64 = alert_req_dsl::fm_alert_request
+            .filter(
+                alert_req_dsl::sitrep_id
+                    .eq(ghost_sitrep_id.into_untyped_uuid()),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(alerts_after, 0, "alert request should be gone after GC");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that the deeply-orphaned cleanup correctly paginates across
+    /// multiple batches when there are more distinct sitrep_ids than the
+    /// batch size.
+    #[tokio::test]
+    async fn test_gc_deeply_orphaned_pagination() {
+        let logctx = dev::test_setup_log("test_gc_deeply_orphaned_pagination");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert an initial sitrep so the system isn't empty.
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1)
+            .await
+            .expect("inserting initial sitrep should succeed");
+
+        // Insert deeply-orphaned cases across 5 distinct sitrep_ids.
+        // We'll use a batch size of 2, forcing at least 3 batches.
+        let num_ghost_sitreps = 5;
+        let mut ghost_sitrep_ids = Vec::new();
+        for _ in 0..num_ghost_sitreps {
+            let ghost_sitrep_id = SitrepUuid::new_v4();
+            ghost_sitrep_ids.push(ghost_sitrep_id);
+            diesel::insert_into(case_dsl::fm_case)
+                .values(model::fm::CaseMetadata {
+                    id: CaseUuid::new_v4().into(),
+                    sitrep_id: ghost_sitrep_id.into(),
+                    de: nexus_types::fm::DiagnosisEngineKind::PowerShelf.into(),
+                    created_sitrep_id: ghost_sitrep_id.into(),
+                    closed_sitrep_id: None,
+                    comment: "deeply orphaned".to_string(),
+                })
+                .execute_async(&*conn)
+                .await
+                .expect("inserting deeply orphaned case");
+        }
+
+        // Verify all rows exist.
+        let cases_before: i64 = case_dsl::fm_case
+            .filter(
+                case_dsl::sitrep_id.eq_any(
+                    ghost_sitrep_ids
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            cases_before, num_ghost_sitreps as i64,
+            "all ghost cases should exist"
+        );
+
+        // Run the deeply-orphaned batch query manually with a small
+        // batch size (2) to force pagination across multiple batches.
+        let batch_size = std::num::NonZeroU32::new(2).unwrap();
+        let mut total_deleted = 0usize;
+        let mut marker = SitrepUuid::nil();
+        let mut iterations = 0;
+
+        loop {
+            let result = DataStore::deeply_orphaned_batch_query(
+                SitrepChildTable::Case,
+                marker,
+                batch_size,
+            )
+            .get_result_async::<(i64, Option<Uuid>)>(&*conn)
+            .await
+            .expect("batch query should succeed");
+
+            let (rows_deleted, next_marker) = result;
+            total_deleted += rows_deleted as usize;
+            iterations += 1;
+
+            match next_marker {
+                Some(m) => marker = SitrepUuid::from_untyped_uuid(m),
+                None => break,
+            }
+        }
+
+        assert_eq!(
+            total_deleted, num_ghost_sitreps,
+            "should have deleted all {num_ghost_sitreps} deeply orphaned cases"
+        );
+        assert!(
+            iterations >= 3,
+            "with batch_size=2 and {num_ghost_sitreps} sitreps, \
+             should need at least 3 iterations, got {iterations}"
+        );
+
+        // Verify all rows are gone.
+        let cases_after: i64 = case_dsl::fm_case
+            .filter(
+                case_dsl::sitrep_id.eq_any(
+                    ghost_sitrep_ids
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(cases_after, 0, "all ghost cases should be deleted");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Regression test: with batch_size=1, the old `>=` marker would
+    /// infinite-loop on a non-orphaned sitrep_id. With `>`, the loop
+    /// must terminate.
+    #[tokio::test]
+    async fn test_gc_deeply_orphaned_batch_size_one() {
+        let logctx =
+            dev::test_setup_log("test_gc_deeply_orphaned_batch_size_one");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert an initial sitrep so the system isn't empty.
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1)
+            .await
+            .expect("inserting initial sitrep should succeed");
+
+        // Insert deeply-orphaned cases across 3 distinct sitrep_ids.
+        let num_ghost_sitreps = 3;
+        let mut ghost_sitrep_ids = Vec::new();
+        for _ in 0..num_ghost_sitreps {
+            let ghost_sitrep_id = SitrepUuid::new_v4();
+            ghost_sitrep_ids.push(ghost_sitrep_id);
+            diesel::insert_into(case_dsl::fm_case)
+                .values(model::fm::CaseMetadata {
+                    id: CaseUuid::new_v4().into(),
+                    sitrep_id: ghost_sitrep_id.into(),
+                    de: nexus_types::fm::DiagnosisEngineKind::PowerShelf.into(),
+                    created_sitrep_id: ghost_sitrep_id.into(),
+                    closed_sitrep_id: None,
+                    comment: "deeply orphaned".to_string(),
+                })
+                .execute_async(&*conn)
+                .await
+                .expect("inserting deeply orphaned case");
+        }
+
+        // Run the deeply-orphaned batch query with batch_size=1.
+        // This would infinite-loop with the old `>=` marker.
+        let batch_size = std::num::NonZeroU32::new(1).unwrap();
+        let mut total_deleted = 0usize;
+        let mut marker = SitrepUuid::nil();
+        let mut iterations = 0;
+
+        loop {
+            let result = DataStore::deeply_orphaned_batch_query(
+                SitrepChildTable::Case,
+                marker,
+                batch_size,
+            )
+            .get_result_async::<(i64, Option<Uuid>)>(&*conn)
+            .await
+            .expect("batch query should succeed");
+
+            let (rows_deleted, next_marker) = result;
+            total_deleted += rows_deleted as usize;
+            iterations += 1;
+
+            match next_marker {
+                Some(m) => marker = SitrepUuid::from_untyped_uuid(m),
+                None => break,
+            }
+        }
+
+        assert_eq!(
+            total_deleted, num_ghost_sitreps,
+            "should have deleted all {num_ghost_sitreps} deeply orphaned cases"
+        );
+        assert_eq!(
+            iterations,
+            num_ghost_sitreps + 1,
+            "with batch_size=1 and {num_ghost_sitreps} ghost sitreps, \
+             should need exactly {n} iterations (one per ghost + one \
+             final empty batch)",
+            n = num_ghost_sitreps + 1,
+        );
+
+        // Verify all rows are gone.
+        let cases_after: i64 = case_dsl::fm_case
+            .filter(
+                case_dsl::sitrep_id.eq_any(
+                    ghost_sitrep_ids
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(cases_after, 0, "all ghost cases should be deleted");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // ---------------------------------------------------------------
+    // SitrepChildTableCounts: queries each table listed in
+    // `SitrepChildTable::ALL` to count the number of rows matching a
+    // given `sitrep_id`. Used by tests to verify that orphan GC
+    // actually cleaned up the expected rows.
+    //
+    // Mirrors `BlueprintTableCounts` from deployment.rs; the
+    // completeness test below ensures every `fm_*` child table with
+    // a `sitrep_id` column is covered by `SitrepChildTable`.
+    // ---------------------------------------------------------------
+
+    struct SitrepChildTableCounts {
+        counts: BTreeMap<String, i64>,
+    }
+
+    impl SitrepChildTableCounts {
+        /// Query row counts for each child table tracked by
+        /// `SitrepChildTable`, for the given `sitrep_id`.
+        async fn new(
+            datastore: &DataStore,
+            sitrep_id: SitrepUuid,
+        ) -> SitrepChildTableCounts {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let mut counts = BTreeMap::new();
+
+            for &table in SitrepChildTable::ALL {
+                let mut query = QueryBuilder::new();
+                query.sql("SELECT COUNT(*) FROM ");
+                query.sql(table.table_name());
+                query.sql(" WHERE ");
+                query.sql(table.sitrep_id_column());
+                query.sql(" = ");
+                query.param().bind::<diesel::sql_types::Uuid, _>(
+                    sitrep_id.into_untyped_uuid(),
+                );
+
+                let count: i64 = query
+                    .query::<diesel::sql_types::BigInt>()
+                    .get_result_async(&*conn)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "failed to count rows in {}: {e}",
+                            table.table_name()
+                        )
+                    });
+                counts.insert(table.table_name().to_string(), count);
+            }
+
+            let table_counts = SitrepChildTableCounts { counts };
+
+            // Verify no new fm_* child tables were added without
+            // updating SitrepChildTable.
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
+                panic!("{msg}");
+            }
+
+            table_counts
+        }
+
+        fn all_empty(&self) -> bool {
+            self.counts.values().all(|&count| count == 0)
+        }
+
+        fn empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        fn non_empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        fn tables_checked(&self) -> BTreeSet<&str> {
+            self.counts.keys().map(|s| s.as_str()).collect()
+        }
+
+        /// Verify no new fm_* tables were added without updating
+        /// `SitrepChildTable`.
+        async fn verify_all_tables_covered(
+            &self,
+            datastore: &DataStore,
+        ) -> Result<(), String> {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // fm_* tables that are NOT children of fm_sitrep and are
+            // intentionally ignored.
+            let tables_ignored: BTreeSet<&str> =
+                ["fm_sitrep", "fm_sitrep_history"].into_iter().collect();
+            let tables_checked = self.tables_checked();
+
+            let mut query = QueryBuilder::new();
+            query.sql(
+                "SELECT table_name FROM information_schema.tables \
+                 WHERE table_name LIKE 'fm\\_%'",
+            );
+            let tables_unchecked: Vec<String> = query
+                .query::<diesel::sql_types::Text>()
+                .load_async(&*conn)
+                .await
+                .expect("failed to query information_schema for fm_* tables")
+                .into_iter()
+                .filter(|f: &String| {
+                    let t = f.as_str();
+                    !tables_ignored.contains(t) && !tables_checked.contains(t)
+                })
+                .collect();
+
+            if !tables_unchecked.is_empty() {
+                Err(format!(
+                    "found fm_* child table(s) not covered by \
+                     `SitrepChildTable`: {}\n\n\
+                     If you added a new fm_* child table, add a variant \
+                     to `SitrepChildTable` and update the orphan GC code \
+                     in `fm_sitrep_gc_orphans`.\n\n\
+                     If your new table should NOT be covered by orphan GC, \
+                     either drop the `fm_` prefix or add it to \
+                     `tables_ignored` in this test.",
+                    tables_unchecked.join(", ")
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    async fn ensure_sitrep_fully_populated(
+        datastore: &DataStore,
+        sitrep_id: SitrepUuid,
+    ) {
+        let counts = SitrepChildTableCounts::new(datastore, sitrep_id).await;
+
+        let empty = counts.empty_tables();
+        if !empty.is_empty() {
+            panic!(
+                "expected all fm_* child tables to be populated for \
+                 sitrep {sitrep_id}, but these were empty: {empty:?}\n\n\
+                 If every sitrep should have rows in this table, this \
+                 is a bug in the test fixture. Otherwise, add an \
+                 exception to ensure_sitrep_fully_populated()."
+            );
+        }
+    }
+
+    async fn ensure_sitrep_children_fully_deleted(
+        datastore: &DataStore,
+        sitrep_id: SitrepUuid,
+    ) {
+        let counts = SitrepChildTableCounts::new(datastore, sitrep_id).await;
+
+        assert!(
+            counts.all_empty(),
+            "sitrep {sitrep_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_representative_sitrep_child_tables() {
+        let logctx =
+            dev::test_setup_log("test_representative_sitrep_child_tables");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Build a representative sitrep that populates every child table.
+        let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let sitrep_id = sitrep.id();
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Verify every child table has ≥1 row, AND that every fm_*
+        // child table in the schema is covered by SitrepChildTable.
+        ensure_sitrep_fully_populated(&datastore, sitrep_id).await;
+
+        // Insert a child sitrep so the original is no longer current
+        // and can be deleted.
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                fm::Sitrep {
+                    metadata: fm::SitrepMetadata {
+                        parent_sitrep_id: Some(sitrep_id),
+                        id: SitrepUuid::new_v4(),
+                        time_created: Utc::now(),
+                        creator_id: OmicronZoneUuid::new_v4(),
+                        comment: "child sitrep".to_string(),
+                        inv_collection_id: CollectionUuid::new_v4(),
+                    },
+                    cases: Default::default(),
+                    ereports_by_id: Default::default(),
+                },
+            )
+            .await
+            .expect("failed to insert child sitrep");
+
+        // Delete the original sitrep.
+        let deleted = datastore
+            .fm_sitrep_delete_all(&opctx, vec![sitrep_id])
+            .await
+            .expect("failed to delete sitrep");
+        assert_eq!(deleted, 1);
+
+        // Verify all child rows are gone.
+        ensure_sitrep_children_fully_deleted(&datastore, sitrep_id).await;
 
         db.terminate().await;
         logctx.cleanup_successful();

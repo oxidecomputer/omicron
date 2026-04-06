@@ -517,15 +517,6 @@ move into the client package instead.
 """
 
 [[dependency_filter_rules]]
-ancestor = "dns-server"
-client = "dns-service-client"
-evaluation = "not-deployed"
-note = """
-DNS server depends on itself only to provide TransientServer, which is not a
-deployed component.
-"""
-
-[[dependency_filter_rules]]
 ancestor = "omicron-sled-agent"
 client = "sled-agent-client"
 evaluation = "not-deployed"

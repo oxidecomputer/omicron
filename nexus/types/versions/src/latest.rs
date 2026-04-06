@@ -469,7 +469,8 @@ pub mod subnet_pool {
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolSiloPath;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolSiloUpdate;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolUpdate;
-    pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolUtilization;
+    // Utilization type from SUBNET_POOL_UTILIZATION_REMAINING.
+    pub use crate::v2026_03_25_00::subnet_pool::SubnetPoolUtilization;
 
     // View types from FLOATING_IP_ALLOCATOR_UPDATE (pool_type removed).
     pub use crate::v2026_01_22_00::subnet_pool::SiloSubnetPool;

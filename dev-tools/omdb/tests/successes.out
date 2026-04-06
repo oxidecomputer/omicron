@@ -347,6 +347,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "fm_analysis"
+    performs fault management analysis and updates the sitrep
+
+
 task: "fm_rendezvous"
     updates externally visible database tables to match the current fault
     management sitrep
@@ -687,6 +691,24 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "fm_analysis"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    parent sitrep ID:                None
+    current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    FAULT MANAGEMENT ANALYSIS SUMMARY
+    ===== ========== ======== =======
+/!\ analysis failed: FM analysis is not yet implemented
+
+    fault management analysis inputs
+    ----- ---------- -------- ------
+    parent sitrep:        <none>
+    inventory collection: ..........<REDACTED_UUID>...........
+    no new ereports since the parent sitrep
+    no cases copied forward
+
+
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -713,8 +735,15 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    orphaned sitreps found:      0
-    orphaned sitreps deleted:    0
+    batch size:                               1000
+    orphaned sitreps deleted:                    0
+      batches:                                   1
+    orphaned fm_alert_request rows deleted:      0
+      batches:                                   1
+    orphaned fm_case rows deleted:               0
+      batches:                                   1
+    orphaned fm_ereport_in_case rows deleted:    0
+      batches:                                   1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
@@ -1320,6 +1349,24 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "fm_analysis"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    parent sitrep ID:                None
+    current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    FAULT MANAGEMENT ANALYSIS SUMMARY
+    ===== ========== ======== =======
+/!\ analysis failed: FM analysis is not yet implemented
+
+    fault management analysis inputs
+    ----- ---------- -------- ------
+    parent sitrep:        <none>
+    inventory collection: ..........<REDACTED_UUID>...........
+    no new ereports since the parent sitrep
+    no cases copied forward
+
+
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1346,8 +1393,15 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    orphaned sitreps found:      0
-    orphaned sitreps deleted:    0
+    batch size:                               1000
+    orphaned sitreps deleted:                    0
+      batches:                                   1
+    orphaned fm_alert_request rows deleted:      0
+      batches:                                   1
+    orphaned fm_case rows deleted:               0
+      batches:                                   1
+    orphaned fm_ereport_in_case rows deleted:    0
+      batches:                                   1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s

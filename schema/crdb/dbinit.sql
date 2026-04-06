@@ -149,9 +149,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
      */
     initialized BOOL NOT NULL,
 
-    /* Used to configure the updates service URL */
-    tuf_base_url STRING(512),
-
     /* The IPv6 underlay /56 prefix for the rack */
     rack_subnet INET
 );
@@ -8315,7 +8312,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '246.0.0', NULL)
+    (TRUE, NOW(), NOW(), '248.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
