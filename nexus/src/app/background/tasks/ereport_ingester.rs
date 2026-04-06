@@ -75,6 +75,8 @@ impl SpEreportIngester {
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
+        use gateway_client::types::{SpIdentifier, SpIgnition, SpIgnitionInfo};
+
         let mut status = SpEreportIngesterStatus::default();
         if self.disabled {
             status.disabled = true;
@@ -119,9 +121,9 @@ impl SpEreportIngester {
             return status;
         };
 
-        // Ask MGS for the list of all SP identifiers. If a request to the first
-        // gateway fails, we'll try again for every resolved MGS before giving
-        // up.
+        // Ask MGS for the list of all present SP identifiers. If a request to
+        // the first gateway fails, we'll try again for every resolved MGS
+        // before giving up.
         let sps = {
             let mut gateways = mgs_clients.iter();
             loop {
@@ -132,7 +134,7 @@ impl SpEreportIngester {
                     status.errors.push(MSG.to_string());
                     return status;
                 };
-                match client.sp_all_ids().await {
+                match client.ignition_list().await {
                     Ok(ids) => break ids.into_inner(),
                     Err(err) => {
                         const MSG: &str = "failed to list SP IDs from MGS";
@@ -154,12 +156,25 @@ impl SpEreportIngester {
         let mut total_ereports = 0;
         let mut total_new_ereports = 0;
 
-        for gateway_client::types::SpIdentifier { type_, slot } in sps {
+        for SpIgnitionInfo { details, id } in sps {
+            let ignition_type = match details {
+                SpIgnition::Yes { id, .. } => id,
+                SpIgnition::No => {
+                    // This SP is not present; skip it.
+                    status.sps_not_present += 1;
+                    continue;
+                }
+            };
+            let SpIdentifier { type_, slot } = id;
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
                         // XXX(eliza): that's so many little strings... :(
                         ("sp_type".to_string(), type_.to_string()),
+                        (
+                            "ignition_type".to_string(),
+                            format!("{ignition_type:?}"),
+                        ),
                         ("slot".to_string(), slot.to_string()),
                     ]));
                     let clients = mgs_clients.clone();
@@ -168,7 +183,12 @@ impl SpEreportIngester {
                         let status = ingester
                             .ingest_sp_ereports(opctx, &clients, type_, slot)
                             .await?;
-                        Some(SpEreporterStatus { sp_type: type_, slot, status })
+                        Some(SpEreporterStatus {
+                            sp_type: type_,
+                            slot,
+                            ignition_type,
+                            status,
+                        })
                     }
                 })
                 .await;
@@ -198,6 +218,7 @@ impl SpEreportIngester {
                 status.sps.len();
                 "total_ereports" => total_ereports,
                 "new_ereports" => total_new_ereports,
+                "absent_sps" => status.sps_not_present,
             );
             self.fm_analysis.activate();
         } else {
@@ -208,6 +229,7 @@ impl SpEreportIngester {
                 status.sps.len();
                 "total_ereports" => total_ereports,
                 "new_ereports" => total_new_ereports,
+                "absent_sps" => status.sps_not_present,
             );
         }
 
@@ -482,7 +504,9 @@ mod tests {
             "fm analysis task should be activated"
         );
 
-        for SpEreporterStatus { sp_type, slot, status } in &activation1.sps {
+        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
+            &activation1.sps
+        {
             assert_eq!(
                 &status.errors,
                 &Vec::<String>::new(),

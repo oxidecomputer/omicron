@@ -852,6 +852,7 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
 
@@ -859,6 +860,7 @@ pub struct SpEreportIngesterStatus {
 pub struct SpEreporterStatus {
     pub sp_type: SpType,
     pub slot: u16,
+    pub ignition_type: gateway_client::types::SpIgnitionSystemType,
     #[serde(flatten)]
     pub status: EreporterStatus,
 }
