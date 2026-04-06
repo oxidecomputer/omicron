@@ -29,8 +29,11 @@ pub async fn spawn_collection_steps(
         return Ok(CollectionStepOutput::Skipped);
     }
 
-    let Some(mgs_client) = cache.get_or_initialize_mgs_client(collection).await
-    else {
+    let mgs_client_option = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = cache.get_or_initialize_mgs_client(collection) => result,
+    };
+    let Some(mgs_client) = mgs_client_option else {
         bail!("Could not initialize MGS client");
     };
 
@@ -39,8 +42,13 @@ pub async fn spawn_collection_steps(
         format!("Failed to create SP task dump directory {sp_dumps_dir}")
     })?;
 
+    let available_sps = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = steps::sled_cubby::get_available_sps(&mgs_client) => result?,
+    };
+
     let mut extra_steps: Vec<CollectionStep> = vec![];
-    for sp in steps::sled_cubby::get_available_sps(&mgs_client).await? {
+    for sp in available_sps {
         extra_steps.push(CollectionStep::new(
             format!("SP dump for {:?}", sp),
             Box::new({
@@ -75,17 +83,25 @@ async fn collect_sp_dump(
     Ok(CollectionStepOutput::None)
 }
 
+// Download and save SP task dumps.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// HTTP requests to MGS are eagerly cancelled via `select!`.
 async fn save_sp_dumps(
     collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
     sp_dumps_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
-    let dump_count = mgs_client
-        .sp_task_dump_count(&sp.type_, sp.slot)
-        .await
-        .context("failed to get task dump count from SP")?
-        .into_inner();
+    let dump_count = tokio::select! {
+        _ = collection.cancelled() => return Ok(()),
+        result = mgs_client.sp_task_dump_count(&sp.type_, sp.slot) => {
+            result.context("failed to get task dump count from SP")?
+                .into_inner()
+        }
+    };
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
     tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
@@ -93,14 +109,14 @@ async fn save_sp_dumps(
     })?;
 
     for i in 0..dump_count {
-        if collection.is_cancelled() {
-            break;
-        }
-        let task_dump = mgs_client
-            .sp_task_dump_get(&sp.type_, sp.slot, i)
-            .await
-            .with_context(|| format!("failed to get task dump {i} from SP"))?
-            .into_inner();
+        let task_dump = tokio::select! {
+            _ = collection.cancelled() => return Ok(()),
+            result = mgs_client.sp_task_dump_get(&sp.type_, sp.slot, i) => {
+                result
+                    .with_context(|| format!("failed to get task dump {i} from SP"))?
+                    .into_inner()
+            }
+        };
 
         let zip_bytes = base64::engine::general_purpose::STANDARD
             .decode(task_dump.base64_zip)

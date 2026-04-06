@@ -37,11 +37,10 @@ use slog_error_chain::InlineErrorChain;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
+use tokio_util::sync::CancellationToken;
 use tufaceous_artifact::ArtifactHash;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
@@ -55,7 +54,7 @@ pub struct BundleCollection {
     request: BundleRequest,
     bundle: SupportBundle,
     transfer_chunk_size: NonZeroU64,
-    cancelled: AtomicBool,
+    cancellation_token: CancellationToken,
 }
 
 impl BundleCollection {
@@ -76,7 +75,7 @@ impl BundleCollection {
             request,
             bundle,
             transfer_chunk_size,
-            cancelled: AtomicBool::new(false),
+            cancellation_token: CancellationToken::new(),
         }
     }
 
@@ -105,8 +104,27 @@ impl BundleCollection {
     }
 
     /// Returns true if this bundle collection has been cancelled.
+    ///
+    /// Use for cooperative cancellation checks before cancel-unsafe
+    /// operations (filesystem writes, `spawn_blocking`).
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
+        self.cancellation_token.is_cancelled()
+    }
+
+    /// Returns a reference to the cancellation token.
+    ///
+    /// Pass to helper functions that need to `select!` on cancellation
+    /// independently (e.g., futures inside `FuturesUnordered`).
+    pub fn cancellation_token(&self) -> &CancellationToken {
+        &self.cancellation_token
+    }
+
+    /// Returns a future that completes when cancellation is requested.
+    ///
+    /// Use in `tokio::select!` with cancel-safe operations (HTTP requests,
+    /// DB queries) for immediate cancellation at await points.
+    pub async fn cancelled(&self) {
+        self.cancellation_token.cancelled().await
     }
 
     /// Collect the bundle within Nexus, and store it on a target sled.
@@ -132,17 +150,25 @@ impl BundleCollection {
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
         // Spawn a background task that periodically checks whether this
-        // bundle should still be collected. If not, it sets `self.cancelled`.
+        // bundle should still be collected. If not, it cancels the
+        // `CancellationToken`.
         //
-        // The collection loop in `run_collect_bundle_steps` checks this flag
-        // before spawning new steps, and long-running steps check it at
-        // their loop points. When cancellation is detected, the collection
-        // stops spawning new work and drains all in-flight tasks before
-        // returning. This ensures all `spawn_blocking` work (from
-        // `tokio::fs::write` etc.) completes before the TempDir is dropped.
+        // Cancellation is hybrid:
         //
-        // Previous iterations used `tokio::select!` to race cancellation
-        // against collection. This had two problems:
+        // - Cancel-safe operations (HTTP requests, DB queries) use
+        //   `tokio::select!` with the token for immediate cancellation.
+        //   Dropping these futures is safe — no local side effects.
+        //
+        // - Cancel-unsafe operations (filesystem writes via `tokio::fs`,
+        //   `spawn_blocking`) use cooperative `is_cancelled()` checks.
+        //   These are never dropped mid-flight, ensuring all
+        //   `spawn_blocking` work completes before the TempDir is dropped.
+        //
+        // `run_collect_bundle_steps` checks the token before spawning new
+        // steps and drains all in-flight tasks before returning.
+        //
+        // Previous iterations used a top-level `tokio::select!` to race
+        // cancellation against the entire collection. This had two problems:
         //
         // 1. Dropping the collection future left `spawn_blocking` file
         //    writes in-flight, racing with TempDir cleanup.
@@ -153,9 +179,8 @@ impl BundleCollection {
         //    connection pool claim, causing deadlocks.
         //    See: https://github.com/oxidecomputer/omicron/issues/9259
         //
-        // The current design avoids both issues: cancellation is
-        // cooperative (no future dropping), and the DB check runs in a
-        // separate spawned task (no connection pool contention).
+        // The current design avoids both: cancel-unsafe futures are never
+        // dropped, and the DB check runs in a separate spawned task.
         let cancel_task = tokio::spawn({
             let this = Arc::clone(self);
             async move { this.check_for_cancellation().await }
@@ -295,7 +320,7 @@ impl BundleCollection {
     // Indefinitely perform periodic checks about whether or not we should
     // cancel the bundle.
     //
-    // Sets `self.cancelled` and returns if:
+    // Cancels `self.cancellation_token` and returns if:
     // - The bundle state is no longer SupportBundleState::Collecting
     //   (which happens if the bundle has been explicitly cancelled, or
     //   if the backing storage has been expunged).
@@ -332,11 +357,11 @@ impl BundleCollection {
                 }
                 Ok(_) => {
                     // Not collecting, for any reason: Time to exit
-                    self.cancelled.store(true, Ordering::Relaxed);
+                    self.cancellation_token.cancel();
                     return;
                 }
                 Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
-                    self.cancelled.store(true, Ordering::Relaxed);
+                    self.cancellation_token.cancel();
                     return;
                 }
                 Err(err) => {
@@ -519,8 +544,9 @@ impl BundleCollection {
     // an Ok(SupportBundleCollectionReport). Any failures from this function
     // will prevent the support bundle from being collected altogether.
     //
-    // Cancellation is cooperative: `self.is_cancelled()` is checked by
-    // `run_collect_bundle_steps` and by individual steps at loop points.
+    // Cancellation is hybrid: cancel-safe operations (HTTP, DB) use
+    // `select!` with the token for immediate cancellation; cancel-unsafe
+    // operations (filesystem writes) use cooperative `is_cancelled()`.
     // In-flight work is drained before returning.
     async fn collect_bundle_as_file(
         self: &Arc<Self>,

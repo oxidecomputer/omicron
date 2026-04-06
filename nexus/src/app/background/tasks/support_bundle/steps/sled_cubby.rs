@@ -34,12 +34,16 @@ pub async fn collect(
         return Ok(CollectionStepOutput::Skipped);
     }
 
-    let mgs_client_option =
-        cache.get_or_initialize_mgs_client(&collection).await;
-    let nexus_sleds = cache
-        .get_or_initialize_all_sleds(&collection)
-        .await
-        .map_or(&[][..], |v| v.as_slice());
+    let mgs_client_option = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = cache.get_or_initialize_mgs_client(&collection) => result,
+    };
+    let nexus_sleds = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = cache.get_or_initialize_all_sleds(&collection) => {
+            result.map_or(&[][..], |v| v.as_slice())
+        }
+    };
 
     let Some(mgs_client) = mgs_client_option else {
         bail!("Could not initialize MGS client");
@@ -51,6 +55,12 @@ pub async fn collect(
     Ok(CollectionStepOutput::None)
 }
 
+// Write a mapping of sled cubbies to serial numbers and UUIDs.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// HTTP requests to MGS are eagerly cancelled via `select!`.
 async fn write_sled_cubby_info(
     collection: &BundleCollection,
     log: &Logger,
@@ -64,9 +74,12 @@ async fn write_sled_cubby_info(
         uuid: Option<Uuid>,
     }
 
-    let available_sps = get_available_sps(&mgs_client)
-        .await
-        .context("failed to get available SPs")?;
+    let available_sps = tokio::select! {
+        _ = collection.cancelled() => return Ok(()),
+        result = get_available_sps(&mgs_client) => {
+            result.context("failed to get available SPs")?
+        }
+    };
 
     // We can still get a useful mapping of cubby to serial using just the data from MGS.
     let mut nexus_map: BTreeMap<_, _> = nexus_sleds
@@ -78,19 +91,21 @@ async fn write_sled_cubby_info(
     for sp in
         available_sps.into_iter().filter(|sp| matches!(sp.type_, SpType::Sled))
     {
-        if collection.is_cancelled() {
-            break;
-        }
-        let sp_state = match mgs_client.sp_get(&sp.type_, sp.slot).await {
-            Ok(s) => s.into_inner(),
-            Err(e) => {
-                error!(log,
-                    "Failed to get SP state for sled_info.json";
-                    "cubby" => sp.slot,
-                    "component" => %sp.type_,
-                    "error" => InlineErrorChain::new(&e)
-                );
-                continue;
+        let sp_state = tokio::select! {
+            _ = collection.cancelled() => return Ok(()),
+            result = mgs_client.sp_get(&sp.type_, sp.slot) => {
+                match result {
+                    Ok(s) => s.into_inner(),
+                    Err(e) => {
+                        error!(log,
+                            "Failed to get SP state for sled_info.json";
+                            "cubby" => sp.slot,
+                            "component" => %sp.type_,
+                            "error" => InlineErrorChain::new(&e)
+                        );
+                        continue;
+                    }
+                }
             }
         };
 

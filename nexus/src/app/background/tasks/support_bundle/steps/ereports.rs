@@ -64,6 +64,12 @@ pub async fn collect(
     Ok(CollectionStepOutput::Ereports(status))
 }
 
+// Save ereports to disk, paginating through the database.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// DB queries are eagerly cancelled via `select!`.
 async fn save_ereports(
     collection: &BundleCollection,
     log: &Logger,
@@ -78,13 +84,18 @@ async fn save_ereports(
         dropshot::PaginationOrder::Ascending,
     );
     while let Some(p) = paginator.next() {
-        if collection.is_cancelled() {
-            break;
-        }
-        let ereports = datastore
-            .ereport_fetch_matching(&opctx, &filters, &p.current_pagparams())
-            .await
-            .map_err(|e| e.internal_context("failed to query for ereports"))?;
+        // Cancel-safe: DB query can be eagerly cancelled.
+        let pagparams = p.current_pagparams();
+        let ereports = tokio::select! {
+            _ = collection.cancelled() => break,
+            result = datastore.ereport_fetch_matching(
+                &opctx, &filters, &pagparams
+            ) => {
+                result.map_err(|e| {
+                    e.internal_context("failed to query for ereports")
+                })?
+            }
+        };
         paginator = p.found_batch(&ereports, &|ereport| {
             (ereport.restart_id.into_untyped_uuid(), ereport.ena)
         });

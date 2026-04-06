@@ -26,39 +26,41 @@ pub async fn collect(
         return Ok(CollectionStepOutput::Skipped);
     }
 
-    // Collect reconfigurator state
     const NMAX_BLUEPRINTS: usize = 300;
-    match reconfigurator_state_load(&opctx, &datastore, NMAX_BLUEPRINTS).await {
-        Ok(state) => {
-            let file_path = dir.join("reconfigurator_state.json");
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&file_path)
-                .with_context(|| format!("failed to open {}", file_path))?;
-            serde_json::to_writer_pretty(&file, &state).with_context(|| {
-                format!(
-                    "failed to serialize reconfigurator state to {}",
-                    file_path
-                )
-            })?;
-            info!(
-                log,
-                "Support bundle: collected reconfigurator state";
-                "target_blueprint" => ?state.target_blueprint,
-                "num_blueprints" => state.blueprints.len(),
-                "num_collections" => state.collections.len(),
-            );
-        }
-        Err(err) => {
-            warn!(
-                log,
-                "Support bundle: failed to collect reconfigurator state";
-                "err" => ?err,
-            );
+    let state = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = reconfigurator_state_load(&opctx, &datastore, NMAX_BLUEPRINTS) => {
+            match result {
+                Ok(state) => state,
+                Err(err) => {
+                    warn!(
+                        log,
+                        "Support bundle: failed to collect reconfigurator state";
+                        "err" => ?err,
+                    );
+                    return Ok(CollectionStepOutput::None);
+                }
+            }
         }
     };
+
+    let file_path = dir.join("reconfigurator_state.json");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&file_path)
+        .with_context(|| format!("failed to open {}", file_path))?;
+    serde_json::to_writer_pretty(&file, &state).with_context(|| {
+        format!("failed to serialize reconfigurator state to {}", file_path)
+    })?;
+    info!(
+        log,
+        "Support bundle: collected reconfigurator state";
+        "target_blueprint" => ?state.target_blueprint,
+        "num_blueprints" => state.blueprints.len(),
+        "num_collections" => state.collections.len(),
+    );
 
     Ok(CollectionStepOutput::None)
 }
