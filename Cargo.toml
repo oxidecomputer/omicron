@@ -582,7 +582,6 @@ kstat-rs = "0.2.4"
 libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
-libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
@@ -830,6 +829,7 @@ tofino = { git = "https://github.com/oxidecomputer/tofino" }
 tokio = "1.47.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
+tokio-test = "0.4.5"
 tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
@@ -1065,9 +1065,6 @@ opt-level = 3
 
 # [patch."https://github.com/oxidecomputer/diesel-dtrace"]
 # diesel-dtrace = { path = "../diesel-dtrace" }
-
-# [patch."https://github.com/oxidecomputer/falcon"]
-# libfalcon = { path = "../falcon/lib" }
 
 # [patch."https://github.com/oxidecomputer/propolis"]
 # propolis-client = { path = "../propolis/lib/propolis-client" }

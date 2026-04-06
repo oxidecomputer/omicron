@@ -31,14 +31,12 @@ impl AllCases {
     pub(super) fn new(
         log: slog::Logger,
         sitrep_id: SitrepUuid,
-        parent_sitrep: Option<&fm::Sitrep>,
+        inputs: &crate::analysis_input::Input,
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
-        // Copy forward any open cases from the parent sitrep.
-        // If a case was closed in the parent sitrep, skip it.
-        let cases: IdOrdMap<_> = parent_sitrep
+        let cases = inputs
+            .cases()
             .iter()
-            .flat_map(|s| s.open_cases())
             .map(|case| {
                 let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
                 CaseBuilder::new(&log, sitrep_id, case.clone(), rng)
@@ -61,10 +59,12 @@ impl AllCases {
             iddqd::id_ord_map::Entry::Vacant(entry) => {
                 let case = fm::Case {
                     id,
-                    created_sitrep_id: self.sitrep_id,
-                    closed_sitrep_id: None,
-                    de,
-                    comment: String::new(),
+                    metadata: fm::case::Metadata {
+                        created_sitrep_id: self.sitrep_id,
+                        closed_sitrep_id: None,
+                        de,
+                        comment: String::new(),
+                    },
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
@@ -114,8 +114,8 @@ impl CaseBuilder {
     ) -> Self {
         let log = log.new(slog::o!(
             "case_id" => case.id.to_string(),
-            "de" => case.de.to_string(),
-            "created_sitrep_id" => case.created_sitrep_id.to_string(),
+            "de" => case.metadata.de.to_string(),
+            "created_sitrep_id" => case.metadata.created_sitrep_id.to_string(),
         ));
         Self { log, case, sitrep_id, rng }
     }
@@ -149,7 +149,7 @@ impl CaseBuilder {
     }
 
     pub fn close(&mut self) {
-        self.case.closed_sitrep_id = Some(self.sitrep_id);
+        self.case.metadata.closed_sitrep_id = Some(self.sitrep_id);
 
         slog::info!(&self.log, "case closed");
     }
@@ -202,7 +202,7 @@ impl CaseBuilder {
 
     /// Mutably borrows the case's `comment` field (i.e. to append to it).
     pub fn comment_mut(&mut self) -> &mut String {
-        &mut self.case.comment
+        &mut self.case.metadata.comment
     }
 }
 

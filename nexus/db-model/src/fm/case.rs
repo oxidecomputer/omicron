@@ -54,10 +54,13 @@ impl CaseMetadata {
     ) -> Self {
         let fm::Case {
             id,
-            created_sitrep_id,
-            closed_sitrep_id,
-            de,
-            comment,
+            metadata:
+                fm::case::Metadata {
+                    created_sitrep_id,
+                    closed_sitrep_id,
+                    de,
+                    comment,
+                },
             alerts_requested: _,
             support_bundles_requested: _,
             ereports: _,
