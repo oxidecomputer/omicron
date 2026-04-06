@@ -787,25 +787,10 @@ impl DataStore {
                 })?;
         }
 
-        if !support_bundles_requested.is_empty() {
-            diesel::insert_into(
-                support_bundle_req_dsl::fm_support_bundle_request,
-            )
-            .values(support_bundles_requested)
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context(
-                        "failed to insert support bundle requests",
-                    )
-            })?;
-        }
-
-        // Insert child data selection rows.
-        Self::data_selections_insert_on_conn(
+        Self::fm_support_bundle_requests_insert_on_conn(
             &conn,
             sitrep_id,
+            support_bundles_requested,
             bundle_data_selections_requested,
         )
         .await?;
@@ -847,16 +832,33 @@ impl DataStore {
             .map(|_| ())
     }
 
-    /// Decompose [`BundleDataSelection`]s into child table rows and insert them.
-    async fn data_selections_insert_on_conn(
+    /// Insert support bundle request rows and their child data selection rows.
+    async fn fm_support_bundle_requests_insert_on_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sitrep_id: SitrepUuid,
+        requests: Vec<model::fm::SupportBundleRequest>,
         data_selections: Vec<(SupportBundleUuid, BundleDataSelection)>,
     ) -> Result<(), InsertSitrepError> {
         use model::fm::{DataSelectionFlags, Ereports, HostInfo};
+        use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+
+        if !requests.is_empty() {
+            diesel::insert_into(
+                support_bundle_req_dsl::fm_support_bundle_request,
+            )
+            .values(requests)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert support bundle requests",
+                    )
+            })?;
+        }
         let mut flags_rows = Vec::new();
         let mut host_info_rows = Vec::new();
         let mut ereports_rows = Vec::new();
@@ -2776,7 +2778,70 @@ mod tests {
             .await
             .expect("inserting deeply orphaned alert request");
 
+        // Insert a deeply-orphaned support bundle request with data
+        // selection child rows (flags + host_info).
+        let ghost_request_id = SupportBundleUuid::new_v4();
+        {
+            use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
+            use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+
+            diesel::insert_into(
+                support_bundle_req_dsl::fm_support_bundle_request,
+            )
+            .values(model::fm::SupportBundleRequest {
+                id: ghost_request_id.into(),
+                sitrep_id: ghost_sitrep_id.into(),
+                requested_sitrep_id: ghost_sitrep_id.into(),
+                case_id: ghost_case_id.into(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned support bundle request");
+
+            diesel::insert_into(
+                flags_dsl::fm_support_bundle_request_data_selection_flags,
+            )
+            .values(model::fm::DataSelectionFlags {
+                sitrep_id: ghost_sitrep_id.into(),
+                request_id: ghost_request_id.into(),
+                include_reconfigurator: true,
+                include_sled_cubby_info: false,
+                include_sp_dumps: true,
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned data selection flags");
+
+            diesel::insert_into(
+                host_info_dsl::fm_support_bundle_request_data_selection_host_info,
+            )
+            .values(model::fm::HostInfo {
+                sitrep_id: ghost_sitrep_id.into(),
+                request_id: ghost_request_id.into(),
+                all_sleds: true,
+                sled_ids: Vec::new(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned data selection host_info");
+        }
+
         // Verify the rows exist.
+        let sb_requests_before: i64 =
+            support_bundle_req_dsl::fm_support_bundle_request
+                .filter(
+                    support_bundle_req_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            sb_requests_before, 1,
+            "support bundle request should exist before GC"
+        );
+
         let cases_before: i64 = case_dsl::fm_case
             .filter(case_dsl::sitrep_id.eq(ghost_sitrep_id.into_untyped_uuid()))
             .count()
@@ -2821,6 +2886,29 @@ mod tests {
             result.child_tables[&SitrepChildTable::CaseEreport].rows_deleted,
             0, // we didn't insert any
         );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::SupportBundleRequest]
+                .rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables
+                [&SitrepChildTable::SupportBundleRequestDataSelectionFlags]
+                .rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables
+                [&SitrepChildTable::SupportBundleRequestDataSelectionHostInfo]
+                .rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables
+                [&SitrepChildTable::SupportBundleRequestDataSelectionEreports]
+                .rows_deleted,
+            0, // we didn't insert any
+        );
 
         // Verify the rows are gone.
         let cases_after: i64 = case_dsl::fm_case
@@ -2841,6 +2929,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(alerts_after, 0, "alert request should be gone after GC");
+
+        let sb_requests_after: i64 =
+            support_bundle_req_dsl::fm_support_bundle_request
+                .filter(
+                    support_bundle_req_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            sb_requests_after, 0,
+            "support bundle request should be gone after GC"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

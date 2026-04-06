@@ -153,7 +153,7 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
-                    Self::support_bundle_data_selection_insert(
+                    Self::support_bundle_data_selection_insert_on_conn(
                         &conn,
                         bundle.id.into(),
                         // TODO(#10062): The data selection should be passed in
@@ -376,7 +376,7 @@ impl DataStore {
                         .iter()
                         .map(|id| id.into_untyped_uuid())
                         .collect();
-                    Self::support_bundle_data_selection_delete(
+                    Self::support_bundle_data_selection_delete_on_conn(
                         conn,
                         bundle_uuids_to_delete,
                     )
@@ -575,7 +575,7 @@ impl DataStore {
     /// and insert them for the given bundle.
     ///
     /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
-    async fn support_bundle_data_selection_insert(
+    async fn support_bundle_data_selection_insert_on_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         bundle_id: SupportBundleUuid,
         data_selection: BundleDataSelection,
@@ -634,7 +634,7 @@ impl DataStore {
     ///
     /// Both callers run this within a transaction alongside the bundle row
     /// delete, since the data selection tables have no ON DELETE CASCADE.
-    async fn support_bundle_data_selection_delete(
+    async fn support_bundle_data_selection_delete_on_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         bundle_ids: Vec<Uuid>,
     ) -> Result<(), diesel::result::Error> {
@@ -708,7 +708,7 @@ impl DataStore {
                         }
                     }
 
-                    Self::support_bundle_data_selection_delete(&conn, vec![id])
+                    Self::support_bundle_data_selection_delete_on_conn(&conn, vec![id])
                         .await?;
                     diesel::delete(dsl::support_bundle)
                         .filter(dsl::id.eq(id))
@@ -1251,6 +1251,64 @@ mod test {
             .support_bundle_data_selection_get(&opctx, &authz_bundle)
             .await
             .expect_err("Data selection should not exist after bundle delete");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_delete_wrong_state_preserves_data_selection() {
+        let logctx = dev::test_setup_log(
+            "test_bundle_delete_wrong_state_preserves_data_selection",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create a bundle (starts in Collecting state).
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "test wrong-state delete",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        // Verify data selection exists.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection_before = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Data selection should exist");
+
+        // Try to delete the bundle while it's still Collecting — should fail.
+        datastore
+            .support_bundle_delete(&opctx, &authz_bundle)
+            .await
+            .expect_err(
+                "Should not be able to delete bundle in Collecting state",
+            );
+
+        // Verify the bundle still exists.
+        let observed = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should still exist after failed delete");
+        assert_eq!(observed.state, SupportBundleState::Collecting);
+
+        // Verify data selection rows were not partially deleted.
+        let selection_after = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Data selection should still exist after failed delete");
+        assert_eq!(selection_before, selection_after);
 
         db.terminate().await;
         logctx.cleanup_successful();

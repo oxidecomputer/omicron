@@ -13,7 +13,7 @@ use nexus_db_schema::schema::{
 
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::support_bundle as support_bundle_types;
-use nexus_types::fm::ereport::EreportFilters;
+use nexus_types::fm::ereport::{EreportFilters, EreportFiltersParams};
 use nexus_types::support_bundle::BundleData;
 use nexus_types::support_bundle::SledSelection;
 use omicron_uuid_kinds::CaseKind;
@@ -238,16 +238,14 @@ impl TryFrom<Ereports> for BundleData {
             only_serials,
             only_classes,
         } = row;
-        let mut filters = EreportFilters::new();
-        if let Some(t) = start_time {
-            filters = filters.with_start_time(t)?;
+        EreportFiltersParams {
+            start_time,
+            end_time,
+            only_serials,
+            only_classes,
         }
-        if let Some(t) = end_time {
-            filters = filters.with_end_time(t)?;
-        }
-        Ok(BundleData::Ereports(
-            filters.with_serials(only_serials).with_classes(only_classes),
-        ))
+        .try_into()
+        .map(BundleData::Ereports)
     }
 }
 
