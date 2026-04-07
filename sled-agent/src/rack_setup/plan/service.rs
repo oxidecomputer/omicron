@@ -28,10 +28,11 @@ use nexus_types::deployment::{
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
-    NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
-    REPO_DEPOT_PORT, RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX,
-    get_sled_address, get_switch_zone_address,
+    CP_SERVICES_RESERVED_ADDRESSES, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
+    Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT,
+    NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT, ReservedRackSubnet,
+    SLED_PREFIX, SLED_RESERVED_ADDRESSES, get_sled_address,
+    get_switch_zone_address,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -176,6 +177,7 @@ pub(crate) struct PlannedSledDescription {
     pub(crate) sled_id: SledUuid,
     pub(crate) subnet: Ipv6Subnet<SLED_PREFIX>,
     pub(crate) config: SledConfig,
+    pub(crate) last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 }
 
 impl iddqd::IdOrdItem for PlannedSledDescription {
@@ -837,6 +839,9 @@ impl Plan {
                 sled_id: sled_info.sled_id,
                 subnet: sled_info.subnet,
                 config: sled_info.request,
+                last_allocated_ip_subnet_offset: sled_info
+                    .addr_alloc
+                    .last_allocated_subnet_ip_offset(),
             })
             .collect();
 
@@ -930,19 +935,13 @@ impl Plan {
                     })?;
             }
 
-            // We could more carefully track which IPs we actually allocated to
-            // this sled, but in practice Reconfigurator treats the entire
-            // RSS_RESERVED_ADDRESSES range as reserved anyway, so it's fine for
-            // us to just start there.
-            let last_allocated_ip_subnet_offset =
-                LastAllocatedSubnetIpOffset::new(RSS_RESERVED_ADDRESSES);
-
             blueprint_sleds.insert(
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: sled_description.subnet,
-                    last_allocated_ip_subnet_offset,
+                    last_allocated_ip_subnet_offset: sled_description
+                        .last_allocated_ip_subnet_offset,
                     sled_agent_generation: sled_agent_config_generation,
                     disks: sled_config.disks.clone(),
                     datasets,
@@ -989,31 +988,41 @@ impl Plan {
 
 struct AddressBumpAllocator {
     sled_id: SledUuid,
-    last_addr: Ipv6Addr,
+    subnet: Ipv6Subnet<SLED_PREFIX>,
+    last_addr_offset: u16,
 }
 
 impl AddressBumpAllocator {
     fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
-        Self { sled_id, last_addr: get_switch_zone_address(subnet) }
+        Self { sled_id, subnet, last_addr_offset: SLED_RESERVED_ADDRESSES }
     }
 
     fn next(&mut self, log: &Logger, purpose: &str) -> Ipv6Addr {
         let sled_id = &self.sled_id;
 
-        let mut segments: [u16; 8] = self.last_addr.segments();
-        segments[7] = segments[7]
+        self.last_addr_offset = self
+            .last_addr_offset
             .checked_add(1)
             .expect("overflow when calculating the next IP address");
 
-        if segments[7] > RSS_RESERVED_ADDRESSES {
+        // As of April 2026, CP_SERVICES_RESERVED_ADDRESSES is equivalent to
+        // u16::MAX, so in theory this check is redundant.  We still check in
+        // case the constant is updated in the future.
+        #[expect(clippy::absurd_extreme_comparisons)]
+        if self.last_addr_offset > CP_SERVICES_RESERVED_ADDRESSES {
             panic!("ran out of addresses for {purpose} on sled {sled_id}");
         }
 
-        let ip = Ipv6Addr::from(segments);
-        info!(log, "assigned IP {ip} on sled {sled_id} to {purpose}");
+        let mut segments: [u16; 8] = self.subnet.net().addr().segments();
+        segments[7] = self.last_addr_offset;
+        let ip = Ipv6Addr::from_segments(segments);
 
-        self.last_addr = ip;
+        info!(log, "assigned IP {ip} on sled {sled_id} to {purpose}");
         ip
+    }
+
+    fn last_allocated_subnet_ip_offset(&self) -> LastAllocatedSubnetIpOffset {
+        LastAllocatedSubnetIpOffset::new(self.last_addr_offset)
     }
 }
 
@@ -1340,6 +1349,7 @@ impl ServicePortBuilder {
 mod tests {
     use super::*;
     use omicron_common::address::IpRange;
+    use omicron_common::address::SLED_RESERVED_ADDRESSES;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_test_utils::dev::test_setup_log;
@@ -1353,9 +1363,6 @@ mod tests {
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
 
-    const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
-    const EXPECTED_USABLE_ADDRESSES: u16 =
-        RSS_RESERVED_ADDRESSES - EXPECTED_RESERVED_ADDRESSES;
     const DISK_COUNT: usize = 10;
 
     #[test]
@@ -1377,7 +1384,7 @@ mod tests {
                 0,
                 0,
                 0,
-                EXPECTED_RESERVED_ADDRESSES + 1
+                SLED_RESERVED_ADDRESSES + 1
             ),
         );
         assert_eq!(
@@ -1390,7 +1397,7 @@ mod tests {
                 0,
                 0,
                 0,
-                EXPECTED_RESERVED_ADDRESSES + 2
+                SLED_RESERVED_ADDRESSES + 2
             ),
         );
 
@@ -1406,7 +1413,7 @@ mod tests {
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
-        for i in 0..EXPECTED_USABLE_ADDRESSES {
+        for i in 0..(CP_SERVICES_RESERVED_ADDRESSES - SLED_RESERVED_ADDRESSES) {
             allocator.next(&logctx.log, &i.to_string());
         }
 
@@ -1626,6 +1633,36 @@ mod tests {
             "Saw: {:#?}, expected {expected_dataset_count}",
             sled_config.datasets
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_last_allocated_subnet_ip_offset() {
+        let logctx = test_setup_log("test_last_allocated_subnet_ip_offset");
+
+        let (_dns_ips, config) = test_dns_ips_and_config();
+        let sled_info = vec![test_sled_info()];
+        let plan = Plan::create_transient(&logctx.log, &config, sled_info)
+            .expect("should've created a plan");
+
+        for sled in &plan.all_sleds {
+            eprintln!("testing sled {}", sled.sled_id);
+
+            let max_ip = sled
+                .config
+                .zones
+                .iter()
+                .map(|zone| zone.zone_type.underlay_ip())
+                .filter(|ip| sled.subnet.net().contains(*ip))
+                .map(|ip| ip.segments()[7])
+                .max()
+                .expect("no zones in the plan");
+
+            // Ensure that last_allocated_ip_subnet_offset matches the last
+            // segment of the highest IP allocated in the plan for this sled.
+            assert_eq!(sled.last_allocated_ip_subnet_offset.into_u16(), max_ip);
+        }
 
         logctx.cleanup_successful();
     }

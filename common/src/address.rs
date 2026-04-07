@@ -369,20 +369,18 @@ const _ANYCAST_ADDRESS_INDEX: usize = 0;
 const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
 
-/// The maximum number of addresses per sled reserved for RSS.
-pub const RSS_RESERVED_ADDRESSES: u16 = 32;
-
 // The maximum number of addresses per sled reserved for control plane services.
 pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 
-// Number of addresses reserved (by the Nexus deployment planner) for allocation
-// by the sled itself.  This is currently used for the first two addresses of
-// the sled subnet, which are used for the sled global zone and the switch zone,
-// if any.  Note that RSS does not honor this yet (in fact, per the above
-// RSS_RESERVED_ADDRESSES, it will _only_ choose from this range).  And
-// historically, systems did not have this reservation at all.  So it's not safe
-// to assume that addresses in this subnet are available.
-pub const SLED_RESERVED_ADDRESSES: u16 = 32;
+/// Number of addresses reserved (by the Nexus deployment planner) for
+/// allocation by the sled itself.  The first two addresses of every sled subnet
+/// are reserved for the sled global zone and the switch zone (if it exists).
+/// Historically, systems did have any reservations beyond these two, so it's
+/// not safe to assume any other address above `$SLED_SUBNET::2` is available.
+///
+/// Nexus manages this at runtime via a "last allocated IP" field associated
+/// with each sled in the Reconfigurator blueprint.
+pub const SLED_RESERVED_ADDRESSES: u16 = 2;
 
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
 #[derive(
