@@ -463,6 +463,7 @@ mod test {
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
     use nexus_db_queries::db::datastore::SupportBundleCreateParams;
+    use nexus_db_queries::db::datastore::SupportBundleProvenance;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
@@ -832,12 +833,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -916,12 +916,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For trace file testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For trace file testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1030,12 +1029,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1130,12 +1128,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1144,12 +1141,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1250,12 +1246,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1319,12 +1314,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1409,12 +1403,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1483,12 +1476,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1572,12 +1564,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "For collection testing".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1660,13 +1651,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "Testing reconfigurator state collection"
-                        .to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "Testing reconfigurator state collection",
                     nexus_id: nexus.id(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await

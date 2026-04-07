@@ -65,21 +65,28 @@ pub struct SupportBundleExpungementReport {
     pub bundles_reassigned: usize,
 }
 
+/// Provenance for a support bundle: where did it come from?
+pub enum SupportBundleProvenance {
+    /// Created by a user through the external API. A new UUID will be generated
+    /// automatically when the bundle is created.
+    User,
+    /// Requested by the fault management subsystem. Uses a specific bundle ID
+    /// for idempotent creation, and records the FM case association.
+    Fm { id: SupportBundleUuid, case_id: omicron_uuid_kinds::CaseUuid },
+}
+
 /// Parameters for creating a support bundle.
-pub struct SupportBundleCreateParams {
-    /// The ID for the new bundle. Use `SupportBundleUuid::new_v4()` to
-    /// auto-generate, or provide a specific ID for idempotent creation.
-    pub id: SupportBundleUuid,
+pub struct SupportBundleCreateParams<'a> {
+    /// Who is requesting this bundle's creation.
+    pub provenance: SupportBundleProvenance,
     /// Why this bundle is being created.
-    pub reason: String,
+    pub reason: &'a str,
     /// The Nexus instance responsible for collection.
     pub nexus_id: OmicronZoneUuid,
     /// Optional user-provided comment.
     pub user_comment: Option<String>,
     /// What data to include in the bundle.
     pub data_selection: nexus_types::support_bundle::BundleDataSelection,
-    /// Optional FM case association.
-    pub fm_case_id: Option<omicron_uuid_kinds::CaseUuid>,
 }
 
 impl DataStore {
@@ -93,15 +100,16 @@ impl DataStore {
     /// running.
     ///
     /// Finds a free debug dataset, creates a `SupportBundle` in `Collecting`
-    /// state, and inserts it.
-    ///
-    /// If a bundle with the given ID already exists, returns
-    /// [`Error::conflict`]. If no free dataset is available, returns
+    /// state, and inserts it. If no free dataset is available, returns
     /// [`Error::insufficient_capacity`].
+    ///
+    /// If the provenance is [`SupportBundleProvenance::Fm`] and a bundle
+    /// with the given ID already exists, returns the existing bundle
+    /// (idempotent creation).
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
-        params: SupportBundleCreateParams,
+        params: SupportBundleCreateParams<'_>,
     ) -> CreateResult<SupportBundle> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -109,28 +117,34 @@ impl DataStore {
         #[derive(Debug)]
         enum SupportBundleError {
             TooManyBundles,
-            AlreadyExists,
         }
 
         let SupportBundleCreateParams {
-            id: bundle_id,
+            provenance,
             reason,
             nexus_id,
             user_comment,
             data_selection,
-            fm_case_id,
         } = params;
+
+        let (bundle_id, fm_case_id, idempotent) = match provenance {
+            SupportBundleProvenance::User => {
+                (SupportBundleUuid::new_v4(), None, false)
+            }
+            SupportBundleProvenance::Fm { id, case_id } => {
+                (id, Some(case_id), true)
+            }
+        };
 
         let err = OptionalError::new();
         self.transaction_retry_wrapper("support_bundle_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let reason = reason.clone();
+                let reason = reason.to_string();
                 let user_comment = user_comment.clone();
                 let data_selection = data_selection.clone();
 
                 async move {
-                    use diesel::result::DatabaseErrorKind;
                     use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
                     use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 
@@ -174,25 +188,29 @@ impl DataStore {
                         fm_case_id,
                     );
 
+                    // For idempotent creation (FM origin), check if the bundle
+                    // already exists before inserting.
+                    if idempotent {
+                        let existing = support_bundle_dsl::support_bundle
+                            .filter(
+                                support_bundle_dsl::id
+                                    .eq(bundle_id.into_untyped_uuid()),
+                            )
+                            .select(SupportBundle::as_select())
+                            .first_async(&conn)
+                            .await
+                            .optional()?;
+                        if let Some(existing) = existing {
+                            return Ok(existing);
+                        }
+                    }
+
                     diesel::insert_into(
                         support_bundle_dsl::support_bundle,
                     )
                     .values(bundle.clone())
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| match e {
-                        // Catch any unique violation, which could be the pkey
-                        // or the `one_bundle_per_dataset` constraint. In
-                        // practice only the pkey violation can occur here,
-                        // since we're in a transaction that starts by finding
-                        // the first free dataset. We convert to "conflict"
-                        // below so the caller can decide how to handle it.
-                        diesel::result::Error::DatabaseError(
-                            DatabaseErrorKind::UniqueViolation,
-                            _,
-                        ) => err.bail(SupportBundleError::AlreadyExists),
-                        e => e,
-                    })?;
+                    .await?;
 
                     Self::support_bundle_data_selection_insert_on_conn(
                         &conn,
@@ -213,16 +231,6 @@ impl DataStore {
                                 CANNOT_ALLOCATE_ERR_MSG,
                                 "Support Bundle storage exhausted",
                             );
-                        }
-                        SupportBundleError::AlreadyExists => {
-                            // The caller decides what to do with this. If the
-                            // caller has provided a randomly generated UUID,
-                            // this indicates a collision; if the caller has
-                            // provided a specific UUID for idempotent creation,
-                            // then this "error" is expected.
-                            return external::Error::conflict(format!(
-                                "support bundle {bundle_id} already exists",
-                            ));
                         }
                     }
                 }
@@ -944,12 +952,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for tests".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for tests",
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1000,12 +1007,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: nexus_a,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1014,12 +1020,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: nexus_a,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1028,12 +1033,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: nexus_b,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1152,12 +1156,11 @@ mod test {
                     .support_bundle_create(
                         &opctx,
                         SupportBundleCreateParams {
-                            id: SupportBundleUuid::new_v4(),
-                            reason: "for the test".to_string(),
+                            provenance: SupportBundleProvenance::User,
+                            reason: "for the test",
                             nexus_id: this_nexus_id,
                             user_comment: None,
                             data_selection: BundleDataSelection::all(),
-                            fm_case_id: None,
                         },
                     )
                     .await
@@ -1208,12 +1211,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1239,12 +1241,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: reason.to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason,
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1343,12 +1344,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "test wrong-state delete".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "test wrong-state delete",
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1496,12 +1496,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1611,12 +1610,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1729,12 +1727,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: nexus_ids[0],
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1860,12 +1857,11 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: "for the test".to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason: "for the test",
                     nexus_id: nexus_ids[0],
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
@@ -1948,12 +1944,11 @@ mod test {
                 .support_bundle_create(
                     &opctx,
                     SupportBundleCreateParams {
-                        id: SupportBundleUuid::new_v4(),
-                        reason: "Bundle for time ordering test".to_string(),
+                        provenance: SupportBundleProvenance::User,
+                        reason: "Bundle for time ordering test",
                         nexus_id: this_nexus_id,
                         user_comment: None,
                         data_selection: BundleDataSelection::all(),
-                        fm_case_id: None,
                     },
                 )
                 .await
@@ -2003,10 +1998,11 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_support_bundle_create_with_id() {
+    async fn test_support_bundle_fm_idempotent_create() {
         use omicron_uuid_kinds::CaseUuid;
 
-        let logctx = dev::test_setup_log("test_support_bundle_create_with_id");
+        let logctx =
+            dev::test_setup_log("test_support_bundle_fm_idempotent_create");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let this_nexus_id = OmicronZoneUuid::new_v4();
@@ -2016,19 +2012,21 @@ mod test {
 
         let bundle_id = SupportBundleUuid::new_v4();
         let case_id = CaseUuid::new_v4();
-        let reason = "sled is misbehaving".to_string();
+        let reason = "sled is misbehaving";
 
         // Create the bundle.
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: bundle_id,
-                    reason: reason.clone(),
+                    provenance: SupportBundleProvenance::Fm {
+                        id: bundle_id,
+                        case_id,
+                    },
+                    reason,
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: Some(case_id),
                 },
             )
             .await
@@ -2040,25 +2038,26 @@ mod test {
         assert_eq!(bundle.state, SupportBundleState::Collecting);
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
 
-        // Creating the same bundle again should return a conflict error.
-        let err = datastore
+        // Creating the same bundle again should succeed (idempotent).
+        let existing = datastore
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: bundle_id,
-                    reason: reason.clone(),
+                    provenance: SupportBundleProvenance::Fm {
+                        id: bundle_id,
+                        case_id,
+                    },
+                    reason,
                     nexus_id: this_nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: Some(case_id),
                 },
             )
             .await
-            .expect_err("Should get conflict for duplicate bundle ID");
-        assert!(
-            matches!(err, Error::Conflict { .. }),
-            "Expected Conflict error, got: {err:?}"
-        );
+            .expect("Idempotent create should succeed");
+        assert_eq!(SupportBundleUuid::from(existing.id), bundle_id);
+        assert_eq!(existing.reason_for_creation, reason);
+        assert_eq!(existing.fm_case_id, Some(case_id.into()));
 
         db.terminate().await;
         logctx.cleanup_successful();

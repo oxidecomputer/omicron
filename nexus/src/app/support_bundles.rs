@@ -13,6 +13,7 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
+use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -69,13 +70,12 @@ impl super::Nexus {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    id: SupportBundleUuid::new_v4(),
-                    reason: reason.to_string(),
+                    provenance: SupportBundleProvenance::User,
+                    reason,
                     nexus_id: self.id,
                     user_comment,
                     // TODO: eventually allow user-selectable data selection from the API.
                     data_selection: BundleDataSelection::all(),
-                    fm_case_id: None,
                 },
             )
             .await
