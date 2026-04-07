@@ -37,6 +37,7 @@ pub async fn collect(
     let ereports_dir = dir.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
     if let Err(err) = save_ereports(
+        collection,
         log,
         opctx,
         datastore,
@@ -59,7 +60,14 @@ pub async fn collect(
     Ok(CollectionStepOutput::Ereports(status))
 }
 
+// Save ereports to disk, paginating through the database.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// DB queries are eagerly cancelled via `select!`.
 async fn save_ereports(
+    collection: &BundleCollection,
     log: &Logger,
     opctx: &OpContext,
     datastore: &Arc<DataStore>,
@@ -72,10 +80,17 @@ async fn save_ereports(
         dropshot::PaginationOrder::Ascending,
     );
     while let Some(p) = paginator.next() {
-        let ereports = datastore
-            .ereport_fetch_matching(&opctx, &filters, &p.current_pagparams())
-            .await
-            .map_err(|e| e.internal_context("failed to query for ereports"))?;
+        let pagparams = p.current_pagparams();
+        let ereports = tokio::select! {
+            _ = collection.cancelled() => return Ok(()),
+            result = datastore.ereport_fetch_matching(
+                &opctx, &filters, &pagparams
+            ) => {
+                result.map_err(|e| {
+                    e.internal_context("failed to query for ereports")
+                })?
+            }
+        };
         paginator = p.found_batch(&ereports, &|ereport| {
             (ereport.restart_id.into_untyped_uuid(), ereport.ena)
         });
