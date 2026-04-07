@@ -955,12 +955,15 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
-      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
-    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
-      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
-    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
-    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
+    total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:    <TOTAL_COLLECTION_ERRORS_REDACTED>
+    total reporters:              <TOTAL_REPORTERS_REDACTED>
+      contacted successfully:     <CONTACTED_SUCCESSFULLY_REDACTED>
+        with ereports:            <WITH_EREPORTS_REDACTED>
+        without ereports:         <WITHOUT_EREPORTS_REDACTED>
+      with collection errors:     <WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1621,12 +1624,15 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
-      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
-    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
-      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
-    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
-    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
+    total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:    <TOTAL_COLLECTION_ERRORS_REDACTED>
+    total reporters:              <TOTAL_REPORTERS_REDACTED>
+      contacted successfully:     <CONTACTED_SUCCESSFULLY_REDACTED>
+        with ereports:            <WITH_EREPORTS_REDACTED>
+        without ereports:         <WITHOUT_EREPORTS_REDACTED>
+      with collection errors:     <WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s

@@ -3306,7 +3306,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors, disabled } =
+    let SpEreportIngesterStatus { sps, errors, disabled, sps_not_present } =
         match serde_json::from_value(details.clone()) {
             Err(error) => {
                 eprintln!(
@@ -3331,6 +3331,10 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
     }
 
+    if sps_not_present > 0 {
+        println!("(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}");
+    }
+
     if !sps.is_empty() {
         if disabled {
             println!(
@@ -3340,11 +3344,12 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         }
 
         println!("\n    service processors:");
-        for SpEreporterStatus { sp_type, slot, status } in &sps {
+        for SpEreporterStatus { sp_type, slot, status, ignition_type } in &sps {
             println!(
                 "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
                 status.ereports_received
             );
+            println!("      ignition type: {ignition_type:?}",);
             println!(
                 "      {NEW_EREPORTS:<WIDTH$}{:>NUM_WIDTH$}",
                 status.new_ereports
@@ -3375,7 +3380,9 @@ fn print_ereporter_status_totals<'status>(
     let mut total_reqs = 0;
     let mut total_errors = 0;
     let mut reporters_with_ereports = 0;
+    let mut reporters_without_ereports = 0;
     let mut reporters_with_errors = 0;
+    let mut reporters_without_errors = 0;
 
     for &EreporterStatus {
         ereports_received,
@@ -3390,20 +3397,34 @@ fn print_ereporter_status_totals<'status>(
         total_errors += errors.len();
         if total_received > 0 {
             reporters_with_ereports += 1;
+        } else {
+            reporters_without_ereports += 1;
         }
         if total_errors > 0 {
             reporters_with_errors += 1;
+        } else {
+            reporters_without_errors += 1;
         }
     }
+    let total_reporters = reporters_with_ereports + reporters_without_ereports;
 
     use ereporter_status_fields::*;
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
     println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
+    println!(
+        "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
+        {reporters_without_errors:>NUM_WIDTH$}",
+    );
     println!(
         "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
          {reporters_with_ereports:>NUM_WIDTH$}"
+    );
+    println!(
+        "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
+         {reporters_without_ereports:>NUM_WIDTH$}"
     );
     println!(
         "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
@@ -3419,8 +3440,13 @@ mod ereporter_status_fields {
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
     pub const ERRORS: &str = "  total collection errors:";
-    pub const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
-    pub const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    pub const TOTAL_REPORTERS: &str = "total reporters:";
+    pub const REPORTERS_CONTACTED_SUCCESSFULLY: &str =
+        "  contacted successfully:";
+    pub const REPORTERS_WITH_EREPORTS: &str = "    with ereports:";
+    pub const REPORTERS_WITHOUT_EREPORTS: &str = "    without ereports:";
+    pub const REPORTERS_WITH_ERRORS: &str = "  with collection errors:";
+    pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
         TOTAL_NEW_EREPORTS,
         TOTAL_HTTP_REQUESTS,
@@ -3428,8 +3454,11 @@ mod ereporter_status_fields {
         NEW_EREPORTS,
         HTTP_REQUESTS,
         ERRORS,
+        REPORTERS_CONTACTED_SUCCESSFULLY,
         REPORTERS_WITH_EREPORTS,
+        REPORTERS_WITHOUT_EREPORTS,
         REPORTERS_WITH_ERRORS,
+        SPS_NOT_PRESENT,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
 }
