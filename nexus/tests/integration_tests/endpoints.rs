@@ -3016,13 +3016,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &HARDWARE_DISKS_UNINITIALIZED_URL,
-                visibility: Visibility::Protected,
+                visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &HARDWARE_DISK_ADOPTION_REQUESTS_URL,
-                visibility: Visibility::Protected,
+                visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
