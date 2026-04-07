@@ -27,9 +27,9 @@ pub async fn collect(
     cache: &Cache,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let (log, request) = (collection.log(), collection.request());
+    let log = collection.log();
 
-    if !request.include_sled_cubby_info() {
+    if !collection.data_selection().contains_sled_cubby_info() {
         return Ok(CollectionStepOutput::Skipped);
     }
 

@@ -8,10 +8,9 @@
 
 use crate::app::background::tasks::support_bundle::cache::Cache;
 use crate::app::background::tasks::support_bundle::perfetto;
-use crate::app::background::tasks::support_bundle::request::BundleRequest;
-use crate::app::background::tasks::support_bundle::request::TEMPDIR;
 use crate::app::background::tasks::support_bundle::step::CollectionStep;
 use crate::app::background::tasks::support_bundle::steps;
+use nexus_types::support_bundle::BundleDataSelection;
 
 use anyhow::Context;
 use camino::Utf8DirEntry;
@@ -44,13 +43,21 @@ use tufaceous_artifact::ArtifactHash;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
+/// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
+/// rather than "/tmp", which would keep this collected data in-memory.
+pub const TEMPDIR: &str = "/var/tmp";
+
+/// The size of piece of a support bundle to transfer to the sled agent
+/// within a single streaming request.
+pub const CHUNK_SIZE: NonZeroU64 = NonZeroU64::new(1024 * 1024 * 1024).unwrap();
+
 /// Wraps up all arguments to perform a single support bundle collection
 pub struct BundleCollection {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     log: slog::Logger,
     opctx: OpContext,
-    request: BundleRequest,
+    data_selection: BundleDataSelection,
     bundle: SupportBundle,
     transfer_chunk_size: NonZeroU64,
 }
@@ -61,7 +68,7 @@ impl BundleCollection {
         resolver: Resolver,
         log: slog::Logger,
         opctx: OpContext,
-        request: BundleRequest,
+        data_selection: BundleDataSelection,
         bundle: SupportBundle,
         transfer_chunk_size: NonZeroU64,
     ) -> Self {
@@ -70,7 +77,7 @@ impl BundleCollection {
             resolver,
             log,
             opctx,
-            request,
+            data_selection,
             bundle,
             transfer_chunk_size,
         }
@@ -92,8 +99,8 @@ impl BundleCollection {
         &self.opctx
     }
 
-    pub fn request(&self) -> &BundleRequest {
-        &self.request
+    pub fn data_selection(&self) -> &BundleDataSelection {
+        &self.data_selection
     }
 
     pub fn bundle(&self) -> &SupportBundle {
