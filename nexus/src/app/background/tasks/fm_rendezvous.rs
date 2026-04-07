@@ -340,20 +340,14 @@ impl FmRendezvous {
         // requests are ever removed from sitreps (e.g. when a case is closed),
         // a lagging Nexus could re-create "zombie" bundles from an outdated
         // sitrep. Currently safe because requests are carried forward.
-        for (
-            fm::case::Case {
-                id: case_id,
-                metadata: fm::case::Metadata { de, .. },
-                ..
-            },
-            fm::case::SupportBundleRequest {
+        for (case, req) in sitrep.support_bundles_requested() {
+            let case_id = case.id;
+            let de = case.metadata.de;
+            let fm::case::SupportBundleRequest {
                 id: bundle_id,
                 requested_sitrep_id,
                 data_selection,
-            },
-        ) in sitrep.support_bundles_requested()
-        {
-            let case_id = *case_id;
+            } = req;
             let bundle_id = *bundle_id;
 
             status.total_bundles_requested += 1;
@@ -390,7 +384,7 @@ impl FmRendezvous {
                         "error" => %e,
                     );
                     status.errors.push(format!(
-                        "support bundle {bundle_id} for case {case_id} : {e}",
+                        "support bundle {bundle_id} for case {case_id}: {e}",
                     ));
                 }
                 Ok(_) => status.bundles_created += 1,
@@ -405,7 +399,6 @@ impl FmRendezvous {
                  sitrep, but {} requests could not be fulfilled!",
                 status.bundles_created,
                 n_errors;
-                "sitrep_id" => %sitrep.id(),
                 "total_bundles_requested" => status.total_bundles_requested,
                 "bundles_created" => status.bundles_created,
                 "errors" => n_errors,
@@ -415,7 +408,6 @@ impl FmRendezvous {
                 opctx.log,
                 "created {} support bundles requested by the current sitrep",
                 status.bundles_created;
-                "sitrep_id" => %sitrep.id(),
                 "total_bundles_requested" => status.total_bundles_requested,
                 "bundles_created" => status.bundles_created,
             );
@@ -424,14 +416,12 @@ impl FmRendezvous {
                 opctx.log,
                 "all support bundles requested by the current sitrep \
                  already exist";
-                "sitrep_id" => %sitrep.id(),
                 "total_bundles_requested" => status.total_bundles_requested,
             );
         } else {
             slog::debug!(
                 opctx.log,
-                "current sitrep requests no support bundles";
-                "sitrep_id" => %sitrep.id(),
+                "current sitrep requests no support bundles"
             );
         }
 
