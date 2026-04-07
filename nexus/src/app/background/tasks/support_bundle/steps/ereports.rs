@@ -26,13 +26,9 @@ pub async fn collect(
     collection: &BundleCollection,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let (log, opctx, datastore, request) = (
-        collection.log(),
-        collection.opctx(),
-        collection.datastore(),
-        collection.request(),
-    );
-    let ereport_filters = request.get_ereport_filters();
+    let (log, opctx, datastore) =
+        (collection.log(), collection.opctx(), collection.datastore());
+    let ereport_filters = collection.data_selection().ereport_filters();
 
     let Some(ereport_filters) = ereport_filters else {
         debug!(log, "Support bundle: ereports not requested");

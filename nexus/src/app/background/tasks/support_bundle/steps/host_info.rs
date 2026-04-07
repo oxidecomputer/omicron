@@ -26,11 +26,10 @@ pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
     cache: &Cache,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let request = collection.request();
-
-    if !request.include_host_info() {
+    let Some(sled_selection) = collection.data_selection().sled_selection()
+    else {
         return Ok(CollectionStepOutput::Skipped);
-    }
+    };
 
     let all_sleds = cache.get_or_initialize_all_sleds(collection).await;
 
@@ -40,7 +39,7 @@ pub async fn spawn_query_all_sleds(
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
     for sled in all_sleds {
-        if !request.include_sled_host_info(sled.id()) {
+        if !sled_selection.contains(sled.id()) {
             continue;
         }
 
@@ -72,14 +71,14 @@ async fn collect_data_from_sled(
     sled: Sled,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let (log, opctx, datastore, request) = (
-        collection.log(),
-        collection.opctx(),
-        collection.datastore(),
-        collection.request(),
-    );
+    let (log, opctx, datastore) =
+        (collection.log(), collection.opctx(), collection.datastore());
 
-    if !request.include_sled_host_info(sled.id()) {
+    let excluded = collection
+        .data_selection()
+        .sled_selection()
+        .map_or(true, |sel| !sel.contains(sled.id()));
+    if excluded {
         return Ok(CollectionStepOutput::Skipped);
     }
 

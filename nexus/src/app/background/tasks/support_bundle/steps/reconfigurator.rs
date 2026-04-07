@@ -15,14 +15,10 @@ pub async fn collect(
     collection: &BundleCollection,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let (log, opctx, datastore, request) = (
-        collection.log(),
-        collection.opctx(),
-        collection.datastore(),
-        collection.request(),
-    );
+    let (log, opctx, datastore) =
+        (collection.log(), collection.opctx(), collection.datastore());
 
-    if !request.include_reconfigurator_data() {
+    if !collection.data_selection().contains_reconfigurator() {
         return Ok(CollectionStepOutput::Skipped);
     }
 

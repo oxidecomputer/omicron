@@ -23,9 +23,7 @@ pub async fn spawn_collection_steps(
     cache: &Cache,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let request = collection.request();
-
-    if !request.include_sp_dumps() {
+    if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
 
@@ -64,7 +62,7 @@ async fn collect_sp_dump(
     sp: SpIdentifier,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    if !collection.request().include_sp_dumps() {
+    if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
 
