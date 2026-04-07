@@ -6,10 +6,7 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::{
-        LoadedTargetBlueprint,
-        tasks::networking::{api_to_dpd_port_settings, build_mgd_clients},
-    },
+    background::{LoadedTargetBlueprint, tasks::networking::build_mgd_clients},
     dpd_clients, switch_zone_address_mappings,
 };
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -43,7 +40,7 @@ use nexus_db_queries::{
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
 use nexus_types::external_api::networking;
-use nexus_types::identity::{Asset, Resource};
+use nexus_types::identity::Asset;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
@@ -76,11 +73,9 @@ use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    str::FromStr,
     sync::Arc,
 };
 
-const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
 const PHY0: &str = "phy0";
 
 // This is more of an implementation detail of the BGP implementation. It
@@ -393,8 +388,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     },
                 };
-
-                apply_switch_port_changes(&dpd_clients, &changes, &log).await;
 
                 //
                 // calculate and apply routing changes
@@ -2085,166 +2078,6 @@ fn static_routes_in_db(
         }
     }
     routes_from_db
-}
-
-// apply changes for each port
-// if we encounter an error, we log it and keep going instead of bailing
-async fn apply_switch_port_changes(
-    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
-    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
-    log: &slog::Logger,
-) {
-    for (switch_slot, switch_port, change) in changes {
-        let client = match dpd_clients.get(&switch_slot) {
-            Some(client) => client,
-            None => {
-                error!(
-                    &log,
-                    "no DPD client for switch switch_slot";
-                    "switch_location" => ?switch_slot
-                );
-                continue;
-            }
-        };
-
-        let port_name = switch_port.port_name.clone();
-
-        let dpd_port_id = match DpdTypes::PortId::from_str(port_name.as_str()) {
-            Ok(port_id) => port_id,
-            Err(e) => {
-                error!(
-                    &log,
-                    "failed to parse switch port id";
-                    "db_switch_port_name" => ?switch_port.port_name,
-                    "switch_location" => ?switch_slot,
-                    "error" => format!("{:#}", e)
-                );
-                continue;
-            }
-        };
-
-        let mut config_on_switch =
-            match client.port_settings_get(&dpd_port_id, DPD_TAG).await {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to retrieve port setttings from switch";
-                        "switch_port_id" => ?port_name,
-                        "switch_location" => ?switch_slot,
-                        "error" => format!("{:#}", e)
-                    );
-                    continue;
-                }
-            };
-
-        // dont consider link local addresses in change computation
-        for lnk in config_on_switch.links.values_mut() {
-            lnk.addrs.retain(|x| match x {
-                IpAddr::V6(addr) => !addr.is_unicast_link_local(),
-                _ => true,
-            })
-        }
-
-        info!(
-            log,
-            "retrieved port settings from switch";
-            "switch_port_id" => ?port_name,
-            "settings" => ?config_on_switch,
-        );
-
-        match change {
-            PortSettingsChange::Apply(settings) => {
-                let dpd_port_settings = match api_to_dpd_port_settings(
-                    &settings,
-                ) {
-                    Ok(settings) => settings,
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to convert switch port settings";
-                            "switch_port_id" => ?port_name,
-                            "switch_location" => ?switch_slot,
-                            "switch_port_settings_id" => ?settings.settings.id(),
-                            "error" => format!("{:#}", e)
-                        );
-                        continue;
-                    }
-                };
-
-                if config_on_switch.into_inner() == dpd_port_settings {
-                    info!(
-                        &log,
-                        "port settings up to date, skipping";
-                        "switch_port_id" => ?port_name,
-                        "switch_location" => ?switch_slot,
-                        "switch_port_settings_id" => ?settings.settings.id(),
-                    );
-                    continue;
-                }
-
-                // apply settings via dpd client
-                info!(
-                    &log,
-                    "applying settings to switch port";
-                    "switch_location" => ?switch_slot,
-                    "port_id" => ?dpd_port_id,
-                    "settings" => ?dpd_port_settings,
-                );
-                match client
-                    .port_settings_apply(
-                        &dpd_port_id,
-                        DPD_TAG,
-                        &dpd_port_settings,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to apply switch port settings";
-                            "switch_port_id" => ?port_name,
-                            "switch_location" => ?switch_slot,
-                            "error" => format!("{:#}", e)
-                        );
-                    }
-                }
-            }
-            PortSettingsChange::Clear => {
-                // clear settings via dpd client
-                info!(
-                    &log,
-                    "clearing switch port settings";
-                    "switch_location" => ?switch_slot,
-                    "port_id" => ?dpd_port_id,
-                );
-
-                if config_on_switch.into_inner().links.is_empty() {
-                    info!(
-                        &log,
-                        "port settings up to date, skipping";
-                        "switch_port_id" => ?port_name,
-                        "switch_location" => ?switch_slot,
-                    );
-                    continue;
-                }
-
-                match client.port_settings_clear(&dpd_port_id, DPD_TAG).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to clear switch port settings";
-                            "switch_port_id" => ?port_name,
-                            "switch_location" => ?switch_slot,
-                            "error" => format!("{:#}", e)
-                        );
-                    }
-                }
-            }
-        }
-    }
 }
 
 async fn static_routes_on_switch(
