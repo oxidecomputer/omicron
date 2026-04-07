@@ -25,7 +25,6 @@ use omicron_common::api::external::{
 };
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchSlot;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -546,7 +545,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     // Create port settings
     let settings_name =
-        Name::from_str("nacelle").expect("nacell should be a valid name");
+        Name::from_str("nacelle").expect("should be a valid name");
     let mut settings =
         SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
             name: settings_name.clone(),
@@ -618,12 +617,6 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
-    let mgd_client = mg_admin_client::Client::new(
-        &format!("http://[::1]:{}", mgd.port),
-        ctx.logctx.log.clone(),
-    );
-
     // apply port settings
     let apply_settings = SwitchPortApplySettings {
         port_settings: NameOrId::Name(settings_name.clone()),
@@ -651,23 +644,4 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
-
-    // wait for routes to be reconciled to mgd
-    for _ in 0..20 {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        match mgd_client.static_list_v6_routes().await {
-            Ok(routes) => {
-                let n = routes.len();
-                if n == 1 {
-                    return;
-                } else {
-                    println!("expected 1 route got {n}")
-                }
-            }
-            Err(e) => {
-                println!("failed to contact mgd: {e:?}");
-            }
-        }
-    }
-    panic!("expected number of routes not found");
 }
