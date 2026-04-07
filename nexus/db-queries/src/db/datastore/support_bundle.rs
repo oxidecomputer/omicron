@@ -188,21 +188,21 @@ impl DataStore {
                         fm_case_id,
                     );
 
-                    // For idempotent creation (FM origin), check if the bundle
-                    // already exists before inserting.
-                    if idempotent {
-                        let existing = support_bundle_dsl::support_bundle
-                            .filter(
-                                support_bundle_dsl::id
-                                    .eq(bundle_id.into_untyped_uuid()),
-                            )
-                            .select(SupportBundle::as_select())
-                            .first_async(&conn)
-                            .await
-                            .optional()?;
-                        if let Some(existing) = existing {
-                            return Ok(existing);
-                        }
+                    // For idempotent creation (FM provenance), check if the
+                    // bundle already exists before inserting.
+                    if idempotent
+                        && let Some(existing) =
+                            support_bundle_dsl::support_bundle
+                                .filter(
+                                    support_bundle_dsl::id
+                                        .eq(bundle_id.into_untyped_uuid()),
+                                )
+                                .select(SupportBundle::as_select())
+                                .first_async(&conn)
+                                .await
+                                .optional()?
+                    {
+                        return Ok(existing);
                     }
 
                     diesel::insert_into(
