@@ -539,6 +539,39 @@ deployed.
 #
 
 [[dependency_filter_rules]]
+ancestor = "dice-verifier"
+client = "sled-agent-client"
+evaluation = "bogus"
+note = """
+propolis-server does actually talk to sled-agent-client, but by virtue of both
+APIs being server-side versioned, trips a check in the component graph that
+requires server-side versioned APIs to not form a cycle. This is a deficiency
+in the server-side API checking, since this cycle is acceptable on the basis of
+propolis-server and sled-agent being in the same deployment unit.
+
+This filter should be removed when the intra-deployment relationship between
+propolis-server and sled-agent can be tolerated in the component graph check.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-client"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+Same as the bogus rule between sled-agent-types and propolis-client.
+sled-agent-client re-exports some (Crucible!) types from propolis-client for
+sled-agent-client's consumers.
+
+This bogus rule would be fine enough on its own, though ideally we should not
+need sled-agent-client to depend on propolis-client even just for types. But,
+perhaps surprisingly, this was necessary to add even though the
+dice-verifier->sled-agent-client rule above "broke" the dependency path from
+propolis-server through to propolis-client. Once we've fixed the issue requiring
+the dice-verifier rule above, we should probably keep this dependency filter
+rule.
+"""
+
+[[dependency_filter_rules]]
 ancestor = "omicron-common"
 client = "mg-admin-client"
 evaluation = "bogus"
@@ -627,29 +660,6 @@ sled agent.
 # instances of the deployment unit (i.e., different sleds).  Those don't belong
 # in this category.
 ################################################################################
-
-[[intra_deployment_unit_only_edges]]
-server = "propolis-server"
-client = "sled-agent-client"
-note = """
-propolis-server calls into sled-agent RoT attestation endpoints. propolis-server
-and sled-agent are deployed in the same deployment unit, and propolis-server
-only talks to the sled-agent running on its local sled.
-"""
-permalinks = [
-    "https://github.com/oxidecomputer/propolis/blob/2c9d705/lib/propolis/src/attestation/server.rs#L324-L328",
-    "https://github.com/oxidecomputer/propolis/blob/2c9d705/bin/propolis-server/src/main.rs#L326-L337",
-]
-
-[[intra_deployment_unit_only_edges]]
-server = "propolis-server"
-client = "propolis-client"
-note = """
-propolis-server now depends on sled-agent-client. sled-agent-client includes
-propolis-client but does not actually use it. this needs to be cleaned up.
-"""
-permalinks = [
-]
 
 [[intra_deployment_unit_only_edges]]
 server = "ddmd"
