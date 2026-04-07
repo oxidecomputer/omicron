@@ -15,15 +15,19 @@ use slog::Logger;
 use slog::info;
 use std::time::Duration;
 
+mod static_route_reconciler;
+
+pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
+pub use static_route_reconciler::MgdStaticRouteBulkOperationResult;
+
 #[derive(Debug, Clone)]
-pub enum MgdReconcilerStatus {
-    /// The reconciler does nothing because it's currently a stub.
-    NotYetImplemented,
+pub struct MgdReconcilerStatus {
+    pub static_routes_status: MgdStaticRouteReconcilerStatus,
 }
 
 pub(crate) struct MgdReconciler {
-    _client: Client,
-    _switch_slot: ThisSledSwitchSlot,
+    client: Client,
+    switch_slot: ThisSledSwitchSlot,
 }
 
 impl Reconciler for MgdReconciler {
@@ -42,7 +46,7 @@ impl Reconciler for MgdReconciler {
         // seconds happens to coincide exactly with dropshot's default
         // connection timeout of 30 seconds. In early testing, this caused us to
         // hit <https://github.com/hyperium/hyper/issues/2136> surprisingly
-        // frequently: dpd would close a connection right as we were trying to
+        // frequently: mgd would close a connection right as we were trying to
         // use it, resulting in spurious "connection closed before message
         // completed" or "connection reset by peer" errors.
         //
@@ -65,15 +69,26 @@ impl Reconciler for MgdReconciler {
             parent_log.new(slog::o!("component" => "MgdReconcilerClient")),
         );
 
-        Self { _client: client, _switch_slot: switch_slot }
+        Self { client, switch_slot }
     }
 
     async fn do_reconciliation(
         &mut self,
-        _system_networking_config: &SystemNetworkingConfig,
+        system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
-        info!(log, "TODO: implement mgd reconciler");
-        MgdReconcilerStatus::NotYetImplemented
+        let static_routes_status = static_route_reconciler::reconcile(
+            &self.client,
+            &system_networking_config.rack_network_config,
+            self.switch_slot,
+            log,
+        )
+        .await;
+
+        info!(
+            log, "mgd reconciliation completed";
+            &static_routes_status,
+        );
+        MgdReconcilerStatus { static_routes_status }
     }
 }
