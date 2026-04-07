@@ -53,7 +53,7 @@ impl SledUnderlayIpAllocator {
         assert!(minimum > sled_gz_addr);
         let switch_zone_addr = get_switch_zone_address(sled_subnet);
         assert!(sled_subnet.net().contains(switch_zone_addr));
-        assert!(minimum > switch_zone_addr);
+        assert!(minimum >= switch_zone_addr);
         assert!(sled_subnet.net().contains(minimum));
         assert!(sled_subnet.net().contains(maximum));
 

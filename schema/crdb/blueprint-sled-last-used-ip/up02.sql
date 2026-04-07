@@ -8,11 +8,15 @@
 -- maximum of these integers, or 32 if there are no zones or if there are no
 -- zones with a final hextet of at least 32.
 --
--- 32 is the magic value for `RSS_RESERVED_ADDRESSES` as defined in
--- `omicron-common`; Reconfigurator always starts new, empty sleds with a
--- `last_allocated_ip_subnet_offset` equal to 32. If Reconfigurator has added
--- zones to this sled in any given blueprint, it will have a zone with an IP
--- with a final hextet greater than 32, and we need to use that instead.
+-- 32 was the maximum number of addresses RSS would allocate before April 2026
+-- to services within the sled. If Reconfigurator has added zones to this sled
+-- in any given blueprint, it will have a zone with an IP with a final hextet
+-- greater than 32, and we need to use that instead.
+--
+-- From April 2026 onwards, RSS sets last_allocated_ip_subnet_offset to the
+-- actual last offset, rather than hardcoding 32. This migration is a noop in
+-- that case, as last_allocated_ip_subnet_offset is going to be set in the
+-- initial blueprint and all future ones.
 --
 -- Finally, all of this logic also has to ignore `internal_dns` zones, because
 -- they listen on an IP that's outside the sled subnet.

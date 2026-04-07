@@ -30,8 +30,7 @@ use nexus_lockstep_client::types::{
     Ipv6Range, RackInitializationRequest, RackNetworkConfig,
 };
 use nexus_types::deployment::{
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintZoneImageSource, blueprint_zone_type,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition, BlueprintZoneImageSource, LastAllocatedSubnetIpOffset, blueprint_zone_type
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
@@ -599,6 +598,8 @@ pub async fn run_standalone_server(
             underlay_address,
             sled_id: config.id,
             subnet: Ipv6Subnet::new(*underlay_address.ip()),
+            // TODO: calculate actual value here.
+            last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset::new(32),
             config: SledConfig {
                 disks: omicron_physical_disks_config
                     .disks
