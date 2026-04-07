@@ -17,6 +17,7 @@ use nexus_types::fm::ereport::{EreportFilters, EreportFiltersParams};
 use nexus_types::support_bundle::BundleData;
 use nexus_types::support_bundle::SledSelection;
 use omicron_uuid_kinds::CaseKind;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -111,25 +112,25 @@ pub struct SupportBundle {
 
 impl SupportBundle {
     pub fn new(
-        reason_for_creation: &'static str,
+        id: SupportBundleUuid,
+        reason_for_creation: String,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         nexus_id: OmicronZoneUuid,
         user_comment: Option<String>,
+        fm_case_id: Option<CaseUuid>,
     ) -> Self {
         Self {
-            id: SupportBundleUuid::new_v4().into(),
+            id: id.into(),
             time_created: Utc::now(),
-            reason_for_creation: reason_for_creation.to_string(),
+            reason_for_creation,
             reason_for_failure: None,
             state: SupportBundleState::Collecting,
             zpool_id: zpool_id.into(),
             dataset_id: dataset_id.into(),
             assigned_nexus: Some(nexus_id.into()),
             user_comment,
-            // TODO(#10062): take a case ID when constructing the support bundle
-            // in fm_rendezvous.
-            fm_case_id: None,
+            fm_case_id: fm_case_id.map(Into::into),
         }
     }
 
