@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_08_00, SYSTEM_VERSION),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
@@ -394,6 +395,27 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::system::Ping>, HttpError> {
         Ok(HttpResponseOk(latest::system::Ping {
             status: latest::system::PingStatus::Ok,
+        }))
+    }
+
+    // No auth required: this only returns hard-coded values.
+
+    /// Fetch system version
+    ///
+    /// Returns the current version of the Oxide software running on this
+    /// system.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/version",
+        tags = ["system/status"],
+        versions = VERSION_SYSTEM_VERSION..,
+    }]
+    async fn system_version(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::system::SystemVersion>, HttpError> {
+        // TODO: replace with the real version string
+        Ok(HttpResponseOk(latest::system::SystemVersion {
+            version: "0.0.0".parse().unwrap(),
         }))
     }
 
