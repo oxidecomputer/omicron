@@ -5,13 +5,8 @@
 //! Network setup required to bring up the control plane
 
 use anyhow::{Context, anyhow};
-use dpd_client::Client as DpdClient;
-use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, TxEq,
-};
 use futures::future;
 use gateway_client::Client as MgsClient;
-use http::StatusCode;
 use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
@@ -29,8 +24,6 @@ use mg_admin_client::types::{
     BgpPeerConfig as MgBgpPeerConfig, Ipv6UnicastConfig,
     UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
 };
-use omicron_common::OMICRON_DPD_TAG;
-use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
@@ -40,8 +33,8 @@ use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_scrimlet_reconcilers::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::early_networking::{
-    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
-    PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
+    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig,
+    RouterPeerType, SwitchSlot,
 };
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
@@ -51,7 +44,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::watch;
-use tokio::time::sleep;
 
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
@@ -70,9 +62,6 @@ pub enum EarlyNetworkSetupError {
 
     #[error("Error during request to MGS: {0}")]
     Mgs(String),
-
-    #[error("Error during request to Dendrite: {0}")]
-    Dendrite(String),
 
     #[error("Error during DNS lookup")]
     DnsResolver(#[from] ResolveError),
@@ -371,69 +360,6 @@ impl<'a> EarlyNetworkSetup<'a> {
              {switch_zone_underlay_ip}",
             our_ports.len(),
         );
-        let dpd = DpdClient::new(
-            &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
-            dpd_client::ClientState {
-                tag: OMICRON_DPD_TAG.into(),
-                log: self.log.new(o!("component" => "DpdClient")),
-            },
-        );
-
-        // configure uplink for each requested uplink in configuration that
-        // matches our switch_slot
-        let mut uplink_configuration_errors = vec![];
-
-        for port_config in &our_ports {
-            let (dpd_port_settings, port_id) =
-                self.build_port_config(port_config)?;
-
-            self.wait_for_dendrite(&dpd).await;
-
-            info!(
-                self.log,
-                "Configuring default uplink on switch";
-                "config" => #?dpd_port_settings
-            );
-
-            while let Err(e) = dpd
-                .port_settings_apply(
-                    &port_id,
-                    Some(OMICRON_DPD_TAG),
-                    &dpd_port_settings,
-                )
-                .await
-            {
-                if let Some(StatusCode::SERVICE_UNAVAILABLE) = e.status() {
-                    warn!(
-                        self.log,
-                        "dendrite not available, re-attempting port configuration in 5 seconds";
-                        "port_id" => ?port_id,
-                        "configuration" => ?dpd_port_settings,
-                    );
-                    sleep(Duration::from_secs(5)).await;
-                    continue;
-                } else {
-                    // log and move on to the next uplink instead of bailing on the
-                    // entire uplink process
-                    error!(
-                        self.log,
-                        "unable to apply uplink port configuration";
-                        "error" => ?e,
-                        "port_id" => ?port_id,
-                        "configuration" => ?dpd_port_settings
-                    );
-                    uplink_configuration_errors.push(e);
-
-                    break;
-                }
-            }
-        }
-
-        if uplink_configuration_errors.len() == our_ports.len() {
-            let message =
-                format!("unable to configure any uplinks for {switch_slot:?}");
-            return Err(EarlyNetworkSetupError::Dendrite(message));
-        }
 
         let mgd = MgdClient::new(
             &format!("http://[{switch_zone_underlay_ip}]:{MGD_PORT}"),
@@ -829,83 +755,6 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         Ok(our_ports)
     }
-
-    fn build_port_config(
-        &self,
-        port_config: &PortConfig,
-    ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
-        info!(self.log, "Building Port Configuration");
-        let mut dpd_port_settings = PortSettings { links: HashMap::new() };
-        let link_id = LinkId(0);
-
-        let mut addrs = Vec::new();
-        for a in &port_config.addresses {
-            match a.address {
-                UplinkAddress::AddrConf => continue,
-                UplinkAddress::Static { ip_net } => {
-                    // TODO We're discarding the `uplink_cidr.prefix()` here and
-                    // only using the IP address; at some point we probably need
-                    // to give the full CIDR to dendrite?
-                    addrs.push(ip_net.addr());
-                }
-            }
-        }
-
-        let link_settings = LinkSettings {
-            params: LinkCreate {
-                autoneg: port_config.autoneg,
-                kr: false, //NOTE: kr does not apply to user configurable links.
-                fec: port_config.uplink_port_fec.map(convert_fec),
-                speed: convert_speed(&port_config.uplink_port_speed),
-                lane: Some(LinkId(0)),
-                tx_eq: port_config.tx_eq.map(|x| TxEq {
-                    pre1: x.pre1,
-                    pre2: x.pre2,
-                    main: x.main,
-                    post2: x.post2,
-                    post1: x.post1,
-                }),
-            },
-            addrs,
-        };
-        dpd_port_settings.links.insert(link_id.to_string(), link_settings);
-        let port_id: PortId = port_config.port.parse().map_err(|e| {
-            EarlyNetworkSetupError::BadConfig(format!(
-                concat!(
-                    "could not use value provided to",
-                    "rack_network_config.uplink_port as PortID: {}"
-                ),
-                e
-            ))
-        })?;
-
-        Ok((dpd_port_settings, port_id))
-    }
-
-    async fn wait_for_dendrite(&self, dpd: &DpdClient) {
-        loop {
-            info!(self.log, "Checking dendrite uptime");
-            match dpd.dpd_uptime().await {
-                Ok(uptime) => {
-                    info!(
-                        self.log,
-                        "Dendrite online";
-                        "uptime" => uptime.to_string()
-                    );
-                    break;
-                }
-                Err(e) => {
-                    info!(
-                        self.log,
-                        "Unable to check Dendrite uptime";
-                        "reason" => #?e
-                    );
-                }
-            }
-            info!(self.log, "Waiting for dendrite to come online");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
-    }
 }
 
 // This is derived from `retry_policy_internal_service_aggressive` with a
@@ -919,30 +768,4 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
         .with_max_interval(Duration::from_secs(15))
         .with_max_elapsed_time(None)
         .build()
-}
-
-// The following two conversion functions translate the speed and fec types used
-// in the internal API to the types used in the dpd-client API.  The conversion
-// is done here, rather than with "impl From" at the definition, to avoid a
-// circular dependency between omicron-common and dpd.
-fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
-    match speed {
-        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
-        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
-        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
-        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
-        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
-        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
-        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
-        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
-        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
-    }
-}
-
-fn convert_fec(fec: PortFec) -> dpd_client::types::PortFec {
-    match fec {
-        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
-        PortFec::None => dpd_client::types::PortFec::None,
-        PortFec::Rs => dpd_client::types::PortFec::Rs,
-    }
 }
