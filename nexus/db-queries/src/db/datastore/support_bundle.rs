@@ -584,18 +584,16 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
-        use nexus_types::support_bundle::BundleDataCategory;
 
         // Always insert a flags row.
         diesel::insert_into(flags_dsl::support_bundle_data_selection_flags)
             .values(DataSelectionFlags {
                 bundle_id: bundle_id.into(),
                 include_reconfigurator: data_selection
-                    .contains(BundleDataCategory::Reconfigurator),
+                    .contains_reconfigurator(),
                 include_sled_cubby_info: data_selection
-                    .contains(BundleDataCategory::SledCubbyInfo),
-                include_sp_dumps: data_selection
-                    .contains(BundleDataCategory::SpDumps),
+                    .contains_sled_cubby_info(),
+                include_sp_dumps: data_selection.contains_sp_dumps(),
             })
             .execute_async(conn)
             .await?;

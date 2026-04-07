@@ -15,6 +15,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -27,10 +28,11 @@ use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use super::support_bundle::collection::BundleCollection;
-use super::support_bundle::request::BundleRequest;
+use super::support_bundle::collection::CHUNK_SIZE;
 
 fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
     authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
@@ -56,6 +58,7 @@ pub struct SupportBundleCollector {
     resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
+    transfer_chunk_size: NonZeroU64,
 }
 
 impl SupportBundleCollector {
@@ -65,7 +68,19 @@ impl SupportBundleCollector {
         disable: bool,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        SupportBundleCollector { datastore, resolver, disable, nexus_id }
+        SupportBundleCollector {
+            datastore,
+            resolver,
+            disable,
+            nexus_id,
+            transfer_chunk_size: CHUNK_SIZE,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_transfer_chunk_size(mut self, size: NonZeroU64) -> Self {
+        self.transfer_chunk_size = size;
+        self
     }
 
     // Tells a sled agent to delete a support bundle
@@ -311,7 +326,7 @@ impl SupportBundleCollector {
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
-        request: &BundleRequest,
+        data_selection: &BundleDataSelection,
     ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
@@ -354,9 +369,9 @@ impl SupportBundleCollector {
             self.resolver.clone(),
             opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
             opctx.child(std::collections::BTreeMap::new()),
-            request.clone(),
+            data_selection.clone(),
             bundle.clone(),
-            request.transfer_chunk_size,
+            self.transfer_chunk_size,
         ));
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
@@ -416,8 +431,8 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
-            let request = BundleRequest::all();
-            match self.collect_bundle(&opctx, &request).await {
+            let data_selection = BundleDataSelection::all();
+            match self.collect_bundle(&opctx, &data_selection).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
@@ -455,7 +470,7 @@ mod test {
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
-    use nexus_types::support_bundle::{BundleData, SledSelection};
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -469,7 +484,6 @@ mod test {
         PhysicalDiskUuid, SledUuid,
     };
     use sled_agent_types::inventory::ZpoolHealth;
-    use std::collections::HashSet;
     use std::num::NonZeroU64;
     use uuid::Uuid;
 
@@ -520,9 +534,9 @@ mod test {
             nexus.id(),
         );
 
-        let request = BundleRequest::all();
+        let data_selection = BundleDataSelection::all();
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should succeed with no bundles");
         assert!(report.is_none());
@@ -837,10 +851,9 @@ mod test {
         // The bundle collection should complete successfully.
         // NOTE: The support bundle querying interface isn't supported on
         // the simulated sled agent (yet?) so we're using an empty sled selection.
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -874,7 +887,7 @@ mod test {
         // If we retry bundle collection, nothing should happen.
         // The bundle has already been collected.
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
@@ -916,10 +929,9 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded")
             .expect("Should have generated a report");
@@ -1026,26 +1038,21 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-        );
+        )
+        .with_transfer_chunk_size(NonZeroU64::new(16).unwrap());
 
         // The bundle collection should complete successfully.
         //
         // We're going to use a really small chunk size here to force the bundle
         // to get split up.
-        let request = BundleRequest {
-            transfer_chunk_size: NonZeroU64::new(16).unwrap(),
-            data_selection: [
-                BundleData::Reconfigurator,
-                BundleData::HostInfo(SledSelection::Specific(HashSet::new())),
-                BundleData::SledCubbyInfo,
-                BundleData::SpDumps,
-            ]
-            .into_iter()
-            .collect(),
-        };
+        let data_selection = BundleDataSelection::new()
+            .with_reconfigurator()
+            .with_specific_sleds([])
+            .with_sled_cubby_info()
+            .with_sp_dumps();
 
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1141,10 +1148,9 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1175,7 +1181,7 @@ mod test {
         assert_eq!(observed_bundle.state, SupportBundleState::Collecting);
 
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1310,10 +1316,9 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1469,10 +1474,9 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1556,10 +1560,9 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1644,10 +1647,9 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::all();
-        request.data_selection = request.data_selection.with_specific_sleds([]);
+        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx, &data_selection)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
