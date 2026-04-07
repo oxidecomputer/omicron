@@ -29,18 +29,18 @@ pub async fn spawn_collection_steps(
         return Ok(CollectionStepOutput::Skipped);
     }
 
+    let init_future = async {
+        let Some(mgs_client) =
+            cache.get_or_initialize_mgs_client(collection).await
+        else {
+            bail!("Could not initialize MGS client");
+        };
+        let sps = steps::sled_cubby::get_available_sps(&mgs_client).await?;
+        Ok::<_, anyhow::Error>((mgs_client, sps))
+    };
     let (mgs_client, available_sps) = tokio::select! {
         _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
-        result = async {
-            let Some(mgs_client) =
-                cache.get_or_initialize_mgs_client(collection).await
-            else {
-                bail!("Could not initialize MGS client");
-            };
-            let sps =
-                steps::sled_cubby::get_available_sps(&mgs_client).await?;
-            Ok::<_, anyhow::Error>((mgs_client, sps))
-        } => result?,
+        result = init_future => result?,
     };
 
     let sp_dumps_dir = dir.join("sp_task_dumps");
@@ -96,34 +96,33 @@ async fn save_sp_dumps(
     sp: SpIdentifier,
     sp_dumps_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
-    let dumps = tokio::select! {
-        _ = collection.cancelled() => return Ok(()),
-        result = async {
-            let dump_count = mgs_client
-                .sp_task_dump_count(&sp.type_, sp.slot)
+    let fetch_dumps = async {
+        let dump_count = mgs_client
+            .sp_task_dump_count(&sp.type_, sp.slot)
+            .await
+            .context("failed to get task dump count from SP")?
+            .into_inner();
+
+        let mut dumps = Vec::with_capacity(dump_count as usize);
+        for i in 0..dump_count {
+            let task_dump = mgs_client
+                .sp_task_dump_get(&sp.type_, sp.slot, i)
                 .await
-                .context("failed to get task dump count from SP")?
+                .with_context(|| {
+                    format!("failed to get task dump {i} from SP")
+                })?
                 .into_inner();
 
-            let mut dumps = Vec::with_capacity(dump_count as usize);
-            for i in 0..dump_count {
-                let task_dump = mgs_client
-                    .sp_task_dump_get(&sp.type_, sp.slot, i)
-                    .await
-                    .with_context(|| {
-                        format!("failed to get task dump {i} from SP")
-                    })?
-                    .into_inner();
-
-                let zip_bytes = base64::engine::general_purpose::STANDARD
-                    .decode(task_dump.base64_zip)
-                    .context(
-                        "failed to decode base64-encoded SP task dump zip",
-                    )?;
-                dumps.push((i, zip_bytes));
-            }
-            Ok::<_, anyhow::Error>(dumps)
-        } => result?,
+            let zip_bytes = base64::engine::general_purpose::STANDARD
+                .decode(task_dump.base64_zip)
+                .context("failed to decode base64-encoded SP task dump zip")?;
+            dumps.push((i, zip_bytes));
+        }
+        Ok::<_, anyhow::Error>(dumps)
+    };
+    let dumps = tokio::select! {
+        _ = collection.cancelled() => return Ok(()),
+        result = fetch_dumps => result?,
     };
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));

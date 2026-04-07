@@ -73,71 +73,68 @@ async fn write_sled_cubby_info(
         uuid: Option<Uuid>,
     }
 
-    let sled_info = tokio::select! {
-        _ = collection.cancelled() => return Ok(()),
-        result = async {
-            let available_sps = get_available_sps(&mgs_client).await
-                .context("failed to get available SPs")?;
+    let sled_info_collection = async {
+        let available_sps = get_available_sps(&mgs_client)
+            .await
+            .context("failed to get available SPs")?;
 
-            let mut nexus_map: BTreeMap<_, _> = nexus_sleds
-                .into_iter()
-                .map(|sled| (sled.serial_number(), sled))
-                .collect();
+        let mut nexus_map: BTreeMap<_, _> = nexus_sleds
+            .into_iter()
+            .map(|sled| (sled.serial_number(), sled))
+            .collect();
 
-            let mut sled_info = BTreeMap::new();
-            for sp in available_sps
-                .into_iter()
-                .filter(|sp| matches!(sp.type_, SpType::Sled))
-            {
-                match mgs_client.sp_get(&sp.type_, sp.slot).await {
-                    Ok(s) => {
-                        let sp_state = s.into_inner();
-                        if let Some(sled) =
-                            nexus_map.remove(sp_state.serial_number.as_str())
-                        {
-                            sled_info.insert(
-                                sp_state.serial_number.to_string(),
-                                SledInfo {
-                                    cubby: Some(sp.slot),
-                                    uuid: Some(
-                                        *sled.identity.id.as_untyped_uuid(),
-                                    ),
-                                },
-                            );
-                        } else {
-                            sled_info.insert(
-                                sp_state.serial_number.to_string(),
-                                SledInfo {
-                                    cubby: Some(sp.slot),
-                                    uuid: None,
-                                },
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        error!(log,
-                            "Failed to get SP state for sled_info.json";
-                            "cubby" => sp.slot,
-                            "component" => %sp.type_,
-                            "error" => InlineErrorChain::new(&e)
+        let mut sled_info = BTreeMap::new();
+        for sp in available_sps
+            .into_iter()
+            .filter(|sp| matches!(sp.type_, SpType::Sled))
+        {
+            match mgs_client.sp_get(&sp.type_, sp.slot).await {
+                Ok(s) => {
+                    let sp_state = s.into_inner();
+                    if let Some(sled) =
+                        nexus_map.remove(sp_state.serial_number.as_str())
+                    {
+                        sled_info.insert(
+                            sp_state.serial_number.to_string(),
+                            SledInfo {
+                                cubby: Some(sp.slot),
+                                uuid: Some(*sled.identity.id.as_untyped_uuid()),
+                            },
+                        );
+                    } else {
+                        sled_info.insert(
+                            sp_state.serial_number.to_string(),
+                            SledInfo { cubby: Some(sp.slot), uuid: None },
                         );
                     }
                 }
+                Err(e) => {
+                    error!(log,
+                        "Failed to get SP state for sled_info.json";
+                        "cubby" => sp.slot,
+                        "component" => %sp.type_,
+                        "error" => InlineErrorChain::new(&e)
+                    );
+                }
             }
+        }
 
-            // Sleds not returned by MGS.
-            for (serial, sled) in nexus_map {
-                sled_info.insert(
-                    serial.to_string(),
-                    SledInfo {
-                        cubby: None,
-                        uuid: Some(*sled.identity.id.as_untyped_uuid()),
-                    },
-                );
-            }
+        // Sleds not returned by MGS.
+        for (serial, sled) in nexus_map {
+            sled_info.insert(
+                serial.to_string(),
+                SledInfo {
+                    cubby: None,
+                    uuid: Some(*sled.identity.id.as_untyped_uuid()),
+                },
+            );
+        }
 
-            Ok::<_, anyhow::Error>(sled_info)
-        } => result?,
+        Ok::<_, anyhow::Error>(sled_info)
+    };
+    let sled_info = tokio::select! {
+        _ = collection.cancelled() => return Ok(()),
+        result = sled_info_collection => result?,
     };
 
     let json = serde_json::to_string_pretty(&sled_info)
