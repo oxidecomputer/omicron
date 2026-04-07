@@ -94,6 +94,14 @@ async fn collect_data_from_sled(
     }
 
     info!(log, "Collecting bundle info from sled"; "sled" => %sled.id());
+
+    let sled_client_result = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = nexus_networking::sled_client(
+            &datastore, &opctx, sled.id(), log,
+        ) => result,
+    };
+
     let sled_path = dir
         .join("rack")
         .join(sled.rack_id.to_string())
@@ -102,12 +110,6 @@ async fn collect_data_from_sled(
     tokio::fs::create_dir_all(&sled_path).await?;
     tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}")).await?;
 
-    let sled_client_result = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
-        result = nexus_networking::sled_client(
-            &datastore, &opctx, sled.id(), log,
-        ) => result,
-    };
     let sled_client = match sled_client_result {
         Ok(client) => client,
         Err(err) => {

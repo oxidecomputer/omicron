@@ -44,22 +44,30 @@ pub async fn collect(
         }
     };
 
+    // serde_json's serialization API is synchronous, so use
+    // spawn_blocking to avoid blocking the async runtime.
     let file_path = dir.join("reconfigurator_state.json");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&file_path)
-        .with_context(|| format!("failed to open {}", file_path))?;
-    serde_json::to_writer_pretty(&file, &state).with_context(|| {
-        format!("failed to serialize reconfigurator state to {}", file_path)
-    })?;
+    let target_blueprint = state.target_blueprint;
+    let num_blueprints = state.blueprints.len();
+    let num_collections = state.collections.len();
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&file_path)
+            .with_context(|| format!("failed to open {}", file_path))?;
+        serde_json::to_writer_pretty(&file, &state).with_context(|| {
+            format!("failed to serialize reconfigurator state to {}", file_path)
+        })
+    })
+    .await??;
     info!(
         log,
         "Support bundle: collected reconfigurator state";
-        "target_blueprint" => ?state.target_blueprint,
-        "num_blueprints" => state.blueprints.len(),
-        "num_collections" => state.collections.len(),
+        "target_blueprint" => ?target_blueprint,
+        "num_blueprints" => num_blueprints,
+        "num_collections" => num_collections,
     );
 
     Ok(CollectionStepOutput::None)

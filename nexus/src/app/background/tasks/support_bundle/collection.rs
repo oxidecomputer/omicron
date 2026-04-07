@@ -192,6 +192,7 @@ impl BundleCollection {
 
         // Collection is done — stop the cancellation checker.
         cancel_task.abort();
+        let _ = cancel_task.await;
 
         if self.is_cancelled() {
             warn!(
