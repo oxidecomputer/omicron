@@ -375,6 +375,16 @@ impl FmRendezvous {
                 )
                 .await
             {
+                // Bundle already exists from a previous activation, idempotent.
+                Err(Error::ObjectAlreadyExists { .. }) => {
+                    slog::debug!(
+                        opctx.log,
+                        "support bundle already exists";
+                        "case_id" => %case_id,
+                        "bundle_id" => %bundle_id,
+                    );
+                }
+                // Other errors, unexpected.
                 Err(e) => {
                     slog::warn!(
                         opctx.log,
