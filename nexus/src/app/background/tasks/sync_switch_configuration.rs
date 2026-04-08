@@ -6,8 +6,8 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::{LoadedTargetBlueprint, tasks::networking::build_mgd_clients},
-    dpd_clients, switch_zone_address_mappings,
+    background::LoadedTargetBlueprint, dpd_clients,
+    switch_zone_address_mappings,
 };
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use slog::o;
@@ -26,12 +26,6 @@ use display_error_chain::DisplayErrorChain;
 use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use mg_admin_client::types::{
-    ApplyRequest, BestpathFanoutRequest, BgpPeerConfig, CheckerSource,
-    ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    Ipv6UnicastConfig, JitterRange, ShaperSource, UnnumberedBgpPeerConfig,
-};
 use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
@@ -74,11 +68,6 @@ use std::{
 };
 
 const PHY0: &str = "phy0";
-
-// This is more of an implementation detail of the BGP implementation. It
-// defines the maximum time the peering engine will wait for external messages
-// before breaking to check for shutdown conditions.
-const BGP_SESSION_RESOLUTION: u64 = 100;
 
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
@@ -320,10 +309,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build mgd clients
-                let mgd_clients = build_mgd_clients(mappings, &log, &self.resolver).await;
-
                 let port_list = match self.switch_ports(opctx, &log).await {
                     Ok(value) => value,
                     Err(e) => {
@@ -419,13 +404,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 }
 
                 //
-                // calculate and apply BGP changes
+                // calculate BGP changes to update the bootstore
                 //
-
-                // build a list of desired settings for each switch
-                let mut desired_bgp_configs: HashMap<
-                        SwitchSlot, (ApplyRequest, BestpathFanoutRequest)
-                        > = HashMap::new();
 
                 // we currently only support one bgp config per switch
                 let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
@@ -438,14 +418,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     };
 
-                    // desired peer configurations for a given switch port
-                    let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
-                    let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
-
                     for peer in &settings.bgp_peers {
                         let bgp_config_id = peer.bgp_config_id();
-                        let port_settings_id = peer.port_settings_id();
-                        let peer = peer.as_bgp_peer();
 
                         // since we only have one bgp config per switch, we only need to fetch it once
                         let bgp_config = match switch_bgp_config.entry(*switch_slot) {
@@ -539,368 +513,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
-
-                        let ttl = peer.min_ttl;
-
-                        // Determine if this is a numbered or unnumbered peer
-                        // (None or unspecified address = unnumbered)
-                        let peer_addr = match peer.addr {
-                            Some(addr) if !addr.is_unspecified() => Some(addr),
-                            _ => None,
-                        };
-
-                        // Numbered peer - identified by address
-                        //TODO consider awaiting in parallel and joining
-                        let communities = match self.datastore.communities_for_peer(
-                            opctx,
-                            port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer_addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get communities for peer";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get port settings for peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
-                                        )
-                                });
-                            }
-                        };
-
-                        let allow_import = match self.datastore.allow_import_for_peer(
-                            opctx,
-                            port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer_addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed imports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get allowed imports peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
-                                        )
-                                });
-                            }
-                        };
-
-                        let import_policy4 = match &allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy4::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) =>  None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy4::NoFiltering,
-                        };
-
-                        let import_policy6 = match &allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy6::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) =>  None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy6::NoFiltering,
-                        };
-
-                        let allow_export = match self.datastore.allow_export_for_peer(
-                            opctx,
-                            port_settings_id,
-                            &peer.interface_name.to_string(),
-                            peer_addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed exportss";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e),
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get allowed exports peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
-                                        )
-                                });
-                            }
-                        };
-
-                        let export_policy4 = match &allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy4::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) => None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy4::NoFiltering,
-                        };
-
-                        let export_policy6 = match &allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy6::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) => None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy6::NoFiltering,
-                        };
-
-                        // numbered peer
-                        if let Some(addr) = peer_addr {
-                            // now that the peer passes the above validations, add it to the list for configuration
-                            let peer_config = BgpPeerConfig {
-                                name: format!("{}", addr),
-                                host: format!("{}:179", addr),
-                                hold_time: peer.hold_time.into(),
-                                idle_hold_time: peer.idle_hold_time.into(),
-                                delay_open: peer.delay_open.into(),
-                                connect_retry: peer.connect_retry.into(),
-                                keepalive: peer.keepalive.into(),
-                                resolution: BGP_SESSION_RESOLUTION,
-                                passive: false,
-                                remote_asn: peer.remote_asn,
-                                min_ttl: ttl,
-                                md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator,
-                                local_pref: peer.local_pref,
-                                enforce_first_as: peer.enforce_first_as,
-                                communities: communities.into_iter().map(|c| c.community.0).collect(),
-                                ipv4_unicast: Some(Ipv4UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy4,
-                                    export_policy: export_policy4,
-                                }),
-                                ipv6_unicast: Some(Ipv6UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy6,
-                                    export_policy: export_policy6,
-                                }),
-                                vlan_id: peer.vlan_id,
-                                //TODO plumb these out to the external API
-                                connect_retry_jitter: Some(JitterRange {
-                                    max: 1.0,
-                                    min: 0.75,
-                                }),
-                                deterministic_collision_resolution: false,
-                                idle_hold_jitter: None,
-                            };
-
-                            // update the stored vec if it exists, create a new on if it doesn't exist
-                            match peers.entry(port.port_name.clone().to_string()) {
-                                Entry::Occupied(mut occupied_entry) => {
-                                    occupied_entry.get_mut().push(peer_config);
-                                },
-                                Entry::Vacant(vacant_entry) => {
-                                    vacant_entry.insert(vec![peer_config]);
-                                },
-                            }
-                        }
-                        // unnumbered peer
-                        else {
-                            // Unnumbered peer - identified by interface
-                            // For unnumbered peers, we use NoFiltering policies as the
-                            // communities/import/export tables are keyed by address
-                            let peer_config = UnnumberedBgpPeerConfig {
-                                name: format!("unnumbered-{}", port.port_name),
-                                interface: format!("tfport{}_0", port.port_name),
-                                hold_time: peer.hold_time.into(),
-                                idle_hold_time: peer.idle_hold_time.into(),
-                                delay_open: peer.delay_open.into(),
-                                connect_retry: peer.connect_retry.into(),
-                                keepalive: peer.keepalive.into(),
-                                resolution: BGP_SESSION_RESOLUTION,
-                                passive: false,
-                                remote_asn: peer.remote_asn,
-                                min_ttl: ttl,
-                                md5_auth_key: peer.md5_auth_key.clone(),
-                                multi_exit_discriminator: peer.multi_exit_discriminator,
-                                local_pref: peer.local_pref,
-                                enforce_first_as: peer.enforce_first_as,
-                                communities: communities.into_iter().map(|c| c.community.0).collect(),
-                                ipv4_unicast: Some(Ipv4UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy4,
-                                    export_policy: export_policy4,
-                                }),
-                                ipv6_unicast: Some(Ipv6UnicastConfig{
-                                    nexthop: None,
-                                    import_policy: import_policy6,
-                                    export_policy: export_policy6,
-                                }),
-                                vlan_id: peer.vlan_id,
-                                connect_retry_jitter: Some(JitterRange {
-                                    max: 1.0,
-                                    min: 0.75,
-                                }),
-                                deterministic_collision_resolution: false,
-                                idle_hold_jitter: None,
-                                router_lifetime: peer.router_lifetime,
-                            };
-
-                            // update the stored vec if it exists, create a new on if it doesn't exist
-                            match unnumbered_peers.entry(port.port_name.clone().to_string()) {
-                                Entry::Occupied(mut occupied_entry) => {
-                                    occupied_entry.get_mut().push(peer_config);
-                                },
-                                Entry::Vacant(vacant_entry) => {
-                                    vacant_entry.insert(vec![peer_config]);
-                                },
-                            }
-                        }
-                    }
-
-                    let (config_id, request_bgp_config) = match switch_bgp_config.get(switch_slot) {
-                        Some(config) => config,
-                        None => {
-                            info!(log, "no bgp config found for switch, skipping."; "switch" => ?switch_slot);
-                            continue;
-                        },
-                    };
-
-                    let request_prefixes = match bgp_announce_prefixes.get(
-                        &request_bgp_config.bgp_announce_set_id) {
-                        Some(prefixes) => prefixes,
-                        None => {
-                            error!(
-                                log,
-                                "no prefixes to announce found for bgp config";
-                                "switch" => ?switch_slot,
-                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
-                                "bgp_config_id" => ?config_id,
-                            );
-                            continue;
-                        },
-                    };
-
-                    match desired_bgp_configs.entry(*switch_slot) {
-                        Entry::Occupied(mut occupied_entry) => {
-                            let (config, _) = occupied_entry.get_mut();
-                            // peers are the only per-port part of the config.
-                            config.peers.extend(peers);
-                            config.unnumbered_peers.extend(unnumbered_peers);
-                        }
-                        Entry::Vacant(vacant_entry) => {
-                            let apply_request = ApplyRequest {
-                                    asn: *request_bgp_config.asn,
-                                    peers,
-                                    unnumbered_peers,
-                                    originate: request_prefixes.clone(),
-                                    checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
-                                        asn: *request_bgp_config.asn,
-                                        code: code.clone(),
-                                    }),
-                                    shaper: request_bgp_config.shaper.as_ref().map(|code| ShaperSource{
-                                        asn: *request_bgp_config.asn,
-                                        code: code.clone(),
-                                    }),
-                                };
-
-                            let fanout = match std::num::NonZeroU8::new(*request_bgp_config.max_paths) {
-                                Some(v) => v,
-                                None => {
-                                    error!(
-                                        log,
-                                        "Bgp config max_paths was set to zero! Configuring with default value of 1!";
-                                        "switch" => ?switch_slot,
-                                        "bgp_config_id" => ?config_id,
-                                    );
-                                    std::num::NonZeroU8::MIN
-                                },
-                            };
-
-                            let fanout_request = BestpathFanoutRequest { fanout };
-
-                            vacant_entry.insert((apply_request, fanout_request));
-                        }
-                    }
-                }
-
-                for (switch_slot, (config, fanout)) in &desired_bgp_configs {
-                    let client = match mgd_clients.get(switch_slot) {
-                        Some(client) => client,
-                        None => {
-                            error!(log, "no mgd client found for switch"; "switch_slot" => ?switch_slot);
-                            continue;
-                        },
-                    };
-                    info!(
-                        &log,
-                        "applying bgp config";
-                        "switch_slot" => ?switch_slot,
-                        "config" => ?config,
-                    );
-                    if let Err(e) = client.bgp_apply_v2(config).await {
-                        error!(log, "error while applying bgp configuration"; "error" => ?e);
-                    }
-
-                    if let Err(e) = client.update_rib_bestpath_fanout(fanout).await {
-                        error!(log, "error while updating bestpath fanout"; "error" => ?e);
                     }
                 }
 
