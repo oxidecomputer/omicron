@@ -15,7 +15,7 @@ use std::fmt;
 
 /// Summarizes the inputs to sitrep analysis.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AnalysisInputReport {
+pub struct InputReport {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub parent_inv_id: Option<CollectionUuid>,
     pub inv_id: CollectionUuid,
@@ -33,14 +33,14 @@ pub struct ClosedCaseReport {
     pub unmarked_ereports: BTreeSet<EreportId>,
 }
 
-impl AnalysisInputReport {
+impl InputReport {
     pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
         InputReportMultilineDisplay { report: self, indent }
     }
 }
 
 struct InputReportMultilineDisplay<'report> {
-    report: &'report AnalysisInputReport,
+    report: &'report InputReport,
     indent: usize,
 }
 
@@ -48,7 +48,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
             report:
-                AnalysisInputReport {
+                InputReport {
                     parent_sitrep_id,
                     parent_inv_id,
                     inv_id,
@@ -167,7 +167,7 @@ mod tests {
     };
     use std::str::FromStr;
 
-    fn example_report_with_cases() -> AnalysisInputReport {
+    fn example_report_with_cases() -> InputReport {
         let parent_sitrep_id =
             SitrepUuid::from_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
                 .unwrap();
@@ -229,7 +229,7 @@ mod tests {
             },
         );
 
-        AnalysisInputReport {
+        InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
@@ -239,12 +239,12 @@ mod tests {
         }
     }
 
-    fn example_report_empty() -> AnalysisInputReport {
+    fn example_report_empty() -> InputReport {
         let inv_id =
             CollectionUuid::from_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
                 .unwrap();
 
-        AnalysisInputReport {
+        InputReport {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
@@ -254,7 +254,7 @@ mod tests {
         }
     }
 
-    fn example_report_same_inv() -> AnalysisInputReport {
+    fn example_report_same_inv() -> InputReport {
         let parent_sitrep_id =
             SitrepUuid::from_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
                 .unwrap();
@@ -262,7 +262,7 @@ mod tests {
             CollectionUuid::from_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
                 .unwrap();
 
-        AnalysisInputReport {
+        InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,

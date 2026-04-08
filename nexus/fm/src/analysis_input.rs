@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-pub use nexus_types::fm::analysis_reports::AnalysisInputReport as Report;
+pub use nexus_types::fm::analysis_reports::InputReport as Report;
 
 /// A complete set of inputs to a fault management analysis phase.
 ///
