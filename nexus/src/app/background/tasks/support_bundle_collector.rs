@@ -5,6 +5,7 @@
 //! Background task for managing Support Bundles
 
 use crate::app::background::BackgroundTask;
+use anyhow::Context;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -15,7 +16,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
-use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -326,7 +326,6 @@ impl SupportBundleCollector {
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
-        data_selection: &BundleDataSelection,
     ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
@@ -364,17 +363,23 @@ impl SupportBundleCollector {
             }
         };
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let data_selection = self
+            .datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await
+            .context("failed to query bundle data selection")?;
+
         let collection = Arc::new(BundleCollection::new(
             self.datastore.clone(),
             self.resolver.clone(),
             opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
             opctx.child(std::collections::BTreeMap::new()),
-            data_selection.clone(),
+            data_selection,
             bundle.clone(),
             self.transfer_chunk_size,
         ));
 
-        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         let mut report = collection.collect_bundle_and_store_on_sled().await?;
         if let Err(err) = self
             .datastore
@@ -431,8 +436,7 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
-            let data_selection = BundleDataSelection::all();
-            match self.collect_bundle(&opctx, &data_selection).await {
+            match self.collect_bundle(&opctx).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
@@ -535,9 +539,8 @@ mod test {
             nexus.id(),
         );
 
-        let data_selection = BundleDataSelection::all();
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should succeed with no bundles");
         assert!(report.is_none());
@@ -837,7 +840,11 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    // NOTE: The support bundle querying interface isn't
+                    // supported on the simulated sled agent (yet?) so we're
+                    // using an empty sled selection.
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -852,11 +859,8 @@ mod test {
         );
 
         // The bundle collection should complete successfully.
-        // NOTE: The support bundle querying interface isn't supported on
-        // the simulated sled agent (yet?) so we're using an empty sled selection.
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -890,7 +894,7 @@ mod test {
         // If we retry bundle collection, nothing should happen.
         // The bundle has already been collected.
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
@@ -920,7 +924,8 @@ mod test {
                     reason: "For trace file testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -934,9 +939,8 @@ mod test {
         );
 
         // Collect the bundle
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded")
             .expect("Should have generated a report");
@@ -1033,7 +1037,8 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1052,14 +1057,8 @@ mod test {
         //
         // We're going to use a really small chunk size here to force the bundle
         // to get split up.
-        let data_selection = BundleDataSelection::new()
-            .with_reconfigurator()
-            .with_specific_sleds([])
-            .with_sled_cubby_info()
-            .with_sp_dumps();
-
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1132,7 +1131,8 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1145,7 +1145,8 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1159,9 +1160,8 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1192,7 +1192,7 @@ mod test {
         assert_eq!(observed_bundle.state, SupportBundleState::Collecting);
 
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1318,7 +1318,8 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1331,9 +1332,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1480,7 +1480,8 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1493,9 +1494,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1568,7 +1568,8 @@ mod test {
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1581,9 +1582,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1655,7 +1655,8 @@ mod test {
                     reason: "Testing reconfigurator state collection",
                     nexus_id: nexus.id(),
                     user_comment: None,
-                    data_selection: BundleDataSelection::all(),
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
                 },
             )
             .await
@@ -1670,9 +1671,8 @@ mod test {
         );
 
         // Collect the bundle
-        let data_selection = BundleDataSelection::all().with_specific_sleds([]);
         let report = collector
-            .collect_bundle(&opctx, &data_selection)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1729,6 +1729,114 @@ mod test {
                 .expect("blueprints should be an array")
                 .is_empty(),
             "Should have blueprints"
+        );
+    }
+
+    // Verify that a bundle created with a limited data selection only runs
+    // the corresponding collection steps (others are skipped).
+    #[nexus_test(server = crate::Server)]
+    async fn test_per_bundle_data_selection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle that only requests reconfigurator state -
+        // everything else should be skipped.
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "Testing per-bundle data selection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::new()
+                        .with_reconfigurator(),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+        assert!(report.activated_in_db_ok);
+
+        // Reconfigurator state should have run successfully.
+        let reconfig_step = report
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE
+            })
+            .expect("should have reconfigurator state step");
+        assert_eq!(reconfig_step.status, SupportBundleCollectionStepStatus::Ok);
+
+        // Ereports should be skipped since we didn't request them.
+        let ereport_step = report
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(
+            ereport_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // Sled cubby info should be skipped.
+        let cubby_step = report
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO
+            })
+            .expect("should have sled cubby info step");
+        assert_eq!(
+            cubby_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // SP dumps should be skipped.
+        let sp_step = report
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS
+            })
+            .expect("should have SP dumps step");
+        assert_eq!(sp_step.status, SupportBundleCollectionStepStatus::Skipped);
+
+        // Sled queries should be skipped.
+        let sled_step = report
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+            .expect("should have sled query step");
+        assert_eq!(
+            sled_step.status,
+            SupportBundleCollectionStepStatus::Skipped
         );
     }
 }
