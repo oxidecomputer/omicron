@@ -15,7 +15,6 @@ pub struct BackgroundTasks {
     pub task_metrics_producer_gc: Activator,
     pub task_external_endpoints: Activator,
     pub task_nat_cleanup: Activator,
-    pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
     pub task_inventory_loader: Activator,
     pub task_support_bundle_collector: Activator,

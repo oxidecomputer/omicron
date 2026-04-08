@@ -3222,9 +3222,12 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
-        // Configure uplinks via DPD in our switch zone.
+        // Filter out our port configs from `network_config_rx`.
         let our_ports = EarlyNetworkSetup::new(log)
-            .init_switch_config(network_config_rx, switch_zone_ip)
+            .determine_our_switch_port_configs(
+                network_config_rx,
+                switch_zone_ip,
+            )
             .await?
             .into_iter()
             .map(From::from)

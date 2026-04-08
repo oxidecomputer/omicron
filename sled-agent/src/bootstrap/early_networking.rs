@@ -9,20 +9,18 @@ use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
-use mg_admin_client::Client as MgdClient;
-use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
-use omicron_common::address::{MGD_PORT, MGS_PORT};
+use omicron_common::address::MGS_PORT;
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
 };
 use omicron_ddm_admin_client::DdmError;
 use sled_agent_scrimlet_reconcilers::ThisSledSwitchZoneUnderlayIpAddr;
-use sled_agent_types::early_networking::{BfdMode, PortConfig, SwitchSlot};
+use sled_agent_types::early_networking::{PortConfig, SwitchSlot};
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -41,15 +39,6 @@ pub enum EarlyNetworkSetupError {
 
     #[error("Error during DNS lookup")]
     DnsResolver(#[from] ResolveError),
-
-    #[error("BGP configuration error: {0}")]
-    BgpConfigurationError(String),
-
-    #[error("BFD configuration error: {0}")]
-    BfdConfigurationError(String),
-
-    #[error("MGD error: {0}")]
-    MgdError(String),
 }
 
 enum LookupSwitchZoneAddrsResult {
@@ -65,9 +54,9 @@ pub struct EarlyNetworkSetup<'a> {
     log: &'a Logger,
 }
 
-/// `EarlyNetworkSetup` provides three helper methods primarily used for cold
-/// boot and RSS networking configuration (i.e., prior to the control plane
-/// being up). The first two are related to finding the switch zones:
+/// `EarlyNetworkSetup` provides helper methods primarily used for cold boot and
+/// RSS networking configuration (i.e., prior to the control plane being up).
+/// The first two are related to finding the switch zones:
 ///
 /// * `lookup_switch_zone_underlay_addrs` attempts to find the underlay
 ///   addresses and slots of all switch zones reported by internal DNS,
@@ -79,9 +68,9 @@ pub struct EarlyNetworkSetup<'a> {
 /// There are additional details about how these fail behave if one or both
 /// switch zones are unresponse; see their respective documentation.
 ///
-/// The third function provided is `init_switch_config`. It is intended to be
-/// called by a scrimlet to configure _its own_ switch by talking to dendrite on
-/// its own switch zone's underlay address.
+/// The third function provided is `determine_our_switch_port_configs()`. It's
+/// called by a scrimlet to find the port configs relevant only to it so it can
+/// configure `uplinkd`.
 impl<'a> EarlyNetworkSetup<'a> {
     pub fn new(log: &'a Logger) -> Self {
         EarlyNetworkSetup { log }
@@ -271,14 +260,13 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
     }
 
-    /// Initialize a single switch.
+    /// Filter the `SystemNetworkingConfig` down to just the `PortConfig`s
+    /// relevant to our switch zone.
     ///
-    /// This should be called by a scrimlet after it brings up its own switch
-    /// zone. `switch_zone_underlay_ip` should be the IP address of the switch
-    /// zone it brought up.
-    ///
-    /// Returns the list of port configs that apply to this switch.
-    pub(crate) async fn init_switch_config(
+    /// This requires contacting MGS to figure out which switch we are.
+    /// Eventually this method will be removed as a part of
+    /// <https://github.com/oxidecomputer/omicron/issues/10167>.
+    pub(crate) async fn determine_our_switch_port_configs(
         &mut self,
         network_config_rx: &watch::Receiver<SystemNetworkingConfig>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
@@ -329,49 +317,6 @@ impl<'a> EarlyNetworkSetup<'a> {
             .filter(|port| port.switch == switch_slot)
             .cloned()
             .collect::<Vec<_>>();
-
-        info!(
-            self.log,
-            "Initializing {} Uplinks on {switch_slot:?} at \
-             {switch_zone_underlay_ip}",
-            our_ports.len(),
-        );
-
-        let mgd = MgdClient::new(
-            &format!("http://[{switch_zone_underlay_ip}]:{MGD_PORT}"),
-            self.log.clone(),
-        );
-
-        // BFD config
-        for spec in &rack_network_config.bfd {
-            if spec.switch != switch_slot {
-                continue;
-            }
-
-            let cfg = MgBfdPeerConfig {
-                detection_threshold: spec.detection_threshold,
-                listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
-                mode: match spec.mode {
-                    BfdMode::SingleHop => {
-                        mg_admin_client::types::SessionMode::SingleHop
-                    }
-                    BfdMode::MultiHop => {
-                        mg_admin_client::types::SessionMode::MultiHop
-                    }
-                },
-                peer: spec.remote,
-                required_rx: spec.required_rx,
-            };
-
-            if let Err(e) = mgd.add_bfd_peer(&cfg).await {
-                error!(
-                    self.log,
-                    "BFD peer configuration failed";
-                    "error" => ?e,
-                    "configuration" => ?cfg,
-                );
-            };
-        }
 
         Ok(our_ports)
     }
