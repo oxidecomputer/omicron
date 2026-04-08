@@ -298,6 +298,7 @@ impl Plan {
     }
 
     pub fn create_transient(
+        log: &Logger,
         config: &Config,
         mut sled_info: Vec<SledInfo>,
     ) -> Result<Self, PlanError> {
@@ -498,7 +499,7 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next(log, "CockroachDB");
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
@@ -540,7 +541,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let internal_ip = sled.addr_alloc.next(log, "External DNS");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
             // With respect to internal DNS configuration, there's only one
@@ -589,7 +590,7 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next(log, "Nexus");
             let internal_address =
                 SocketAddrV6::new(ip, NEXUS_INTERNAL_PORT, 0, 0);
             dns_builder
@@ -637,7 +638,7 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next(log, "Oximeter");
             let address = SocketAddrV6::new(
                 ip,
                 omicron_common::address::OXIMETER_PORT,
@@ -670,7 +671,7 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next(log, "Clickhouse");
             let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             let oximeter_read_mode_enabled = true;
@@ -711,7 +712,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next(log, "Crucible Pantry");
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             let id = OmicronZoneUuid::new_v4();
@@ -740,7 +741,9 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         for sled in sled_info.iter_mut() {
             for pool in &sled.u2_zpools {
-                let ip = sled.addr_alloc.next().expect("Not enough addrs");
+                let ip = sled
+                    .addr_alloc
+                    .next(log, &format!("Crucible zone for {pool}"));
                 let port = omicron_common::address::CRUCIBLE_PORT;
                 let address = SocketAddrV6::new(ip, port, 0, 0);
                 let id = OmicronZoneUuid::new_v4();
@@ -777,7 +780,7 @@ impl Plan {
         let mut boundary_ntp_servers = vec![];
         for (idx, sled) in sled_info.iter_mut().enumerate() {
             let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next(log, "NTP boundary");
             let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
             let filesystem_pool = sled.alloc_zpool_from_u2s()?;
 
@@ -873,7 +876,7 @@ impl Plan {
             result?
         };
 
-        let plan = Self::create_transient(config, sled_info)?;
+        let plan = Self::create_transient(log, config, sled_info)?;
         Ok(plan)
     }
 
@@ -985,22 +988,32 @@ impl Plan {
 }
 
 struct AddressBumpAllocator {
+    sled_id: SledUuid,
     last_addr: Ipv6Addr,
 }
 
 impl AddressBumpAllocator {
-    fn new(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
-        Self { last_addr: get_switch_zone_address(subnet) }
+    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self { sled_id, last_addr: get_switch_zone_address(subnet) }
     }
 
-    fn next(&mut self) -> Option<Ipv6Addr> {
+    fn next(&mut self, log: &Logger, purpose: &str) -> Ipv6Addr {
+        let sled_id = &self.sled_id;
+
         let mut segments: [u16; 8] = self.last_addr.segments();
-        segments[7] = segments[7].checked_add(1)?;
+        segments[7] = segments[7]
+            .checked_add(1)
+            .expect("overflow when calculating the next IP address");
+
         if segments[7] > RSS_RESERVED_ADDRESSES {
-            return None;
+            panic!("ran out of addresses for {purpose} on sled {sled_id}");
         }
-        self.last_addr = Ipv6Addr::from(segments);
-        Some(self.last_addr)
+
+        let ip = Ipv6Addr::from(segments);
+        info!(log, "assigned IP {ip} on sled {sled_id} to {purpose}");
+
+        self.last_addr = ip;
+        ip
     }
 }
 
@@ -1043,7 +1056,7 @@ impl SledInfo {
             u2_zpools: vec![],
             u2_zpool_allocators: HashMap::new(),
             is_scrimlet,
-            addr_alloc: AddressBumpAllocator::new(subnet),
+            addr_alloc: AddressBumpAllocator::new(sled_id, subnet),
             request: Default::default(),
         }
     }
@@ -1345,12 +1358,16 @@ mod tests {
 
     #[test]
     fn bump_allocator_basics() {
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("bump_allocator_basics");
+
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
         let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
 
-        let mut allocator = AddressBumpAllocator::new(subnet);
+        let mut allocator =
+            AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
         assert_eq!(
-            allocator.next().unwrap(),
+            allocator.next(&logctx.log, "test"),
             Ipv6Addr::new(
                 0xfd00,
                 0,
@@ -1363,7 +1380,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            allocator.next().unwrap(),
+            allocator.next(&logctx.log, "test"),
             Ipv6Addr::new(
                 0xfd00,
                 0,
@@ -1375,21 +1392,35 @@ mod tests {
                 EXPECTED_RESERVED_ADDRESSES + 2
             ),
         );
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn bump_allocator_exhaustion() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "bump_allocator_exhaustion",
+        );
+
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
         let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
 
-        let mut allocator = AddressBumpAllocator::new(subnet);
+        let mut allocator =
+            AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
         for i in 0..EXPECTED_USABLE_ADDRESSES {
-            assert!(
-                allocator.next().is_some(),
-                "Could not allocate {i}-th address"
-            );
+            allocator.next(&logctx.log, &i.to_string());
         }
-        assert!(allocator.next().is_none(), "Expected allocation to fail");
+
+        let log = logctx.log.clone();
+        let result = std::panic::catch_unwind(move || {
+            allocator.next(&log, "last");
+        });
+        assert!(
+            result.is_err(),
+            "didn't panic when allocating IPs over capacity"
+        );
+
+        logctx.cleanup_successful();
     }
 
     fn test_config(ip_pools: &[(&str, &str)], dns_ips: &[&str]) -> Config {
@@ -1489,6 +1520,9 @@ mod tests {
 
     #[test]
     fn test_dataset_and_zone_count() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_dataset_and_zone_count",
+        );
         // We still need these values to provision external services
         let ip_pools = [
             ("192.168.1.10", "192.168.1.14"),
@@ -1507,7 +1541,7 @@ mod tests {
 
         // Confirm that this fails with no sleds
         let sleds = vec![];
-        Plan::create_transient(&config, sleds)
+        Plan::create_transient(&logctx.log, &config, sleds)
             .expect_err("Should have failed to create plan");
 
         // Try again, with a sled that has ten U.2 disks
@@ -1563,7 +1597,7 @@ mod tests {
             is_scrimlet,
         )];
 
-        let plan = Plan::create_transient(&config, sleds)
+        let plan = Plan::create_transient(&logctx.log, &config, sleds)
             .expect("Should have created plan");
 
         assert_eq!(plan.all_sleds.len(), 1);
@@ -1609,5 +1643,7 @@ mod tests {
             "Saw: {:#?}, expected {expected_dataset_count}",
             sled_config.datasets
         );
+
+        logctx.cleanup_successful();
     }
 }

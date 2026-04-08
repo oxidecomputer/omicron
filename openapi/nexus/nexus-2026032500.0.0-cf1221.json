@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026032400.0.0"
+    "version": "2026032500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -28346,23 +28346,23 @@
         }
       },
       "SubnetPoolUtilization": {
-        "description": "Utilization information for a subnet pool",
+        "description": "Utilization of addresses in a subnet pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large subnet pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",
         "type": "object",
         "properties": {
-          "allocated": {
-            "description": "Number of addresses allocated from this pool",
+          "capacity": {
+            "description": "The total number of addresses in the pool.",
             "type": "number",
             "format": "double"
           },
-          "capacity": {
-            "description": "Total capacity of this pool in addresses",
+          "remaining": {
+            "description": "The number of remaining addresses in the pool.",
             "type": "number",
             "format": "double"
           }
         },
         "required": [
-          "allocated",
-          "capacity"
+          "capacity",
+          "remaining"
         ]
       },
       "SupportBundleCreate": {

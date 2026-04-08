@@ -6,9 +6,10 @@
 // where these types come from.
 pub use gateway_client::types::{
     RotState, SpComponentCaboose, SpComponentInfo, SpComponentPresence,
-    SpIdentifier, SpIgnition, SpIgnitionSystemType, SpState,
+    SpIdentifier, SpState,
 };
 pub use gateway_types::component::SpType;
+pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
 pub use gateway_types::rot::RotSlot;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;

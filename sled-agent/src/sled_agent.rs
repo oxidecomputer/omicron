@@ -1440,13 +1440,9 @@ impl SledAgent {
             HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
         })?;
 
-        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs::Raw {
             name: &delegated_zvol.volume_name(),
             size: volume_size,
-            raw: true,
-            // Set the volblocksize (read: the allocation size for the zvol,
-            // _not_ the actual block size!) to 128k
-            volblocksize: Some(131072),
         })
         .await
         .map_err(|e| {
