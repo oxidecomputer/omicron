@@ -51,6 +51,8 @@ pub use dpd_reconciler::DpdPortReconcilerStatus;
 pub use dpd_reconciler::DpdReconcilerStatus;
 pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersPrereqs;
+pub use mgd_reconciler::MgdBgpReconcilerApplyResult;
+pub use mgd_reconciler::MgdBgpReconcilerStatus;
 pub use mgd_reconciler::MgdReconcilerStatus;
 pub use mgd_reconciler::MgdStaticRouteBulkOperationResult;
 pub use mgd_reconciler::MgdStaticRouteReconcilerStatus;
