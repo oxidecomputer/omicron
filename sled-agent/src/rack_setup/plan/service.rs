@@ -1355,6 +1355,7 @@ mod tests {
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
         RSS_RESERVED_ADDRESSES - EXPECTED_RESERVED_ADDRESSES;
+    const DISK_COUNT: usize = 10;
 
     #[test]
     fn bump_allocator_basics() {
@@ -1423,8 +1424,22 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    fn test_config(ip_pools: &[(&str, &str)], dns_ips: &[&str]) -> Config {
-        Config {
+    fn test_config() -> (Vec<&'static str>, Config) {
+        // We still need these values to provision external services
+        let ip_pools = [
+            ("192.168.1.10", "192.168.1.14"),
+            ("fd00::20", "fd00::23"),
+            ("fd01::100", "fd01::103"),
+        ];
+        let dns_ips = [
+            "192.168.1.10",
+            "192.168.1.13",
+            "fd00::22",
+            "fd01::100",
+            "fd01::103",
+        ];
+
+        let config = Config {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
@@ -1462,26 +1477,67 @@ mod tests {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
-        }
+        };
+
+        (dns_ips.to_vec(), config)
+    }
+
+    fn test_sled_info() -> SledInfo {
+        let sled_id = SledUuid::new_v4();
+        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let sled_address = get_sled_address(subnet);
+        let is_scrimlet = true;
+
+        let disks: Vec<_> = (0..DISK_COUNT)
+            .map(|i| sled_agent_types::inventory::InventoryDisk {
+                identity: omicron_common::disk::DiskIdentity {
+                    vendor: "vendor".to_string(),
+                    model: "model".to_string(),
+                    serial: format!("test-{i}"),
+                },
+                variant: DiskVariant::U2,
+                slot: i as i64,
+                active_firmware_slot: 0,
+                next_active_firmware_slot: None,
+                number_of_firmware_slots: 8,
+                slot1_is_read_only: false,
+                slot_firmware_versions: vec![],
+            })
+            .collect();
+
+        SledInfo::new(
+            sled_id,
+            subnet,
+            sled_address,
+            Inventory {
+                sled_id,
+                sled_agent_address: sled_address,
+                sled_role: SledRole::Scrimlet,
+                baseboard: Baseboard::Unknown,
+                usable_hardware_threads: 32,
+                usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
+                cpu_family: SledCpuFamily::AmdMilan,
+                reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
+                disks,
+                zpools: vec![],
+                datasets: vec![],
+                ledgered_sled_config: None,
+                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+                last_reconciliation: None,
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
+                reference_measurements: IdOrdMap::new(),
+            },
+            is_scrimlet,
+        )
     }
 
     #[test]
     fn service_port_builder_skips_dns_ips() {
-        // Conjure up a config; only the internal services pools and
-        // external DNS IPs matter when constructing a ServicePortBuilder.
-        let ip_pools = [
-            ("192.168.1.10", "192.168.1.14"),
-            ("fd00::20", "fd00::23"),
-            ("fd01::100", "fd01::103"),
-        ];
-        let dns_ips = [
-            "192.168.1.10",
-            "192.168.1.13",
-            "fd00::22",
-            "fd01::100",
-            "fd01::103",
-        ];
-        let config = test_config(&ip_pools, &dns_ips);
+        let (dns_ips, config) = test_config();
 
         let mut svp = ServicePortBuilder::new(&config);
 
@@ -1523,21 +1579,8 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_dataset_and_zone_count",
         );
-        // We still need these values to provision external services
-        let ip_pools = [
-            ("192.168.1.10", "192.168.1.14"),
-            ("fd00::20", "fd00::23"),
-            ("fd01::100", "fd01::103"),
-        ];
-        let dns_ips = [
-            "192.168.1.10",
-            "192.168.1.13",
-            "fd00::22",
-            "fd01::100",
-            "fd01::103",
-        ];
 
-        let config = test_config(&ip_pools, &dns_ips);
+        let (dns_ips, config) = test_config();
 
         // Confirm that this fails with no sleds
         let sleds = vec![];
@@ -1545,58 +1588,7 @@ mod tests {
             .expect_err("Should have failed to create plan");
 
         // Try again, with a sled that has ten U.2 disks
-        let sled_id = SledUuid::new_v4();
-        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
-        let sled_address = get_sled_address(subnet);
-        let is_scrimlet = true;
-
-        const DISK_COUNT: usize = 10;
-        let disks: Vec<_> = (0..DISK_COUNT)
-            .map(|i| sled_agent_types::inventory::InventoryDisk {
-                identity: omicron_common::disk::DiskIdentity {
-                    vendor: "vendor".to_string(),
-                    model: "model".to_string(),
-                    serial: format!("test-{i}"),
-                },
-                variant: DiskVariant::U2,
-                slot: i as i64,
-                active_firmware_slot: 0,
-                next_active_firmware_slot: None,
-                number_of_firmware_slots: 8,
-                slot1_is_read_only: false,
-                slot_firmware_versions: vec![],
-            })
-            .collect();
-
-        let sleds = vec![SledInfo::new(
-            sled_id,
-            subnet,
-            sled_address,
-            Inventory {
-                sled_id,
-                sled_agent_address: sled_address,
-                sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
-                usable_hardware_threads: 32,
-                usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
-                cpu_family: SledCpuFamily::AmdMilan,
-                reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
-                disks,
-                zpools: vec![],
-                datasets: vec![],
-                ledgered_sled_config: None,
-                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
-                last_reconciliation: None,
-                file_source_resolver:
-                    OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_enabled_not_online:
-                    SvcsEnabledNotOnlineResult::DataUnavailable,
-                reference_measurements: IdOrdMap::new(),
-            },
-            is_scrimlet,
-        )];
-
+        let sleds = vec![test_sled_info()];
         let plan = Plan::create_transient(&logctx.log, &config, sleds)
             .expect("Should have created plan");
 
