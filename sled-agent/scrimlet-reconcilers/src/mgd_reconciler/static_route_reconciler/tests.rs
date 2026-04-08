@@ -67,11 +67,7 @@ fn v6_route(
     }
 }
 
-fn mgd_path(
-    nexthop: &str,
-    rib_priority: u8,
-    vlan_id: Option<u16>,
-) -> MgdPath {
+fn mgd_path(nexthop: &str, rib_priority: u8, vlan_id: Option<u16>) -> MgdPath {
     MgdPath {
         nexthop: nexthop.parse().unwrap(),
         rib_priority,
@@ -462,10 +458,7 @@ fn plan_rejects_mixed_ip_families_in_config() {
     )
     .expect_err("plan should fail with mixed families");
 
-    assert!(
-        err.contains("mixed IP families"),
-        "unexpected error: {err}",
-    );
+    assert!(err.contains("mixed IP families"), "unexpected error: {err}",);
 
     logctx.cleanup_successful();
 }
