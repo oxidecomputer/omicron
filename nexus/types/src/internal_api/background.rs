@@ -925,7 +925,7 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         pub errors: Vec<String>,
-        pub report: crate::fm::AnalysisInputReport,
+        pub report: crate::fm::analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
