@@ -966,6 +966,8 @@ pub mod fm_analysis {
 pub struct FmRendezvousStatus {
     pub sitrep_id: Option<SitrepUuid>,
     pub alerts: fm_rendezvous::OpStatus<fm_rendezvous::AlertCreationStatus>,
+    pub support_bundles:
+        fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
 }
@@ -997,6 +999,19 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SupportBundleCreationStatus {
+        /// The total number of support bundles requested by the current sitrep.
+        pub total_bundles_requested: usize,
+        /// The total number of support bundles which were *first* requested in the
+        /// current sitrep.
+        pub current_sitrep_bundles_requested: usize,
+        /// The number of support bundles created by this activation.
+        pub bundles_created: usize,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }

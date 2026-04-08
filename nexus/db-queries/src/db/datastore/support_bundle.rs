@@ -104,8 +104,8 @@ impl DataStore {
     /// [`Error::insufficient_capacity`].
     ///
     /// If the provenance is [`SupportBundleProvenance::Fm`] and a bundle
-    /// with the given ID already exists, returns the existing bundle
-    /// (idempotent creation).
+    /// with the given ID already exists, returns
+    /// [`Error::ObjectAlreadyExists`].
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
@@ -117,6 +117,7 @@ impl DataStore {
         #[derive(Debug)]
         enum SupportBundleError {
             TooManyBundles,
+            AlreadyExists,
         }
 
         let SupportBundleCreateParams {
@@ -191,18 +192,18 @@ impl DataStore {
                     // For idempotent creation (FM provenance), check if the
                     // bundle already exists before inserting.
                     if idempotent
-                        && let Some(existing) =
-                            support_bundle_dsl::support_bundle
-                                .filter(
-                                    support_bundle_dsl::id
-                                        .eq(bundle_id.into_untyped_uuid()),
-                                )
-                                .select(SupportBundle::as_select())
-                                .first_async(&conn)
-                                .await
-                                .optional()?
+                        && diesel::select(diesel::dsl::exists(
+                            support_bundle_dsl::support_bundle.filter(
+                                support_bundle_dsl::id
+                                    .eq(bundle_id.into_untyped_uuid()),
+                            ),
+                        ))
+                        .get_result_async::<bool>(&conn)
+                        .await?
                     {
-                        return Ok(existing);
+                        return Err(
+                            err.bail(SupportBundleError::AlreadyExists),
+                        );
                     }
 
                     diesel::insert_into(
@@ -231,6 +232,13 @@ impl DataStore {
                                 CANNOT_ALLOCATE_ERR_MSG,
                                 "Support Bundle storage exhausted",
                             );
+                        }
+                        SupportBundleError::AlreadyExists => {
+                            return external::Error::ObjectAlreadyExists {
+                                type_name:
+                                    external::ResourceType::SupportBundle,
+                                object_name: bundle_id.to_string(),
+                            };
                         }
                     }
                 }
@@ -792,6 +800,7 @@ mod test {
     use super::*;
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
+    use assert_matches::assert_matches;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
@@ -2038,8 +2047,8 @@ mod test {
         assert_eq!(bundle.state, SupportBundleState::Collecting);
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
 
-        // Creating the same bundle again should succeed (idempotent).
-        let existing = datastore
+        // Creating the same bundle again should return ObjectAlreadyExists.
+        let err = datastore
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
@@ -2054,10 +2063,10 @@ mod test {
                 },
             )
             .await
-            .expect("Idempotent create should succeed");
-        assert_eq!(SupportBundleUuid::from(existing.id), bundle_id);
-        assert_eq!(existing.reason_for_creation, reason);
-        assert_eq!(existing.fm_case_id, Some(case_id.into()));
+            .expect_err(
+                "Creating an existing FM bundle should return an error",
+            );
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         db.terminate().await;
         logctx.cleanup_successful();
