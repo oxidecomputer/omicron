@@ -94,7 +94,6 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::attached_subnets;
 use super::tasks::audit_log_cleanup;
 use super::tasks::audit_log_timeout_incomplete;
-use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_load::LoadedTargetBlueprint;
@@ -227,7 +226,6 @@ impl BackgroundTasksInitializer {
             task_metrics_producer_gc: Activator::new(),
             task_external_endpoints: Activator::new(),
             task_nat_cleanup: Activator::new(),
-            task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
             task_inventory_loader: Activator::new(),
             task_support_bundle_collector: Activator::new(),
@@ -321,7 +319,6 @@ impl BackgroundTasksInitializer {
             task_metrics_producer_gc,
             task_external_endpoints,
             task_nat_cleanup,
-            task_bfd_manager,
             task_inventory_collection,
             task_inventory_loader,
             task_support_bundle_collector,
@@ -448,20 +445,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_nat_cleanup,
-        });
-
-        driver.register(TaskDefinition {
-            name: "bfd_manager",
-            description: "Manages bidirectional fowarding detection (BFD) \
-                 configuration on rack switches",
-            period: config.bfd_manager.period_secs,
-            task_impl: Box::new(bfd::BfdManager::new(
-                datastore.clone(),
-                resolver.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_bfd_manager,
         });
 
         // Background task: phantom disk detection
