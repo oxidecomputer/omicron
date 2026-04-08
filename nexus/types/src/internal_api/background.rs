@@ -860,7 +860,7 @@ pub struct SpEreportIngesterStatus {
 pub struct SpEreporterStatus {
     pub sp_type: SpType,
     pub slot: u16,
-    pub ignition_type: gateway_client::types::SpIgnitionSystemType,
+    pub ignition_type: gateway_types::ignition::SpIgnitionSystemType,
     #[serde(flatten)]
     pub status: EreporterStatus,
 }

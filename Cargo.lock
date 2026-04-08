@@ -16781,6 +16781,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "gateway-types",
  "hex",
  "hickory-resolver 0.25.2",
  "http",

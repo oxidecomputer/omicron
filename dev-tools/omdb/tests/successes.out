@@ -124,11 +124,11 @@ ALL CONFIGURED SPs
 
 SPs FOUND THROUGH IGNITION
 
-    TYPE   SLOT SYSTEM_TYPE 
-    Sled   0    Gimlet      
-    Sled   1    Gimlet      
-    Switch 0    Sidecar     
-    Switch 1    Sidecar     
+    TYPE   SLOT SYSTEM_TYPE SP 
+    Sled   0    Gimlet      on 
+    Sled   1    Gimlet      on 
+    Switch 0    Sidecar     on 
+    Switch 1    Sidecar     on 
 
 SERVICE PROCESSOR STATES
 

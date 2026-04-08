@@ -13,7 +13,6 @@ use anyhow::bail;
 use camino::Utf8Path;
 use gateway_client::Client as MgsClient;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpIgnition;
 use gateway_types::component::SpType;
 use nexus_db_model::Sled;
 use omicron_uuid_kinds::GenericUuid;
@@ -155,11 +154,9 @@ pub async fn get_available_sps(
 
     let mut active_sps = Vec::new();
     for info in ignition_info {
-        if let SpIgnition::Yes { power, flt_sp, .. } = info.details {
-            // Only return SPs that are powered on and are not in a faulted state.
-            if power && !flt_sp {
-                active_sps.push(info.id);
-            }
+        // Only return SPs that are powered on and are not in a faulted state.
+        if info.details.is_sp_running() && !info.details.is_sp_faulted() {
+            active_sps.push(info.id);
         }
     }
 
