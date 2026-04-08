@@ -52,6 +52,7 @@ use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
@@ -719,6 +720,18 @@ pub enum SagaState {
     Unwinding,
     Done,
     Abandoned,
+}
+
+impl Display for SagaState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            SagaState::Running => "running",
+            SagaState::Unwinding => "unwinding",
+            SagaState::Done => "done",
+            SagaState::Abandoned => "abandoned",
+        };
+        write!(f, "{s}")
+    }
 }
 
 // TODO-K: Is this necessary? Can I just use `Saga`?
