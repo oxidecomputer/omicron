@@ -565,5 +565,5 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
     let version = NexusRequest::object_get(client, "/v1/system/version")
         .execute_and_parse_unwrap::<system::SystemVersion>()
         .await;
-    assert_eq!(version.version, semver::Version::new(0, 0, 0));
+    assert_eq!(version.version, omicron_common::RELEASE_VERSION);
 }

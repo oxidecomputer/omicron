@@ -413,9 +413,8 @@ pub trait NexusExternalApi {
     async fn system_version(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::system::SystemVersion>, HttpError> {
-        // TODO: replace with the real version string
         Ok(HttpResponseOk(latest::system::SystemVersion {
-            version: "0.0.0".parse().unwrap(),
+            version: omicron_common::RELEASE_VERSION,
         }))
     }
 

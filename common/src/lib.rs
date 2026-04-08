@@ -69,6 +69,18 @@ pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
     ts - std::time::Duration::from_nanos(u64::from(only_nanos))
 }
 
+/// The base release version of the Oxide software.
+///
+/// Under current policy, each new release is a major version bump, and
+/// generally referred to only by the major version (e.g. 8.0.0 is referred
+/// to as "v8", "version 8", or "release 8" to customers). The use of semantic
+/// versioning is mostly to hedge for perhaps wanting something more granular in
+/// the future.
+///
+/// This is used in the releng build process (which appends build metadata to
+/// produce the full version string) and by the system version API endpoint.
+pub const RELEASE_VERSION: semver::Version = semver::Version::new(19, 0, 0);
+
 pub const OMICRON_DPD_TAG: &str = "omicron";
 
 /// A wrapper struct that does nothing other than elide the inner value from
