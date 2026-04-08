@@ -22,6 +22,9 @@ api_versions!([
 
     // Remove rack initialization endpoints moved to bootstrap-agent-lockstep-api.
     (2, REMOVE_RACK_INIT_ENDPOINTS),
+    // Version 1 has been retired (see
+    // <https://github.com/oxidecomputer/dropshot-api-manager> for mechanics).
+    // We no longer support in any server, nor expect it from any client.
 ]);
 
 #[dropshot::api_description]
