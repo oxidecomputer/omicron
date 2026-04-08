@@ -7,6 +7,7 @@
 use crate::ArtifactHash;
 use crate::Generation;
 use crate::PhysicalDiskKind;
+use crate::SagaState;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::typed_uuid::DbTypedUuid;
@@ -44,10 +45,11 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
-    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
+    inv_stale_saga, inv_zone_manifest_measurement, inv_zpool, sw_caboose,
     sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
+use nexus_types::inventory::InventorySaga;
 use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
@@ -3332,6 +3334,51 @@ impl From<InvInternalDns> for InternalDnsGenerationStatus {
         Self {
             zone_id: value.zone_id.into(),
             generation: value.generation.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_stale_saga)]
+pub struct InvStaleSaga {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub creator: Uuid,
+    pub current_sec: Option<Uuid>,
+    pub name: String,
+    pub saga_id: Uuid,
+    pub state: SagaState,
+    pub time_created: DateTime<Utc>,
+    pub time_collected: DateTime<Utc>,
+}
+
+impl InvStaleSaga {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        saga: &InventorySaga,
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            creator: saga.creator,
+            current_sec: saga.current_sec,
+            name: saga.name.clone(),
+            saga_id: saga.saga_id,
+            state: saga.state.clone().into(),
+            time_created: saga.time_created,
+            time_collected: saga.time_collected,
+        })
+    }
+}
+
+impl From<InvStaleSaga> for InventorySaga {
+    fn from(value: InvStaleSaga) -> Self {
+        Self {
+            creator: value.creator,
+            current_sec: value.current_sec,
+            name: value.name,
+            saga_id: value.saga_id,
+            state: value.state.into(),
+            time_created: value.time_created,
+            time_collected: value.time_collected,
         }
     }
 }

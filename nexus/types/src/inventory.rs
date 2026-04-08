@@ -187,7 +187,7 @@ pub struct Collection {
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 
     // TODO-K: Use IdOrdMap probably, indexing based on the nexus zone they were
-    // created by
+    // created by?
     /// A list of sagas that have been active for an extended period
     pub stale_sagas: Vec<InventorySaga>,
 }
@@ -712,6 +712,7 @@ impl IdOrdItem for InternalDnsGenerationStatus {
     id_upcast!();
 }
 
+// TODO-K: Is this necessary?
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum SagaState {
     Running,
@@ -720,9 +721,10 @@ pub enum SagaState {
     Abandoned,
 }
 
+// TODO-K: Is this necessary? Can I just use `Saga`?
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct InventorySaga {
-    // TODO-K: Use own Uuid types
+    // TODO-K: Use own Uuid types?
     pub creator: Uuid,
     pub current_sec: Option<Uuid>,
     pub name: String,

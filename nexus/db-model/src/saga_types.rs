@@ -189,6 +189,7 @@ impl From<steno::SagaCachedState> for SagaState {
     }
 }
 
+// TODO-K: Can I delete this?
 impl From<SagaState> for nexus_types::inventory::SagaState {
     fn from(value: SagaState) -> Self {
         match value {
@@ -196,6 +197,17 @@ impl From<SagaState> for nexus_types::inventory::SagaState {
             SagaState::Unwinding => Self::Unwinding,
             SagaState::Done => Self::Done,
             SagaState::Abandoned => Self::Abandoned,
+        }
+    }
+}
+
+impl From<nexus_types::inventory::SagaState> for SagaState {
+    fn from(value: nexus_types::inventory::SagaState) -> Self {
+        match value {
+            nexus_types::inventory::SagaState::Running => Self::Running,
+            nexus_types::inventory::SagaState::Unwinding => Self::Unwinding,
+            nexus_types::inventory::SagaState::Done => Self::Done,
+            nexus_types::inventory::SagaState::Abandoned => Self::Abandoned,
         }
     }
 }
