@@ -5010,6 +5010,7 @@ async fn cmd_nexus_support_bundles_list(
         reason_for_failure: String,
         state: String,
         user_comment: String,
+        fm_case_id: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
         id: sb.id,
@@ -5020,6 +5021,10 @@ async fn cmd_nexus_support_bundles_list(
             .unwrap_or_else(|| "-".to_string()),
         state: format!("{:?}", sb.state),
         user_comment: sb.user_comment.unwrap_or_else(|| "-".to_string()),
+        fm_case_id: sb
+            .fm_case_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_string()),
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())

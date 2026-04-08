@@ -4,6 +4,7 @@
 
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
+use crate::external_api::support_bundle::SupportBundleInfo as ExternalSupportBundleInfo;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use crate::quiesce::SagaQuiesceStatus;
@@ -1247,6 +1248,18 @@ impl IdOrdItem for HeldDbClaimInfo {
     }
 
     id_upcast!();
+}
+
+/// Support bundle info with internal-only fields.
+///
+/// This wraps the external API's [`ExternalSupportBundleInfo`] and extends it
+/// with fields that are only exposed through the lockstep API (e.g., for OMDB).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleInfo {
+    #[serde(flatten)]
+    pub base: ExternalSupportBundleInfo,
+    /// The FM case ID that triggered creation of this bundle, if any.
+    pub fm_case_id: Option<uuid::Uuid>,
 }
 
 #[cfg(test)]
