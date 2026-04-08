@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
     (2026_03_14_00, MULTICAST_DROP_MVLAN),
@@ -2519,7 +2520,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/utilization",
         tags = ["system/subnet-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_SUBNET_POOL_UTILIZATION_REMAINING..,
     }]
     async fn system_subnet_pool_utilization_view(
         rqctx: RequestContext<Self::Context>,
@@ -2528,6 +2529,26 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::subnet_pool::SubnetPoolUtilization>,
         HttpError,
     >;
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        operation_id = "system_subnet_pool_utilization_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_SUBNET_POOL_UTILIZATION_REMAINING,
+    }]
+    async fn system_subnet_pool_utilization_view_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
+        HttpError,
+    > {
+        Ok(Self::system_subnet_pool_utilization_view(rqctx, path_params)
+            .await?
+            .map(v2026_01_16_01::subnet_pool::SubnetPoolUtilization::from))
+    }
 
     /// Fetch subnet pool utilization
     #[endpoint {
@@ -2544,7 +2565,11 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
         HttpError,
     > {
-        Self::system_subnet_pool_utilization_view(rqctx, path_params).await
+        Self::system_subnet_pool_utilization_view_v2026_02_09_00(
+            rqctx,
+            path_params,
+        )
+        .await
     }
 
     // External Subnets

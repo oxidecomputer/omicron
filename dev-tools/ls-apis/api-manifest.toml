@@ -539,6 +539,39 @@ deployed.
 #
 
 [[dependency_filter_rules]]
+ancestor = "dice-verifier"
+client = "sled-agent-client"
+evaluation = "bogus"
+note = """
+propolis-server does actually talk to sled-agent-client, but by virtue of both
+APIs being server-side versioned, trips a check in the component graph that
+requires server-side versioned APIs to not form a cycle. This is a deficiency
+in the server-side API checking, since this cycle is acceptable on the basis of
+propolis-server and sled-agent being in the same deployment unit.
+
+This filter should be removed when the intra-deployment relationship between
+propolis-server and sled-agent can be tolerated in the component graph check.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-client"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+Same as the bogus rule between sled-agent-types and propolis-client.
+sled-agent-client re-exports some (Crucible!) types from propolis-client for
+sled-agent-client's consumers.
+
+This bogus rule would be fine enough on its own, though ideally we should not
+need sled-agent-client to depend on propolis-client even just for types. But,
+perhaps surprisingly, this was necessary to add even though the
+dice-verifier->sled-agent-client rule above "broke" the dependency path from
+propolis-server through to propolis-client. Once we've fixed the issue requiring
+the dice-verifier rule above, we should probably keep this dependency filter
+rule.
+"""
+
+[[dependency_filter_rules]]
 ancestor = "omicron-common"
 client = "mg-admin-client"
 evaluation = "bogus"
