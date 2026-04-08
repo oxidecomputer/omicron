@@ -15,14 +15,18 @@ use slog::Logger;
 use slog::info;
 use std::time::Duration;
 
+mod bgp_reconciler;
 mod static_route_reconciler;
 
-pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
+pub use bgp_reconciler::MgdBgpReconcilerApplyResult;
+pub use bgp_reconciler::MgdBgpReconcilerStatus;
 pub use static_route_reconciler::MgdStaticRouteBulkOperationResult;
+pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
 
 #[derive(Debug, Clone)]
 pub struct MgdReconcilerStatus {
     pub static_routes_status: MgdStaticRouteReconcilerStatus,
+    pub bgp_status: MgdBgpReconcilerStatus,
 }
 
 pub(crate) struct MgdReconciler {
@@ -85,10 +89,20 @@ impl Reconciler for MgdReconciler {
         )
         .await;
 
+        let bgp_status = bgp_reconciler::reconcile(
+            &self.client,
+            &system_networking_config.rack_network_config,
+            self.switch_slot,
+            log,
+        )
+        .await;
+
         info!(
             log, "mgd reconciliation completed";
             &static_routes_status,
+            &bgp_status,
         );
-        MgdReconcilerStatus { static_routes_status }
+
+        MgdReconcilerStatus { static_routes_status, bgp_status }
     }
 }
