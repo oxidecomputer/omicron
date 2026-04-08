@@ -72,8 +72,6 @@ progenitor::generate_api!(
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpComponentInfo = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
-        SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
         SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
@@ -89,6 +87,8 @@ progenitor::generate_api!(
         Ereports = ereport_types::Ereports,
         SpType = gateway_types::component::SpType,
         TaskDump = gateway_types::task_dump::TaskDump,
+        SpIgnition = gateway_types::ignition::SpIgnition,
+        SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
     },
 );
 
