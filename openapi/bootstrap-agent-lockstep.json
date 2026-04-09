@@ -1383,7 +1383,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "network_config_update"
+                  "initial_network_config_update"
                 ]
               }
             },
@@ -1398,6 +1398,20 @@
                 "type": "string",
                 "enum": [
                   "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "final_network_config_update"
                 ]
               }
             },
