@@ -2,7 +2,7 @@
 #:
 #: name = "a4x2-deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.31"
+#: target = "lab-2.0-opte-0.39"
 #: output_rules = [
 #:	"/out/falcon/*.log",
 #:	"/out/falcon/*.err",
@@ -12,7 +12,6 @@
 #:  "%/out/dhcp-server.log",
 #: ]
 #: skip_clone = true
-#: enable = false
 #:
 #: [dependencies.a4x2]
 #: job = "a4x2-prepare"

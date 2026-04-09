@@ -2,7 +2,7 @@
 #:
 #: name = "a4x2-prepare"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-2.0-16c64gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/out/cargo-bay-ce.tgz",
@@ -20,7 +20,6 @@
 #: access_repos = [
 #:	"oxidecomputer/testbed",
 #: ]
-#: enable = false
 
 # shellcheck source=/dev/null
 source ./env.sh
