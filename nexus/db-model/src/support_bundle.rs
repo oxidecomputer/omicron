@@ -155,7 +155,7 @@ impl From<SupportBundle> for support_bundle_types::SupportBundleInfo {
 
 impl From<SupportBundle> for internal_views::SupportBundleInfo {
     fn from(bundle: SupportBundle) -> Self {
-        let fm_case_id = bundle.fm_case_id.map(|id| id.into());
+        let fm_case_id = bundle.fm_case_id.map(Into::into);
         let base: support_bundle_types::SupportBundleInfo = bundle.into();
         Self { base, fm_case_id }
     }
