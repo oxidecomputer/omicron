@@ -4692,6 +4692,21 @@ impl DataStore {
             "found extra mupdate override non-boot entries: {:?}",
             mupdate_override_non_boot_by_sled_id.keys()
         );
+        bail_unless!(
+            svcs_enabled_not_online_by_sled.is_empty(),
+            "found extra svcs enabled not online entries: {:?}",
+            svcs_enabled_not_online_by_sled.keys()
+        );
+        bail_unless!(
+            svcs_enabled_not_online_services_by_sled.is_empty(),
+            "found extra svcs enabled not online services entries: {:?}",
+            svcs_enabled_not_online_services_by_sled.keys()
+        );
+        bail_unless!(
+            svcs_enabled_not_online_errors_by_sled.is_empty(),
+            "found extra svcs enabled not online entries: {:?}",
+            svcs_enabled_not_online_errors_by_sled.keys()
+        );
 
         // Read the top-level collection metadata last. We do this at the end
         // (rather than the beginning) so that if a concurrent delete operation
