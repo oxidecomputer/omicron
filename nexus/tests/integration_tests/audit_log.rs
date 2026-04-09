@@ -38,6 +38,20 @@ use std::str::FromStr;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+/// Strip lines starting with `#` from a snapshot file so that the file
+/// can contain human-readable comments explaining why each entry is there.
+fn strip_comments(s: &str) -> String {
+    let mut out: String = s
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if s.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
 fn to_q(d: DateTime<Utc>) -> String {
     d.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
@@ -711,7 +725,9 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
 
     // Print a helpful message when there are new uncovered endpoints
     let expected_path = "tests/output/uncovered-audit-log-endpoints.txt";
-    let expected = std::fs::read_to_string(expected_path).unwrap_or_default();
+    let expected = strip_comments(
+        &std::fs::read_to_string(expected_path).unwrap_or_default(),
+    );
     let expected_ops: std::collections::HashSet<&str> = expected
         .lines()
         .skip(1) // skip the header line
@@ -767,8 +783,9 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     }
 
     let get_expected_path = "tests/output/audited-get-endpoints.txt";
-    let get_expected =
-        std::fs::read_to_string(get_expected_path).unwrap_or_default();
+    let get_expected = strip_comments(
+        &std::fs::read_to_string(get_expected_path).unwrap_or_default(),
+    );
     let get_expected_ops: std::collections::HashSet<&str> = get_expected
         .lines()
         .skip(1) // skip the header line

@@ -1,8 +1,17 @@
 Mutating endpoints without audit logging:
+# Intermediate steps of the device OAuth flow. The meaningful endpoint is
+# device_auth_confirm, which is where authentication and token creation
+# happen. device_auth_request has no user identity, and device_access_token
+# is just polling (mostly 400s) until the token created by confirm is ready.
 device_access_token                          (post   "/device/token")
 device_auth_request                          (post   "/device/auth")
+# Called too many times per disk image upload, other related endpoints cover it.
+# See https://github.com/oxidecomputer/omicron/pull/10046 for rationale.
 disk_bulk_write_import                       (post   "/v1/disks/{disk}/bulk-write")
+# Needs rework to extract actor identity before we can log it. Low priority
+# since sessions expire anyway.
 logout                                       (post   "/v1/logout")
+# Read-only queries that happen to use POST for the request body
 system_timeseries_query                      (post   "/v1/system/timeseries/query")
 timeseries_query                             (post   "/v1/timeseries/query")
 
