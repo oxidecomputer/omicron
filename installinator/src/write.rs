@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
 use buf_list::BufList;
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
@@ -38,8 +38,8 @@ use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
     task::JoinSet,
 };
-use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
-use tufaceous_lib::ControlPlaneZoneImages;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::installinator::InstallinatorArtifactId;
 use update_engine::{
     StepSpec, errors::NestedEngineError, events::ProgressUnits,
 };
@@ -228,13 +228,10 @@ pub(crate) struct ArtifactWriter<'a> {
 impl<'a> ArtifactWriter<'a> {
     pub(crate) fn new(
         mupdate_id: MupdateUuid,
-        host_phase_2_id: &'a ArtifactHashId,
+        host_phase_2_id: &'a InstallinatorArtifactId,
         host_phase_2_data: &'a BufList,
-        control_plane_id: &'a ArtifactHashId,
-        control_plane_zones: &'a ControlPlaneZoneImages,
-
+        control_plane_zones: &'a [ZoneToWrite],
         measurement_corpus: &'a [MeasurementToWrite],
-
         destination: WriteDestination,
     ) -> Self {
         let drives = destination
@@ -256,7 +253,6 @@ impl<'a> ArtifactWriter<'a> {
             artifacts: ArtifactsToWrite {
                 host_phase_2_id,
                 host_phase_2_data,
-                control_plane_id,
                 control_plane_zones,
                 mupdate_id,
                 mupdate_override_uuid,
@@ -567,10 +563,9 @@ impl SlotWriteContext<'_> {
 
 #[derive(Copy, Clone)]
 struct ArtifactsToWrite<'a> {
-    host_phase_2_id: &'a ArtifactHashId,
+    host_phase_2_id: &'a InstallinatorArtifactId,
     host_phase_2_data: &'a BufList,
-    control_plane_id: &'a ArtifactHashId,
-    control_plane_zones: &'a ControlPlaneZoneImages,
+    control_plane_zones: &'a [ZoneToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
     measurement_corpus: &'a [MeasurementToWrite],
@@ -625,7 +620,6 @@ impl ArtifactsToWrite<'_> {
             measurement_directory: &destinations.measurement_dir,
             zones: self.control_plane_zones,
             host_phase_2_id: self.host_phase_2_id,
-            control_plane_id: self.control_plane_id,
             measurement_corpus: self.measurement_corpus,
             mupdate_id: self.mupdate_id,
             mupdate_override_uuid: self.mupdate_override_uuid,
@@ -639,22 +633,24 @@ impl ArtifactsToWrite<'_> {
             Ok(())
         })
         .await
-        .map_err(|error| {
-            warn!(
-                log, "{error:?}";
-                "artifact_id" => ?self.control_plane_id,
-            );
-            error
+        .inspect_err(|error| {
+            warn!(log, "{error:?}");
         })?;
 
         info!(
             log,
             "finished writing {} control plane zones",
-            self.control_plane_zones.zones.len()
+            self.control_plane_zones.len()
         );
 
         StepSuccess::new(()).into()
     }
+}
+
+pub(crate) struct ZoneToWrite {
+    pub(crate) id: InstallinatorArtifactId,
+    pub(crate) file_name: String,
+    pub(crate) data: BufList,
 }
 
 pub(crate) struct MeasurementToWrite {
@@ -667,9 +663,8 @@ struct ControlPlaneZoneWriteContext<'a> {
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     measurement_directory: &'a Utf8Path,
-    zones: &'a ControlPlaneZoneImages,
-    host_phase_2_id: &'a ArtifactHashId,
-    control_plane_id: &'a ArtifactHashId,
+    zones: &'a [ZoneToWrite],
+    host_phase_2_id: &'a InstallinatorArtifactId,
     measurement_corpus: &'a [MeasurementToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
@@ -793,19 +788,19 @@ impl ControlPlaneZoneWriteContext<'_> {
             )
             .register();
 
-        for (name, data) in &self.zones.zones {
-            let out_path = self.output_directory.join(name);
+        for ZoneToWrite { file_name, data, .. } in self.zones {
+            let out_path = self.output_directory.join(file_name);
             transport = engine
                 .new_step(
                     WriteComponent::ControlPlane,
-                    ControlPlaneZonesStepId::Zone { name: name.clone() },
-                    format!("Writing zone {name}"),
+                    ControlPlaneZonesStepId::Zone { name: file_name.clone() },
+                    format!("Writing zone {file_name}"),
                     async move |cx| {
                         let transport = transport.into_value(cx.token()).await;
                         write_artifact_impl(
                             WriteComponent::ControlPlane,
                             slot,
-                            data.clone().into(),
+                            data.clone(),
                             &out_path,
                             transport,
                             &cx,
@@ -931,10 +926,9 @@ impl ControlPlaneZoneWriteContext<'_> {
         &self,
         mupdate_override_uuid: MupdateOverrideUuid,
     ) -> BufList {
-        let hash_ids =
-            [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
-                .into_iter()
-                .collect();
+        let mut hash_ids = BTreeSet::new();
+        hash_ids.insert(self.host_phase_2_id.clone());
+        hash_ids.extend(self.zones.iter().map(|z| z.id.clone()));
 
         let mupdate_override = MupdateOverrideInfo {
             mupdate_uuid: mupdate_override_uuid,
@@ -1022,21 +1016,25 @@ async fn compute_measurement_hashes(
 ///
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_zone_hashes(
-    images: &ControlPlaneZoneImages,
+    images: &[ZoneToWrite],
 ) -> IdOrdMap<OmicronInstallMetadata> {
     let mut tasks = JoinSet::new();
-    for (file_name, data) in &images.zones {
+    for ZoneToWrite { file_name, data, .. } in images {
         let file_name = file_name.clone();
-        // data is a Bytes so is cheap to clone.
-        let data: Bytes = data.clone();
+        // data is a BufList so is relatively cheap to clone.
+        let data: BufList = data.clone();
         // Compute hashes in parallel.
         tasks.spawn_blocking(move || {
+            let mut len = 0;
             let mut hasher = Sha256::new();
-            hasher.update(&data);
+            for buf in data {
+                len += buf.len();
+                hasher.update(&buf);
+            }
             let hash = hasher.finalize();
             OmicronInstallMetadata {
                 file_name,
-                file_size: u64::try_from(data.len()).unwrap(),
+                file_size: u64::try_from(len).unwrap(),
                 hash: ArtifactHash(hash.into()),
             }
         });
@@ -1292,7 +1290,7 @@ mod tests {
     use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
     use tokio_stream::wrappers::ReceiverStream;
-    use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
+    use tufaceous_artifact::installinator::InstallinatorArtifactKind;
 
     #[proptest(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
     fn proptest_write_artifact(
@@ -1403,8 +1401,8 @@ mod tests {
         let artifact_measurement_corpus: BufList =
             data3.into_iter().map(Bytes::from).collect();
 
-        let host_id = ArtifactHashId {
-            kind: ArtifactKind::HOST_PHASE_2,
+        let host_id = InstallinatorArtifactId {
+            kind: InstallinatorArtifactKind::HostPhase2.to_id(),
             hash: {
                 // The `validate_written_host_phase_2_hash()` will fail unless
                 // we give the actual hash of the host phase 2 data, so compute
@@ -1419,8 +1417,6 @@ mod tests {
                 ArtifactHash(hasher.finalize().into())
             },
         };
-        let control_plane_id =
-            dummy_artifact_hash_id(KnownArtifactKind::ControlPlane);
 
         // XXX: note we don't assert on the number of attempts it took to write
         // just the host image at the moment.
@@ -1465,12 +1461,17 @@ mod tests {
 
         // Assemble our one control plane artifact into a 1-long list of zone
         // images.
-        let control_plane_zone_images = ControlPlaneZoneImages {
-            zones: vec![(
-                destination_control_plane.file_name().unwrap().to_string(),
-                artifact_control_plane.iter().flatten().copied().collect(),
-            )],
-        };
+        let zone_id = dummy_artifact_hash_id(InstallinatorArtifactKind::Zone {
+            zone_name: String::from("test-control-plane"),
+        });
+        let control_plane_zone_images = vec![ZoneToWrite {
+            id: zone_id,
+            file_name: destination_control_plane
+                .file_name()
+                .unwrap()
+                .to_string(),
+            data: artifact_control_plane.clone(),
+        }];
 
         let all_corpus = vec![MeasurementToWrite {
             artifact: artifact_measurement_corpus,
@@ -1480,7 +1481,6 @@ mod tests {
             MupdateUuid::new_v4(),
             &host_id,
             &artifact_host,
-            &control_plane_id,
             &control_plane_zone_images,
             &all_corpus,
             destination,
@@ -1490,7 +1490,7 @@ mod tests {
         let log = logctx.log.clone();
         engine
             .new_step(
-                InstallinatorComponent::Both,
+                InstallinatorComponent::All,
                 InstallinatorStepId::Write,
                 "Writing",
                 async move |cx| {

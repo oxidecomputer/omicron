@@ -4729,10 +4729,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4833,10 +4856,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4933,10 +4979,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {

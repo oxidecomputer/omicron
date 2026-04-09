@@ -2944,19 +2944,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-
-    -- TODO: Repos fetched over HTTP will not have a SHA256 hash; this is an
-    -- implementation detail of our ZIP archives.
-    sha256 STRING(64) NOT NULL,
-
-    -- The version of the targets.json role that was used to generate the repo.
-    targets_role_version INT NOT NULL,
-
-    -- The valid_until time for the repo.
-    -- TODO: Figure out timestamp validity policy for uploaded repos vs those
-    -- fetched over HTTP; my (iliana's) current presumption is that we will make
-    -- this NULL for uploaded ZIP archives of repos.
-    valid_until TIMESTAMPTZ NOT NULL,
+    sha256 STRING(64),
 
     -- The system version described in the TUF repo.
     --
@@ -2970,11 +2958,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
 
     -- For debugging only:
     -- Filename provided by the user.
-    file_name TEXT NOT NULL,
+    file_name TEXT,
 
     -- Set when the repository's artifacts can be deleted from replication.
     time_pruned TIMESTAMPTZ,
 
+    -- This constraint ensures all *non-NULL* checksums values are unique.
     CONSTRAINT unique_checksum UNIQUE (sha256),
     CONSTRAINT unique_system_version UNIQUE (system_version)
 );
@@ -2983,18 +2972,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS tuf_repo_not_pruned
     ON omicron.public.tuf_repo (id)
     WHERE time_pruned IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_metadata (
+    tuf_repo_id UUID NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+
+    PRIMARY KEY (tuf_repo_id, key)
+);
+
 -- Describes an individual artifact from an uploaded TUF repo.
 --
--- In the future, this may also be used to describe artifacts that are fetched
--- from a remote TUF repo, but that requires some additional design work.
+-- A row in this table represents a set of tags for an artifact hash. (This is
+-- ideally a unique set of tags, which Nexus attempts to ensure, but this cannot
+-- be guaranteed by the schema.)
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    version STRING(64) NOT NULL,
-    -- This used to be an enum but is now a string, because it can represent
-    -- artifact kinds currently unknown to a particular version of Nexus as
-    -- well.
-    kind STRING(63) NOT NULL,
 
     -- The time this artifact was first recorded.
     time_created TIMESTAMPTZ NOT NULL,
@@ -3002,29 +2994,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The SHA256 hash of the artifact, typically obtained from the TUF
     -- targets.json (and validated at extract time).
     sha256 STRING(64) NOT NULL,
-    -- The length of the artifact, in bytes.
-    artifact_size INT8 NOT NULL,
 
     -- The generation number this artifact was added for.
-    generation_added INT8 NOT NULL,
-
-    -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
-    sign BYTES, -- nullable
-
-    -- Board (caboose BORD) for artifacts that are Hubris archives.
-    board TEXT, -- nullable (null for non-Hubris artifacts)
-
-    CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
+    generation_added INT8 NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
-    ON omicron.public.tuf_artifact (generation_added, id)
-    STORING (name, version, kind, time_created, sha256, artifact_size);
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_sha256
+    ON omicron.public.tuf_artifact (sha256, id);
 
--- RFD 554: (kind, hash) is unique for artifacts. This index is used while
--- looking up artifacts.
-CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_kind_sha256
-    ON omicron.public.tuf_artifact (kind, sha256);
+-- Describes the version and length for a given artifact SHA256 hash.
+--
+-- This is a separate table to enforce the one-to-one mapping between SHA256
+-- hash and version/length. Per RFD 554, artifacts must be stamped with their
+-- version (or a similar identifier) to ensure that they change when the version
+-- changes.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact_file (
+    sha256 STRING(64) PRIMARY KEY,
+    version STRING(64) NOT NULL,
+    artifact_size INT8 NOT NULL
+);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -3033,6 +3021,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
     tuf_artifact_id UUID NOT NULL,
 
     PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact_tag (
+    tuf_artifact_id UUID NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+
+    PRIMARY KEY (tuf_artifact_id, key)
 );
 
 -- Generation number for the current list of TUF artifacts the system wants.

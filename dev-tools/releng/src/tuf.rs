@@ -18,19 +18,18 @@ use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
 use tokio::io::AsyncReadExt;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::Key;
-use tufaceous_lib::assemble::ArtifactManifest;
-use tufaceous_lib::assemble::DeserializedArtifactData;
-use tufaceous_lib::assemble::DeserializedArtifactSource;
-use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
-use tufaceous_lib::assemble::DeserializedManifest;
-use tufaceous_lib::assemble::OmicronRepoAssembler;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
+use tufaceous::ExpirationEnforcement;
+use tufaceous::RepositoryLoader;
+use tufaceous::TrustStoreBehavior;
+use tufaceous_artifact_v1::ArtifactVersion;
+use tufaceous_artifact_v1::KnownArtifactKind;
+use tufaceous_lib_v1::Key;
+use tufaceous_lib_v1::assemble::ArtifactManifest;
+use tufaceous_lib_v1::assemble::DeserializedArtifactData;
+use tufaceous_lib_v1::assemble::DeserializedArtifactSource;
+use tufaceous_lib_v1::assemble::DeserializedControlPlaneZoneSource;
+use tufaceous_lib_v1::assemble::DeserializedManifest;
+use tufaceous_lib_v1::assemble::OmicronRepoAssembler;
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -193,7 +192,8 @@ pub(crate) async fn build_tuf_repo(
     // Generate the checksum file.
     let mut hasher = Sha256::new();
     let mut buf = [0; 8192];
-    let mut file = File::open(output_dir.join("repo.zip")).await?;
+    let output_path = output_dir.join("repo.zip");
+    let mut file = File::open(&output_path).await?;
     loop {
         let n = file.read(&mut buf).await?;
         if n == 0 {
@@ -207,38 +207,15 @@ pub(crate) async fn build_tuf_repo(
     )
     .await?;
 
-    // Check that we haven't stepped on any rakes by attempting to generate a
-    // plan from the zip
-    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
-        .context("error opening archive.zip")?;
-    let repo_hash = ArtifactHash([0u8; 32]);
-    let _ = ArtifactsWithPlan::from_zip(
-        zip_bytes,
-        None,
-        repo_hash,
-        ControlPlaneZonesMode::Split,
-        VerificationMode::BlindlyTrustAnything,
-        &logger,
-    )
-    .await
-    .with_context(|| {
-        "error reading generated TUF repo (split control plane)".to_string()
-    })?;
-
-    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
-        .context("error opening archive.zip")?;
-    let _ = ArtifactsWithPlan::from_zip(
-        zip_bytes,
-        None,
-        repo_hash,
-        ControlPlaneZonesMode::Composite,
-        VerificationMode::BlindlyTrustAnything,
-        &logger,
-    )
-    .await
-    .with_context(|| {
-        "error reading generated TUF repo (composite control plane)".to_string()
-    })?;
+    // Check that we haven't stepped on any rakes by attempting to load a repo
+    // from the zip
+    let _ = RepositoryLoader::new()
+        .expiration_enforcement(ExpirationEnforcement::Unsafe)
+        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .v1_compatibility(true)
+        .load_zip_path(output_path, &logger)
+        .await
+        .with_context(|| "error reading generated TUF repo".to_string())?;
 
     Ok(())
 }

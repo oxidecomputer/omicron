@@ -2,10 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod install_manifest;
-mod mupdate_override;
-mod tuf_repo;
+//! Version `TUF_REPO_OPTIONAL_METADATA` of the Nexus external API.
+//!
+//! This version (2026_02_99_99) makes the `hash` and `file_name` fields of
+//! `TufRepo` optional.
 
-pub use install_manifest::*;
-pub use mupdate_override::*;
-pub use tuf_repo::*;
+pub mod update;
