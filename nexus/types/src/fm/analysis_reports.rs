@@ -31,6 +31,20 @@ pub struct CaseReport {
 #[serde(transparent)]
 pub struct EventLog(Vec<LogEntry>);
 
+/// An entry in an analysis report's event log.
+///
+/// This type is somewhat intentionally very "stringly-typed": through the use
+/// of `#[serde(skip_serializing_if = "Option::is_none")]`, `#[serde(default)]`,
+/// and `#[serde(flatten)]`, we are essentially saying that this consists of a
+/// string field named `event`, and any number of other string fields, which are
+/// just thrown in a bag of key-value pairs. If one is named 'comment', we
+/// handle it separately."
+///
+/// If we add additional fields that are handled specially, they will still go
+/// in the bag of `kvs` if they are parsed by an OMDB version that doesn't
+/// understand them. Conversely, any new special-cased fields should be
+/// `Option`al, so that OMDB can still display event log entries emitted by
+/// older versions of Nexus.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LogEntry {
     event: String,
