@@ -57,8 +57,8 @@ use nexus_types::external_api::image::Image;
 use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
 use nexus_types::external_api::physical_disk::{
-    PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskId,
-    UninitializedPhysicalDisk,
+    PhysicalDisk, PhysicalDiskAdoptionRequest,
+    PhysicalDiskManufacturerIdentity, Unadopted,
 };
 use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::external_api::project::Project;
@@ -6705,11 +6705,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn physical_disk_list_uninitialized(
+    async fn physical_disk_list_unadopted(
         rqctx: RequestContext<ApiContext>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
-    ) -> Result<HttpResponseOk<ResultsPage<UninitializedPhysicalDisk>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ResultsPage<Unadopted>>, HttpError> {
         let apictx = rqctx.context();
         let pag_params = query.into_inner();
         if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
@@ -6724,14 +6723,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let disks = nexus
-                .physical_disk_list_uninitialized(&opctx)
+                .physical_disk_list_unadopted(&opctx)
                 .await?
                 .into_iter()
-                .map(|d| UninitializedPhysicalDisk {
+                .map(|d| Unadopted {
                     sled_id: d.sled_id.into(),
                     slot: d.slot as u64,
                     variant: d.variant.into(),
-                    disk_id: PhysicalDiskId {
+                    disk_id: PhysicalDiskManufacturerIdentity {
                         vendor: d.vendor,
                         serial: d.serial,
                         model: d.model,
@@ -6782,9 +6781,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn physical_disk_adopt(
+    async fn physical_disk_enable_adoption(
         rqctx: RequestContext<Self::Context>,
-        req: TypedBody<PhysicalDiskId>,
+        req: TypedBody<PhysicalDiskManufacturerIdentity>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus.physical_disk_adopt(&opctx, req.into_inner()).await?;

@@ -7700,7 +7700,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "List physical disks adoption requests",
+        "summary": "List physical disk adoption requests",
         "operationId": "physical_disk_list_adoption_requests",
         "parameters": [
           {
@@ -7816,13 +7816,13 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Adopt a physical disk for usage by the control plane",
-        "operationId": "physical_disk_adopt",
+        "summary": "Enable adoption of a physical disk for general use",
+        "operationId": "physical_disk_enable_adoption",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskId"
+                "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
               }
             }
           },
@@ -7880,13 +7880,13 @@
         }
       }
     },
-    "/v1/system/hardware/disks-uninitialized": {
+    "/v1/system/hardware/disks-unadopted": {
       "get": {
         "tags": [
           "system/hardware"
         ],
-        "summary": "List uninitialized physical disks",
-        "operationId": "physical_disk_list_uninitialized",
+        "summary": "List physical disks that have not yet been adopted for use",
+        "operationId": "physical_disk_list_unadopted",
         "parameters": [
           {
             "in": "query",
@@ -7915,7 +7915,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UninitializedPhysicalDiskResultsPage"
+                  "$ref": "#/components/schemas/UnadoptedResultsPage"
                 }
               }
             }
@@ -25377,8 +25377,16 @@
           "items"
         ]
       },
-      "PhysicalDiskId": {
-        "description": "The unique identity of a physical disk",
+      "PhysicalDiskKind": {
+        "description": "Describes the form factor of physical disks.",
+        "type": "string",
+        "enum": [
+          "m2",
+          "u2"
+        ]
+      },
+      "PhysicalDiskManufacturerIdentity": {
+        "description": "The unique identity of a physical disk provided by the manufacturer",
         "type": "object",
         "properties": {
           "model": {
@@ -25395,14 +25403,6 @@
           "model",
           "serial",
           "vendor"
-        ]
-      },
-      "PhysicalDiskKind": {
-        "description": "Describes the form factor of physical disks.",
-        "type": "string",
-        "enum": [
-          "m2",
-          "u2"
         ]
       },
       "PhysicalDiskPolicy": {
@@ -29885,12 +29885,12 @@
           }
         }
       },
-      "UninitializedPhysicalDisk": {
+      "Unadopted": {
         "description": "A physical disk that has not yet been adopted by the control plane",
         "type": "object",
         "properties": {
           "disk_id": {
-            "$ref": "#/components/schemas/PhysicalDiskId"
+            "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
           },
           "sled_id": {
             "$ref": "#/components/schemas/SledUuid"
@@ -29911,7 +29911,7 @@
           "variant"
         ]
       },
-      "UninitializedPhysicalDiskResultsPage": {
+      "UnadoptedResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -29919,7 +29919,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UninitializedPhysicalDisk"
+              "$ref": "#/components/schemas/Unadopted"
             }
           },
           "next_page": {

@@ -74,8 +74,10 @@ impl PhysicalDisk {
     }
 }
 
-impl From<&PhysicalDisk> for physical_disk_types::PhysicalDiskId {
-    fn from(value: &PhysicalDisk) -> Self {
+impl From<PhysicalDisk>
+    for physical_disk_types::PhysicalDiskManufacturerIdentity
+{
+    fn from(value: PhysicalDisk) -> Self {
         Self {
             vendor: value.vendor.clone(),
             serial: value.serial.clone(),

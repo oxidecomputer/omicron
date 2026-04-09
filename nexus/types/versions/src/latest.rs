@@ -450,8 +450,8 @@ pub mod physical_disk {
 
     // Types from MANUAL_DISK_ADOPTION.
     pub use crate::v2026_04_02_00::physical_disk::PhysicalDiskAdoptionRequest;
-    pub use crate::v2026_04_02_00::physical_disk::PhysicalDiskId;
-    pub use crate::v2026_04_02_00::physical_disk::UninitializedPhysicalDisk;
+    pub use crate::v2026_04_02_00::physical_disk::PhysicalDiskManufacturerIdentity;
+    pub use crate::v2026_04_02_00::physical_disk::Unadopted;
 }
 
 pub mod rack {

@@ -6683,24 +6683,22 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
 
-    /// List uninitialized physical disks
+    /// List physical disks that have not yet been adopted for use
     #[endpoint {
         method = GET,
-        path = "/v1/system/hardware/disks-uninitialized",
+        path = "/v1/system/hardware/disks-unadopted",
         tags = ["system/hardware"],
         versions = VERSION_MANUAL_DISK_ADOPTION..
     }]
-    async fn physical_disk_list_uninitialized(
+    async fn physical_disk_list_unadopted(
         rqctx: RequestContext<Self::Context>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
     ) -> Result<
-        HttpResponseOk<
-            ResultsPage<latest::physical_disk::UninitializedPhysicalDisk>,
-        >,
+        HttpResponseOk<ResultsPage<latest::physical_disk::Unadopted>>,
         HttpError,
     >;
 
-    /// List physical disks adoption requests
+    /// List physical disk adoption requests
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/disk-adoption-requests",
@@ -6717,16 +6715,16 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Adopt a physical disk for usage by the control plane
+    /// Enable adoption of a physical disk for general use
     #[endpoint {
         method = PUT,
         path = "/v1/system/hardware/disks",
         tags = ["system/hardware"],
         versions = VERSION_MANUAL_DISK_ADOPTION..
     }]
-    async fn physical_disk_adopt(
+    async fn physical_disk_enable_adoption(
         rqctx: RequestContext<Self::Context>,
-        req: TypedBody<latest::physical_disk::PhysicalDiskId>,
+        req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     // Switches

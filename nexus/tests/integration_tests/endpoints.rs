@@ -123,8 +123,8 @@ pub static HARDWARE_SWITCH_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/switches/{}", SWITCH_UUID));
 
 pub static DEMO_HARDWARE_PHYSICAL_DISK_ID: LazyLock<
-    physical_disk::PhysicalDiskId,
-> = LazyLock::new(|| physical_disk::PhysicalDiskId {
+    physical_disk::PhysicalDiskManufacturerIdentity,
+> = LazyLock::new(|| physical_disk::PhysicalDiskManufacturerIdentity {
     vendor: "test".into(),
     serial: "test".into(),
     model: "test".into(),
@@ -132,8 +132,8 @@ pub static DEMO_HARDWARE_PHYSICAL_DISK_ID: LazyLock<
 
 pub static HARDWARE_DISK_ADOPTION_REQUESTS_URL: &'static str =
     "/v1/system/hardware/disk-adoption-requests";
-pub static HARDWARE_DISKS_UNINITIALIZED_URL: &'static str =
-    "/v1/system/hardware/disks-uninitialized";
+pub static HARDWARE_DISKS_UNADOPTED_URL: &'static str =
+    "/v1/system/hardware/disks-unadopted";
 
 pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
 pub static HARDWARE_DISK_URL: LazyLock<String> = LazyLock::new(|| {
@@ -3015,7 +3015,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
-                url: &HARDWARE_DISKS_UNINITIALIZED_URL,
+                url: &HARDWARE_DISKS_UNADOPTED_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

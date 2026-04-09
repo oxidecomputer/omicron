@@ -12,22 +12,24 @@ use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
 
 /// A physical disk that has not yet been adopted by the control plane
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct UninitializedPhysicalDisk {
+pub struct Unadopted {
     pub sled_id: SledUuid,
     pub slot: u64,
     pub variant: PhysicalDiskKind,
-    pub disk_id: PhysicalDiskId,
+    pub disk_id: PhysicalDiskManufacturerIdentity,
 }
 
-/// The unique identity of a physical disk
+/// The unique identity of a physical disk provided by the manufacturer
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct PhysicalDiskId {
+pub struct PhysicalDiskManufacturerIdentity {
     pub vendor: String,
     pub serial: String,
     pub model: String,
 }
 
-impl From<omicron_common::disk::DiskIdentity> for PhysicalDiskId {
+impl From<omicron_common::disk::DiskIdentity>
+    for PhysicalDiskManufacturerIdentity
+{
     fn from(value: omicron_common::disk::DiskIdentity) -> Self {
         Self { vendor: value.vendor, serial: value.serial, model: value.model }
     }

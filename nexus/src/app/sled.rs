@@ -283,7 +283,7 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn physical_disk_list_uninitialized(
+    pub(crate) async fn physical_disk_list_unadopted(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<db::model::InvPhysicalDisk> {
@@ -293,7 +293,7 @@ impl super::Nexus {
             return Ok(vec![]);
         };
         self.db_datastore
-            .physical_disk_uninitialized_list(opctx, collection_id)
+            .physical_disk_unadopted_list(opctx, collection_id)
             .await
     }
 
@@ -310,7 +310,7 @@ impl super::Nexus {
     pub(crate) async fn physical_disk_adopt(
         &self,
         opctx: &OpContext,
-        disk_id: nexus_types::external_api::physical_disk::PhysicalDiskId,
+        disk_id: nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity,
     ) -> Result<(), Error> {
         self.db_datastore.physical_disk_adopt(opctx, disk_id).await
     }
