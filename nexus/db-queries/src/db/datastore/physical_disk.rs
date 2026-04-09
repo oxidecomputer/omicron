@@ -133,7 +133,8 @@ impl DataStore {
 
         let conn = &*self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::<TransactionError<Error>>::new();
-        self.transaction_retry_wrapper("physical_disk_adopt")
+        let txn_res = self
+            .transaction_retry_wrapper("physical_disk_adopt")
             .transaction(&conn, |conn| {
                 let vendor = disk_id.vendor.clone();
                 let serial = disk_id.serial.clone();
@@ -167,7 +168,7 @@ impl DataStore {
                     }
 
                     // Insert the adoption request.
-                    if let Err(err) = diesel::insert_into(
+                    diesel::insert_into(
                         adoption_dsl::physical_disk_adoption_request,
                     )
                     .values((
@@ -178,35 +179,40 @@ impl DataStore {
                         adoption_dsl::time_created.eq(Utc::now()),
                     ))
                     .execute_async(&conn)
-                    .await
-                    {
-                        // Check for a unique index violation for an active
-                        // adoption request with the same vendor/serial/model.
-                        //
-                        // Return Ok(()) in this case as the request is idempotent.
-                        match err {
-                            DieselError::DatabaseError(
-                                DieselErrorKind::UniqueViolation,
-                                _,
-                            ) => {
-                                return Ok(());
-                            }
-                            _ => Err(err)?,
-                        }
-                    }
+                    .await?;
 
                     Ok(())
                 }
             })
-            .await
-            .map_err(|e| {
-                match err.take() {
-                    // A called function performed its own error propagation.
-                    Some(txn_error) => txn_error.into_public_ignore_retries(),
-                    // The transaction setup/teardown itself encountered a diesel error.
-                    None => public_error_from_diesel(e, ErrorHandler::Server),
+            .await;
+
+        // Check for a unique index violation for an active
+        // adoption request with the same vendor/serial/model.
+        //
+        // Return Ok(()) in this case as the request is idempotent.
+        if let Err(e) = txn_res {
+            match err.take() {
+                // A called function performed its own error propagation.
+                Some(txn_error) => {
+                    return Err(txn_error.into_public_ignore_retries());
                 }
-            })?;
+                // The transaction setup/teardown itself encountered a diesel error.
+                None => match e {
+                    DieselError::DatabaseError(
+                        DieselErrorKind::UniqueViolation,
+                        _,
+                    ) => {
+                        return Ok(());
+                    }
+                    _ => {
+                        return Err(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Server,
+                        ));
+                    }
+                },
+            }
+        }
 
         Ok(())
     }
