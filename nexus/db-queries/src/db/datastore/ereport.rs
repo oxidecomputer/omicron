@@ -319,20 +319,30 @@ impl DataStore {
         Ok((created, latest))
     }
 
-    pub async fn ereports_list_unseen(
+    /// Lists ereports which have not been marked as **definitely seen**
+    /// (included in a committed sitrep) in the database, paginated by the
+    /// reporter restart ID and ENA.
+    ///
+    /// Note that this filters based only on whether they have been marked in
+    /// the database. Because marking seen ereports occurs asynchronously from
+    /// committing sitreps as part of FM rendezvous, ereports returned by this
+    /// query may have already been seen. These ereports must be filtered out at
+    /// a higher level based on the contents of the current sitrep when
+    /// determining which ereports are *actually* new.
+    pub async fn ereports_list_unmarked(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         // TODO(eliza): ereports should probably have their own resource type someday...
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        Self::ereports_list_unseen_query(pagparams)
+        Self::ereports_list_unmarked_query(pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    fn ereports_list_unseen_query(
+    fn ereports_list_unmarked_query(
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> impl RunnableQuery<Ereport> + use<> {
         paginated_multicolumn(
@@ -671,23 +681,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expectorate_ereports_list_unseen() {
+    async fn expectorate_ereports_list_unmarked() {
         let pagparams = DataPageParams {
             marker: None,
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let query = DataStore::ereports_list_unseen_query(&pagparams);
+        let query = DataStore::ereports_list_unmarked_query(&pagparams);
         expectorate_query_contents(
             &query,
-            "tests/output/ereports_list_unseen.sql",
+            "tests/output/ereports_list_unmarked.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn explain_ereports_list_unseen_query() {
-        let logctx = dev::test_setup_log("explain_ereports_list_unseen_query");
+    async fn explain_ereports_list_unmarked_query() {
+        let logctx =
+            dev::test_setup_log("explain_ereports_list_unmarked_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
@@ -697,7 +708,7 @@ mod tests {
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let query = DataStore::ereports_list_unseen_query(&pagparams);
+        let query = DataStore::ereports_list_unmarked_query(&pagparams);
         let explanation = query
             .explain_async(&conn)
             .await

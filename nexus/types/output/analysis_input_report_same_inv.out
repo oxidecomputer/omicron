@@ -1,0 +1,7 @@
+fault management analysis inputs
+----- ---------- -------- ------
+parent sitrep:        aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+inventory collection: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+ --> same collection as parent sitrep
+no new ereports since the parent sitrep
+no cases copied forward
