@@ -56,6 +56,7 @@ impl DataStore {
         disk: PhysicalDisk,
         zpool: Zpool,
     ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         let err = OptionalError::new();
 
@@ -251,7 +252,7 @@ impl DataStore {
         id: PhysicalDiskUuid,
         policy: PhysicalDiskPolicy,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 

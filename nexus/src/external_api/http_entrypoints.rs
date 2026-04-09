@@ -6488,6 +6488,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // This request isn't currently paginated. The query is somewhat complex
+    // underneath and doesn't support pagination right now. We would need a way
+    // to order filtered `InvPhysicalDisk` objects to support pagination, and
+    // we've decided to punt on this for now. The justification for punting is
+    // that in single-rack systems there is a limit to the number of disks we'd
+    // adopt at one time. The maximum is 320 U.2 drives in an entire rack, and
+    // we won't be replacing them all at once.
     async fn sled_list_uninitialized(
         rqctx: RequestContext<ApiContext>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
