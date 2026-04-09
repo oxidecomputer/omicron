@@ -123,8 +123,9 @@ impl Metadata {
                         this_sitrep(closed_id)
                     )?;
                 }
-
-                writeln!(f, "{:>indent$}comment: {comment}", "")?;
+                if !comment.is_empty() {
+                    writeln!(f, "{:>indent$}comment: {comment}", "")?;
+                }
 
                 Ok(())
             }

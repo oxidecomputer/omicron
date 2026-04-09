@@ -413,7 +413,7 @@ mod tests {
             ]);
             builder.build()
         };
-        dbg!(report);
+        eprintln!("{}", report.display_multiline(0));
 
         // Check the "new ereports" in the constructed input.
         assert!(
@@ -493,15 +493,34 @@ mod tests {
             "the closed_case_without_unmarked should NOT be accessible via \
              case_mut() (closed cases are not open for modification)"
         );
+        sitrep_builder.comment_mut().push_str("my cool sitrep");
 
+        let new_case_id = {
+            let mut new_case =
+                sitrep_builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
+            new_case.add_ereport(
+                &ereport_new,
+                "this ereport is important to the case somehow",
+            );
+            new_case
+                .request_alert(
+                    nexus_types::alert::AlertClass::TestFooBar,
+                    &serde_json::json!({"alert": true}),
+                )
+                .unwrap();
+            *new_case.id()
+        };
         // Build the final sitrep
-        let output_sitrep = dbg!(
-            sitrep_builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now())
-        );
-
+        let (output_sitrep, report) =
+            sitrep_builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now());
+        eprintln!("{}", report.display_multiline(0));
         assert!(
             output_sitrep.cases.contains_key(&open_case_id),
             "open case should be in the output sitrep's cases"
+        );
+        assert!(
+            output_sitrep.cases.contains_key(&new_case_id),
+            "new case should be in the output sitrep's cases"
         );
         assert!(
             output_sitrep.cases.contains_key(&closed_case_with_unmarked_id),
@@ -515,9 +534,9 @@ mod tests {
         );
         assert_eq!(
             output_sitrep.cases.len(),
-            2,
-            "the output sitrep should have exactly 2 cases: the open case and \
-             the closed-but-copied-forward case"
+            3,
+            "the output sitrep should have exactly 3 cases: the open case, \
+             the closed-but-copied-forward case, and the new case"
         );
 
         logctx.cleanup_successful();

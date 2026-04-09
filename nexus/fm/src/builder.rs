@@ -75,7 +75,7 @@ impl<'a> SitrepBuilder<'a> {
         &self.comment
     }
 
-    pub fn comment_mut(&mut self) -> &mut str {
+    pub fn comment_mut(&mut self) -> &mut String {
         &mut self.comment
     }
 
@@ -83,20 +83,31 @@ impl<'a> SitrepBuilder<'a> {
         self,
         creator_id: OmicronZoneUuid,
         time_created: chrono::DateTime<chrono::Utc>,
-    ) -> fm::Sitrep {
+    ) -> (fm::Sitrep, fm::analysis_reports::AnalysisReport) {
         let mut ereports_by_id = iddqd::IdOrdMap::new();
+        let mut report_cases = IdOrdMap::new();
         let cases = self
             .cases
             .cases
             .into_iter()
-            .map(fm::Case::from)
+            .map(|case_builder| {
+                let (case, report) = case_builder.build();
+                report_cases.insert_unique(report)
+                    .expect("we are iterating over an IdOrdMap, so the entries should already be unique");
+                case
+            })
             .chain(self.closed_cases_copied_forward.iter().cloned())
             .inspect(|case| {
                 ereports_by_id
                     .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
             })
             .collect();
-        fm::Sitrep {
+        let report = fm::analysis_reports::AnalysisReport {
+            sitrep_id: self.sitrep_id,
+            comment: self.comment.clone(),
+            cases: report_cases,
+        };
+        let sitrep = fm::Sitrep {
             metadata: fm::SitrepMetadata {
                 id: self.sitrep_id,
                 parent_sitrep_id: self.parent_sitrep.map(|s| s.metadata.id),
@@ -107,6 +118,7 @@ impl<'a> SitrepBuilder<'a> {
             },
             cases,
             ereports_by_id,
-        }
+        };
+        (sitrep, report)
     }
 }

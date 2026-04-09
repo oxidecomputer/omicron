@@ -17,19 +17,28 @@ use std::fmt;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnalysisReport {
     pub sitrep_id: SitrepUuid,
+    pub comment: String,
     pub cases: IdOrdMap<CaseReport>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaseReport {
     pub case: Case,
-    pub log: Vec<LogEntry>,
+    pub log: EventLog,
 }
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct EventLog(Vec<LogEntry>);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LogEntry {
-    pub event: String,
-    pub comment: Option<String>,
+    event: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    comment: Option<String>,
+    #[serde(flatten)]
+    kvs: BTreeMap<String, String>,
 }
 
 impl iddqd::IdOrdItem for CaseReport {
@@ -51,11 +60,14 @@ impl AnalysisReport {
         impl<'a> fmt::Display for AnalysisReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: AnalysisReport { cases, sitrep_id },
+                    report: AnalysisReport { cases, sitrep_id, comment },
                     indent,
                 } = self;
                 writeln!(f, "{:indent$}fault management analysis report", "")?;
                 writeln!(f, "{:indent$}----- ---------- -------- ------", "")?;
+                if !comment.is_empty() {
+                    writeln!(f, "{:indent$}// {comment}", "")?;
+                }
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
                 writeln!(f, "{:indent$}cases:", "")?;
                 for case in cases {
@@ -85,16 +97,22 @@ impl CaseReport {
         impl<'a> fmt::Display for CaseReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: CaseReport { case, log },
+                    report: CaseReport { case, log: EventLog(log) },
                     indent,
                     this_sitrep,
                 } = self;
                 let bullet = if indent > 0 { "* " } else { "" };
-                writeln!(f, "{:indent$}{bullet} case {}", "", case.id)?;
+                writeln!(f, "{:indent$}{bullet}case {}", "", case.id)?;
                 let indent = indent + 2;
                 case.metadata.display_multiline(indent, this_sitrep).fmt(f)?;
-                for entry in &log[..] {
-                    entry.display_indented(indent + 2).fmt(f)?;
+                if !log.is_empty() {
+                    writeln!(f, "{:indent$}activity in this analysis:", "")?;
+                    let indent = indent + 2;
+                    for entry in &log[..] {
+                        entry.display_indented(indent).fmt(f)?;
+                    }
+                } else {
+                    writeln!(f, "{:indent$}no activity in this analysis", "")?;
                 }
                 Ok(())
             }
@@ -104,7 +122,42 @@ impl CaseReport {
     }
 }
 
+impl EventLog {
+    pub fn entry(&mut self, event: impl ToString) -> &mut LogEntry {
+        self.0.push(LogEntry::new(event));
+        self.0.last_mut().expect("we just pushed it")
+    }
+}
+
 impl LogEntry {
+    pub fn new(event: impl ToString) -> Self {
+        Self { event: event.to_string(), comment: None, kvs: BTreeMap::new() }
+    }
+
+    pub fn comment(&mut self, comment: impl ToString) -> &mut Self {
+        self.comment = Some(comment.to_string());
+        self
+    }
+
+    pub fn kv(
+        &mut self,
+        key: impl ToString,
+        value: impl ToString,
+    ) -> &mut Self {
+        self.kvs(std::iter::once((key, value)));
+        self
+    }
+
+    pub fn kvs(
+        &mut self,
+        kvs: impl IntoIterator<Item = (impl ToString, impl ToString)>,
+    ) -> &mut Self {
+        self.kvs.extend(
+            kvs.into_iter().map(|(k, v)| (k.to_string(), v.to_string())),
+        );
+        self
+    }
+
     pub fn display_indented(&self, indent: usize) -> impl fmt::Display + '_ {
         struct LogEntryDisplayer<'a> {
             entry: &'a LogEntry,
@@ -113,13 +166,18 @@ impl LogEntry {
 
         impl<'a> fmt::Display for LogEntryDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let &Self { entry: LogEntry { event, comment }, indent } = self;
+                let &Self { entry: LogEntry { event, comment, kvs }, indent } =
+                    self;
                 let (bullet, commindent) =
                     if indent > 0 { ("* ", "  ") } else { ("", "") };
                 if let Some(comment) = comment {
                     writeln!(f, "{:indent$}{commindent}// {comment}", "")?;
                 }
-                writeln!(f, "{:indent$}{bullet}{event}", "")?;
+                let colon = if kvs.is_empty() { "" } else { ":" };
+                writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
+                for (k, v) in kvs {
+                    writeln!(f, "{:indent$}  * {k}: {v}", "")?;
+                }
                 Ok(())
             }
         }
@@ -200,6 +258,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "",
                 new_ereport_ids.len()
             )?;
+            let indent = indent + 2;
             for ereport_id in new_ereport_ids {
                 writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
             }
@@ -224,6 +283,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     "",
                     open_cases.len()
                 )?;
+                let indent = indent + 2;
                 for (case_id, metadata) in open_cases {
                     writeln!(f, "{:indent$}* case {case_id}", "")?;
                     metadata.display_multiline(indent + 2, None).fmt(f)?;
@@ -243,6 +303,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     "",
                     closed_cases_copied_forward.len()
                 )?;
+                let indent = indent + 2;
                 for (
                     case_id,
                     ClosedCaseReport { metadata, unmarked_ereports },

@@ -4,6 +4,7 @@
 
 use super::rng;
 use anyhow::Context;
+use fm::analysis_reports;
 use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::alert::AlertClass;
 use nexus_types::fm;
@@ -17,7 +18,7 @@ pub struct CaseBuilder {
     case: fm::Case,
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
-    event_log: Vec<fm::analysis_reports::LogEntry>,
+    report_log: analysis_reports::EventLog,
 }
 
 #[derive(Debug)]
@@ -70,11 +71,10 @@ impl AllCases {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                 };
-                let mut builder = CaseBuilder::new(
-                    &self.log, sitrep_id, case, case_rng,
-                );
-                builder.events.push(CaseEvent {  })
-                entry.insert()
+                let mut builder =
+                    CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
+                builder.report_log.entry("opened case");
+                entry.insert(builder)
             }
         };
 
@@ -120,7 +120,7 @@ impl CaseBuilder {
             "de" => case.metadata.de.to_string(),
             "created_sitrep_id" => case.metadata.created_sitrep_id.to_string(),
         ));
-        Self { log, case, sitrep_id, rng }
+        Self { log, case, sitrep_id, rng, report_log: Default::default() }
     }
 
     pub fn request_alert(
@@ -141,6 +141,10 @@ impl CaseBuilder {
             anyhow::anyhow!("an alert with ID {id:?} already exists")
         })?;
 
+        self.report_log
+            .entry("requested alert")
+            .kv("alert_id", id)
+            .kv("alert_class", &class);
         slog::info!(
             &self.log,
             "requested an alert";
@@ -162,12 +166,13 @@ impl CaseBuilder {
         report: &Arc<fm::Ereport>,
         comment: impl ToString,
     ) {
+        let comment = comment.to_string();
         let assignment_id = self.rng.next_case_ereport();
         match self.case.ereports.insert_unique(fm::case::CaseEreport {
             id: assignment_id,
             ereport: report.clone(),
             assigned_sitrep_id: self.sitrep_id,
-            comment: comment.to_string(),
+            comment: comment.clone(),
         }) {
             Ok(_) => {
                 slog::info!(
@@ -177,6 +182,16 @@ impl CaseBuilder {
                     "ereport_class" => ?report.class,
                     "assignment_id" => %assignment_id,
                 );
+
+                self.report_log
+                    .entry("assigned ereport to case")
+                    .comment(comment)
+                    .kv("ereport_id", &report.id())
+                    .kv(
+                        "ereport_class",
+                        &report.class.as_deref().unwrap_or("<none>"),
+                    )
+                    .kv("assignment_id", assignment_id);
             }
             Err(_) => {
                 slog::warn!(
@@ -207,11 +222,14 @@ impl CaseBuilder {
     pub fn comment_mut(&mut self) -> &mut String {
         &mut self.case.metadata.comment
     }
-}
 
-impl From<CaseBuilder> for fm::Case {
-    fn from(CaseBuilder { case, .. }: CaseBuilder) -> Self {
-        case
+    pub(crate) fn build(self) -> (fm::Case, fm::analysis_reports::CaseReport) {
+        let Self { case, report_log, .. } = self;
+        let report = fm::analysis_reports::CaseReport {
+            case: case.clone(),
+            log: report_log,
+        };
+        (case, report)
     }
 }
 
