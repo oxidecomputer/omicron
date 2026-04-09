@@ -5110,6 +5110,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS inv_svc_enabled_not_online_collection_by_sled
+    ON omicron.public.inv_svc_enabled_not_online (inv_collection_id, sled_id);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
@@ -5121,7 +5124,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_error (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
     id UUID NOT NULL,

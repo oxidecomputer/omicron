@@ -67,6 +67,7 @@ use sled_agent_types::inventory::Svc;
 use sled_agent_types::inventory::SvcState;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
@@ -654,7 +655,12 @@ pub fn representative() -> Representative {
                         has_mupdate_override: true,
                     },
                 ),
-                SvcsEnabledNotOnlineResult::DataUnavailable,
+                // Simulate an error running the svcs command when retrieving
+                // SMF service status
+                SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+                    error: "Command failed with status: 2".to_string(),
+                    time_of_status: "2026-01-01T00:00:00Z".parse().unwrap(),
+                }),
             ),
         )
         .unwrap();

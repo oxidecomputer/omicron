@@ -1783,7 +1783,7 @@ table! {
 }
 
 table! {
-    inv_svc_enabled_not_online_error (inv_collection_id, sled_id, id) {
+    inv_svc_enabled_not_online_parse_error (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
         id -> Uuid,

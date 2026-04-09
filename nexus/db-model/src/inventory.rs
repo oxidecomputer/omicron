@@ -45,7 +45,7 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
-    inv_svc_enabled_not_online, inv_svc_enabled_not_online_error,
+    inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
     inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
     inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
@@ -74,9 +74,9 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::SvcEnabledNotOnlineErrorKind;
-use omicron_uuid_kinds::SvcEnabledNotOnlineErrorUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineParseErrorKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineParseErrorUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineServiceKind;
 use omicron_uuid_kinds::SvcEnabledNotOnlineServiceUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
@@ -2101,22 +2101,22 @@ impl InvSvcEnabledNotOnlineService {
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_svc_enabled_not_online_error)]
-pub struct InvSvcEnabledNotOnlineError {
+#[diesel(table_name = inv_svc_enabled_not_online_parse_error)]
+pub struct InvSvcEnabledNotOnlineParseError {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: DbTypedUuid<SvcEnabledNotOnlineErrorKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineParseErrorKind>,
     pub error_message: String,
 }
 
-impl InvSvcEnabledNotOnlineError {
+impl InvSvcEnabledNotOnlineParseError {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
         error_message: String,
     ) -> Self {
         // This ID is only used as a primary key, it's fine to generate it here.
-        let id = to_db_typed_uuid(SvcEnabledNotOnlineErrorUuid::new_v4());
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineParseErrorUuid::new_v4());
 
         Self {
             inv_collection_id: inv_collection_id.into(),

@@ -63,7 +63,7 @@ use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvSvcEnabledNotOnline;
-use nexus_db_model::InvSvcEnabledNotOnlineError;
+use nexus_db_model::InvSvcEnabledNotOnlineParseError;
 use nexus_db_model::InvSvcEnabledNotOnlineService;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
@@ -244,7 +244,7 @@ impl DataStore {
                     // Pull services in maintenance errors out of each sled agent
                     svcs_enabled_not_online_errors.extend(
                         svcs.errors.iter().map(|error| {
-                            InvSvcEnabledNotOnlineError::new(
+                            InvSvcEnabledNotOnlineParseError::new(
                                 collection_id,
                                 sled_agent.sled_id,
                                 error.clone(),
@@ -275,7 +275,7 @@ impl DataStore {
                         svcs.errors
                             .iter()
                             .map(|error| {
-                                InvSvcEnabledNotOnlineError::new(
+                                InvSvcEnabledNotOnlineParseError::new(
                                     collection_id,
                                     sled_agent.sled_id,
                                     error.clone(),
@@ -1644,7 +1644,7 @@ impl DataStore {
             // Insert rows for all the errors from the enabled not online SMF
             // services we found.
             {
-                use nexus_db_schema::schema::inv_svc_enabled_not_online_error::dsl;
+                use nexus_db_schema::schema::inv_svc_enabled_not_online_parse_error::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
                 let mut svcs_enabled_not_online_errors = svcs_enabled_not_online_errors.into_iter();
@@ -1654,7 +1654,7 @@ impl DataStore {
                     if some_svcs_enabled_not_online_errors.is_empty() {
                         break;
                     }
-                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online_error)
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online_parse_error)
                         .values(some_svcs_enabled_not_online_errors)
                         .execute_async(&conn)
                         .await?;
@@ -2458,8 +2458,8 @@ impl DataStore {
                     };
 
                     let nsvcs_enabled_not_online_error = {
-                        use nexus_db_schema::schema::inv_svc_enabled_not_online_error::dsl;
-                        diesel::delete(dsl::inv_svc_enabled_not_online_error.filter(
+                        use nexus_db_schema::schema::inv_svc_enabled_not_online_parse_error::dsl;
+                        diesel::delete(dsl::inv_svc_enabled_not_online_parse_error.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -3122,23 +3122,25 @@ impl DataStore {
         // Mapping of "Sled ID" -> "All enabled not online SMF services errors
         // reported by that sled"
         let mut svcs_enabled_not_online_errors_by_sled = {
-            use nexus_db_schema::schema::inv_svc_enabled_not_online_error::dsl;
+            use nexus_db_schema::schema::inv_svc_enabled_not_online_parse_error::dsl;
 
-            let mut svcs =
-                BTreeMap::<SledUuid, Vec<InvSvcEnabledNotOnlineError>>::new();
+            let mut svcs = BTreeMap::<
+                SledUuid,
+                Vec<InvSvcEnabledNotOnlineParseError>,
+            >::new();
             let mut paginator = Paginator::new(
                 batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch: Vec<InvSvcEnabledNotOnlineError> =
+                let batch: Vec<InvSvcEnabledNotOnlineParseError> =
                     paginated_multicolumn(
-                        dsl::inv_svc_enabled_not_online_error,
+                        dsl::inv_svc_enabled_not_online_parse_error,
                         (dsl::sled_id, dsl::id),
                         &p.current_pagparams(),
                     )
                     .filter(dsl::inv_collection_id.eq(db_id))
-                    .select(InvSvcEnabledNotOnlineError::as_select())
+                    .select(InvSvcEnabledNotOnlineParseError::as_select())
                     .load_async(&*conn)
                     .await
                     .map_err(|e| {

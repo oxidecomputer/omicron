@@ -88,7 +88,7 @@ impl_typed_uuid_kinds! {
         SubnetPoolMember = {},
         SupportBundle = {},
         SvcEnabledNotOnline = {},
-        SvcEnabledNotOnlineError = {},
+        SvcEnabledNotOnlineParseError = {},
         SvcEnabledNotOnlineService = {},
         TufArtifact = {},
         TufRepo = {},
