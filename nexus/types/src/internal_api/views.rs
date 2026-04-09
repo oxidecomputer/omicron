@@ -25,6 +25,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::disk::M2Slot;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use schemars::JsonSchema;
@@ -1259,7 +1260,7 @@ pub struct SupportBundleInfo {
     #[serde(flatten)]
     pub base: ExternalSupportBundleInfo,
     /// The FM case ID that triggered creation of this bundle, if any.
-    pub fm_case_id: Option<uuid::Uuid>,
+    pub fm_case_id: Option<CaseUuid>,
 }
 
 #[cfg(test)]
