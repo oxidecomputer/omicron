@@ -3062,7 +3062,8 @@ impl DataStore {
         let mut svcs_enabled_not_online_by_sled = {
             use nexus_db_schema::schema::inv_svc_enabled_not_online::dsl;
 
-            let mut svcs = BTreeMap::<Uuid, Vec<InvSvcEnabledNotOnline>>::new();
+            let mut svcs =
+                BTreeMap::<SledUuid, Vec<InvSvcEnabledNotOnline>>::new();
             let mut paginator = Paginator::new(
                 batch_size,
                 dropshot::PaginationOrder::Ascending,
@@ -3082,9 +3083,7 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
-                    svcs.entry(svc.sled_id.into_untyped_uuid())
-                        .or_default()
-                        .push(svc);
+                    svcs.entry(svc.sled_id.into()).or_default().push(svc);
                 }
             }
             svcs
@@ -3096,7 +3095,7 @@ impl DataStore {
             use nexus_db_schema::schema::inv_svc_enabled_not_online_service::dsl;
 
             let mut svcs =
-                BTreeMap::<Uuid, Vec<InvSvcEnabledNotOnlineService>>::new();
+                BTreeMap::<SledUuid, Vec<InvSvcEnabledNotOnlineService>>::new();
             let mut paginator = Paginator::new(
                 batch_size,
                 dropshot::PaginationOrder::Ascending,
@@ -3117,9 +3116,7 @@ impl DataStore {
                     })?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
-                    svcs.entry(svc.sled_id.into_untyped_uuid())
-                        .or_default()
-                        .push(svc);
+                    svcs.entry(svc.sled_id.into()).or_default().push(svc);
                 }
             }
             svcs
@@ -3131,7 +3128,7 @@ impl DataStore {
             use nexus_db_schema::schema::inv_svc_enabled_not_online_error::dsl;
 
             let mut svcs =
-                BTreeMap::<Uuid, Vec<InvSvcEnabledNotOnlineError>>::new();
+                BTreeMap::<SledUuid, Vec<InvSvcEnabledNotOnlineError>>::new();
             let mut paginator = Paginator::new(
                 batch_size,
                 dropshot::PaginationOrder::Ascending,
@@ -3152,9 +3149,7 @@ impl DataStore {
                     })?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
-                    svcs.entry(svc.sled_id.into_untyped_uuid())
-                        .or_default()
-                        .push(svc);
+                    svcs.entry(svc.sled_id.into()).or_default().push(svc);
                 }
             }
             svcs
@@ -4548,7 +4543,7 @@ impl DataStore {
             // `SvcsEnabledNotOnlineResult`
             let smf_services_enabled_not_online =
                 match svcs_enabled_not_online_by_sled
-                    .remove(&sled_id.into_untyped_uuid())
+                    .remove(&sled_id)
                     .and_then(|rows| rows.into_iter().next())
                 {
                     // There should only be one row per collection per sled
@@ -4566,7 +4561,7 @@ impl DataStore {
                         // for this sled.
                         let services: Vec<Svc> =
                             svcs_enabled_not_online_services_by_sled
-                                .remove(&sled_id.into_untyped_uuid())
+                                .remove(&sled_id)
                                 .unwrap_or_default()
                                 .into_iter()
                                 .map(|svc| Svc {
@@ -4580,7 +4575,7 @@ impl DataStore {
                         // for this sled.
                         let errors: Vec<String> =
                             svcs_enabled_not_online_errors_by_sled
-                                .remove(&sled_id.into_untyped_uuid())
+                                .remove(&sled_id)
                                 .unwrap_or_default()
                                 .into_iter()
                                 .map(|err| err.error_message)

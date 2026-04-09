@@ -1,4 +1,4 @@
-CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_state_enum AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_state AS ENUM (
     'uninitialized',
     'offline',
     'online',

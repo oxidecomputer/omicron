@@ -65,7 +65,6 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -75,7 +74,11 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineErrorKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineErrorUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineServiceKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineServiceUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
@@ -2052,9 +2055,7 @@ impl InvSvcEnabledNotOnline {
         time_of_status: DateTime<Utc>,
     ) -> Self {
         // This ID is only used as a primary key, it's fine to generate it here.
-        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::from_untyped_uuid(
-            Uuid::new_v4(),
-        ));
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::new_v4());
 
         Self {
             inv_collection_id: inv_collection_id.into(),
@@ -2071,7 +2072,7 @@ impl InvSvcEnabledNotOnline {
 pub struct InvSvcEnabledNotOnlineService {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineServiceKind>,
     pub fmri: String,
     pub zone: String,
     pub state: InvSvcState,
@@ -2086,9 +2087,7 @@ impl InvSvcEnabledNotOnlineService {
         let Svc { fmri, zone, state } = svc;
 
         // This ID is only used as a primary key, it's fine to generate it here.
-        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::from_untyped_uuid(
-            Uuid::new_v4(),
-        ));
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineServiceUuid::new_v4());
 
         Self {
             inv_collection_id: inv_collection_id.into(),
@@ -2106,7 +2105,7 @@ impl InvSvcEnabledNotOnlineService {
 pub struct InvSvcEnabledNotOnlineError {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineErrorKind>,
     pub error_message: String,
 }
 
@@ -2117,9 +2116,7 @@ impl InvSvcEnabledNotOnlineError {
         error_message: String,
     ) -> Self {
         // This ID is only used as a primary key, it's fine to generate it here.
-        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::from_untyped_uuid(
-            Uuid::new_v4(),
-        ));
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineErrorUuid::new_v4());
 
         Self {
             inv_collection_id: inv_collection_id.into(),

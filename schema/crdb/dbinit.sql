@@ -5085,7 +5085,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
     PRIMARY KEY (inv_collection_id, zone_id)
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_state_enum AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_state AS ENUM (
     'uninitialized',
     'offline',
     'online',
@@ -5100,6 +5100,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
     id UUID NOT NULL,
+    -- This represents an error when calling the `svcs` command.
+    -- This column will always be NULL unless something went very wrong and we
+    -- were unable to retrieve any information from the state of the services
+    -- due to a command error.
     svcs_cmd_error TEXT,
     time_of_status TIMESTAMPTZ NOT NULL,
 
@@ -5112,7 +5116,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
     id UUID NOT NULL,
     fmri TEXT NOT NULL,
     zone TEXT NOT NULL,
-    state omicron.public.inv_svc_state_enum NOT NULL,
+    state omicron.public.inv_svc_state NOT NULL,
 
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );

@@ -68,7 +68,7 @@ define_enums! {
     InstanceStateEnum => "instance_state_v2",
     InstanceIntendedStateEnum => "instance_intended_state",
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
-    InvSvcStateEnum => "inv_svc_state_enum",
+    InvSvcStateEnum => "inv_svc_state",
     InvZoneImageSourceEnum => "inv_zone_image_source",
     InvZoneManifestSourceEnum => "inv_zone_manifest_source",
     InvZpoolHealthEnum => "inv_zpool_health",
