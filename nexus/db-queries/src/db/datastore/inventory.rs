@@ -216,57 +216,54 @@ impl DataStore {
             }
         }
 
-        // Pull services enabled not online result out of all sled agents
-        let svcs_enabled_not_online: Vec<_> = collection
-            .sled_agents
-            .iter()
-            .flat_map(|sled_agent| {
-                match &sled_agent.smf_services_enabled_not_online {
-                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
-                        vec![InvSvcEnabledNotOnline::new(
-                            collection_id,
-                            sled_agent.sled_id,
-                            None,
-                            svcs.time_of_status,
-                        )]
-                    }
-                    SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
-                        vec![InvSvcEnabledNotOnline::new(
-                            collection_id,
-                            sled_agent.sled_id,
-                            Some(e.error.clone()),
-                            e.time_of_status,
-                        )]
-                    }
-                    SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
-                }
-            })
-            .collect();
+        let mut svcs_enabled_not_online = Vec::new();
+        let mut svcs_enabled_not_online_services = Vec::new();
+        let mut svcs_enabled_not_online_errors = Vec::new();
+        for sled_agent in &collection.sled_agents {
+            match &sled_agent.smf_services_enabled_not_online {
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                    // Pull services enabled not online result out of each sled agent
+                    svcs_enabled_not_online.push(InvSvcEnabledNotOnline::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        None,
+                        svcs.time_of_status,
+                    ));
 
-        // Pull services in maintenance details out of all sled agents
-        let svcs_enabled_not_online_services: Vec<_> = collection
-            .sled_agents
-            .iter()
-            .flat_map(|sled_agent| {
-                match &sled_agent.smf_services_enabled_not_online {
-                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
-                        svcs.services
-                            .iter()
-                            .map(|svc| {
-                                InvSvcEnabledNotOnlineService::new(
-                                    collection_id,
-                                    sled_agent.sled_id,
-                                    svc.clone(),
-                                )
-                            })
-                            .collect()
-                    }
-                    // If there is an error we've already captured it above
-                    SvcsEnabledNotOnlineResult::SvcsCmdError(_) => vec![],
-                    SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
+                    // Pull services in maintenance details out of each sled agent
+                    svcs_enabled_not_online_services.extend(
+                        svcs.services.iter().map(|svc| {
+                            InvSvcEnabledNotOnlineService::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                svc.clone(),
+                            )
+                        }),
+                    );
+
+                    // Pull services in maintenance errors out of each sled agent
+                    svcs_enabled_not_online_errors.extend(
+                        svcs.errors.iter().map(|error| {
+                            InvSvcEnabledNotOnlineError::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                error.clone(),
+                            )
+                        }),
+                    );
                 }
-            })
-            .collect();
+                SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
+                    // Pull services enabled not online result out of each sled agent
+                    svcs_enabled_not_online.push(InvSvcEnabledNotOnline::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        Some(e.error.clone()),
+                        e.time_of_status,
+                    ));
+                }
+                SvcsEnabledNotOnlineResult::DataUnavailable => {}
+            }
+        }
 
         // Pull services in maintenance errors out of all sled agents
         let svcs_enabled_not_online_errors: Vec<_> = collection
@@ -4552,12 +4549,10 @@ impl DataStore {
                     // can safely assume no services have been reported and
                     // return an error.
                     Some(row) if row.svcs_cmd_error.is_some() => {
-                        SvcsEnabledNotOnlineResult::SvcsCmdError(
-                            SvcsError {
-                                error: row.svcs_cmd_error.unwrap(),
-                                time_of_status: row.time_of_status,
-                            },
-                        )
+                        SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+                            error: row.svcs_cmd_error.unwrap(),
+                            time_of_status: row.time_of_status,
+                        })
                     }
                     Some(row) => {
                         // Collect all services from svcs_enabled_not_online_services_by_sled
