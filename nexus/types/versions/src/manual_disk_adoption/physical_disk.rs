@@ -14,7 +14,7 @@ use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Unadopted {
     pub sled_id: SledUuid,
-    pub slot: u64,
+    pub slot: i64,
     pub variant: PhysicalDiskKind,
     pub disk_id: PhysicalDiskManufacturerIdentity,
 }
@@ -43,5 +43,4 @@ pub struct PhysicalDiskAdoptionRequest {
     pub serial: String,
     pub model: String,
     pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
 }

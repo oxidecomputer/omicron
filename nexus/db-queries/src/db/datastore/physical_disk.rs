@@ -1028,7 +1028,7 @@ mod test {
         // We need an adoption request before we can adopt the disk
         // Adoption is idempotent
         datastore
-            .physical_disk_adopt(&opctx, disk.into())
+            .physical_disk_adopt(&opctx, disk.clone().into())
             .await
             .expect("adoption succeeds");
         datastore
@@ -1051,7 +1051,7 @@ mod test {
         // We don't want it to fail because it doesn't have an adoption request
         // though
         datastore
-            .physical_disk_adopt(&opctx, disk.into())
+            .physical_disk_adopt(&opctx, disk.clone().into())
             .await
             .expect("adoption succeeds");
         let err = datastore
@@ -1150,7 +1150,7 @@ mod test {
         let (disk_001, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
         datastore
-            .physical_disk_adopt(&opctx, (&disk_001).into())
+            .physical_disk_adopt(&opctx, disk_001.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1160,7 +1160,7 @@ mod test {
         let (disk_002, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
         datastore
-            .physical_disk_adopt(&opctx, (&disk_002).into())
+            .physical_disk_adopt(&opctx, disk_002.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1170,7 +1170,7 @@ mod test {
         let (disk_101, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
         datastore
-            .physical_disk_adopt(&opctx, (&disk_101).into())
+            .physical_disk_adopt(&opctx, disk_101.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1212,7 +1212,7 @@ mod test {
         let (disk_003, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
         datastore
-            .physical_disk_adopt(&opctx, (&disk_003).into())
+            .physical_disk_adopt(&opctx, disk_003.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1222,7 +1222,7 @@ mod test {
         let (disk_102, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
         datastore
-            .physical_disk_adopt(&opctx, (&disk_102).into())
+            .physical_disk_adopt(&opctx, disk_102.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1232,7 +1232,7 @@ mod test {
         let (disk_103, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
         datastore
-            .physical_disk_adopt(&opctx, (&disk_103).into())
+            .physical_disk_adopt(&opctx, disk_103.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore

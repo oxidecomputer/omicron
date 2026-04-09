@@ -504,11 +504,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public
     id
 );
 
--- Any disk present in this table with a NON-NULL time_deleted column
+-- Any disk present in this table with a NULL time_deleted column
 -- is eligible for adoption.
 CREATE TABLE IF NOT EXISTS physical_disk_adoption_request (
     id UUID PRIMARY KEY,
-	vendor STRING(63) NOT NULL,
+    vendor STRING(63) NOT NULL,
     model STRING(63) NOT NULL,
     serial STRING(63) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
@@ -518,9 +518,9 @@ CREATE TABLE IF NOT EXISTS physical_disk_adoption_request (
 -- Only one eligible disk with the same physical id may be present at a time
 CREATE UNIQUE INDEX IF NOT EXISTS physical_disk_adoption_request_by_physical_id
 ON physical_disk_adoption_request (
-   vendor,
-   model,
-   serial
+    vendor,
+    model,
+    serial
 ) WHERE time_deleted IS NULL;
 
 -- x509 certificates which may be used by services

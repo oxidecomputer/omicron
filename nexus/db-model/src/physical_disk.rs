@@ -123,7 +123,6 @@ impl From<PhysicalDiskAdoptionRequest>
             serial: req.serial,
             model: req.model,
             time_created: req.time_created,
-            time_deleted: req.time_deleted,
         }
     }
 }

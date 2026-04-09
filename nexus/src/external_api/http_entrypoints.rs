@@ -6728,7 +6728,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|d| Unadopted {
                     sled_id: d.sled_id.into(),
-                    slot: d.slot as u64,
+                    slot: d.slot,
                     variant: d.variant.into(),
                     disk_id: PhysicalDiskManufacturerIdentity {
                         vendor: d.vendor,
