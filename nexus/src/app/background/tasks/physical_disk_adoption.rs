@@ -170,12 +170,9 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     // This means that another nexus concurrently added the
                     // disk or that the adoptable request was deleted. We
                     // don't want to report mistakenly one way or another and
-                    // so we just return an empty result here. The nexus that
-                    // actually added the disk or cancelled the request will
-                    // log the result and report the adoption to the task output
-                    // if necessary.
+                    // so we just continue here.
                     if let external::Error::NotFound { .. } = err {
-                        return json!({});
+                        continue;
                     }
 
                     let err = InlineErrorChain::new(&err);
