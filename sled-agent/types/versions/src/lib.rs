@@ -77,6 +77,8 @@ pub mod v30;
 pub mod v31;
 #[path = "make_all_external_ip_fields_optional/mod.rs"]
 pub mod v32;
+#[path = "modify_svcs_error/mod.rs"]
+pub mod v33;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

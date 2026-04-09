@@ -10,7 +10,6 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
-//use slog_error_chain::SlogInlineError;
 use std::net::SocketAddrV6;
 
 use crate::v1::inventory::InventoryDataset;
@@ -21,46 +20,51 @@ use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
-use crate::v24;
 use crate::v24::inventory::InventoryZpool;
-
-/// Each service instance is always in a well-defined state based on its
-/// dependencies, the results of the execution of its methods, and its potential
-/// contracts events. See <https://illumos.org/man/7/smf> for more information.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SvcState {
-    /// Initial state for all service instances.
-    Uninitialized,
-    /// The instance is enabled, but not yet running or available to run.
-    Offline,
-    /// The instance is enabled and running or is available to run.
-    Online,
-    /// The instance is enabled and running or available to run. It is, however,
-    /// functioning at a limited capacity in comparison to normal operation.
-    Degraded,
-    /// The instance is enabled, but not able to run.
-    Maintenance,
-    /// The instance is disabled.
-    Disabled,
-    /// Represents a legacy instance that is not managed by the service
-    /// management facility.
-    LegacyRun,
-    /// We were unable to determine the state of the service instance.
-    Unknown,
-}
+use crate::v28;
+use crate::v28::inventory::SvcsEnabledNotOnline;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-/// Information about an SMF service that is enabled but not running
-// TODO-correctness `SvcState::Online` is one possibility; should we have a
-// different enum if we're actually restricted to "enabled but not running"?
-pub struct Svc {
-    pub fmri: String,
-    pub zone: String,
-    pub state: SvcState,
+pub struct SvcsError {
+    pub error: String,
+    pub time_of_status: DateTime<Utc>,
+}
+
+impl From<SvcsError> for v28::inventory::SvcsError {
+    fn from(value: SvcsError) -> Self {
+        let SvcsError { error, time_of_status: _ } = value;
+        // We don't put too much effort into parsing this back into the proper
+        // error type because this API isn't used yet. It would be adding
+        // unnecessary complexity.
+        Self::CommandFailure(error)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum SvcsEnabledNotOnlineResult {
+    SvcsEnabledNotOnline(SvcsEnabledNotOnline),
+    SvcsCmdError(SvcsError),
+    DataUnavailable,
+}
+
+impl From<SvcsEnabledNotOnlineResult>
+    for v28::inventory::SvcsEnabledNotOnlineResult
+{
+    fn from(value: SvcsEnabledNotOnlineResult) -> Self {
+        match value {
+            SvcsEnabledNotOnlineResult::DataUnavailable => {
+                Self::DataUnavailable
+            }
+            SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
+                Self::SvcsCmdError(e.into())
+            }
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                Self::SvcsEnabledNotOnline(svcs)
+            }
+        }
+    }
 }
 
 /// Identity and basic status information about this sled agent
@@ -85,7 +89,7 @@ pub struct Inventory {
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 
-impl From<Inventory> for v24::inventory::Inventory {
+impl From<Inventory> for v28::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,
@@ -103,7 +107,7 @@ impl From<Inventory> for v24::inventory::Inventory {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            smf_services_enabled_not_online: _,
+            smf_services_enabled_not_online,
             reference_measurements,
         } = value;
         Self {
@@ -122,41 +126,9 @@ impl From<Inventory> for v24::inventory::Inventory {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            smf_services_in_maintenance: Err(
-                "Unable to retrieve services in maintenance".to_string(),
-            ),
+            smf_services_enabled_not_online: smf_services_enabled_not_online
+                .into(),
             reference_measurements,
         }
     }
-}
-
-/// Lists services that are enabled but not in an online state if any, the time
-/// the sample was collected, and any errors that may have ocurred during the
-/// collection
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct SvcsEnabledNotOnline {
-    pub services: Vec<Svc>,
-    pub errors: Vec<String>,
-    pub time_of_status: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum SvcsEnabledNotOnlineResult {
-    SvcsEnabledNotOnline(SvcsEnabledNotOnline),
-    SvcsCmdError(SvcsError),
-    DataUnavailable,
-}
-
-/// Error that is a one to one mapping of `illumos_utils::ExecutionError`, which
-/// uses a String for any type in `ExecutionError` that is not cloneable.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum SvcsError {
-    ExecutionStart { command: String, err: String },
-    CommandFailure(String),
-    ContractFailure { msg: String, err: String },
-    ParseFailure(String),
-    NotRunning,
 }

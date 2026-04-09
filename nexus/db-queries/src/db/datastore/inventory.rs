@@ -11,7 +11,6 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::node::InternalNodeId as CockroachNodeId;
 use diesel::BoolExpressionMethods;
@@ -124,6 +123,7 @@ use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::Svc;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -230,12 +230,12 @@ impl DataStore {
                             svcs.time_of_status,
                         )]
                     }
-                    SvcsEnabledNotOnlineResult::SvcsCmdError(error) => {
+                    SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
                         vec![InvSvcEnabledNotOnline::new(
                             collection_id,
                             sled_agent.sled_id,
-                            Some(error.to_string()),
-                            Utc::now(),
+                            Some(e.error.clone()),
+                            e.time_of_status,
                         )]
                     }
                     SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
@@ -4553,7 +4553,10 @@ impl DataStore {
                     // return an error.
                     Some(row) if row.svcs_cmd_error.is_some() => {
                         SvcsEnabledNotOnlineResult::SvcsCmdError(
-                            row.svcs_cmd_error.unwrap().into(),
+                            SvcsError {
+                                error: row.svcs_cmd_error.unwrap(),
+                                time_of_status: row.time_of_status,
+                            },
                         )
                     }
                     Some(row) => {

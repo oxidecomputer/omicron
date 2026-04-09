@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "32.0.0"
+    "version": "33.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -9666,118 +9666,19 @@
         ]
       },
       "SvcsError": {
-        "description": "Error that is a one to one mapping of `illumos_utils::ExecutionError`, which uses a String for any type in `ExecutionError` that is not cloneable.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "execution_start"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "command": {
-                    "type": "string"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "command",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "command_failure"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "contract_failure"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  },
-                  "msg": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err",
-                  "msg"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "parse_failure"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "not_running"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
+          "time_of_status": {
+            "type": "string",
+            "format": "date-time"
           }
+        },
+        "required": [
+          "error",
+          "time_of_status"
         ]
       },
       "SwitchPorts": {

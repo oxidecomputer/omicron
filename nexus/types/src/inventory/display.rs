@@ -21,7 +21,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
 use sled_agent_types::inventory::{
-    SvcState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult,
+    SvcState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult, SvcsError,
 };
 use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -972,8 +972,16 @@ fn display_svcs_enabled_not_online(
                 }
             }
         }
-        SvcsEnabledNotOnlineResult::SvcsCmdError(error) => {
-            writeln!(indented, "failed to retrieve SMF services: {error}")?;
+        SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
+            let SvcsError { error, time_of_status } = e;
+
+            let time = time_of_status
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true);
+
+            writeln!(
+                indented,
+                "failed to retrieve SMF services at {time}: {error}",
+            )?;
         }
         SvcsEnabledNotOnlineResult::DataUnavailable => {
             writeln!(indented, "no data on SMF services has been collected")?;

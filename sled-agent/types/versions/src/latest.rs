@@ -157,12 +157,13 @@ pub mod inventory {
     pub use crate::v24::inventory::InventoryZpool;
     pub use crate::v24::inventory::ZpoolHealth;
 
-    pub use crate::v28::inventory::Inventory;
     pub use crate::v28::inventory::Svc;
     pub use crate::v28::inventory::SvcState;
     pub use crate::v28::inventory::SvcsEnabledNotOnline;
-    pub use crate::v28::inventory::SvcsEnabledNotOnlineResult;
-    pub use crate::v28::inventory::SvcsError;
+
+    pub use crate::v33::inventory::Inventory;
+    pub use crate::v33::inventory::SvcsEnabledNotOnlineResult;
+    pub use crate::v33::inventory::SvcsError;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
