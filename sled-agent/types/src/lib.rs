@@ -17,8 +17,6 @@ pub mod firewall_rules;
 pub mod instance;
 pub mod inventory;
 pub mod probes;
-pub mod rack_init;
-pub mod rack_ops;
 pub mod resolvable_files;
 pub mod rot;
 pub mod sled;

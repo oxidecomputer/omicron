@@ -182,16 +182,6 @@ pub mod probes {
     pub use crate::v10::probes::ProbeSet;
 }
 
-pub mod rack_init {
-    pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
-
-    pub use crate::v20::rack_init::BootstrapAddressDiscovery;
-    pub use crate::v20::rack_init::RackInitializeRequestParseError;
-
-    pub use crate::v30::rack_init::RackInitializeRequest;
-    pub use crate::v30::rack_init::RackInitializeRequestParams;
-}
-
 pub mod rot {
     pub use crate::v19::attestation::Attestation;
     pub use crate::v19::attestation::CertificateChain;

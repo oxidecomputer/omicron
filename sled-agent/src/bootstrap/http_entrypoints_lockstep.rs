@@ -9,17 +9,16 @@
 //! need to support a single version.
 
 use super::http_entrypoints::BootstrapServerContext;
+use crate::rack_setup::service::RackInitializeRequestParams;
 use bootstrap_agent_lockstep_api::BootstrapAgentLockstepApi;
 use bootstrap_agent_lockstep_api::bootstrap_agent_lockstep_api_mod;
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
-use sled_agent_types::rack_init::{
-    RackInitializeRequest, RackInitializeRequestParams,
-};
-use sled_agent_types::rack_ops::RackOperationStatus;
 
 /// Returns a description of the bootstrap agent lockstep API
 pub(crate) fn api() -> ApiDescription<BootstrapServerContext> {
