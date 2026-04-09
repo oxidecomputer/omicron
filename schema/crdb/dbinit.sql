@@ -3153,7 +3153,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     -- and later managing its storage.
     assigned_nexus UUID,
 
-    user_comment TEXT
+    user_comment TEXT,
+
+    -- If this bundle was requested by an FM case, the case UUID.
+    fm_case_id UUID
 
 );
 
@@ -3170,6 +3173,41 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
     time_created
+);
+
+-- Child data selection tables owned by `support_bundle`. The flags table stores
+-- boolean columns for payload-less categories; the host_info and ereports tables
+-- use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
+    bundle_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (bundle_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_info (
+    bundle_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
 
 /*******************************************************************/
@@ -7482,6 +7520,68 @@ CREATE INDEX IF NOT EXISTS
     lookup_fm_alert_requests_for_case
 ON omicron.public.fm_alert_request (sitrep_id, case_id);
 
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
+    -- Requested support bundle UUID.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the bundle was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the bundle was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this request belongs.
+    case_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_requests_for_case
+ON omicron.public.fm_support_bundle_request (sitrep_id, case_id);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_request_by_id
+ON omicron.public.fm_support_bundle_request (id)
+STORING (requested_sitrep_id);
+
+-- Child data selection tables owned by `fm_support_bundle_request`. The flags
+-- table stores boolean columns for payload-less categories; the host_info and
+-- ereports tables use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_flags (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_host_info (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
+
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
  * instance local storage.
@@ -8312,7 +8412,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '248.0.0', NULL)
+    (TRUE, NOW(), NOW(), '249.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

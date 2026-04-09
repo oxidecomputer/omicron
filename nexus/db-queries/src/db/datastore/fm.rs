@@ -36,8 +36,10 @@ use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
+use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -48,6 +50,8 @@ use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SupportBundleKind;
+use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -112,6 +116,10 @@ macro_rules! sitrep_child_tables {
 sitrep_child_tables! {
     CaseEreport => { table: "fm_ereport_in_case" },
     AlertRequest => { table: "fm_alert_request" },
+    SupportBundleRequestDataSelectionFlags => { table: "fm_support_bundle_request_data_selection_flags" },
+    SupportBundleRequestDataSelectionHostInfo => { table: "fm_support_bundle_request_data_selection_host_info" },
+    SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
+    SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
 }
 
@@ -352,62 +360,15 @@ impl DataStore {
             map
         };
 
-        // Next, fetch all the alert requests belonging to cases in this sitrep.
-        // We do this in one big batched query that's paginated by case ID,
-        // rather than by querying alert requests per case, since this will
-        // generally result in fewer queries overall (most cases will have less
-        // than SQL_BATCH_SIZE alerts in them).
-        let mut alert_requests = {
-            let mut by_case = HashMap::<
-                CaseUuid,
-                iddqd::IdOrdMap<fm::case::AlertRequest>,
-            >::new();
+        let mut alert_requests =
+            self.alert_requests_read_on_conn(id, conn).await?;
 
-            let mut paginator: Paginator<DbTypedUuid<AlertKind>> =
-                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    alert_req_dsl::fm_alert_request,
-                    alert_req_dsl::id,
-                    &p.current_pagparams(),
-                )
-                .filter(alert_req_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-                .select(model::fm::AlertRequest::as_select())
-                .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to load case alert requests assignments",
-                        )
-                })?;
-
-                paginator = p.found_batch(&batch, &|alert_req| alert_req.id);
-                for alert_req in batch {
-                    let case_id = alert_req.case_id.into();
-                    let id: AlertUuid = alert_req.id.into();
-                    by_case
-                        .entry(case_id)
-                        .or_default()
-                        .insert_unique(alert_req.into())
-                        .map_err(|_| {
-                            let internal_message = format!(
-                                "encountered multiple alert requests for case \
-                                 {case_id} with the same alert UUID {id}. \
-                                 this should really not be possible, as the \
-                                 alert UUID is a primary key!",
-                            );
-                            Error::InternalError { internal_message }
-                        })?;
-                }
-            }
-
-            by_case
-        };
+        let mut support_bundle_requests =
+            self.support_bundle_requests_read_on_conn(id, conn).await?;
 
         // Next, load the case metadata entries and marry them to the sets of
-        // ereports and alert requests for to those cases that we loaded in the
-        // previous steps.
+        // ereports, alert requests, and support bundle requests for those
+        // cases that we loaded in the previous steps.
         let cases = {
             let mut cases = iddqd::IdOrdMap::new();
             let mut paginator =
@@ -445,15 +406,19 @@ impl DataStore {
                         .unwrap_or_default();
                     let alerts_requested =
                         alert_requests.remove(&id).unwrap_or_default();
+                    let support_bundles_requested =
+                        support_bundle_requests.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
-                        created_sitrep_id: created_sitrep_id.into(),
-                        closed_sitrep_id: closed_sitrep_id.map(Into::into),
-                        de: de.into(),
-                        comment,
-                        ereports,
+                        metadata: fm::case::Metadata {
+                            created_sitrep_id: created_sitrep_id.into(),
+                            closed_sitrep_id: closed_sitrep_id.map(Into::into),
+                            de: de.into(),
+                            comment,
+                        },
                         alerts_requested,
-                        support_bundles_requested: iddqd::IdOrdMap::new(),
+                        ereports,
+                        support_bundles_requested,
                     }
                 }));
             }
@@ -473,6 +438,187 @@ impl DataStore {
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
         Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
+    }
+
+    /// Fetch all alert requests belonging to cases in the given sitrep.
+    ///
+    /// We do this in one big batched query paginated by alert ID, rather than
+    /// by querying alert requests per case, since this will generally result
+    /// in fewer queries overall (most cases will have fewer than
+    /// SQL_BATCH_SIZE alerts in them).
+    async fn alert_requests_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::AlertRequest>>, Error>
+    {
+        let mut by_case =
+            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::AlertRequest>>::new();
+
+        let mut paginator: Paginator<DbTypedUuid<AlertKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                alert_req_dsl::fm_alert_request,
+                alert_req_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(alert_req_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::AlertRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load case alert requests assignments",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|alert_req| alert_req.id);
+            for alert_req in batch {
+                let case_id = alert_req.case_id.into();
+                let id: AlertUuid = alert_req.id.into();
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(alert_req.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple alert requests for case \
+                             {case_id} with the same alert UUID {id}. \
+                             this should really not be possible, as the \
+                             alert UUID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
+    }
+
+    /// Fetch all support bundle requests belonging to cases in the given
+    /// sitrep, including their child data selection tables.
+    async fn support_bundle_requests_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::SupportBundleRequest>>,
+        Error,
+    > {
+        // First, load the request rows.
+        let mut requests_by_id =
+            HashMap::<SupportBundleUuid, model::fm::SupportBundleRequest>::new(
+            );
+
+        let mut paginator: Paginator<DbTypedUuid<SupportBundleKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                support_bundle_req_dsl::fm_support_bundle_request,
+                support_bundle_req_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(
+                support_bundle_req_dsl::sitrep_id.eq(id.into_untyped_uuid()),
+            )
+            .select(model::fm::SupportBundleRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load case support bundle requests",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|sb_req| sb_req.id);
+            for sb_req in batch {
+                requests_by_id.insert(sb_req.id.into(), sb_req);
+            }
+        }
+
+        // Load data selections from child tables.
+        let mut data_selections =
+            Self::data_selections_read_on_conn(id, conn).await?;
+
+        // Combine into final results, grouped by case.
+        let mut requests_by_case = HashMap::<
+            CaseUuid,
+            iddqd::IdOrdMap<fm::case::SupportBundleRequest>,
+        >::new();
+        for (req_id, sb_req) in requests_by_id {
+            let data_selection =
+                data_selections.remove(&req_id).unwrap_or_default();
+            requests_by_case
+                .entry(sb_req.case_id.into())
+                .or_default()
+                .insert_unique(fm::case::SupportBundleRequest {
+                    id: req_id,
+                    requested_sitrep_id: sb_req.requested_sitrep_id.into(),
+                    data_selection,
+                })
+                .expect("req_id is unique in requests_by_id");
+        }
+
+        Ok(requests_by_case)
+    }
+
+    /// Load child data selection rows for all support bundle requests in a
+    /// sitrep, returning them grouped by support bundle request ID.
+    async fn data_selections_read_on_conn(
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<SupportBundleUuid, BundleDataSelection>, Error> {
+        use model::fm::BundleDataSelection as DbBundleDataSelection;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+
+        let sitrep_uuid = id.into_untyped_uuid();
+        let mut selections =
+            HashMap::<SupportBundleUuid, BundleDataSelection>::new();
+
+        let mut paginator: Paginator<DbTypedUuid<SupportBundleKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                flags_dsl::fm_support_bundle_request_data_selection_flags,
+                flags_dsl::request_id,
+                &p.current_pagparams(),
+            )
+            .filter(flags_dsl::sitrep_id.eq(sitrep_uuid))
+            .left_join(
+                host_info_dsl::fm_support_bundle_request_data_selection_host_info
+                    .on(host_info_dsl::sitrep_id.eq(flags_dsl::sitrep_id)
+                        .and(host_info_dsl::request_id.eq(flags_dsl::request_id))),
+            )
+            .left_join(
+                ereports_dsl::fm_support_bundle_request_data_selection_ereports
+                    .on(ereports_dsl::sitrep_id.eq(flags_dsl::sitrep_id)
+                        .and(ereports_dsl::request_id.eq(flags_dsl::request_id))),
+            )
+            .select(DbBundleDataSelection::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to query data selection for bundle request")
+            })?;
+
+            paginator = p.found_batch(&batch, &|row| row.flags.request_id);
+            for row in batch {
+                let request_id: SupportBundleUuid = row.flags.request_id.into();
+                let domain_selection: BundleDataSelection =
+                    row.try_into().map_err(|e: Error| {
+                        e.internal_context("failed to convert data selection")
+                    })?;
+                selections.insert(request_id, domain_selection);
+            }
+        }
+
+        Ok(selections)
     }
 
     async fn fm_sitrep_cases_list_on_conn(
@@ -582,13 +728,15 @@ impl DataStore {
         // perform.
         //
         // The ordering of inserts among case child records (ereports, alert
-        // requests) and case metadata doesn't matter: there are no foreign key
-        // constraints between these tables, and garbage collection is keyed on
-        // sitrep_id (which is inserted first above). If we crash partway
-        // through, orphaned child records will be cleaned up when the orphaned
-        // sitrep is garbage collected.
+        // requests, support bundle requests) and case metadata doesn't matter:
+        // there are no foreign key constraints between these tables, and
+        // garbage collection is keyed on sitrep_id (which is inserted first
+        // above). If we crash partway through, orphaned child records will be
+        // cleaned up when the orphaned sitrep is garbage collected.
         let mut cases = Vec::with_capacity(sitrep.cases.len());
         let mut alerts_requested = Vec::new();
+        let mut support_bundles_requested = Vec::new();
+        let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
@@ -603,6 +751,16 @@ impl DataStore {
                     )
                 },
             ));
+            for req in case.support_bundles_requested {
+                let req_id = req.id;
+                let data_selection = req.data_selection.clone();
+                support_bundles_requested.push(
+                    model::fm::SupportBundleRequest::from_sitrep(
+                        sitrep_id, case_id, req,
+                    ),
+                );
+                bundle_data_selections_requested.push((req_id, data_selection));
+            }
         }
 
         if !case_ereports.is_empty() {
@@ -628,6 +786,14 @@ impl DataStore {
                         .internal_context("failed to insert alert requests")
                 })?;
         }
+
+        Self::fm_support_bundle_requests_insert_on_conn(
+            &conn,
+            sitrep_id,
+            support_bundles_requested,
+            bundle_data_selections_requested,
+        )
+        .await?;
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -664,6 +830,102 @@ impl DataStore {
                 }
             })
             .map(|_| ())
+    }
+
+    /// Insert support bundle request rows and their child data selection rows.
+    async fn fm_support_bundle_requests_insert_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sitrep_id: SitrepUuid,
+        requests: Vec<model::fm::SupportBundleRequest>,
+        data_selections: Vec<(SupportBundleUuid, BundleDataSelection)>,
+    ) -> Result<(), InsertSitrepError> {
+        use model::fm::{DataSelectionFlags, Ereports, HostInfo};
+        use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+
+        if !requests.is_empty() {
+            diesel::insert_into(
+                support_bundle_req_dsl::fm_support_bundle_request,
+            )
+            .values(requests)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert support bundle requests",
+                    )
+            })?;
+        }
+        let mut flags_rows = Vec::new();
+        let mut host_info_rows = Vec::new();
+        let mut ereports_rows = Vec::new();
+
+        for (req_id, data_selection) in data_selections {
+            flags_rows.push(DataSelectionFlags::from_sitrep(
+                sitrep_id,
+                req_id,
+                &data_selection,
+            ));
+            for data in data_selection {
+                match data {
+                    BundleData::Reconfigurator
+                    | BundleData::SledCubbyInfo
+                    | BundleData::SpDumps => {}
+                    BundleData::HostInfo(sleds) => {
+                        host_info_rows.push(HostInfo::from_sitrep(
+                            sitrep_id, req_id, sleds,
+                        ));
+                    }
+                    BundleData::Ereports(filters) => {
+                        ereports_rows.push(Ereports::from_sitrep(
+                            sitrep_id, req_id, filters,
+                        ));
+                    }
+                }
+            }
+        }
+
+        if !flags_rows.is_empty() {
+            diesel::insert_into(
+                flags_dsl::fm_support_bundle_request_data_selection_flags,
+            )
+            .values(flags_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_flags rows")
+            })?;
+        }
+        if !host_info_rows.is_empty() {
+            diesel::insert_into(
+                host_info_dsl::fm_support_bundle_request_data_selection_host_info,
+            )
+            .values(host_info_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_host_info rows")
+            })?;
+        }
+        if !ereports_rows.is_empty() {
+            diesel::insert_into(
+                ereports_dsl::fm_support_bundle_request_data_selection_ereports,
+            )
+            .values(ereports_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_ereports rows")
+            })?;
+        }
+
+        Ok(())
     }
 
     // Uncastable sentinel used to detect we attempt to make a sitrep current when
@@ -866,6 +1128,7 @@ impl DataStore {
             sitreps_deleted: usize,
             case_ereports_deleted: usize,
             alert_requests_deleted: usize,
+            support_bundle_requests_deleted: usize,
             cases_deleted: usize,
         }
 
@@ -874,6 +1137,7 @@ impl DataStore {
             sitreps_deleted,
             case_ereports_deleted,
             alert_requests_deleted,
+            support_bundle_requests_deleted,
             cases_deleted,
         } = self
             // Sitrep deletion is transactional to prevent a sitrep from being
@@ -912,6 +1176,12 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
+                    // Delete support bundle request child data selection rows,
+                    // then the requests themselves.
+                    let support_bundle_requests_deleted =
+                        Self::support_bundle_requests_delete_on_conn(&conn, ids.clone())
+                            .await?;
+
                     // Delete case metadata records.
                     let cases_deleted = diesel::delete(
                         case_dsl::fm_case
@@ -932,6 +1202,7 @@ impl DataStore {
                         sitreps_deleted,
                         cases_deleted,
                         alert_requests_deleted,
+                        support_bundle_requests_deleted,
                         case_ereports_deleted,
                     })
                 }
@@ -950,6 +1221,7 @@ impl DataStore {
             "cases_deleted" => cases_deleted,
             "case_ereports_deleted" => case_ereports_deleted,
             "alert_requests_deleted" => alert_requests_deleted,
+            "support_bundle_requests_deleted" => support_bundle_requests_deleted,
         );
 
         Ok(sitreps_deleted)
@@ -1193,6 +1465,43 @@ impl DataStore {
         builder.query()
     }
 
+    /// Delete child data selection rows for support bundle requests, then the
+    /// support bundle request rows themselves.
+    #[cfg(test)]
+    async fn support_bundle_requests_delete_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sitrep_ids: Vec<uuid::Uuid>,
+    ) -> Result<usize, DieselError> {
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+
+        diesel::delete(
+            flags_dsl::fm_support_bundle_request_data_selection_flags
+                .filter(flags_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            host_info_dsl::fm_support_bundle_request_data_selection_host_info
+                .filter(host_info_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            ereports_dsl::fm_support_bundle_request_data_selection_ereports
+                .filter(ereports_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
+        )
+        .execute_async(conn)
+        .await?;
+        diesel::delete(
+            support_bundle_req_dsl::fm_support_bundle_request
+                .filter(support_bundle_req_dsl::sitrep_id.eq_any(sitrep_ids)),
+        )
+        .execute_async(conn)
+        .await
+    }
+
     pub async fn fm_sitrep_version_list(
         &self,
         opctx: &OpContext,
@@ -1252,6 +1561,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SupportBundleUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
@@ -1697,13 +2007,16 @@ mod tests {
         for case in &that.cases {
             let fm::Case {
                 id,
-                created_sitrep_id,
-                closed_sitrep_id,
-                comment,
-                de,
+                metadata:
+                    fm::case::Metadata {
+                        created_sitrep_id,
+                        closed_sitrep_id,
+                        comment,
+                        de,
+                    },
                 ereports,
                 alerts_requested,
-                support_bundles_requested: _,
+                support_bundles_requested,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -1720,18 +2033,21 @@ mod tests {
             // :(
             assert_eq!(&expected.id, id, "while checking case {case_id}");
             assert_eq!(
-                &expected.created_sitrep_id, created_sitrep_id,
+                &expected.metadata.created_sitrep_id, created_sitrep_id,
                 "while checking case {case_id}"
             );
             assert_eq!(
-                &expected.closed_sitrep_id, closed_sitrep_id,
+                &expected.metadata.closed_sitrep_id, closed_sitrep_id,
                 "while checking case {case_id}"
             );
             assert_eq!(
-                &expected.comment, comment,
+                &expected.metadata.comment, comment,
                 "while checking case {case_id}"
             );
-            assert_eq!(&expected.de, de, "while checking case {case_id}");
+            assert_eq!(
+                &expected.metadata.de, de,
+                "while checking case {case_id}"
+            );
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
@@ -1780,6 +2096,10 @@ mod tests {
             // the whole map is the same.
             assert_eq!(
                 alerts_requested, &expected.alerts_requested,
+                "while checking case {case_id}"
+            );
+            assert_eq!(
+                support_bundles_requested, &expected.support_bundles_requested,
                 "while checking case {case_id}"
             );
         }
@@ -1861,15 +2181,55 @@ mod tests {
                 })
                 .unwrap();
 
+            let mut support_bundles_requested = iddqd::IdOrdMap::new();
+            support_bundles_requested
+                .insert_unique(fm::case::SupportBundleRequest {
+                    id: SupportBundleUuid::new_v4(),
+                    requested_sitrep_id: sitrep_id,
+
+                    data_selection: BundleDataSelection::all(),
+                })
+                .unwrap();
+            // A request with a nontrivial data_selection, including
+            // HostInfo(Specific) and ereport time filters.
+            {
+                use nexus_types::fm::ereport::EreportFilters;
+                use nexus_types::support_bundle::*;
+                let now = omicron_common::now_db_precision();
+                let sel = BundleDataSelection::new()
+                    .with_sp_dumps()
+                    .with_reconfigurator()
+                    .with_specific_sleds([
+                        omicron_uuid_kinds::SledUuid::new_v4(),
+                    ])
+                    .with_ereports(
+                        EreportFilters::new()
+                            .with_start_time(now - chrono::Duration::hours(1))
+                            .unwrap()
+                            .with_end_time(now)
+                            .unwrap(),
+                    );
+                support_bundles_requested
+                    .insert_unique(fm::case::SupportBundleRequest {
+                        id: SupportBundleUuid::new_v4(),
+                        requested_sitrep_id: sitrep_id,
+
+                        data_selection: sel,
+                    })
+                    .unwrap();
+            }
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
-                created_sitrep_id: sitrep_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "my cool case".to_string(),
+                },
                 ereports,
                 alerts_requested,
-                support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "my cool case".to_string(),
+                support_bundles_requested,
             }
         };
 
@@ -1896,13 +2256,15 @@ mod tests {
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
-                created_sitrep_id: sitrep_id,
-                closed_sitrep_id: None,
-                de: fm::DiagnosisEngineKind::PowerShelf,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "break in case of emergency".to_string(),
+                },
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
-                comment: "break in case of emergency".to_string(),
             }
         };
 
@@ -1952,6 +2314,104 @@ mod tests {
         assert_sitreps_eq(&sitrep, &read_sitrep);
 
         // Clean up
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_support_bundle_requests_roundtrip() {
+        let logctx = dev::test_setup_log(
+            "test_sitrep_support_bundle_requests_roundtrip",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Build a sitrep with cases that include support bundle requests,
+        // including one with a data_selection.
+        let sitrep_id = SitrepUuid::new_v4();
+        let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
+
+        let mut support_bundles_requested = iddqd::IdOrdMap::new();
+        // A request with no data_selection (whole-sled default).
+        support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: SupportBundleUuid::new_v4(),
+                requested_sitrep_id: sitrep_id,
+
+                data_selection: BundleDataSelection::all(),
+            })
+            .unwrap();
+        // A request with HostInfo(Specific) and Ereports with time-range
+        // filters, plus SpDumps.
+        {
+            use nexus_types::fm::ereport::EreportFilters;
+            use nexus_types::support_bundle::*;
+            let now = omicron_common::now_db_precision();
+            let sled1 = omicron_uuid_kinds::SledUuid::new_v4();
+            let sled2 = omicron_uuid_kinds::SledUuid::new_v4();
+            let sel = BundleDataSelection::new()
+                .with_sp_dumps()
+                .with_specific_sleds([sled1, sled2])
+                .with_ereports(
+                    EreportFilters::new()
+                        .with_start_time(now - chrono::Duration::hours(2))
+                        .unwrap()
+                        .with_end_time(now)
+                        .unwrap()
+                        .with_serials(["BRM42"])
+                        .with_classes(["ereport.io"]),
+                );
+            support_bundles_requested
+                .insert_unique(fm::case::SupportBundleRequest {
+                    id: SupportBundleUuid::new_v4(),
+                    requested_sitrep_id: sitrep_id,
+
+                    data_selection: sel,
+                })
+                .unwrap();
+        }
+
+        let case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "testing support bundle requests".to_string(),
+            },
+            ereports: iddqd::IdOrdMap::new(),
+            alerts_requested: iddqd::IdOrdMap::new(),
+            support_bundles_requested,
+        };
+
+        let mut cases = iddqd::IdOrdMap::new();
+        cases.insert_unique(case).unwrap();
+        let sitrep = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "sitrep with support bundle requests".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+            cases,
+            ereports_by_id: Default::default(),
+        };
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .expect("failed to insert sitrep");
+
+        // Read back and verify the support bundle requests roundtripped.
+        let read_sitrep = datastore
+            .fm_sitrep_read(&opctx, sitrep_id)
+            .await
+            .expect("failed to read sitrep");
+
+        assert_sitreps_eq(&sitrep, &read_sitrep);
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -2318,7 +2778,70 @@ mod tests {
             .await
             .expect("inserting deeply orphaned alert request");
 
+        // Insert a deeply-orphaned support bundle request with data
+        // selection child rows (flags + host_info).
+        let ghost_request_id = SupportBundleUuid::new_v4();
+        {
+            use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
+            use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+
+            diesel::insert_into(
+                support_bundle_req_dsl::fm_support_bundle_request,
+            )
+            .values(model::fm::SupportBundleRequest {
+                id: ghost_request_id.into(),
+                sitrep_id: ghost_sitrep_id.into(),
+                requested_sitrep_id: ghost_sitrep_id.into(),
+                case_id: ghost_case_id.into(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned support bundle request");
+
+            diesel::insert_into(
+                flags_dsl::fm_support_bundle_request_data_selection_flags,
+            )
+            .values(model::fm::DataSelectionFlags {
+                sitrep_id: ghost_sitrep_id.into(),
+                request_id: ghost_request_id.into(),
+                include_reconfigurator: true,
+                include_sled_cubby_info: false,
+                include_sp_dumps: true,
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned data selection flags");
+
+            diesel::insert_into(
+                host_info_dsl::fm_support_bundle_request_data_selection_host_info,
+            )
+            .values(model::fm::HostInfo {
+                sitrep_id: ghost_sitrep_id.into(),
+                request_id: ghost_request_id.into(),
+                all_sleds: true,
+                sled_ids: Vec::new(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned data selection host_info");
+        }
+
         // Verify the rows exist.
+        let sb_requests_before: i64 =
+            support_bundle_req_dsl::fm_support_bundle_request
+                .filter(
+                    support_bundle_req_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            sb_requests_before, 1,
+            "support bundle request should exist before GC"
+        );
+
         let cases_before: i64 = case_dsl::fm_case
             .filter(case_dsl::sitrep_id.eq(ghost_sitrep_id.into_untyped_uuid()))
             .count()
@@ -2363,6 +2886,29 @@ mod tests {
             result.child_tables[&SitrepChildTable::CaseEreport].rows_deleted,
             0, // we didn't insert any
         );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::SupportBundleRequest]
+                .rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables
+                [&SitrepChildTable::SupportBundleRequestDataSelectionFlags]
+                .rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables
+                [&SitrepChildTable::SupportBundleRequestDataSelectionHostInfo]
+                .rows_deleted,
+            1
+        );
+        assert_eq!(
+            result.child_tables
+                [&SitrepChildTable::SupportBundleRequestDataSelectionEreports]
+                .rows_deleted,
+            0, // we didn't insert any
+        );
 
         // Verify the rows are gone.
         let cases_after: i64 = case_dsl::fm_case
@@ -2383,6 +2929,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(alerts_after, 0, "alert request should be gone after GC");
+
+        let sb_requests_after: i64 =
+            support_bundle_req_dsl::fm_support_bundle_request
+                .filter(
+                    support_bundle_req_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            sb_requests_after, 0,
+            "support bundle request should be gone after GC"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

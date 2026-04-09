@@ -6,6 +6,9 @@
 
 pub mod builder;
 pub use builder::{CaseBuilder, SitrepBuilder};
+pub mod analysis_input;
+
+pub use nexus_types::fm::*;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod test_util;

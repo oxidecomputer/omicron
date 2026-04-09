@@ -1942,19 +1942,16 @@ mod test {
         ]
     }
 
-    fn make_test_service_plan() -> ServicePlan {
+    #[test]
+    fn test_omicron_zone_configs() {
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("make_test_service_plan");
+
         let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
         let service_plan =
-            ServicePlan::create_transient(&rss_config, fake_sleds)
+            ServicePlan::create_transient(&logctx.log, &rss_config, fake_sleds)
                 .expect("failed to create service plan");
-
-        service_plan
-    }
-
-    #[test]
-    fn test_omicron_zone_configs() {
-        let service_plan = make_test_service_plan();
 
         // Verify the initial state.
         let g1 = Generation::new();
@@ -2064,6 +2061,8 @@ mod test {
             );
         }
         assert!(v6_nfound > v5_nfound);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -2076,7 +2075,7 @@ mod test {
 
         let rss_config = rack_initialize_request_test_config();
         let service_plan =
-            ServicePlan::create_transient(&rss_config, fake_sleds)
+            ServicePlan::create_transient(&logctx.log, &rss_config, fake_sleds)
                 .expect("created service plan");
 
         let blueprint = service_plan
