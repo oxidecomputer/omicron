@@ -314,7 +314,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     metadata.display_multiline(indent, None).fmt(f)?;
                     writeln!(
                         f,
-                        "\n{:indent$}copied forwards because these ereports \
+                        "{:indent$}copied forwards because these ereports \
                          haven't been marked seen yet:",
                         ""
                     )?;
