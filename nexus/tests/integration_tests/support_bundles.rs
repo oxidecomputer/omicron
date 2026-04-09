@@ -967,7 +967,6 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
 
     // Create an FM bundle directly through the datastore.
     let case_id = CaseUuid::new_v4();
-    let expected_case_uuid = case_id.into_untyped_uuid();
     let fm_bundle = datastore
         .support_bundle_create(
             &opctx,
@@ -1004,7 +1003,7 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
         .iter()
         .find(|b| b.id == fm_bundle_uuid)
         .expect("FM bundle should appear in list");
-    assert_eq!(listed_fm.fm_case_id, Some(expected_case_uuid));
+    assert_eq!(listed_fm.fm_case_id, Some(case_id));
 
     // Verify fm_case_id via the lockstep API get endpoint.
     let fetched_fm = lockstep
@@ -1012,5 +1011,5 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("fetching FM bundle via lockstep API")
         .into_inner();
-    assert_eq!(fetched_fm.fm_case_id, Some(expected_case_uuid));
+    assert_eq!(fetched_fm.fm_case_id, Some(case_id));
 }
