@@ -52,7 +52,7 @@ pub struct LogEntry {
     #[serde(default)]
     comment: Option<String>,
     #[serde(flatten)]
-    kvs: BTreeMap<String, String>,
+    kvs: BTreeMap<String, serde_json::Value>,
 }
 
 impl iddqd::IdOrdItem for CaseReport {
@@ -143,6 +143,85 @@ impl EventLog {
     }
 }
 
+/// Recursively format a JSON value as a bulleted list entry, nesting any
+/// object or array children as indented sub-bullets.
+fn fmt_json_value(
+    f: &mut fmt::Formatter<'_>,
+    key: &str,
+    value: &serde_json::Value,
+    indent: usize,
+) -> fmt::Result {
+    match value {
+        serde_json::Value::Object(map) => {
+            writeln!(f, "{:indent$}* {key}:", "")?;
+            for (k, v) in map {
+                fmt_json_value(f, k, v, indent + 2)?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Array(arr) => {
+            writeln!(f, "{:indent$}* {key}:", "")?;
+            let indent = indent + 2;
+            for (i, v) in arr.iter().enumerate() {
+                fmt_json_array_item(f, i + 1, v, indent)?;
+            }
+            Ok(())
+        }
+        serde_json::Value::String(s) => {
+            writeln!(f, "{:indent$}* {key}: {s}", "")
+        }
+        serde_json::Value::Null => {
+            writeln!(f, "{:indent$}* {key}: <none>", "")
+        }
+        serde_json::Value::Bool(b) => {
+            writeln!(f, "{:indent$}* {key}: {b}", "")
+        }
+        serde_json::Value::Number(n) => {
+            writeln!(f, "{:indent$}* {key}: {n}", "")
+        }
+    }
+}
+
+/// Format a single element of a JSON array as a numbered list item,
+/// e.g. `1. value` for scalars or `1.` followed by indented children for
+/// objects and nested arrays.
+fn fmt_json_array_item(
+    f: &mut fmt::Formatter<'_>,
+    n: usize,
+    value: &serde_json::Value,
+    indent: usize,
+) -> fmt::Result {
+    match value {
+        serde_json::Value::Object(map) => {
+            writeln!(f, "{:indent$}{n}.", "")?;
+            for (k, v) in map {
+                fmt_json_value(f, k, v, indent + 2)?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Array(arr) => {
+            writeln!(f, "{:indent$}{n}.", "")?;
+            let indent = indent + 2;
+            for (i, v) in arr.iter().enumerate() {
+                fmt_json_array_item(f, i + 1, v, indent)?;
+            }
+            Ok(())
+        }
+        serde_json::Value::String(s) => {
+            writeln!(f, "{:indent$}{n}. {s}", "")
+        }
+        serde_json::Value::Null => {
+            writeln!(f, "{:indent$}{n}. <none>", "")
+        }
+        serde_json::Value::Bool(b) => {
+            writeln!(f, "{:indent$}{n}. {b}", "")
+        }
+        serde_json::Value::Number(num) => {
+            writeln!(f, "{:indent$}{n}. {num}", "")
+        }
+    }
+}
+
 impl LogEntry {
     pub fn new(event: impl ToString) -> Self {
         Self { event: event.to_string(), comment: None, kvs: BTreeMap::new() }
@@ -156,19 +235,20 @@ impl LogEntry {
     pub fn kv(
         &mut self,
         key: impl ToString,
-        value: impl ToString,
+        value: impl Serialize,
     ) -> &mut Self {
-        self.kvs(std::iter::once((key, value)));
-        self
+        self.kvs(std::iter::once((key, value)))
     }
 
     pub fn kvs(
         &mut self,
-        kvs: impl IntoIterator<Item = (impl ToString, impl ToString)>,
+        kvs: impl IntoIterator<Item = (impl ToString, impl Serialize)>,
     ) -> &mut Self {
-        self.kvs.extend(
-            kvs.into_iter().map(|(k, v)| (k.to_string(), v.to_string())),
-        );
+        self.kvs.extend(kvs.into_iter().map(|(k, v)| {
+            let v = serde_json::to_value(v)
+                .unwrap_or_else(|e| serde_json::Value::String(e.to_string()));
+            (k.to_string(), v)
+        }));
         self
     }
 
@@ -189,7 +269,7 @@ impl LogEntry {
                     writeln!(f, "{:indent$}  // {comment}", "")?;
                 }
                 for (k, v) in kvs {
-                    writeln!(f, "{:indent$}  * {k}: {v}", "")?;
+                    fmt_json_value(f, k, v, indent + 2)?;
                 }
                 Ok(())
             }
@@ -486,6 +566,105 @@ mod tests {
         let output = format!("{}", report.display_multiline(0));
         expectorate::assert_contents(
             "output/analysis_input_report_same_inv.out",
+            &output,
+        );
+    }
+
+    /// A JSON object containing only the required `event` field should
+    /// always deserialize as a valid `LogEntry`.
+    #[test]
+    fn test_log_entry_backwards_compat_event_only() {
+        let json = serde_json::json!({ "event": "something happened" });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(entry.event, "something happened");
+        assert_eq!(entry.comment, None);
+        assert!(entry.kvs.is_empty());
+    }
+
+    /// A JSON object with `event`, `comment`, and arbitrary additional
+    /// fields should deserialize as a valid `LogEntry` — the extra
+    /// fields land in the flattened `kvs` map.
+    #[test]
+    fn test_log_entry_forwards_compat_extra_fields() {
+        let json = serde_json::json!({
+            "event": "something happened",
+            "comment": "this is a comment",
+            "extra_string": "extra_value",
+            "extra_number": 42,
+            "nested": { "a": 1, "b": "two" }
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(entry.event, "something happened");
+        assert_eq!(entry.comment.as_deref(), Some("this is a comment"));
+        assert_eq!(
+            entry.kvs.get("extra_string"),
+            Some(&serde_json::Value::String("extra_value".to_string()))
+        );
+        assert_eq!(entry.kvs.get("extra_number"), Some(&serde_json::json!(42)));
+        assert_eq!(
+            entry.kvs.get("nested"),
+            Some(&serde_json::json!({ "a": 1, "b": "two" }))
+        );
+    }
+
+    /// A JSON object with `event`, `comment`, and extra fields round-trips
+    /// through serialization: serialize → deserialize produces an
+    /// equivalent `LogEntry`.
+    #[test]
+    fn test_log_entry_roundtrip() {
+        let mut entry = LogEntry::new("test event");
+        entry
+            .comment("a comment")
+            .kv("simple", "value")
+            .kv("number", 123)
+            .kv("flag", true);
+
+        let serialized = serde_json::to_value(&entry).unwrap();
+        let deserialized: LogEntry =
+            serde_json::from_value(serialized).unwrap();
+        assert_eq!(entry, deserialized);
+    }
+
+    /// Extra fields of various JSON types (string, number, bool, null,
+    /// array, nested object) are all preserved through deserialization.
+    #[test]
+    fn test_log_entry_forwards_compat_varied_types() {
+        let json = serde_json::json!({
+            "event": "varied types",
+            "a_bool": true,
+            "a_null": null,
+            "an_array": [1, "two", false],
+            "deep": { "level1": { "level2": "hi" } }
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(entry.event, "varied types");
+        assert_eq!(entry.kvs.get("a_bool"), Some(&serde_json::json!(true)));
+        assert_eq!(entry.kvs.get("a_null"), Some(&serde_json::Value::Null));
+        assert_eq!(
+            entry.kvs.get("an_array"),
+            Some(&serde_json::json!([1, "two", false]))
+        );
+        assert_eq!(
+            entry.kvs.get("deep"),
+            Some(&serde_json::json!({ "level1": { "level2": "hi" } }))
+        );
+    }
+
+    /// The pretty-printer handles nested objects and arrays by indenting
+    /// sub-entries under their parent bullet point.
+    #[test]
+    fn test_log_entry_display_nested_values() {
+        let json = serde_json::json!({
+            "event": "nested example",
+            "comment": "shows nesting",
+            "flat_key": "flat_value",
+            "obj": { "inner_a": "va", "inner_b": 2 },
+            "arr": [10, 20]
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        let output = format!("{}", entry.display_indented(0));
+        expectorate::assert_contents(
+            "output/log_entry_display_nested_values.out",
             &output,
         );
     }
