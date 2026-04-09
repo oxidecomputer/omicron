@@ -21,6 +21,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
+use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -165,6 +166,18 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     .await;
 
                 if let Err(err) = result {
+                    // Skip reporting the error if we get back a `NotFound`.
+                    // This means that another nexus concurrently added the
+                    // disk or that the adoptable request was deleted. We
+                    // don't want to report mistakenly one way or another and
+                    // so we just return an empty result here. The nexus that
+                    // actually added the disk or cancelled the request will
+                    // log the result and report the adoption to the task output
+                    // if necessary.
+                    if let external::Error::NotFound { .. } = err {
+                        return json!({});
+                    }
+
                     let err = InlineErrorChain::new(&err);
                     warn!(
                         &opctx.log,

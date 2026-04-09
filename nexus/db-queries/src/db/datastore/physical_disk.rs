@@ -547,13 +547,13 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
-        bail_unless!(
-            rows_modified == 1,
-            "No adoption request for physical disk: {}:{}:{}",
-            id.vendor,
-            id.serial,
-            id.model
-        );
+        if rows_modified != 1 {
+            return Err(Error::non_resourcetype_not_found(format!(
+                "No adoption request found for physical disk: {}:{}:{}",
+                id.vendor, id.serial, id.model
+            ))
+            .into());
+        }
 
         Ok(())
     }

@@ -25339,11 +25339,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "time_deleted": {
-            "nullable": true,
-            "type": "string",
-            "format": "date-time"
-          },
           "vendor": {
             "type": "string"
           }
@@ -29897,8 +29892,7 @@
           },
           "slot": {
             "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "format": "int64"
           },
           "variant": {
             "$ref": "#/components/schemas/PhysicalDiskKind"
