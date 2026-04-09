@@ -587,6 +587,115 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         }
     }
 
+    // Exercise endpoints not in VERIFY_ENDPOINTS. These require special
+    // handling (unauthenticated, non-JSON bodies, etc.) that prevents them
+    // from being included in the generic loop above.
+    //
+    // For each endpoint we derive the operation_id from the URL via the
+    // API spec (api_operations.find) rather than hardcoding it, so that a
+    // URL change or mix-up is caught automatically.
+
+    // Make a request and check whether an audit log entry was produced.
+    // Looks up the operation_id from the URL via the API spec rather than
+    // hardcoding it, so a URL change or mix-up is caught automatically.
+    // The builder is wrapped in NexusRequest with UnprivilegedUser auth,
+    // which is harmless for unauthenticated endpoints (they ignore it).
+    // Panics if the URL doesn't match any API operation.
+    let mut check_manual =
+        async |method: &str, url: &str, builder: RequestBuilder<'_>| {
+            let before = fetch_log(client, t_start, None).await.items.len();
+            let _ = NexusRequest::new(
+                builder.allow_non_dropshot_errors().expect_status(None),
+            )
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await;
+            let after = fetch_log(client, t_start, None).await.items.len();
+            let op = api_operations.find(method, url).unwrap_or_else(|| {
+                panic!("{} {} does not match any API operation", method, url)
+            });
+            if let Some(info) = untested_mutating.remove(&op.operation_id) {
+                if after <= before {
+                    missing_audit.insert(op.operation_id.clone(), info);
+                }
+            }
+        };
+
+    // login_local: unauthenticated, JSON body
+    check_manual(
+        "POST",
+        "/v1/login/fake-silo/local",
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            "/v1/login/fake-silo/local",
+        )
+        .body(Some(&serde_json::json!({
+            "username": "nonexistent",
+            "password": "doesntmatter"
+        }))),
+    )
+    .await;
+
+    // login_saml: unauthenticated, takes UntypedBody (any bytes work)
+    check_manual(
+        "POST",
+        "/login/fake-silo/saml/fake-provider",
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            "/login/fake-silo/saml/fake-provider",
+        )
+        .body(Some(&serde_json::json!({}))),
+    )
+    .await;
+
+    // logout: session cookie-based, no body needed
+    check_manual(
+        "POST",
+        "/v1/logout",
+        RequestBuilder::new(client, Method::POST, "/v1/logout"),
+    )
+    .await;
+
+    // device_auth_request: unauthenticated, URL-encoded body
+    check_manual(
+        "POST",
+        "/device/auth",
+        RequestBuilder::new(client, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&device::DeviceAuthRequest {
+                client_id: uuid::Uuid::nil(),
+                ttl_seconds: None,
+            })),
+    )
+    .await;
+
+    // device_auth_confirm: authenticated, JSON body
+    check_manual(
+        "POST",
+        "/device/confirm",
+        RequestBuilder::new(client, Method::POST, "/device/confirm")
+            .body(Some(&device::DeviceAuthVerify {
+                user_code: "fake-code".to_string(),
+            })),
+    )
+    .await;
+
+    // device_access_token: unauthenticated, URL-encoded body
+    check_manual(
+        "POST",
+        "/device/token",
+        RequestBuilder::new(client, Method::POST, "/device/token")
+            .body_urlencoded(Some(&device::DeviceAccessTokenRequest {
+                grant_type:
+                    "urn:ietf:params:oauth:grant-type:device_code"
+                        .to_string(),
+                device_code: "fake-code".to_string(),
+                client_id: uuid::Uuid::nil(),
+            })),
+    )
+    .await;
+
     let mut output =
         String::from("Mutating endpoints without audit logging:\n");
     for (op_id, (method, path)) in &missing_audit {
