@@ -10,7 +10,6 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
-//use slog_error_chain::SlogInlineError;
 use std::net::SocketAddrV6;
 
 use crate::v1::inventory::InventoryDataset;
