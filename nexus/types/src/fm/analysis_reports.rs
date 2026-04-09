@@ -23,11 +23,11 @@ pub struct AnalysisReport {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaseReport {
     pub case: Case,
-    pub events: Vec<CaseEvent>,
+    pub log: Vec<LogEntry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CaseEvent {
+pub struct LogEntry {
     pub event: String,
     pub comment: Option<String>,
 }
@@ -85,7 +85,7 @@ impl CaseReport {
         impl<'a> fmt::Display for CaseReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: CaseReport { case, events },
+                    report: CaseReport { case, log },
                     indent,
                     this_sitrep,
                 } = self;
@@ -93,8 +93,8 @@ impl CaseReport {
                 writeln!(f, "{:indent$}{bullet} case {}", "", case.id)?;
                 let indent = indent + 2;
                 case.metadata.display_multiline(indent, this_sitrep).fmt(f)?;
-                for event in &events[..] {
-                    event.display_indented(indent + 2).fmt(f)?;
+                for entry in &log[..] {
+                    entry.display_indented(indent + 2).fmt(f)?;
                 }
                 Ok(())
             }
@@ -104,17 +104,16 @@ impl CaseReport {
     }
 }
 
-impl CaseEvent {
+impl LogEntry {
     pub fn display_indented(&self, indent: usize) -> impl fmt::Display + '_ {
-        struct CaseEventDisplayer<'a> {
-            event: &'a CaseEvent,
+        struct LogEntryDisplayer<'a> {
+            entry: &'a LogEntry,
             indent: usize,
         }
 
-        impl<'a> fmt::Display for CaseEventDisplayer<'a> {
+        impl<'a> fmt::Display for LogEntryDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let &Self { event: CaseEvent { event, comment }, indent } =
-                    self;
+                let &Self { entry: LogEntry { event, comment }, indent } = self;
                 let (bullet, commindent) =
                     if indent > 0 { ("* ", "  ") } else { ("", "") };
                 if let Some(comment) = comment {
@@ -124,7 +123,7 @@ impl CaseEvent {
                 Ok(())
             }
         }
-        CaseEventDisplayer { event: self, indent }
+        LogEntryDisplayer { entry: self, indent }
     }
 }
 
