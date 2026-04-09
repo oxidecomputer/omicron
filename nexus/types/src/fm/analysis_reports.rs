@@ -168,13 +168,12 @@ impl LogEntry {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self { entry: LogEntry { event, comment, kvs }, indent } =
                     self;
-                let (bullet, commindent) =
-                    if indent > 0 { ("* ", "  ") } else { ("", "") };
-                if let Some(comment) = comment {
-                    writeln!(f, "{:indent$}{commindent}// {comment}", "")?;
-                }
+                let bullet = if indent > 0 { "* " } else { "" };
                 let colon = if kvs.is_empty() { "" } else { ":" };
                 writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
+                if let Some(comment) = comment {
+                    writeln!(f, "{:indent$}  // {comment}", "")?;
+                }
                 for (k, v) in kvs {
                     writeln!(f, "{:indent$}  * {k}: {v}", "")?;
                 }
