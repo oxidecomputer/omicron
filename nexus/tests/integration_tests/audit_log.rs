@@ -714,8 +714,14 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         ("timeseries_query", ("post", "/v1/timeseries/query")),
     ]);
 
+    // Check for endpoints missing audit logging. missing_audit contains
+    // endpoints we tested and found to lack audit logging. untested_mutating
+    // contains mutating endpoints not in VERIFY_ENDPOINTS that we couldn't
+    // test in the generic loop (they need special request construction).
+    // Both need to be in the allowlist or have audit logging added.
     let unexpected_unaudited: Vec<_> = missing_audit
         .keys()
+        .chain(untested_mutating.keys())
         .filter(|op| !allowed_unaudited.contains_key(op.as_str()))
         .collect();
     if !unexpected_unaudited.is_empty() {
