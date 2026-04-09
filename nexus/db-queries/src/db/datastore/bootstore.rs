@@ -7,6 +7,7 @@ use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{BootstoreConfig, BootstoreKeys};
 use omicron_common::api::external::{CreateResult, LookupResult};
+use sled_agent_types::rack_init::rack_init_bootstore_generation;
 
 impl DataStore {
     pub async fn bump_bootstore_generation(
@@ -22,14 +23,7 @@ impl DataStore {
         let bks = diesel::insert_into(dsl::bootstore_keys)
             .values(BootstoreKeys {
                 key: key.clone(),
-                // RSS has a two-phase bootstore process: generation 1 is
-                // persisted containing only the rack network config, then RSS
-                // initializes all `sled-agent`s, then generation 2 is persisted
-                // containing both the rack network config and the NAT entries
-                // for all services planned by RSS.
-                //
-                // We pick up at generation 3.
-                generation: 3,
+                generation: rack_init_bootstore_generation::NEXUS_INITIAL,
             })
             .on_conflict(bootstore_keys::key)
             .do_update()

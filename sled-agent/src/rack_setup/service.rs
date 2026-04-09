@@ -120,6 +120,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
+use sled_agent_types::rack_init::rack_init_bootstore_generation;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
@@ -1324,7 +1325,9 @@ impl ServiceInner {
         bootstore
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&system_networking_config)
-                    .serialize_to_bootstore_with_generation(1),
+                    .serialize_to_bootstore_with_generation(
+                        rack_init_bootstore_generation::RSS_INITIAL,
+                    ),
             )
             .await?;
 
@@ -1381,12 +1384,9 @@ impl ServiceInner {
         bootstore
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&system_networking_config)
-                    // TODO-cleanup Nexus hardcodes knowledge that the final
-                    // network config we install in the bootstore stops at
-                    // generation 2. If you're touching this value, or adding
-                    // new generations afterwards, coordinate changes with
-                    // `DataStore::bump_bootstore_generation()`.
-                    .serialize_to_bootstore_with_generation(2),
+                    .serialize_to_bootstore_with_generation(
+                        rack_init_bootstore_generation::RSS_FINAL,
+                    ),
             )
             .await?;
 
