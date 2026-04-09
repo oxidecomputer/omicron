@@ -23,6 +23,9 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::{
+    DatabaseErrorKind as DieselErrorKind, Error as DieselError,
+};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -38,7 +41,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::bail_unless;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -117,8 +119,8 @@ impl DataStore {
     /// as long as a non-expunged disk isn't present in the `physical_disk`
     /// table for the same disk_id.
     ///
-    /// This request is idempotent. If the disk is already adopted, or an
-    /// adoption request exists, success is returned.
+    /// This request is idempotent. If an existing adoption request exists,
+    /// success is returned.
     pub async fn physical_disk_adopt(
         &self,
         opctx: &OpContext,
@@ -130,11 +132,13 @@ impl DataStore {
         use nexus_db_schema::schema::physical_disk_adoption_request::dsl as adoption_dsl;
 
         let conn = &*self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::<TransactionError<Error>>::new();
         self.transaction_retry_wrapper("physical_disk_adopt")
             .transaction(&conn, |conn| {
                 let vendor = disk_id.vendor.clone();
                 let serial = disk_id.serial.clone();
                 let model = disk_id.model.clone();
+                let err = err.clone();
                 async move {
                     // Check for an active (non-expunged) physical disk with
                     // the same vendor/serial/model.
@@ -153,28 +157,17 @@ impl DataStore {
                         .optional()?;
 
                     if active_disk_exists.is_some() {
-                        return Ok(());
-                    }
-
-                    // Check for an active adoption request with the same
-                    // vendor/serial/model.
-                    let active_request_exists =
-                        adoption_dsl::physical_disk_adoption_request
-                            .filter(adoption_dsl::vendor.eq(vendor.clone()))
-                            .filter(adoption_dsl::serial.eq(serial.clone()))
-                            .filter(adoption_dsl::model.eq(model.clone()))
-                            .filter(adoption_dsl::time_deleted.is_null())
-                            .select(adoption_dsl::id)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .optional()?;
-
-                    if active_request_exists.is_some() {
-                        return Ok(());
+                        return Err(err.bail(
+                            Error::conflict(format!(
+                                "physical disk already adopted: {}:{}:{}",
+                                vendor, model, serial
+                            ))
+                            .into(),
+                        ));
                     }
 
                     // Insert the adoption request.
-                    diesel::insert_into(
+                    if let Err(err) = diesel::insert_into(
                         adoption_dsl::physical_disk_adoption_request,
                     )
                     .values((
@@ -185,13 +178,35 @@ impl DataStore {
                         adoption_dsl::time_created.eq(Utc::now()),
                     ))
                     .execute_async(&conn)
-                    .await?;
+                    .await
+                    {
+                        // Check for a unique index violation for an active
+                        // adoption request with the same vendor/serial/model.
+                        //
+                        // Return Ok(()) in this case as the request is idempotent.
+                        match err {
+                            DieselError::DatabaseError(
+                                DieselErrorKind::UniqueViolation,
+                                _,
+                            ) => {
+                                return Ok(());
+                            }
+                            _ => Err(err)?,
+                        }
+                    }
 
                     Ok(())
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                match err.take() {
+                    // A called function performed its own error propagation.
+                    Some(txn_error) => txn_error.into_public_ignore_retries(),
+                    // The transaction setup/teardown itself encountered a diesel error.
+                    None => public_error_from_diesel(e, ErrorHandler::Server),
+                }
+            })?;
 
         Ok(())
     }
@@ -1071,23 +1086,23 @@ mod test {
     }
 
     #[tokio::test]
-    async fn physical_disk_uninitialized_list() {
-        let logctx = dev::test_setup_log("physical_disk_uninitialized_list");
+    async fn physical_disk_unadopted_list() {
+        let logctx = dev::test_setup_log("physical_disk_unadopted_list");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled_a = create_test_sled(&datastore).await;
         let sled_b = create_test_sled(&datastore).await;
 
-        // No inventory -> No uninitialized disks
-        let uninitialized_disks = datastore
+        // No inventory -> No unadopted disks
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(
                 &opctx,
                 CollectionUuid::new_v4(), // Collection that does not exist
             )
             .await
-            .expect("Failed to look up uninitialized disks");
-        assert!(uninitialized_disks.is_empty());
+            .expect("Failed to look up unadopted disks");
+        assert!(unadopted_disks.is_empty());
 
         // Create inventory disks for both sleds
         let mut builder = nexus_inventory::CollectionBuilder::new("test");
@@ -1110,22 +1125,22 @@ mod test {
             .await
             .expect("failed to insert collection");
 
-        // Now when we list the uninitialized disks, we should see everything in
+        // Now when we list the unadopted disks, we should see everything in
         // the inventory.
-        let uninitialized_disks = datastore
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 6);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 6);
 
         // Normalize the data a bit -- convert to nexus types, and sort vecs for
         // stability in the comparison.
-        let mut uninitialized_disks: Vec<nexus_types::inventory::PhysicalDisk> =
-            uninitialized_disks
+        let mut unadopted_disks: Vec<nexus_types::inventory::PhysicalDisk> =
+            unadopted_disks
                 .into_iter()
                 .map(|d| inv_phys_disk_to_nexus_phys_disk(&d))
                 .collect();
-        uninitialized_disks
+        unadopted_disks
             .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
         let mut expected_disks: Vec<nexus_types::inventory::PhysicalDisk> =
             disks_a
@@ -1135,14 +1150,14 @@ mod test {
                 .collect();
         expected_disks
             .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
-        assert_eq!(uninitialized_disks, expected_disks);
+        assert_eq!(unadopted_disks, expected_disks);
 
         // Let's create control plane objects for some of these disks.
         //
-        // They should no longer show up when we list uninitialized devices.
+        // They should no longer show up when we list unadopted devices.
         //
         // This creates disks for: 001, 002, and 101.
-        // It leaves the following uninitialized: 003, 102, 103
+        // It leaves the following unadopted: 003, 102, 103
         //
         // We make sure we submit an adoption request before we attempt to
         // create the disk and zpools as we don't want automatic adoption in the
@@ -1178,23 +1193,23 @@ mod test {
             .await
             .unwrap();
 
-        let uninitialized_disks = datastore
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 3);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 3);
 
         // Pay careful attention to our indexing below.
         //
         // We're grabbing the last disk of "disks_a" (which still is
         // uninitailized) and the last two disks of "disks_b" (of which both are
-        // still uninitialized).
-        let mut uninitialized_disks: Vec<nexus_types::inventory::PhysicalDisk> =
-            uninitialized_disks
+        // still unadopted).
+        let mut unadopted_disks: Vec<nexus_types::inventory::PhysicalDisk> =
+            unadopted_disks
                 .into_iter()
                 .map(|d| inv_phys_disk_to_nexus_phys_disk(&d))
                 .collect();
-        uninitialized_disks
+        unadopted_disks
             .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
         let mut expected_disks: Vec<nexus_types::inventory::PhysicalDisk> =
             disks_a[2..3]
@@ -1204,11 +1219,11 @@ mod test {
                 .collect();
         expected_disks
             .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
-        assert_eq!(uninitialized_disks, expected_disks);
+        assert_eq!(unadopted_disks, expected_disks);
 
         // Create physical disks for all remaining devices.
         //
-        // Observe no remaining uninitialized disks.
+        // Observe no remaining unadopted disks.
         let (disk_003, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
         datastore
@@ -1240,13 +1255,13 @@ mod test {
             .await
             .unwrap();
 
-        let uninitialized_disks = datastore
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 0);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 0);
 
-        // Expunge some disks, observe that they are now uninitialized again. This allows
+        // Expunge some disks, observe that they are now unadopted again. This allows
         // re-adding them to the control plane.
         use nexus_db_schema::schema::physical_disk::dsl;
 
@@ -1273,13 +1288,13 @@ mod test {
             .await
             .unwrap();
 
-        // The set of uninitialized disks should include the expunged/deleted
+        // The set of unadopted disks should include the expunged/deleted
         // disks
-        let uninitialized_disks = datastore
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 2);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 2);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1334,12 +1349,12 @@ mod test {
             .expect("Failed to look up adoptable disks");
         assert!(adoptable_disks.is_empty());
 
-        // All 6 disks should be uninitialized
-        let uninitialized_disks = datastore
+        // All 6 disks should be unadopted
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 6);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 6);
 
         // Make two disks adoptable
         datastore
@@ -1364,12 +1379,12 @@ mod test {
             .expect("Failed to look up adoptable disks");
         assert_eq!(adoptable_disks.len(), 2);
 
-        // The remaining 4 disks should be uninitialized
-        let uninitialized_disks = datastore
+        // The remaining 4 disks should be unadopted
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 4);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 4);
 
         // soft-deleting both adoptable disks makes them unadoptable again
         DataStore::physical_disk_adoption_request_delete_on_connection(
@@ -1390,12 +1405,12 @@ mod test {
             .expect("Failed to look up adoptable disks");
         assert!(adoptable_disks.is_empty());
 
-        // All 6 disks should be uninitialized again
-        let uninitialized_disks = datastore
+        // All 6 disks should be unadopted again
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 6);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 6);
 
         // Adding one of the same disks back again should make it adoptable
         datastore
@@ -1409,11 +1424,11 @@ mod test {
         assert_eq!(adoptable_disks.len(), 1);
 
         // We should now only have 5 unininitialized disks
-        let uninitialized_disks = datastore
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 5);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 5);
 
         // Making a disk adoption reqeust for a disk that is not in inventory
         // will not make the disk show up as adoptable. We allow the request to
@@ -1433,11 +1448,11 @@ mod test {
         assert_eq!(adoptable_disks.len(), 1);
 
         // We should still have only 5 unininitialized disks
-        let uninitialized_disks = datastore
+        let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
-            .expect("Failed to list uninitialized disks");
-        assert_eq!(uninitialized_disks.len(), 5);
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 5);
 
         db.terminate().await;
         logctx.cleanup_successful();
