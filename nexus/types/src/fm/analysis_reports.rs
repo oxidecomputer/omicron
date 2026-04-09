@@ -64,7 +64,7 @@ impl AnalysisReport {
                     indent,
                 } = self;
                 writeln!(f, "{:indent$}fault management analysis report", "")?;
-                writeln!(f, "{:indent$}----- ---------- -------- ------", "")?;
+                writeln!(f, "{:indent$}--------------------------------", "")?;
                 if !comment.is_empty() {
                     writeln!(f, "{:indent$}// {comment}", "")?;
                 }
@@ -232,7 +232,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
         } = self;
 
         writeln!(f, "{:indent$}fault management analysis inputs", "")?;
-        writeln!(f, "{:indent$}----- ---------- -------- ------", "")?;
+        writeln!(f, "{:indent$}--------------------------------", "")?;
         if let Some(id) = parent_sitrep_id {
             writeln!(f, "{:indent$}parent sitrep:        {id}", "",)?;
         } else {

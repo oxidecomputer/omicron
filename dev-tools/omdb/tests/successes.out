@@ -702,7 +702,7 @@ task: "fm_analysis"
 /!\ analysis failed: FM analysis is not yet implemented
 
     fault management analysis inputs
-    ----- ---------- -------- ------
+    --------------------------------
     parent sitrep:        <none>
     inventory collection: ..........<REDACTED_UUID>...........
     no new ereports since the parent sitrep
@@ -1378,7 +1378,7 @@ task: "fm_analysis"
 /!\ analysis failed: FM analysis is not yet implemented
 
     fault management analysis inputs
-    ----- ---------- -------- ------
+    --------------------------------
     parent sitrep:        <none>
     inventory collection: ..........<REDACTED_UUID>...........
     no new ereports since the parent sitrep

@@ -1,5 +1,5 @@
 fault management analysis inputs
------ ---------- -------- ------
+--------------------------------
 parent sitrep:        aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 inventory collection: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
  --> different from parent sitrep (collection cccccccc-cccc-cccc-cccc-cccccccccccc)
