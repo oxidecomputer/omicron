@@ -112,12 +112,13 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope, LldpAdminStatus,
+    EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -1319,14 +1320,20 @@ impl ServiceInner {
         // TODO: In future releases, we will get rid of the bootstore entirely,
         // and early_network_config will be replicated by the trust quorum
         // nodes.
-        let early_network_config =
-            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
-                rack_network_config: config.rack_network_config.clone(),
-            })
-            .serialize_to_bootstore_with_generation(1);
+        let system_networking_config = SystemNetworkingConfig {
+            rack_network_config: config.rack_network_config.clone(),
+            // TODO-correctness We need to fill this in based on the
+            // `ServicePlan` we generate.
+            service_zone_nat_entries: None,
+        };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         rss_step.update(RssStep::NetworkConfigUpdate);
-        bootstore.update_network_config(early_network_config).await?;
+        bootstore
+            .update_network_config(
+                EarlyNetworkConfigEnvelope::from(&system_networking_config)
+                    .serialize_to_bootstore_with_generation(1),
+            )
+            .await?;
 
         rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.
@@ -1372,16 +1379,15 @@ impl ServiceInner {
         // Ask MGS in each switch zone which switch it is.
         //
         // lookup_uplinked_switch_zone_underlay_addrs() is shared with
-        // sled-agent, which has the rack network config in a watch channel that
+        // sled-agent, which has the network config in a watch channel that
         // changes as Nexus pushes updates in via the bootstore. We don't have
         // that, but can stuff the (unchanging) config into a watch channel to
         // fit this API.
-        let (_rack_network_config_tx, rack_network_config_rx) =
-            watch::channel(config.rack_network_config.clone());
+        let (_tx, network_config_rx) = watch::channel(system_networking_config);
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_uplinked_switch_zone_underlay_addrs(
                 &resolver,
-                &rack_network_config_rx,
+                &network_config_rx,
                 // We willing to wait forever to find all the switches that have
                 // configured uplinks; if we attempt to proceed without doing
                 // so, we'll fail handing off to Nexus later. (Ideally we could

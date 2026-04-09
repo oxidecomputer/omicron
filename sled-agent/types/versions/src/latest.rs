@@ -52,6 +52,8 @@ pub mod disk {
     pub use crate::v1::disk::Zpool;
 }
 
+// TODO-cleanup These types should move to `system_networking` as a part of
+// <https://github.com/oxidecomputer/omicron/issues/10167>.
 pub mod early_networking {
     pub use crate::v1::early_networking::BfdMode;
     pub use crate::v1::early_networking::BfdPeerConfig;
@@ -71,7 +73,6 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
     pub use crate::v30::early_networking::BgpPeerConfig;
-    pub use crate::v30::early_networking::EarlyNetworkConfigBody;
     pub use crate::v30::early_networking::InvalidIpAddrError;
     pub use crate::v30::early_networking::PortConfig;
     pub use crate::v30::early_networking::RackNetworkConfig;
@@ -82,7 +83,6 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
-    pub use crate::v30::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
@@ -209,6 +209,15 @@ pub mod support_bundle {
     pub use crate::v1::support_bundle::SupportBundlePathParam;
     pub use crate::v1::support_bundle::SupportBundleState;
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
+}
+
+pub mod system_networking {
+    pub use crate::v33::system_networking::ServiceZoneNatEntries;
+    pub use crate::v33::system_networking::ServiceZoneNatEntriesError;
+    pub use crate::v33::system_networking::ServiceZoneNatEntry;
+    pub use crate::v33::system_networking::ServiceZoneNatKind;
+    pub use crate::v33::system_networking::SystemNetworkingConfig;
+    pub use crate::v33::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

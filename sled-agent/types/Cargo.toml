@@ -39,4 +39,8 @@ proptest.workspace = true
 test-strategy.workspace = true
 
 [features]
-testing = ["proptest", "test-strategy"]
+testing = [
+    "dep:proptest",
+    "dep:test-strategy",
+    "sled-agent-types-versions/testing",
+]
