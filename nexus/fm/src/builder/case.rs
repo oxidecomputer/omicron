@@ -17,6 +17,7 @@ pub struct CaseBuilder {
     case: fm::Case,
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
+    event_log: Vec<fm::analysis_reports::CaseEvent>,
 }
 
 #[derive(Debug)]
@@ -69,9 +70,11 @@ impl AllCases {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                 };
-                entry.insert(CaseBuilder::new(
+                let mut builder = CaseBuilder::new(
                     &self.log, sitrep_id, case, case_rng,
-                ))
+                );
+                builder.events.push(CaseEvent {  })
+                entry.insert()
             }
         };
 

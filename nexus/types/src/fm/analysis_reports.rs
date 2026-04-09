@@ -5,13 +5,128 @@
 //! Human-readable reports summarizing what occurred during fault management
 //! analysis.
 
-use super::case;
+use super::case::{self, Case};
 use super::ereport::EreportId;
+use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{CaseUuid, CollectionUuid, SitrepUuid};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnalysisReport {
+    pub sitrep_id: SitrepUuid,
+    pub cases: IdOrdMap<CaseReport>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaseReport {
+    pub case: Case,
+    pub events: Vec<CaseEvent>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaseEvent {
+    pub event: String,
+    pub comment: Option<String>,
+}
+
+impl iddqd::IdOrdItem for CaseReport {
+    type Key<'a> = &'a CaseUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.case.id()
+    }
+
+    iddqd::id_upcast!();
+}
+
+impl AnalysisReport {
+    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
+        struct AnalysisReportDisplayer<'a> {
+            report: &'a AnalysisReport,
+            indent: usize,
+        }
+
+        impl<'a> fmt::Display for AnalysisReportDisplayer<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let &Self {
+                    report: AnalysisReport { cases, sitrep_id },
+                    indent,
+                } = self;
+                writeln!(f, "{:indent$}fault management analysis report", "")?;
+                writeln!(f, "{:indent$}----- ---------- -------- ------", "")?;
+                writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
+                writeln!(f, "{:indent$}cases:", "")?;
+                for case in cases {
+                    case.display_multiline(indent + 2, Some(*sitrep_id))
+                        .fmt(f)?;
+                }
+                Ok(())
+            }
+        }
+
+        AnalysisReportDisplayer { report: self, indent }
+    }
+}
+
+impl CaseReport {
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+        this_sitrep: Option<SitrepUuid>,
+    ) -> impl fmt::Display + '_ {
+        struct CaseReportDisplayer<'a> {
+            report: &'a CaseReport,
+            indent: usize,
+            this_sitrep: Option<SitrepUuid>,
+        }
+
+        impl<'a> fmt::Display for CaseReportDisplayer<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let &Self {
+                    report: CaseReport { case, events },
+                    indent,
+                    this_sitrep,
+                } = self;
+                let bullet = if indent > 0 { "* " } else { "" };
+                writeln!(f, "{:indent$}{bullet} case {}", "", case.id)?;
+                let indent = indent + 2;
+                case.metadata.display_multiline(indent, this_sitrep).fmt(f)?;
+                for event in &events[..] {
+                    event.display_indented(indent + 2).fmt(f)?;
+                }
+                Ok(())
+            }
+        }
+
+        CaseReportDisplayer { report: self, indent, this_sitrep }
+    }
+}
+
+impl CaseEvent {
+    pub fn display_indented(&self, indent: usize) -> impl fmt::Display + '_ {
+        struct CaseEventDisplayer<'a> {
+            event: &'a CaseEvent,
+            indent: usize,
+        }
+
+        impl<'a> fmt::Display for CaseEventDisplayer<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let &Self { event: CaseEvent { event, comment }, indent } =
+                    self;
+                let (bullet, commindent) =
+                    if indent > 0 { ("* ", "  ") } else { ("", "") };
+                if let Some(comment) = comment {
+                    writeln!(f, "{:indent$}{commindent}// {comment}", "")?;
+                }
+                writeln!(f, "{:indent$}{bullet}{event}", "")?;
+                Ok(())
+            }
+        }
+        CaseEventDisplayer { event: self, indent }
+    }
+}
 
 /// Summarizes the inputs to sitrep analysis.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
