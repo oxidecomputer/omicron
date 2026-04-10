@@ -108,6 +108,10 @@ impl Metadata {
                 const OPENED_IN: &str = "opened in sitrep:";
                 const CLOSED_IN: &str = "closed in sitrep:";
                 const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
+
+                if !comment.is_empty() {
+                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                }
                 writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
                 writeln!(
                     f,
@@ -123,8 +127,6 @@ impl Metadata {
                         this_sitrep(closed_id)
                     )?;
                 }
-
-                writeln!(f, "{:>indent$}comment: {comment}", "")?;
 
                 Ok(())
             }
