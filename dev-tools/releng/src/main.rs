@@ -25,7 +25,6 @@ use clap::Parser;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
-use semver::Version;
 use slog::Drain;
 use slog::Logger;
 use slog::debug;
@@ -37,16 +36,6 @@ use tokio::sync::Semaphore;
 
 use crate::cmd::Command;
 use crate::job::Jobs;
-
-/// The base version we're currently building. Build information is appended to
-/// this later on.
-///
-/// Under current policy, each new release is a major version bump, and
-/// generally referred to only by the major version (e.g. 8.0.0 is referred
-/// to as "v8", "version 8", or "release 8" to customers). The use of semantic
-/// versioning is mostly to hedge for perhaps wanting something more granular in
-/// the future.
-const BASE_VERSION: Version = Version::new(19, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -249,7 +238,7 @@ async fn main() -> Result<()> {
         .trim()
         .to_owned();
 
-    let mut version = BASE_VERSION.clone();
+    let mut version = omicron_common::RELEASE_VERSION.clone();
     // Differentiate between CI and local builds. We use `0.word` as the
     // prerelease field because it comes before `alpha`.
     version.pre =
