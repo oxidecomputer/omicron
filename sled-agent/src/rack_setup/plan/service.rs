@@ -6,6 +6,7 @@
 
 use anyhow::anyhow;
 use anyhow::bail;
+use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
 use chrono::Utc;
 use iddqd::IdOrdMap;
 use iddqd::errors::DuplicateItem;
@@ -62,7 +63,6 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
-use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -1339,6 +1339,8 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
+    use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
@@ -1348,8 +1350,6 @@ mod tests {
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-    use sled_agent_types::rack_init::BootstrapAddressDiscovery;
-    use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;

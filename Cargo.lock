@@ -885,15 +885,10 @@ dependencies = [
 name = "bootstrap-agent-lockstep-api"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "dropshot 0.16.7",
- "omicron-common",
- "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "sled-agent-types",
- "sled-hardware-types",
 ]
 
 [[package]]
@@ -913,6 +908,22 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
+]
+
+[[package]]
+name = "bootstrap-agent-lockstep-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "strum 0.27.2",
 ]
 
 [[package]]
@@ -3493,6 +3504,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "chrono",
  "clap",
@@ -7202,6 +7214,7 @@ dependencies = [
 name = "nexus-lockstep-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "futures",
  "iddqd",
@@ -7600,6 +7613,7 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bootstrap-agent-lockstep-types",
  "nexus-config",
  "nexus-db-queries",
  "nexus-types",
@@ -7619,6 +7633,7 @@ name = "nexus-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -7690,6 +7705,7 @@ dependencies = [
  "api_identity",
  "async-trait",
  "base64 0.22.1",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "clap",
  "clickhouse-admin-types",
@@ -8561,6 +8577,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "base64 0.22.1",
+ "bootstrap-agent-lockstep-types",
  "buf-list",
  "bytes",
  "camino",
@@ -8781,6 +8798,8 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "async-trait",
+ "base64 0.22.1",
+ "bootstrap-agent-lockstep-client",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -9058,6 +9077,7 @@ dependencies = [
  "bootstrap-agent-api",
  "bootstrap-agent-client",
  "bootstrap-agent-lockstep-api",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -13518,17 +13538,14 @@ dependencies = [
  "bootstore",
  "byte-wrapper",
  "camino",
- "camino-tempfile",
  "chrono",
  "daft",
  "iddqd",
  "omicron-common",
- "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "proptest",
- "rcgen",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -13536,11 +13553,9 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
- "strum 0.27.2",
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
- "toml 0.8.23",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -16871,6 +16886,7 @@ dependencies = [
 name = "wicketd-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "installinator-common",
  "omicron-common",

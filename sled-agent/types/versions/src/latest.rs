@@ -52,6 +52,8 @@ pub mod disk {
     pub use crate::v1::disk::Zpool;
 }
 
+// TODO-cleanup These types should move to `system_networking` as a part of
+// <https://github.com/oxidecomputer/omicron/issues/10167>.
 pub mod early_networking {
     pub use crate::v1::early_networking::BfdMode;
     pub use crate::v1::early_networking::BfdPeerConfig;
@@ -71,7 +73,6 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
     pub use crate::v30::early_networking::BgpPeerConfig;
-    pub use crate::v30::early_networking::EarlyNetworkConfigBody;
     pub use crate::v30::early_networking::InvalidIpAddrError;
     pub use crate::v30::early_networking::PortConfig;
     pub use crate::v30::early_networking::RackNetworkConfig;
@@ -82,7 +83,6 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
-    pub use crate::v30::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
@@ -160,12 +160,12 @@ pub mod inventory {
     pub use crate::v28::inventory::Svc;
     pub use crate::v28::inventory::SvcState;
 
-    pub use crate::v33::inventory::Inventory;
-    pub use crate::v33::inventory::SvcEnabledNotOnline;
-    pub use crate::v33::inventory::SvcEnabledNotOnlineState;
-    pub use crate::v33::inventory::SvcsEnabledNotOnline;
-    pub use crate::v33::inventory::SvcsEnabledNotOnlineResult;
-    pub use crate::v33::inventory::SvcsError;
+    pub use crate::v34::inventory::Inventory;
+    pub use crate::v34::inventory::SvcEnabledNotOnline;
+    pub use crate::v34::inventory::SvcEnabledNotOnlineState;
+    pub use crate::v34::inventory::SvcsEnabledNotOnline;
+    pub use crate::v34::inventory::SvcsEnabledNotOnlineResult;
+    pub use crate::v34::inventory::SvcsError;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -183,16 +183,6 @@ pub mod probes {
     pub use crate::v10::probes::IpKind;
     pub use crate::v10::probes::ProbeCreate;
     pub use crate::v10::probes::ProbeSet;
-}
-
-pub mod rack_init {
-    pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
-
-    pub use crate::v20::rack_init::BootstrapAddressDiscovery;
-    pub use crate::v20::rack_init::RackInitializeRequestParseError;
-
-    pub use crate::v30::rack_init::RackInitializeRequest;
-    pub use crate::v30::rack_init::RackInitializeRequestParams;
 }
 
 pub mod rot {
@@ -222,6 +212,15 @@ pub mod support_bundle {
     pub use crate::v1::support_bundle::SupportBundlePathParam;
     pub use crate::v1::support_bundle::SupportBundleState;
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
+}
+
+pub mod system_networking {
+    pub use crate::v33::system_networking::ServiceZoneNatEntries;
+    pub use crate::v33::system_networking::ServiceZoneNatEntriesError;
+    pub use crate::v33::system_networking::ServiceZoneNatEntry;
+    pub use crate::v33::system_networking::ServiceZoneNatKind;
+    pub use crate::v33::system_networking::SystemNetworkingConfig;
+    pub use crate::v33::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

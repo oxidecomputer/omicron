@@ -17,6 +17,7 @@ use crate::rack_setup::{
 };
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -58,7 +59,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
 use std::collections::HashMap;
 use std::net::IpAddr;
