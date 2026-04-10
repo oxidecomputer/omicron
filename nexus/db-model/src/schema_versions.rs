@@ -104,35 +104,6 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         KnownVersion::new(179, "add-pending-mgs-updates-host-phase-1"),
         KnownVersion::new(178, "change-lldp-management-ip-to-inet"),
         KnownVersion::new(177, "add-host-ereport-part-number"),
-        KnownVersion::new(176, "audit-log"),
-        KnownVersion::new(175, "inv-host-phase-1-active-slot"),
-        KnownVersion::new(174, "add-tuf-rot-by-sign"),
-        KnownVersion::new(173, "inv-internal-dns"),
-        KnownVersion::new(172, "add-zones-with-mupdate-override"),
-        KnownVersion::new(171, "inv-clear-mupdate-override"),
-        KnownVersion::new(170, "add-pending-mgs-updates-rot-bootloader"),
-        KnownVersion::new(169, "inv-ntp-timesync"),
-        KnownVersion::new(168, "add-inv-host-phase-1-flash-hash"),
-        KnownVersion::new(167, "add-pending-mgs-updates-rot"),
-        KnownVersion::new(166, "bundle-user-comment"),
-        KnownVersion::new(165, "route-config-rib-priority"),
-        KnownVersion::new(164, "fix-leaked-bp-oximeter-read-policy-rows"),
-        KnownVersion::new(163, "bp-desired-host-phase-2"),
-        KnownVersion::new(162, "bundle-by-creation"),
-        KnownVersion::new(161, "inv_cockroachdb_status"),
-        KnownVersion::new(160, "tuf-trust-root"),
-        KnownVersion::new(159, "sled-config-desired-host-phase-2"),
-        KnownVersion::new(158, "drop-builtin-roles"),
-        KnownVersion::new(157, "user-data-export"),
-        KnownVersion::new(156, "boot-partitions-inventory"),
-        KnownVersion::new(155, "vpc-firewall-icmp"),
-        KnownVersion::new(154, "add-pending-mgs-updates"),
-        KnownVersion::new(153, "chicken-switches"),
-        KnownVersion::new(152, "ereports"),
-        KnownVersion::new(151, "zone-image-resolver-inventory"),
-        KnownVersion::new(150, "add-last-reconciliation-orphaned-datasets"),
-        KnownVersion::new(149, "bp-add-target-release-min-gen"),
-        KnownVersion::new(148, "clean-misplaced-m2s"),
     ]
 });
 
@@ -141,7 +112,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
 /// Note that we no longer need the actual migration to get to this version, but
 /// this version should match the "base" schema we save in
 /// schema/crdb/dbinit-base.sql
-pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(148, 0, 0);
+pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(177, 0, 0);
 
 /// Parse the schema version from the header of a `dbinit-base.sql` file.
 ///
