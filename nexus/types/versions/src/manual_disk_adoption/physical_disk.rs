@@ -4,7 +4,7 @@
 
 //! Physical disk types for version MANUAL_DISK_ADOPTION.
 
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{PhysicalDiskAdoptionRequestUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +38,7 @@ impl From<omicron_common::disk::DiskIdentity>
 /// A request to adopt a physical disk into the control plane
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PhysicalDiskAdoptionRequest {
-    pub id: uuid::Uuid,
+    pub id: PhysicalDiskAdoptionRequestUuid,
     pub vendor: String,
     pub serial: String,
     pub model: String,

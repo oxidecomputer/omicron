@@ -12,6 +12,7 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, zpool};
 use nexus_types::external_api::physical_disk as physical_disk_types;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::PhysicalDiskAdoptionRequestKind;
 use omicron_uuid_kinds::PhysicalDiskKind as PhysicalDiskUuidKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
@@ -105,7 +106,7 @@ impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
 #[derive(Queryable, Insertable, Debug, Clone, Selectable)]
 #[diesel(table_name = nexus_db_schema::schema::physical_disk_adoption_request)]
 pub struct PhysicalDiskAdoptionRequest {
-    pub id: uuid::Uuid,
+    pub id: DbTypedUuid<PhysicalDiskAdoptionRequestKind>,
     pub vendor: String,
     pub serial: String,
     pub model: String,
@@ -118,7 +119,7 @@ impl From<PhysicalDiskAdoptionRequest>
 {
     fn from(req: PhysicalDiskAdoptionRequest) -> Self {
         Self {
-            id: req.id,
+            id: req.id.into(),
             vendor: req.vendor,
             serial: req.serial,
             model: req.model,

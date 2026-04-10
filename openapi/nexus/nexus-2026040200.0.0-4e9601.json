@@ -25326,8 +25326,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/PhysicalDiskAdoptionRequestUuid"
           },
           "model": {
             "type": "string"
@@ -25371,6 +25370,15 @@
         "required": [
           "items"
         ]
+      },
+      "PhysicalDiskAdoptionRequestUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",

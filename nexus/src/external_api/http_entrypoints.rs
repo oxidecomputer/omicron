@@ -6771,7 +6771,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 requests,
-                &|_, req: &PhysicalDiskAdoptionRequest| req.id,
+                &|_, req: &PhysicalDiskAdoptionRequest| {
+                    req.id.into_untyped_uuid()
+                },
             )?))
         };
         apictx
