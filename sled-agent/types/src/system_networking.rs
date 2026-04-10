@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Version `INITIAL` of the Bootstrap Agent API.
-//!
-//! These types are used by the bootstrap-agent API and are shared between
-//! Nexus and sled-agent during rack setup.
+//! Types for system-level networking.
 
-pub mod rack_init;
+pub use sled_agent_types_versions::latest::system_networking::*;

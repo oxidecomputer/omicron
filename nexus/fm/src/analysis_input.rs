@@ -5,13 +5,14 @@
 //! Inputs to fault management analysis.
 
 use iddqd::IdOrdMap;
-use nexus_types::fm::{self, ClosedCaseReport, Sitrep, SitrepVersion};
+use nexus_types::fm::analysis_reports::ClosedCaseReport;
+use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::inventory;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-pub use nexus_types::fm::AnalysisInputReport as Report;
+pub use nexus_types::fm::analysis_reports::InputReport as Report;
 
 /// A complete set of inputs to a fault management analysis phase.
 ///

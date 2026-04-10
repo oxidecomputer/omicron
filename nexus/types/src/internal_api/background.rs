@@ -301,7 +301,7 @@ impl SupportBundleCollectionStep {
     ///
     /// These are used both when creating steps and when validating in tests.
     pub const STEP_BUNDLE_ID: &'static str = "bundle id";
-    pub const STEP_USER_COMMENT: &'static str = "user comment";
+    pub const STEP_REASON_FOR_CREATION: &'static str = "reason for creation";
     pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
     pub const STEP_EREPORTS: &'static str = "ereports";
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
@@ -925,7 +925,7 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         pub errors: Vec<String>,
-        pub report: crate::fm::AnalysisInputReport,
+        pub report: crate::fm::analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -966,6 +966,8 @@ pub mod fm_analysis {
 pub struct FmRendezvousStatus {
     pub sitrep_id: Option<SitrepUuid>,
     pub alerts: fm_rendezvous::OpStatus<fm_rendezvous::AlertCreationStatus>,
+    pub support_bundles:
+        fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
 }
@@ -997,6 +999,19 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SupportBundleCreationStatus {
+        /// The total number of support bundles requested by the current sitrep.
+        pub total_bundles_requested: usize,
+        /// The total number of support bundles which were *first* requested in the
+        /// current sitrep.
+        pub current_sitrep_bundles_requested: usize,
+        /// The number of support bundles created by this activation.
+        pub bundles_created: usize,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }

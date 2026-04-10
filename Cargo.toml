@@ -143,6 +143,7 @@ members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/bootstrap-agent-lockstep-api",
+    "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
@@ -325,6 +326,7 @@ default-members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/bootstrap-agent-lockstep-api",
+    "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
@@ -424,9 +426,10 @@ bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
 bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
-bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
+bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api" }
 bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
+bootstrap-agent-lockstep-types = { path = "sled-agent/bootstrap-agent-lockstep-types" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }

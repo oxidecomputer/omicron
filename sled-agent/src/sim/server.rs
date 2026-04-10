@@ -17,6 +17,7 @@ use crate::rack_setup::{
 };
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -31,7 +32,7 @@ use nexus_lockstep_client::types::{
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintZoneImageSource, blueprint_zone_type,
+    BlueprintZoneImageSource, LastAllocatedSubnetIpOffset, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
@@ -58,7 +59,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -593,12 +593,25 @@ pub async fn run_standalone_server(
             }
             SocketAddr::V6(addr) => addr,
         };
+
+        let subnet = Ipv6Subnet::new(*underlay_address.ip());
+        let last_allocated_ip_subnet_offset = LastAllocatedSubnetIpOffset::new(
+            zones
+                .iter()
+                .map(|zone| zone.zone_type.underlay_ip())
+                .filter(|ip| subnet.net().contains(*ip))
+                .map(|ip| ip.segments()[7])
+                .max()
+                .expect("no zones are included in the plan"),
+        );
+
         let inventory = server.sled_agent.inventory(underlay_address.into())?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,
             sled_id: config.id,
-            subnet: Ipv6Subnet::new(*underlay_address.ip()),
+            subnet,
+            last_allocated_ip_subnet_offset,
             config: SledConfig {
                 disks: omicron_physical_disks_config
                     .disks

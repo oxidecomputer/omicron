@@ -12,6 +12,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true

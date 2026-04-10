@@ -721,6 +721,13 @@ task: "fm_rendezvous"
         created in this activation:    0
         already created:               0
         errors:                        0
+    creating requested support bundles:
+(i)   note: this operation was not executed
+      support bundles requested:       0
+        requested in this sitrep:      0
+        created in this activation:    0
+        already created:               0
+        errors:                        0
     marking ereports as seen:
 (i)   note: this operation was not executed
       total ereports in sitrep:                 0
@@ -1390,6 +1397,13 @@ task: "fm_rendezvous"
         created in this activation:    0
         already created:               0
         errors:                        0
+    creating requested support bundles:
+(i)   note: this operation was not executed
+      support bundles requested:       0
+        requested in this sitrep:      0
+        created in this activation:    0
+        already created:               0
+        errors:                        0
     marking ereports as seen:
 (i)   note: this operation was not executed
       total ereports in sitrep:                 0
@@ -1788,7 +1802,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1838,7 +1852,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1934,7 +1948,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1984,7 +1998,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------

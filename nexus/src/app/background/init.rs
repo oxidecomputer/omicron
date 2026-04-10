@@ -728,6 +728,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
                 resolver.clone(),
+                rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -1163,7 +1164,13 @@ impl BackgroundTasksInitializer {
                 "updates externally visible database tables to match the \
                  current fault management sitrep",
             period: config.fm.rendezvous_period_secs,
-            task_impl: Box::new(FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
+            task_impl: Box::new(FmRendezvous::new(
+                datastore.clone(),
+                sitrep_watcher.clone(),
+                task_alert_dispatcher.clone(),
+                task_support_bundle_collector.clone(),
+                nexus_id,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher.clone())],
             activator: task_fm_rendezvous,
