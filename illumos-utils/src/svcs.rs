@@ -35,7 +35,7 @@ impl Svcs {
     #[cfg(target_os = "illumos")]
     pub async fn enabled_not_online(
         log: &Logger,
-    ) -> Result<SvcsEnabledNotOnlineResult, ExecutionError> {
+    ) -> Result<SvcsEnabledNotOnlineOutput, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Za", "-H", "-o", "state,fmri,zone"]);
         info!(log, "Retrieving SMF services");
@@ -49,9 +49,9 @@ impl Svcs {
     #[cfg(not(target_os = "illumos"))]
     pub async fn enabled_not_online(
         log: &Logger,
-    ) -> Result<SvcsEnabledNotOnlineResult, ExecutionError> {
+    ) -> Result<SvcsEnabledNotOnlineOutput, ExecutionError> {
         info!(log, "OS not illumos, will not check state of SMF services");
-        let svcs_result = SvcsEnabledNotOnlineResult::new();
+        let svcs_result = SvcsEnabledNotOnlineOutput::new();
         Ok(svcs_result)
     }
 }
@@ -155,11 +155,10 @@ impl SvcsResult {
     // `svcs` command on the machine it is running on, so we split this small
     // part out to test that we are retaining the correct services
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
-    fn to_enabled_not_online(self) -> SvcsEnabledNotOnlineResult {
+    fn to_enabled_not_online(self) -> SvcsEnabledNotOnlineOutput {
         let services = self
             .services
             .into_iter()
-            // TODO-K: How can I make this exhaustive?
             .filter_map(|svc| {
                 let state = match svc.state {
                     SvcState::Uninitialized => {
@@ -187,7 +186,7 @@ impl SvcsResult {
             })
             .collect();
 
-        SvcsEnabledNotOnlineResult {
+        SvcsEnabledNotOnlineOutput {
             services,
             errors: self.errors,
             time_of_status: self.time_of_status,
@@ -195,25 +194,24 @@ impl SvcsResult {
     }
 }
 
-// TODO-K: Remove this? Is it the same as in the API?
 /// Lists services if any, and the time the sample was collected
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SvcsEnabledNotOnlineResult {
+pub struct SvcsEnabledNotOnlineOutput {
     pub services: Vec<SvcEnabledNotOnline>,
     pub errors: Vec<String>,
     pub time_of_status: DateTime<Utc>,
 }
 
-impl From<SvcsEnabledNotOnlineResult> for SvcsEnabledNotOnline {
-    fn from(value: SvcsEnabledNotOnlineResult) -> Self {
-        let SvcsEnabledNotOnlineResult { services, errors, time_of_status } =
+impl From<SvcsEnabledNotOnlineOutput> for SvcsEnabledNotOnline {
+    fn from(value: SvcsEnabledNotOnlineOutput) -> Self {
+        let SvcsEnabledNotOnlineOutput { services, errors, time_of_status } =
             value;
         Self { services, errors, time_of_status }
     }
 }
 
-impl SvcsEnabledNotOnlineResult {
+impl SvcsEnabledNotOnlineOutput {
     pub fn new() -> Self {
         Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
     }
@@ -227,6 +225,7 @@ mod tests {
     use slog_term::FullFormat;
     use slog_term::PlainDecorator;
     use slog_term::TestStdoutWriter;
+    use strum::IntoEnumIterator;
 
     fn log() -> slog::Logger {
         let decorator = PlainDecorator::new(TestStdoutWriter);
@@ -472,5 +471,34 @@ disabled       svc:/network/tcpkey:default                      global
                 mk_e_not_o_svc(10, SvcEnabledNotOnlineState::Uninitialized),
             ]
         );
+    }
+
+    #[test]
+    fn test_to_enabled_not_online_covers_all_states() {
+        // Verify that every `SvcEnabledNotOnlineState` variant is reachable via
+        // the conversion in `to_enabled_not_online`
+        for expected_state in SvcEnabledNotOnlineState::iter() {
+            let svc_state = SvcState::from(expected_state);
+            let result = SvcsResult {
+                services: vec![Svc {
+                    fmri: "svc:/test:default".to_string(),
+                    zone: "global".to_string(),
+                    state: svc_state,
+                }],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            }
+            .to_enabled_not_online();
+
+            assert_eq!(
+                result.services.len(),
+                1,
+                "{svc_state:?} should map to an enabled-not-online state"
+            );
+            assert_eq!(
+                result.services[0].state, expected_state,
+                "{svc_state:?} should map to {expected_state:?}"
+            );
+        }
     }
 }

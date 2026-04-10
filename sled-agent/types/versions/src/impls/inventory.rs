@@ -944,7 +944,6 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
-// TODO-K: Modify here
 impl From<&'_ str> for SvcState {
     fn from(value: &str) -> Self {
         match value {

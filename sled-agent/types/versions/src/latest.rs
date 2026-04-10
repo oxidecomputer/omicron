@@ -157,7 +157,6 @@ pub mod inventory {
     pub use crate::v24::inventory::InventoryZpool;
     pub use crate::v24::inventory::ZpoolHealth;
 
-    // TODO-K: Remove these?
     pub use crate::v28::inventory::Svc;
     pub use crate::v28::inventory::SvcState;
 

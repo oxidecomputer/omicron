@@ -9,6 +9,7 @@ use illumos_utils::svcs::Svcs;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tokio::time::MissedTickBehavior;
@@ -40,7 +41,7 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
                 smf_services_enabled_not_online_tx.send_modify(|status| {
                     *status =
                         SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
-                            error: e.to_string(),
+                            error: InlineErrorChain::new(&e).to_string(),
                             time_of_status: Utc::now(),
                         })
                 })
@@ -48,7 +49,6 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             Ok(svcs) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
                     *status = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-                        // TODO-K: this is where it's converted. Do a try_into()?
                         svcs.into(),
                     );
                 })

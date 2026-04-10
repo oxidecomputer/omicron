@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddrV6;
+use strum::EnumIter;
 
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
@@ -49,7 +50,15 @@ impl From<SvcsError> for v28::inventory::SvcsError {
 /// "unhealthy" or "unexpected" state.
 /// See <https://illumos.org/man/7/smf> for more information.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SvcEnabledNotOnlineState {
