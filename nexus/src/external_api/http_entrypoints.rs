@@ -57,7 +57,7 @@ use nexus_types::external_api::image::Image;
 use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
 use nexus_types::external_api::physical_disk::{
-    PhysicalDisk, PhysicalDiskAdoptionRequest,
+    PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskAdoptionRequestPath,
     PhysicalDiskManufacturerIdentity, Unadopted,
 };
 use nexus_types::external_api::probe::ProbeInfo;
@@ -6788,8 +6788,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
         req: TypedBody<PhysicalDiskManufacturerIdentity>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
-            nexus.physical_disk_adopt(&opctx, req.into_inner()).await?;
+            nexus
+                .physical_disk_enable_adoption(&opctx, req.into_inner())
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
+        })
+        .await
+    }
+
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<PhysicalDiskAdoptionRequestPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .physical_disk_disable_adoption(
+                    &opctx,
+                    path_params.into_inner().physical_disk_adoption_req_id,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
         })
         .await
     }

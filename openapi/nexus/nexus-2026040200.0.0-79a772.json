@@ -7695,6 +7695,38 @@
         }
       }
     },
+    "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}": {
+      "delete": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Disable adoption of a physical disk for general use",
+        "operationId": "physical_disk_disable_adoption",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "physical_disk_adoption_req_id",
+            "description": "ID of the physical disk adoption request",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/disk-adoption-requests": {
       "get": {
         "tags": [
@@ -7811,34 +7843,6 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      },
-      "put": {
-        "tags": [
-          "system/hardware"
-        ],
-        "summary": "Enable adoption of a physical disk for general use",
-        "operationId": "physical_disk_enable_adoption",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/v1/system/hardware/disks/{disk_id}": {
@@ -7870,6 +7874,36 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/disks-adoption-request": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Enable adoption of a physical disk for general use",
+        "operationId": "physical_disk_enable_adoption",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

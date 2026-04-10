@@ -25,6 +25,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -307,12 +308,22 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn physical_disk_adopt(
+    pub(crate) async fn physical_disk_enable_adoption(
         &self,
         opctx: &OpContext,
         disk_id: nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity,
     ) -> Result<(), Error> {
         self.db_datastore.physical_disk_enable_adoption(opctx, disk_id).await
+    }
+
+    pub(crate) async fn physical_disk_disable_adoption(
+        &self,
+        opctx: &OpContext,
+        req_uuid: PhysicalDiskAdoptionRequestUuid,
+    ) -> Result<(), Error> {
+        self.db_datastore
+            .physical_disk_adoption_request_delete(opctx, req_uuid)
+            .await
     }
 
     /// Inserts a physical disk into the database unless it already exists.

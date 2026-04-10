@@ -43,6 +43,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
@@ -553,6 +554,25 @@ impl DataStore {
     }
 
     // Delete an adoption request from the database
+    pub async fn physical_disk_adoption_request_delete(
+        &self,
+        opctx: &OpContext,
+        id: PhysicalDiskAdoptionRequestUuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let now = Utc::now();
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl;
+        diesel::update(dsl::physical_disk_adoption_request)
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    // Delete an adoption request from the database when given a connection
     async fn physical_disk_adoption_request_delete_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         id: PhysicalDiskManufacturerIdentity,

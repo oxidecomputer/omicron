@@ -6718,7 +6718,7 @@ pub trait NexusExternalApi {
     /// Enable adoption of a physical disk for general use
     #[endpoint {
         method = PUT,
-        path = "/v1/system/hardware/disks",
+        path = "/v1/system/hardware/disk-adoption-request",
         tags = ["system/hardware"],
         versions = VERSION_MANUAL_DISK_ADOPTION..
     }]
@@ -6726,6 +6726,20 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Disable adoption of a physical disk for general use
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::physical_disk::PhysicalDiskAdoptionRequestPath,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Switches
 

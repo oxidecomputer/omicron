@@ -4,9 +4,11 @@
 
 //! Physical disk types for version MANUAL_DISK_ADOPTION.
 
+use crate::impls::id_path_param;
 use omicron_uuid_kinds::{PhysicalDiskAdoptionRequestUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
 
@@ -44,3 +46,10 @@ pub struct PhysicalDiskAdoptionRequest {
     pub model: String,
     pub time_created: chrono::DateTime<chrono::Utc>,
 }
+
+id_path_param!(
+    PhysicalDiskAdoptionRequestPath,
+    physical_disk_adoption_req_id,
+    "physical disk adoption request",
+    PhysicalDiskAdoptionRequestUuid
+);
