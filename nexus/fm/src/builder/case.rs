@@ -127,6 +127,7 @@ impl CaseBuilder {
         &mut self,
         class: AlertClass,
         alert: &impl serde::Serialize,
+        comment: impl ToString,
     ) -> anyhow::Result<()> {
         let id = self.rng.next_alert();
         let req = fm::case::AlertRequest {
@@ -140,26 +141,31 @@ impl CaseBuilder {
         self.case.alerts_requested.insert_unique(req).map_err(|_| {
             anyhow::anyhow!("an alert with ID {id:?} already exists")
         })?;
-
-        self.report_log
-            .entry("requested alert")
-            .kv("alert_id", id)
-            .kv("alert_class", &class);
+        // TODO(eliza): add a comment field to the alert request record in the
+        // DB, as well...
+        let comment = comment.to_string();
         slog::info!(
             &self.log,
             "requested an alert";
             "alert_id" => %id,
             "alert_class" => ?class,
+            "comment" => %comment,
         );
+        self.report_log
+            .entry("requested alert")
+            .kv("alert_id", id)
+            .kv("alert_class", &class)
+            .comment(comment);
 
         Ok(())
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&mut self, comment: impl ToString) {
         self.case.metadata.closed_sitrep_id = Some(self.sitrep_id);
 
-        slog::info!(&self.log, "case closed");
-        self.report_log.entry("case closed");
+        let comment = comment.to_string();
+        slog::info!(&self.log, "case closed"; "comment" => %comment);
+        self.report_log.entry("case closed").comment(comment);
     }
 
     pub fn add_ereport(
@@ -182,12 +188,13 @@ impl CaseBuilder {
                     "ereport_id" => %report.id(),
                     "ereport_class" => ?report.class,
                     "assignment_id" => %assignment_id,
+                    "comment" => %comment,
                 );
 
                 self.report_log
                     .entry("assigned ereport to case")
                     .comment(comment)
-                    .kv("ereport_id", &report.id())
+                    .kv("ereport_id", &format_args!("{}", report.id()))
                     .kv(
                         "ereport_class",
                         &report.class.as_deref().unwrap_or("<none>"),
