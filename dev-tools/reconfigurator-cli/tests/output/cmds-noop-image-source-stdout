@@ -259,21 +259,21 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
     omicron zones:
-    -------------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source                disposition   underlay IP           
-    -------------------------------------------------------------------------------------------------------------------------
-*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - install dataset           in service    fd00:1122:3344:101::25
-     └─                                                      + artifact: version 1.0.0                                       
-*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - install dataset           in service    fd00:1122:3344:101::24
-     └─                                                      + artifact: version 1.0.0                                       
-*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - install dataset           in service    fd00:1122:3344:101::23
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   - install dataset           in service    fd00:1122:3344:2::1   
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - install dataset           in service    fd00:1122:3344:101::21
-     └─                                                      + artifact: version 1.0.0                                       
-*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - install dataset           in service    fd00:1122:3344:101::22
-     └─                                                      + artifact: version 1.0.0                                       
+    ------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP          
+    ------------------------------------------------------------------------------------------------------------------------
+*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - install dataset           in service    fd00:1122:3344:101::7
+     └─                                                      + artifact: version 1.0.0                                      
+*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - install dataset           in service    fd00:1122:3344:101::6
+     └─                                                      + artifact: version 1.0.0                                      
+*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - install dataset           in service    fd00:1122:3344:101::5
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   - install dataset           in service    fd00:1122:3344:2::1  
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - install dataset           in service    fd00:1122:3344:101::3
+     └─                                                      + artifact: version 1.0.0                                      
+*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - install dataset           in service    fd00:1122:3344:101::4
+     └─                                                      + artifact: version 1.0.0                                      
 
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active -> decommissioned, config generation 2 -> 3):
@@ -322,13 +322,13 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type      zone id                                image source      disposition      underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-*   crucible       824150c0-3fa4-4bac-9d14-c47ad04c9f3a   install dataset   - in service     fd00:1122:3344:106::22
-     └─                                                                     + expunged ✓                           
-*   internal_ntp   db288a1e-c33c-44ca-8c79-9a8978afa34d   install dataset   - in service     fd00:1122:3344:106::21
-     └─                                                                     + expunged ✓                           
+    --------------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source      disposition      underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+*   crucible       824150c0-3fa4-4bac-9d14-c47ad04c9f3a   install dataset   - in service     fd00:1122:3344:106::4
+     └─                                                                     + expunged ✓                          
+*   internal_ntp   db288a1e-c33c-44ca-8c79-9a8978afa34d   install dataset   - in service     fd00:1122:3344:106::3
+     └─                                                                     + expunged ✓                          
 
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2 -> 3):
@@ -375,20 +375,20 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
     omicron zones:
-    -------------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source                disposition   underlay IP           
-    -------------------------------------------------------------------------------------------------------------------------
-    internal_ntp      e8fe709c-725f-4bb2-b714-ffcda13a9e54   install dataset             in service    fd00:1122:3344:104::21
-*   crucible          8e3dd7a4-75a3-4917-a6f4-0991bbdef7ea   - install dataset           in service    fd00:1122:3344:104::25
-     └─                                                      + artifact: version 1.0.0                                       
-*   crucible_pantry   d07a1fed-4235-4821-a1e5-f7eb2646ff33   - install dataset           in service    fd00:1122:3344:104::24
-     └─                                                      + artifact: version 1.0.0                                       
-*   external_dns      43a0588f-5b57-469b-a173-db6cb6105e4c   - install dataset           in service    fd00:1122:3344:104::23
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_dns      97753dbd-5a0f-4273-b1be-db6bb2b69381   - install dataset           in service    fd00:1122:3344:3::1   
-     └─                                                      + artifact: version 1.0.0                                       
-*   nexus             33862f97-2897-4d53-a9a6-78a80f7eb13f   - install dataset           in service    fd00:1122:3344:104::22
-     └─                                                      + artifact: version 1.0.0                                       
+    ------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP          
+    ------------------------------------------------------------------------------------------------------------------------
+    internal_ntp      e8fe709c-725f-4bb2-b714-ffcda13a9e54   install dataset             in service    fd00:1122:3344:104::3
+*   crucible          8e3dd7a4-75a3-4917-a6f4-0991bbdef7ea   - install dataset           in service    fd00:1122:3344:104::7
+     └─                                                      + artifact: version 1.0.0                                      
+*   crucible_pantry   d07a1fed-4235-4821-a1e5-f7eb2646ff33   - install dataset           in service    fd00:1122:3344:104::6
+     └─                                                      + artifact: version 1.0.0                                      
+*   external_dns      43a0588f-5b57-469b-a173-db6cb6105e4c   - install dataset           in service    fd00:1122:3344:104::5
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_dns      97753dbd-5a0f-4273-b1be-db6bb2b69381   - install dataset           in service    fd00:1122:3344:3::1  
+     └─                                                      + artifact: version 1.0.0                                      
+*   nexus             33862f97-2897-4d53-a9a6-78a80f7eb13f   - install dataset           in service    fd00:1122:3344:104::4
+     └─                                                      + artifact: version 1.0.0                                      
 
 
  COCKROACHDB SETTINGS:
@@ -409,7 +409,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 internal DNS:
 * DNS zone: "control-plane.oxide.internal": 
 -   name: 824150c0-3fa4-4bac-9d14-c47ad04c9f3a.host          (records: 1)
--       AAAA fd00:1122:3344:106::22
+-       AAAA fd00:1122:3344:106::4
 -   name: _crucible._tcp.824150c0-3fa4-4bac-9d14-c47ad04c9f3a (records: 1)
 -       SRV  port 32345 824150c0-3fa4-4bac-9d14-c47ad04c9f3a.host.control-plane.oxide.internal
 *   name: _internal-ntp._tcp                                 (records: 7 -> 6)
@@ -427,7 +427,7 @@ internal DNS:
 +       SRV  port   123 dd66f033-4fe8-438e-afb4-29d3561d4c3e.host.control-plane.oxide.internal
 +       SRV  port   123 e8fe709c-725f-4bb2-b714-ffcda13a9e54.host.control-plane.oxide.internal
 -   name: db288a1e-c33c-44ca-8c79-9a8978afa34d.host          (records: 1)
--       AAAA fd00:1122:3344:106::21
+-       AAAA fd00:1122:3344:106::3
     unchanged names: 51 (records: 68)
 
 external DNS:
@@ -534,13 +534,13 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
 
     omicron zones:
-    ----------------------------------------------------------------------------------------------------------------------
-    zone type      zone id                                image source                disposition   underlay IP           
-    ----------------------------------------------------------------------------------------------------------------------
-*   crucible       c1467d0e-b3de-4bd8-b36a-d8b36626badc   - install dataset           in service    fd00:1122:3344:107::22
-     └─                                                   + artifact: version 1.0.0                                       
-*   internal_ntp   c800ba17-240e-4b72-8ae6-afc30b6baa96   - install dataset           in service    fd00:1122:3344:107::21
-     └─                                                   + artifact: version 1.0.0                                       
+    ---------------------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source                disposition   underlay IP          
+    ---------------------------------------------------------------------------------------------------------------------
+*   crucible       c1467d0e-b3de-4bd8-b36a-d8b36626badc   - install dataset           in service    fd00:1122:3344:107::4
+     └─                                                   + artifact: version 1.0.0                                      
+*   internal_ntp   c800ba17-240e-4b72-8ae6-afc30b6baa96   - install dataset           in service    fd00:1122:3344:107::3
+     └─                                                   + artifact: version 1.0.0                                      
 
 
  COCKROACHDB SETTINGS:
