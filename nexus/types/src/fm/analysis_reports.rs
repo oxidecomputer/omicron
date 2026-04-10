@@ -5,7 +5,7 @@
 //! Human-readable reports summarizing what occurred during fault management
 //! analysis.
 
-use super::case::{self, Case};
+use super::case;
 use super::ereport::EreportId;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{CaseUuid, CollectionUuid, SitrepUuid};
@@ -23,7 +23,9 @@ pub struct AnalysisReport {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaseReport {
-    pub case: Case,
+    pub id: CaseUuid,
+    #[serde(flatten)]
+    pub metadata: case::Metadata,
     pub log: DebugLog,
 }
 
@@ -58,7 +60,7 @@ pub struct LogEntry {
 impl iddqd::IdOrdItem for CaseReport {
     type Key<'a> = &'a CaseUuid;
     fn key(&self) -> Self::Key<'_> {
-        &self.case.id()
+        &self.id
     }
 
     iddqd::id_upcast!();
@@ -111,14 +113,14 @@ impl CaseReport {
         impl<'a> fmt::Display for CaseReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: CaseReport { case, log: DebugLog(log) },
+                    report: CaseReport { id, metadata, log: DebugLog(log) },
                     indent,
                     this_sitrep,
                 } = self;
                 let bullet = if indent > 0 { "* " } else { "" };
-                writeln!(f, "{:indent$}{bullet}case {}", "", case.id)?;
+                writeln!(f, "{:indent$}{bullet}case {id}", "")?;
                 let indent = indent + 2;
-                case.metadata.display_multiline(indent, this_sitrep).fmt(f)?;
+                metadata.display_multiline(indent, this_sitrep).fmt(f)?;
                 if !log.is_empty() {
                     writeln!(f, "{:indent$}activity in this analysis:", "")?;
                     let indent = indent + 2;

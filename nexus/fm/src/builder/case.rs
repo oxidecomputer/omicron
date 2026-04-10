@@ -159,6 +159,7 @@ impl CaseBuilder {
         self.case.metadata.closed_sitrep_id = Some(self.sitrep_id);
 
         slog::info!(&self.log, "case closed");
+        self.report_log.entry("case closed");
     }
 
     pub fn add_ereport(
@@ -226,7 +227,8 @@ impl CaseBuilder {
     pub(crate) fn build(self) -> (fm::Case, fm::analysis_reports::CaseReport) {
         let Self { case, report_log, .. } = self;
         let report = fm::analysis_reports::CaseReport {
-            case: case.clone(),
+            id: case.id,
+            metadata: case.metadata.clone(),
             log: report_log,
         };
         (case, report)
