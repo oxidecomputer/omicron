@@ -312,7 +312,7 @@ impl super::Nexus {
         opctx: &OpContext,
         disk_id: nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity,
     ) -> Result<(), Error> {
-        self.db_datastore.physical_disk_adopt(opctx, disk_id).await
+        self.db_datastore.physical_disk_enable_adoption(opctx, disk_id).await
     }
 
     /// Inserts a physical disk into the database unless it already exists.

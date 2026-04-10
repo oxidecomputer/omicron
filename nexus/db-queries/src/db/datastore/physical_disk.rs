@@ -121,7 +121,7 @@ impl DataStore {
     ///
     /// This request is idempotent. If an existing adoption request exists,
     /// success is returned.
-    pub async fn physical_disk_adopt(
+    pub async fn physical_disk_enable_adoption(
         &self,
         opctx: &OpContext,
         disk_id: PhysicalDiskManufacturerIdentity,
@@ -1049,7 +1049,7 @@ mod test {
         // We need an adoption request before we can adopt the disk
         // Adoption is idempotent
         datastore
-            .physical_disk_adopt(&opctx, disk.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk.clone().into())
             .await
             .expect("adoption succeeds");
         datastore
@@ -1072,7 +1072,7 @@ mod test {
         // We don't want it to fail because it doesn't have an adoption request
         // though
         datastore
-            .physical_disk_adopt(&opctx, disk.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk.clone().into())
             .await
             .expect("adoption succeeds");
         let err = datastore
@@ -1171,7 +1171,7 @@ mod test {
         let (disk_001, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
         datastore
-            .physical_disk_adopt(&opctx, disk_001.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk_001.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1181,7 +1181,7 @@ mod test {
         let (disk_002, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
         datastore
-            .physical_disk_adopt(&opctx, disk_002.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk_002.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1191,7 +1191,7 @@ mod test {
         let (disk_101, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
         datastore
-            .physical_disk_adopt(&opctx, disk_101.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk_101.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1233,7 +1233,7 @@ mod test {
         let (disk_003, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
         datastore
-            .physical_disk_adopt(&opctx, disk_003.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk_003.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1243,7 +1243,7 @@ mod test {
         let (disk_102, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
         datastore
-            .physical_disk_adopt(&opctx, disk_102.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk_102.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1253,7 +1253,7 @@ mod test {
         let (disk_103, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
         datastore
-            .physical_disk_adopt(&opctx, disk_103.clone().into())
+            .physical_disk_enable_adoption(&opctx, disk_103.clone().into())
             .await
             .expect("adoption request succeeds");
         datastore
@@ -1364,17 +1364,26 @@ mod test {
 
         // Make two disks adoptable
         datastore
-            .physical_disk_adopt(&opctx, disks_a[0].identity.clone().into())
+            .physical_disk_enable_adoption(
+                &opctx,
+                disks_a[0].identity.clone().into(),
+            )
             .await
             .expect("adoption request succeeds");
         datastore
-            .physical_disk_adopt(&opctx, disks_b[0].identity.clone().into())
+            .physical_disk_enable_adoption(
+                &opctx,
+                disks_b[0].identity.clone().into(),
+            )
             .await
             .expect("adoption request succeeds");
 
         // Adoption is idempotent
         datastore
-            .physical_disk_adopt(&opctx, disks_b[0].identity.clone().into())
+            .physical_disk_enable_adoption(
+                &opctx,
+                disks_b[0].identity.clone().into(),
+            )
             .await
             .expect("adoption request succeeds");
 
@@ -1420,7 +1429,10 @@ mod test {
 
         // Adding one of the same disks back again should make it adoptable
         datastore
-            .physical_disk_adopt(&opctx, disks_a[0].identity.clone().into())
+            .physical_disk_enable_adoption(
+                &opctx,
+                disks_a[0].identity.clone().into(),
+            )
             .await
             .expect("adoption request succeeds");
         let adoptable_disks = datastore
@@ -1444,7 +1456,7 @@ mod test {
             disks_a[0].identity.clone().into();
         disk_not_in_inventory.vendor = "some-other-vendor".to_string();
         datastore
-            .physical_disk_adopt(&opctx, disk_not_in_inventory)
+            .physical_disk_enable_adoption(&opctx, disk_not_in_inventory)
             .await
             .expect("adoption request succeeds");
         let adoptable_disks = datastore
@@ -1459,6 +1471,56 @@ mod test {
             .await
             .expect("Failed to list unadopted disks");
         assert_eq!(unadopted_disks.len(), 5);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn physical_disk_insert_disk_and_zpool_fails_without_adoption() {
+        let logctx = dev::test_setup_log(
+            "physical_disk_insert_disk_and_zpool_fails_without_adoption",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sled_a = create_test_sled(&datastore).await;
+
+        // No inventory -> No unadopted disks
+        let unadopted_disks = datastore
+            .physical_disk_unadopted_list(
+                &opctx,
+                CollectionUuid::new_v4(), // Collection that does not exist
+            )
+            .await
+            .expect("Failed to look up unadopted disks");
+        assert!(unadopted_disks.is_empty());
+
+        // Create an inventory disk
+        let mut builder = nexus_inventory::CollectionBuilder::new("test");
+        let inv_disk = create_inv_disk("serial-001".to_string(), 1);
+        add_sled_to_inventory(&mut builder, &sled_a, vec![inv_disk.clone()]);
+        let collection = builder.build();
+        let collection_id = collection.id;
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Now when we list the unadopted disks, we should see our disk.
+        let unadopted_disks = datastore
+            .physical_disk_unadopted_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list unadopted disks");
+        assert_eq!(unadopted_disks.len(), 1);
+
+        // Fail to create a control plane object for our disk because we have
+        // not called `datastore.physical_disk_enable_adoption`.
+        let (disk, zpool) = create_disk_zpool_combo(sled_a.id(), &inv_disk);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk, zpool)
+            .await
+            .expect_err("insertion fails without an adoption request");
 
         db.terminate().await;
         logctx.cleanup_successful();
