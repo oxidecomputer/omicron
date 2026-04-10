@@ -3291,6 +3291,15 @@
           "stage0_next"
         ]
       },
+      "CaseUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::CaseUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Certificate": {
         "type": "object",
         "properties": {
@@ -9166,8 +9175,18 @@
         }
       },
       "SupportBundleInfo": {
+        "description": "Support bundle info with internal-only fields.\n\nThis wraps the external API's [`ExternalSupportBundleInfo`] and extends it with fields that are only exposed through the lockstep API (e.g., for OMDB).",
         "type": "object",
         "properties": {
+          "fm_case_id": {
+            "nullable": true,
+            "description": "The FM case ID that triggered creation of this bundle, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CaseUuid"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
