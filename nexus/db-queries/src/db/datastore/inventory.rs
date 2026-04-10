@@ -2560,6 +2560,29 @@ impl DataStore {
         self.inventory_collection_read_batched(opctx, id, SQL_BATCH_SIZE).await
     }
 
+    /// Read just the `inv_collection` row for the given collection ID,
+    /// without reading any of the child tables.
+    ///
+    /// Returns `Ok(None)` if no collection with the specified ID exists.
+    pub async fn inventory_collection_read_metadata(
+        &self,
+        opctx: &OpContext,
+        id: CollectionUuid,
+    ) -> Result<Option<InvCollection>, Error> {
+        use nexus_db_schema::schema::inv_collection::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        dsl::inv_collection
+            .filter(dsl::id.eq(id.into_untyped_uuid()))
+            .select(InvCollection::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Attempt to read the current collection with the provided batch size.
     ///
     /// Queries are limited to `batch_size` records at a time, performing
