@@ -18,7 +18,7 @@ pub struct CaseBuilder {
     case: fm::Case,
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
-    report_log: analysis_reports::EventLog,
+    report_log: analysis_reports::DebugLog,
 }
 
 #[derive(Debug)]

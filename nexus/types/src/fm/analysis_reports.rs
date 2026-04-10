@@ -24,14 +24,14 @@ pub struct AnalysisReport {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaseReport {
     pub case: Case,
-    pub log: EventLog,
+    pub log: DebugLog,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
-pub struct EventLog(Vec<LogEntry>);
+pub struct DebugLog(Vec<LogEntry>);
 
-/// An entry in an analysis report's event log.
+/// An entry in an analysis report's debug log.
 ///
 /// This type is somewhat intentionally very "stringly-typed": through the use
 /// of `#[serde(skip_serializing_if = "Option::is_none")]`, `#[serde(default)]`,
@@ -111,7 +111,7 @@ impl CaseReport {
         impl<'a> fmt::Display for CaseReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: CaseReport { case, log: EventLog(log) },
+                    report: CaseReport { case, log: DebugLog(log) },
                     indent,
                     this_sitrep,
                 } = self;
@@ -136,7 +136,7 @@ impl CaseReport {
     }
 }
 
-impl EventLog {
+impl DebugLog {
     pub fn entry(&mut self, event: impl ToString) -> &mut LogEntry {
         self.0.push(LogEntry::new(event));
         self.0.last_mut().expect("we just pushed it")
