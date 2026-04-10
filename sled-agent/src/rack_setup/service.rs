@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
@@ -96,6 +95,7 @@ use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
+use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;

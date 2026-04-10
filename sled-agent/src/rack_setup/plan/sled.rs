@@ -4,8 +4,8 @@
 
 //! Plan generation for "how should sleds be initialized".
 
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::sled::StartSledAgentRequestBody;

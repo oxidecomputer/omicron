@@ -10,6 +10,31 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/debug/network-config-contents": {
+      "get": {
+        "summary": "Get the current contents of the network config kept in the replicated",
+        "description": "bootstore.\n\nThis should ONLY be used for debugging (e.g., via `omdb`). Nexus, RSS, and sled-agent should never access this endpoint in production - the bootstore contents should be treated as \"write only\" from their point of view.",
+        "operationId": "network_config_contents_for_debug",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplicatedNetworkConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-initialize": {
       "get": {
         "summary": "Get the current status of rack initialization or reset.",
@@ -1203,6 +1228,39 @@
           "silo_name",
           "user_name",
           "user_password_hash"
+        ]
+      },
+      "ReplicatedNetworkConfig": {
+        "description": "Wrapper for optional contents of the replicated network config.",
+        "type": "object",
+        "properties": {
+          "contents": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReplicatedNetworkConfigContents"
+              }
+            ]
+          }
+        }
+      },
+      "ReplicatedNetworkConfigContents": {
+        "description": "Contents of the replicated network config.\n\nAnalogous to the bootstore `NetworkConfig` type.",
+        "type": "object",
+        "properties": {
+          "base64_blob": {
+            "description": "The `NetworkConfig` arbitrary blob, encoded using the standard base64 alphabet.\n\nCurrently, the contents are expected to be JSON, but serialization/deserialization of the contents is performed outside the replication engine, which just deals with a binary blob.",
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "base64_blob",
+          "generation"
         ]
       },
       "RouteConfig": {
