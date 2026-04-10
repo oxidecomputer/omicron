@@ -85,10 +85,23 @@ impl AnalysisReport {
                     writeln!(f, "{:indent$}// {comment}", "")?;
                 }
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
-                writeln!(f, "{:indent$}cases:", "")?;
-                for case in cases {
-                    case.display_multiline(indent + 2, Some(*sitrep_id))
-                        .fmt(f)?;
+                if cases.is_empty() {
+                    writeln!(
+                        f,
+                        "{:indent$}no cases changed in this analysis step",
+                        ""
+                    )?;
+                } else {
+                    writeln!(
+                        f,
+                        "{:indent$}cases ({} with activity):",
+                        "",
+                        cases.len()
+                    )?;
+                    for case in cases {
+                        case.display_multiline(indent + 2, Some(*sitrep_id))
+                            .fmt(f)?;
+                    }
                 }
                 Ok(())
             }
