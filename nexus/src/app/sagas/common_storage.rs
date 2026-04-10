@@ -139,6 +139,10 @@ pub(crate) async fn call_pantry_attach_for_volume(
     let gone_check =
         || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
+    // Do not match on `e.is_gone` here: if the Pantry is gone, then return an
+    // error. The attach may have succeeded for one of the previous calls but if
+    // the retry loop bails out after determining that the Pantry is gone, that
+    // attachment is now gone too.
     ProgenitorOperationRetry::new(attach_operation, gone_check)
         .run(log)
         .await
@@ -169,10 +173,18 @@ pub(crate) async fn call_pantry_detach(
     let gone_check =
         || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    ProgenitorOperationRetry::new(detach_operation, gone_check)
+    match ProgenitorOperationRetry::new(detach_operation, gone_check)
         .run(log)
         .await
-        .map(|_response| ())
+    {
+        Ok(_) => Ok(()),
+
+        // The pantry is stateless: if it is gone, then the Volume was
+        // destroyed, and we can proceed as if it was detached.
+        Err(e) if e.is_gone() => Ok(()),
+
+        Err(e) => Err(e),
+    }
 }
 
 pub(crate) fn find_only_new_region(

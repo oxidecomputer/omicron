@@ -8,7 +8,9 @@ use super::NexusSaga;
 use crate::app::InlineErrorChain;
 use crate::app::sagas::SagaInitError;
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::sled_out_of_service_gone_check;
 use crate::app::sagas::volume_delete;
+use crate::app::sagas::zpool_out_of_service_gone_check;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
@@ -229,6 +231,7 @@ async fn sdd_delete_local_storage(
     };
 
     let sled_id = allocation.sled_id();
+    let zpool_id = allocation.pool_id().upcast();
 
     let request = LocalStorageDatasetDeleteRequest {
         zpool_id: allocation.pool_id(),
@@ -250,18 +253,31 @@ async fn sdd_delete_local_storage(
         sled_agent_client.local_storage_dataset_delete(&request).await
     };
 
-    // `check_sled_in_service` returns an error if the sled is no longer in
-    // service; if it succeeds, the sled is not gone.
+    // Bail out of the retry loop if either the disk or sled is no longer
+    // in-service.
     let gone_check = || async {
-        osagactx
-            .datastore()
-            .check_sled_in_service(&opctx, sled_id)
+        match sled_out_of_service_gone_check(
+            osagactx.datastore(),
+            &opctx,
+            sled_id,
+        )
+        .await?
+        {
+            GoneCheckResult::StillAvailable => {
+                // proceed to zpool check
+            }
+
+            GoneCheckResult::Gone => {
+                return Ok(GoneCheckResult::Gone);
+            }
+        }
+
+        zpool_out_of_service_gone_check(osagactx.datastore(), &opctx, zpool_id)
             .await
-            .map(|()| GoneCheckResult::StillAvailable)
     };
 
     let log = osagactx.log().clone();
-    retry_operation_while_indefinitely(
+    let result = retry_operation_while_indefinitely(
         backon_retry_policy_internal_service(),
         delete_operation,
         gone_check,
@@ -274,15 +290,21 @@ async fn sdd_delete_local_storage(
             );
         },
     )
-    .await
-    .map_err(|e| {
-        saga_action_failed(Error::internal_error(&format!(
+    .await;
+
+    match result {
+        Ok(_) => Ok(()),
+
+        // In this case, if the particular disk hosting this local storage was
+        // expunged, or if the sled was expunged, then proceed with the rest of
+        // the saga.
+        Err(e) if e.is_gone() => Ok(()),
+
+        Err(e) => Err(saga_action_failed(Error::internal_error(&format!(
             "failed to delete local storage: {}",
             InlineErrorChain::new(&e)
-        )))
-    })?;
-
-    Ok(())
+        )))),
+    }
 }
 
 async fn sdd_deallocate_local_storage(
