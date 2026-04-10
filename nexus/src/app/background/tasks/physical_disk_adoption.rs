@@ -21,6 +21,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
+use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -124,11 +125,11 @@ impl BackgroundTask for PhysicalDiskAdoption {
 
             let result = self
                 .datastore
-                .physical_disk_uninitialized_list(opctx, collection_id)
+                .physical_disk_adoptable_list(opctx, collection_id)
                 .await;
 
-            let uninitialized = match result {
-                Ok(uninitialized) => uninitialized,
+            let adoptable = match result {
+                Ok(adoptable) => adoptable,
                 Err(err) => {
                     let err = InlineErrorChain::new(&err);
                     warn!(
@@ -142,7 +143,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 }
             };
 
-            for inv_disk in uninitialized {
+            for inv_disk in adoptable {
                 let disk = PhysicalDisk::new(
                     PhysicalDiskUuid::new_v4(),
                     inv_disk.vendor,
@@ -165,6 +166,15 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     .await;
 
                 if let Err(err) = result {
+                    // Skip reporting the error if we get back a `NotFound`.
+                    // This means that another nexus concurrently added the
+                    // disk or that the adoptable request was deleted. We
+                    // don't want to report mistakenly one way or another and
+                    // so we just continue here.
+                    if let external::Error::NotFound { .. } = err {
+                        continue;
+                    }
+
                     let err = InlineErrorChain::new(&err);
                     warn!(
                         &opctx.log,
