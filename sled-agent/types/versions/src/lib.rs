@@ -77,7 +77,7 @@ pub mod v31;
 pub mod v32;
 #[path = "bootstore_service_nat/mod.rs"]
 pub mod v33;
-#[path = "modify_svcs_error/mod.rs"]
+#[path = "modify_svcs_types/mod.rs"]
 pub mod v34;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;

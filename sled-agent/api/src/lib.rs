@@ -38,7 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (34, MODIFY_SVCS_ERROR),
+    (34, MODIFY_SVCS_TYPES),
     (33, BOOTSTORE_SERVICE_NAT),
     (32, MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL),
     (31, ADD_ICMPV6_FIREWALL_SUPPORT),
@@ -1019,7 +1019,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_MODIFY_SVCS_ERROR..,
+        versions = VERSION_MODIFY_SVCS_TYPES..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -1030,7 +1030,7 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_MODIFY_SERVICES_IN_INVENTORY..VERSION_MODIFY_SVCS_ERROR,
+        versions = VERSION_MODIFY_SERVICES_IN_INVENTORY..VERSION_MODIFY_SVCS_TYPES,
     }]
     async fn inventory_v28(
         rqctx: RequestContext<Self::Context>,
