@@ -16,7 +16,6 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
@@ -64,6 +63,8 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootMismatch;
@@ -532,7 +533,7 @@ pub fn representative() -> Representative {
         zpools.push(InventoryZpool {
             id: pool_id,
             total_size: ByteCount::from(4096),
-            health: illumos_utils::zpool::ZpoolHealth::Online,
+            health: ZpoolHealth::Online,
         });
     }
     let dataset_name = DatasetName::new(
@@ -1091,7 +1092,8 @@ pub fn sled_agent(
         // TODO-K: We'll want to have the functionality to add some services
         // here in a future PR. This will be more useful when we add this
         // information to the DB.
-        smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+        smf_services_enabled_not_online:
+            SvcsEnabledNotOnlineResult::DataUnavailable,
         reference_measurements,
     }
 }

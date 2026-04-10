@@ -33,6 +33,7 @@ use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -54,6 +55,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::system_networking::ServiceZoneNatEntries;
+use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
+use sled_agent_types::system_networking::ServiceZoneNatEntry;
+use sled_agent_types::system_networking::ServiceZoneNatKind;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
 use sled_agent_types_versions::latest::inventory::OmicronSingleMeasurement;
@@ -133,10 +138,12 @@ pub use planning_report::PlanningAddStepReport;
 pub use planning_report::PlanningCockroachdbSettingsStepReport;
 pub use planning_report::PlanningDecommissionStepReport;
 pub use planning_report::PlanningExpungeStepReport;
+pub use planning_report::PlanningMeasurementUpdatesStepReport;
 pub use planning_report::PlanningMgsUpdatesStepReport;
 pub use planning_report::PlanningMupdateOverrideStepReport;
 pub use planning_report::PlanningNexusGenerationBumpReport;
 pub use planning_report::PlanningNoopImageSourceSkipSledHostPhase2Reason;
+pub use planning_report::PlanningNoopImageSourceSkipSledMeasurementsReason;
 pub use planning_report::PlanningNoopImageSourceSkipSledZonesReason;
 pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
 pub use planning_report::PlanningNoopImageSourceStepReport;
@@ -309,6 +316,79 @@ impl Blueprint {
             comment: self.comment.clone(),
             source: self.source.clone(),
         }
+    }
+
+    /// Construct a [`ServiceZoneNatEntries`] containing all NAT entries for
+    /// relevant in-service zones in this blueprint.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if the blueprint contains overlapping NAT entries
+    /// (never expected) or has no in-service zones of the types required by
+    /// `ServiceZoneNatEntries` (boundary NTP, external DNS, and Nexus). Real
+    /// blueprints should always have at least one zone of this type, but many
+    /// test blueprints will not.
+    pub fn to_service_zone_nat_entries(
+        &self,
+    ) -> Result<ServiceZoneNatEntries, ServiceZoneNatEntriesError> {
+        let entries = self
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (nic_mac, vni, kind) = match &zone_config.zone_type {
+                    BlueprintZoneType::BoundaryNtp(ntp) => (
+                        ntp.nic.mac,
+                        ntp.nic.vni,
+                        ServiceZoneNatKind::BoundaryNtp {
+                            snat_cfg: ntp.external_ip.snat_cfg,
+                        },
+                    ),
+                    BlueprintZoneType::ExternalDns(dns) => (
+                        dns.nic.mac,
+                        dns.nic.vni,
+                        ServiceZoneNatKind::ExternalDns {
+                            external_ip: dns.dns_address.addr.ip(),
+                        },
+                    ),
+                    BlueprintZoneType::Nexus(nexus) => (
+                        nexus.nic.mac,
+                        nexus.nic.vni,
+                        ServiceZoneNatKind::Nexus {
+                            external_ip: nexus.external_ip.ip,
+                        },
+                    ),
+
+                    // None of these zone types have external NAT.
+                    BlueprintZoneType::Clickhouse(_)
+                    | BlueprintZoneType::ClickhouseKeeper(_)
+                    | BlueprintZoneType::ClickhouseServer(_)
+                    | BlueprintZoneType::CockroachDb(_)
+                    | BlueprintZoneType::Crucible(_)
+                    | BlueprintZoneType::CruciblePantry(_)
+                    | BlueprintZoneType::InternalDns(_)
+                    | BlueprintZoneType::InternalNtp(_)
+                    | BlueprintZoneType::Oximeter(_) => return None,
+                };
+
+                // in_service_zones() iterates over `self.sleds`, so it can only
+                // give us `sled_id`s that exist there. It's safe for us to
+                // unwrap here.
+                let sled_subnet = self
+                    .sleds
+                    .get(&sled_id)
+                    .expect("sled must exist if we have in-service zones")
+                    .subnet;
+
+                Some(ServiceZoneNatEntry {
+                    zone_id: zone_config.id,
+                    sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
+                    nic_mac,
+                    vni,
+                    kind,
+                })
+            })
+            .collect::<IdOrdMap<_>>();
+
+        entries.try_into()
     }
 
     /// Iterate over the in-service [`BlueprintZoneConfig`] instances in the
@@ -2072,7 +2152,7 @@ pub enum BlueprintMeasurements {
     Artifacts { artifacts: BlueprintArtifactMeasurements },
 }
 
-/// This is a private inner type to ensure the measurment set is always non-empty
+/// This is a private inner type to ensure the measurement set is always non-empty
 #[derive(Clone, Debug, Serialize, JsonSchema, PartialEq, Diffable, Eq)]
 pub struct BlueprintArtifactMeasurements(BTreeSet<BlueprintSingleMeasurement>);
 
@@ -2111,6 +2191,15 @@ impl BlueprintArtifactMeasurements {
 
     pub fn into_iter(self) -> impl Iterator<Item = BlueprintSingleMeasurement> {
         self.0.into_iter()
+    }
+}
+
+impl Display for BlueprintArtifactMeasurements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for m in self.iter() {
+            writeln!(f, "{m}")?;
+        }
+        Ok(())
     }
 }
 
@@ -2206,9 +2295,7 @@ impl Display for BlueprintMeasurements {
                 writeln!(f, "(install dataset)")?;
             }
             Self::Artifacts { artifacts } => {
-                for m in artifacts.iter() {
-                    writeln!(f, "{m}")?;
-                }
+                writeln!(f, "{artifacts}")?;
             }
         }
         Ok(())

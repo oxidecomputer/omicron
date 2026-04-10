@@ -9,7 +9,6 @@ use futures::StreamExt;
 use gateway_client::ClientInfo as _;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
-use mg_common::test as mg_test;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
@@ -179,28 +178,28 @@ impl RunAllArgs {
             cptestctx.silo_name,
             cptestctx.external_dns_zone_name,
         );
-        for (location, gateway) in &cptestctx.gateway {
+        for (switch_slot, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:     {} ({})",
+                "omicron-dev: management gateway:     {} ({:?})",
                 gateway.client.baseurl(),
-                location,
+                switch_slot,
             );
         }
         for (location, dendrite) in cptestctx.dendrite.read().unwrap().iter() {
             println!(
-                "omicron-dev: dendrite:               http://[::1]:{} ({})",
+                "omicron-dev: dendrite:               http://[::1]:{} ({:?})",
                 dendrite.port, location,
             );
         }
         for (location, lldpd) in &cptestctx.lldpd {
             println!(
-                "omicron-dev: lldp:                   http://[::1]:{} ({})",
+                "omicron-dev: lldp:                   http://[::1]:{} ({:?})",
                 lldpd.port, location,
             );
         }
         for (location, mgd) in &cptestctx.mgd {
             println!(
-                "omicron-dev: maghemite:              http://[::1]:{} ({})",
+                "omicron-dev: maghemite:              http://[::1]:{} ({:?})",
                 mgd.port, location,
             );
         }
@@ -286,14 +285,14 @@ impl RunMultipleArgs {
 
         let mut peer_routers = vec![];
 
-        let mut loopback_manager =
-            mg_test::LoopbackIpManager::new("lo0", log.clone());
+        // let mut loopback_manager =
+        //     mg_test::LoopbackIpManager::new("lo0", log.clone());
 
         for n in 0..self.peer_routers {
             let mgd_bgp_addr =
                 SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
 
-            loopback_manager.add(&[mgd_bgp_addr.ip()]);
+            // loopback_manager.add(&[mgd_bgp_addr.ip()]);
 
             let mgd = omicron_test_utils::dev::maghemite::MgdInstance::start(
                 0,
@@ -456,7 +455,7 @@ impl RunMultipleArgs {
             );
             for (location, gateway) in &cptestctx.gateway {
                 println!(
-                    "omicron-dev: management gateway:     {} ({})",
+                    "omicron-dev: management gateway:     {} ({:?})",
                     gateway.client.baseurl(),
                     location,
                 );
@@ -465,24 +464,24 @@ impl RunMultipleArgs {
                 cptestctx.dendrite.read().unwrap().iter()
             {
                 println!(
-                    "omicron-dev: dendrite:               http://[::1]:{} ({})",
+                    "omicron-dev: dendrite:               http://[::1]:{} ({:?})",
                     dendrite.port, location,
                 );
             }
             for (location, lldpd) in &cptestctx.lldpd {
                 println!(
-                    "omicron-dev: lldp:                   http://[::1]:{} ({})",
+                    "omicron-dev: lldp:                   http://[::1]:{} ({:?})",
                     lldpd.port, location,
                 );
             }
             for (location, mgd) in &cptestctx.mgd {
                 println!(
-                    "omicron-dev: mgd api:                http://[::1]:{} ({})",
+                    "omicron-dev: mgd api:                http://[::1]:{} ({:?})",
                     mgd.port, location,
                 );
 
                 println!(
-                    "omicron-dev: mgd bgp-dispatcher:     tcp {} ({})",
+                    "omicron-dev: mgd bgp-dispatcher:     tcp {} ({:?})",
                     mgd.bgp_dispatcher_addr, location,
                 );
             }

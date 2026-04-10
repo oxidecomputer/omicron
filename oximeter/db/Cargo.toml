@@ -112,6 +112,7 @@ expectorate.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 oximeter-test-utils.workspace = true
+rand.workspace = true
 slog-dtrace.workspace = true
 sqlformat.workspace = true
 sqlparser.workspace = true
@@ -149,4 +150,8 @@ doc = false
 
 [[bench]]
 name = "protocol"
+harness = false
+
+[[bench]]
+name = "oxql"
 harness = false

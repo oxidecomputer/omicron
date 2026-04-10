@@ -8,7 +8,7 @@ use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::address::MGS_PORT;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use tokio::time::Duration;
 use tokio::time::sleep;
@@ -27,23 +27,19 @@ async fn test_nexus_boots_before_cockroach() {
 
     starter
         .start_gateway(
-            SwitchLocation::Switch0,
+            SwitchSlot::Switch0,
             Some(MGS_PORT),
             DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
     starter
-        .start_gateway(
-            SwitchLocation::Switch1,
-            None,
-            DEFAULT_SP_SIM_CONFIG.into(),
-        )
+        .start_gateway(SwitchSlot::Switch1, None, DEFAULT_SP_SIM_CONFIG.into())
         .await;
 
-    starter.start_dendrite(SwitchLocation::Switch0).await;
-    starter.start_dendrite(SwitchLocation::Switch1).await;
-    starter.start_mgd(SwitchLocation::Switch0).await;
-    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.start_dendrite(SwitchSlot::Switch0).await;
+    starter.start_dendrite(SwitchSlot::Switch1).await;
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
     starter.start_internal_dns().await;
     starter.start_external_dns().await;
 
@@ -105,18 +101,10 @@ async fn test_nexus_boots_before_dendrite() {
     // hardcodes it.
     info!(&log, "Starting MGS");
     starter
-        .start_gateway(
-            SwitchLocation::Switch0,
-            None,
-            DEFAULT_SP_SIM_CONFIG.into(),
-        )
+        .start_gateway(SwitchSlot::Switch0, None, DEFAULT_SP_SIM_CONFIG.into())
         .await;
     starter
-        .start_gateway(
-            SwitchLocation::Switch1,
-            None,
-            DEFAULT_SP_SIM_CONFIG.into(),
-        )
+        .start_gateway(SwitchSlot::Switch1, None, DEFAULT_SP_SIM_CONFIG.into())
         .await;
     info!(&log, "Started MGS");
 
@@ -161,31 +149,31 @@ async fn test_nexus_boots_before_dendrite() {
     //
     // This is necessary for the prior call to "start Nexus" to succeed.
     info!(log, "Starting Dendrite");
-    starter.start_dendrite(SwitchLocation::Switch0).await;
-    starter.start_dendrite(SwitchLocation::Switch1).await;
+    starter.start_dendrite(SwitchSlot::Switch0).await;
+    starter.start_dendrite(SwitchSlot::Switch1).await;
     info!(log, "Started Dendrite");
 
     info!(log, "Starting lldp");
-    starter.start_lldp(SwitchLocation::Switch0).await;
-    starter.start_lldp(SwitchLocation::Switch1).await;
+    starter.start_lldp(SwitchSlot::Switch0).await;
+    starter.start_lldp(SwitchSlot::Switch1).await;
     info!(log, "Started lldp");
 
     info!(log, "Starting mgd");
-    starter.start_mgd(SwitchLocation::Switch0).await;
-    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
     info!(log, "Started mgd");
 
     info!(log, "Populating internal DNS records");
     starter
         .record_switch_dns(
             nexus_test_utils::SLED_AGENT_UUID.parse().unwrap(),
-            SwitchLocation::Switch0,
+            SwitchSlot::Switch0,
         )
         .await;
     starter
         .record_switch_dns(
             nexus_test_utils::SLED_AGENT2_UUID.parse().unwrap(),
-            SwitchLocation::Switch1,
+            SwitchSlot::Switch1,
         )
         .await;
     starter.populate_internal_dns().await;
@@ -208,12 +196,12 @@ async fn nexus_schema_test_setup(
     starter.start_external_dns().await;
 
     let sp_conf: camino::Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
-    starter.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
-    starter.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
-    starter.start_dendrite(SwitchLocation::Switch0).await;
-    starter.start_dendrite(SwitchLocation::Switch1).await;
-    starter.start_mgd(SwitchLocation::Switch0).await;
-    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.start_gateway(SwitchSlot::Switch0, None, sp_conf.clone()).await;
+    starter.start_gateway(SwitchSlot::Switch1, None, sp_conf).await;
+    starter.start_dendrite(SwitchSlot::Switch0).await;
+    starter.start_dendrite(SwitchSlot::Switch1).await;
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;
 }
 

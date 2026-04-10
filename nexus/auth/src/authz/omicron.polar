@@ -611,6 +611,17 @@ resource DeviceAuthRequestList {
 has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
 	if collection.fleet = fleet;
 
+# Describes the policy for creating and managing trust quorum configurations
+# This may change in a multirack future to a per rack parent
+resource TrustQuorumConfig {
+    permissions = [ "read", "modify" ];
+	relations = { parent_fleet: Fleet };
+	"read" if "viewer" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", config: TrustQuorumConfig)
+	if config.rack.fleet = fleet;
+
 # Describes the policy for creating and managing Silo certificates
 resource SiloCertificateList {
 	permissions = [ "list_children", "create_child" ];

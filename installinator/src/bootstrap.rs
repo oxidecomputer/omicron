@@ -19,7 +19,7 @@ use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware::underlay;
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -70,9 +70,11 @@ pub(crate) async fn bootstrap_sled(
             .context("failed to ensure bootstrap etherstub vnic existence")?;
 
     // Use the mac address of the first link to derive our bootstrap address.
-    let ip = BootstrapInterface::GlobalZone.ip(&links[0]).await.with_context(
-        || format!("failed to derive a bootstrap prefix from {:?}", links[0]),
-    )?;
+    let ip = underlay::bootstrap_ip(BootstrapInterface::GlobalZone, &links[0])
+        .await
+        .with_context(|| {
+            format!("failed to derive a bootstrap prefix from {:?}", links[0])
+        })?;
 
     Zones::ensure_has_global_zone_v6_address(
         bootstrap_etherstub_vnic,

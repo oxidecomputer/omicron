@@ -9,10 +9,11 @@
 //! and upgrade. Furthermore when rack initialization functions are called
 //! it's expected that software components are on the same version.
 
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
-use sled_agent_types::rack_init::RackInitializeRequest;
-use sled_agent_types::rack_ops::RackOperationStatus;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {

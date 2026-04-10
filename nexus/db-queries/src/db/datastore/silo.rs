@@ -667,6 +667,20 @@ impl DataStore {
             "deleted {} IP pool links for silo {}", updated_rows, id
         );
 
+        // delete subnet pool links (not subnet pools, just the links)
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        let updated_rows = diesel::delete(subnet_pool_silo_link::table)
+            .filter(subnet_pool_silo_link::silo_id.eq(id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        debug!(
+            opctx.log,
+            "deleted {} subnet pool links for silo {}", updated_rows, id
+        );
+
         Ok(())
     }
 }

@@ -7,16 +7,20 @@
 //! Of particular importance is the [`Sitrep`], which is the top-level data
 //! structure containing fault management state.
 
+pub mod analysis_reports;
 pub mod ereport;
 pub use ereport::{Ereport, EreportId};
-
 pub mod case;
 pub use case::Case;
 
+use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
+};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
 ///
@@ -39,6 +43,8 @@ pub struct Sitrep {
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
     pub cases: IdOrdMap<Case>,
+    /// A map of all ereports associated with cases in this sitrep.
+    pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please
@@ -68,6 +74,25 @@ impl Sitrep {
     /// child sitreps that descend from this one.
     pub fn open_cases(&self) -> impl Iterator<Item = &Case> + '_ {
         self.cases.iter().filter(|c| c.is_open())
+    }
+
+    /// Iterate over all alerts requested by cases in this sitrep.
+    pub fn alerts_requested(
+        &self,
+    ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
+        self.cases.iter().flat_map(|case| {
+            let case_id = *case.id();
+            case.alerts_requested.iter().map(move |alert| (case_id, alert))
+        })
+    }
+
+    /// Iterate over all support bundles requested by cases in this sitrep.
+    pub fn support_bundles_requested(
+        &self,
+    ) -> impl Iterator<Item = (&Case, &case::SupportBundleRequest)> {
+        self.cases.iter().flat_map(|case| {
+            case.support_bundles_requested.iter().map(move |req| (case, req))
+        })
     }
 }
 

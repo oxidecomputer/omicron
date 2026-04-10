@@ -12,6 +12,9 @@ use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SupportBundleCreateParams;
+use nexus_db_queries::db::datastore::SupportBundleProvenance;
+use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -64,7 +67,17 @@ impl super::Nexus {
         user_comment: Option<String>,
     ) -> CreateResult<SupportBundle> {
         self.db_datastore
-            .support_bundle_create(&opctx, reason, self.id, user_comment)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason,
+                    nexus_id: self.id,
+                    user_comment,
+                    // TODO: eventually allow user-selectable data selection from the API.
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
     }
 

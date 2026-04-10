@@ -22,11 +22,12 @@ use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -441,6 +442,56 @@ pub struct BackgroundTaskConfig {
     pub trust_quorum: TrustQuorumConfig,
     /// configuration for the attached subnet manager
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
+    /// configuration for console session cleanup task
+    pub session_cleanup: SessionCleanupConfig,
+    /// configuration for audit log incomplete timeout task
+    pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
+    /// configuration for audit log cleanup (retention) task
+    pub audit_log_cleanup: AuditLogCleanupConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionCleanupConfig {
+    /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogTimeoutIncompleteConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// how old an incomplete entry must be before it is timed out
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout_secs: Duration,
+
+    /// max rows per SQL statement
+    pub max_timed_out_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogCleanupConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// retention period in days; must be at least 1
+    ///
+    /// This should be much longer than the `audit_log_timeout_incomplete`
+    /// timeout so orphaned entries are completed before they become eligible
+    /// for cleanup.
+    pub retention_days: NonZeroU32,
+
+    /// maximum rows hard-deleted per activation
+    pub max_deleted_per_activation: u32,
 }
 
 #[serde_as]
@@ -927,6 +978,10 @@ impl Default for MulticastGroupReconcilerConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
     /// period (in seconds) for periodic activations of the background task that
+    /// drives fault management analysis.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub analysis_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
@@ -934,16 +989,28 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// updates externally-visible database tables to match the current situation
+    /// report.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub rendezvous_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
     fn default() -> Self {
         Self {
+            // Analysis is generally triggered by changes in the current sitrep,
+            // inventory, or by the ereport ingester(s), so it need not be
+            // periodically activated all that frequently.
+            analysis_period_secs: Duration::from_secs(60),
             sitrep_load_period_secs: Duration::from_secs(15),
             // This need not be activated very frequently, as it's triggered any
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This, too, is activated whenever a new sitrep is loaded, so we
+            // need not set the periodic activation interval too high.
+            rendezvous_period_secs: Duration::from_secs(300),
         }
     }
 }
@@ -1006,13 +1073,13 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    pub dendrite: HashMap<SwitchSlot, DpdConfig>,
     /// `LLDP` daemon configuration
     #[serde(default)]
-    pub lldpd: HashMap<SwitchLocation, LldpdConfig>,
+    pub lldpd: HashMap<SwitchSlot, LldpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
-    pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    pub mgd: HashMap<SwitchSlot, MgdConfig>,
     /// Initial reconfigurator config
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
@@ -1261,8 +1328,18 @@ mod test {
             fm.sitrep_gc_period_secs = 49
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
+            fm.rendezvous_period_secs = 51
+            fm.analysis_period_secs = 52
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1346,21 +1423,21 @@ mod test {
                         load_timeout: None
                     },
                     dendrite: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
                                 .unwrap(),
                         }
                     )]),
                     lldpd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         LldpdConfig {
                             address: SocketAddr::from_str("[::1]:12230")
                                 .unwrap(),
                         }
                     )]),
                     mgd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         MgdConfig {
                             address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),
@@ -1516,8 +1593,10 @@ mod test {
                             disable: false,
                         },
                         fm: FmTasksConfig {
+                            analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
                             period_secs: Duration::from_secs(50),
@@ -1532,6 +1611,21 @@ mod test {
                         },
                         attached_subnet_manager: AttachedSubnetManagerConfig {
                             period_secs: Duration::from_secs(60),
+                        },
+                        session_cleanup: SessionCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
+                        },
+                        audit_log_timeout_incomplete:
+                            AuditLogTimeoutIncompleteConfig {
+                                period_secs: Duration::from_secs(600),
+                                timeout_secs: Duration::from_secs(14400),
+                                max_timed_out_per_activation: 1000,
+                            },
+                        audit_log_cleanup: AuditLogCleanupConfig {
+                            period_secs: Duration::from_secs(600),
+                            retention_days: NonZeroU32::new(90).unwrap(),
+                            max_deleted_per_activation: 10_000,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
@@ -1635,9 +1729,19 @@ mod test {
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
             probe_distributor.period_secs = 47
+            fm.rendezvous_period_secs = 48
+            fm.analysis_period_secs = 49
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"
@@ -1759,6 +1863,19 @@ mod test {
         } else {
             panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
+    }
+
+    #[test]
+    fn test_invalid_audit_log_cleanup_retention_days() {
+        let error = toml::from_str::<AuditLogCleanupConfig>(
+            r##"
+            period_secs = 600
+            retention_days = 0
+            max_deleted_per_activation = 10000
+            "##,
+        )
+        .expect_err("retention_days = 0 should be rejected");
+        assert!(error.message().contains("nonzero"), "error = {}", error);
     }
 
     #[test]

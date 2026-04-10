@@ -197,7 +197,6 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -249,6 +248,7 @@ mod api_impl {
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -270,6 +270,9 @@ mod api_impl {
     use sled_agent_types_versions::v1;
     use sled_agent_types_versions::v20;
     use sled_agent_types_versions::v25;
+    use sled_agent_types_versions::v26;
+    use sled_agent_types_versions::v30;
+    use sled_agent_types_versions::v33;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -399,7 +402,8 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
             }))
         }
@@ -766,6 +770,27 @@ mod api_impl {
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v33(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v30(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v26(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

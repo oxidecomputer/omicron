@@ -159,7 +159,7 @@ impl TestInterfaces for super::Nexus {
                 .fetch()
                 .await?;
 
-        let new_runtime = db_disk.runtime_state.faulted();
+        let new_runtime = db_disk.runtime().faulted();
 
         self.db_datastore
             .disk_update_runtime(&opctx, &authz_disk, &new_runtime)

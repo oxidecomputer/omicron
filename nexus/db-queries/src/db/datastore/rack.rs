@@ -980,10 +980,13 @@ impl DataStore {
 
                     // Insert the initial trust quorum configuration
                     if let Some(tq_config) = rack_init.initial_trust_quorum_configuration {
+                        let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                            RackUuid::from_untyped_uuid(rack_id),
+                        );
                         Self::tq_insert_rss_config_after_handoff(
                             opctx,
                             &conn,
-                            RackUuid::from_untyped_uuid(rack_id),
+                            authz_tq,
                             tq_config.members,
                             tq_config.coordinator
                         ).await.map_err(|e| {

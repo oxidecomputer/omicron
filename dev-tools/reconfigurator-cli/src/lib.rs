@@ -34,6 +34,8 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -461,6 +463,7 @@ fn process_command(
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
         Commands::BlueprintHistory(args) => cmd_blueprint_history(sim, args),
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
+        Commands::BlueprintLoad(args) => cmd_blueprint_load(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
         Commands::TufAssemble(args) => cmd_tuf_assemble(sim, args),
@@ -557,6 +560,8 @@ enum Commands {
     BlueprintHistory(BlueprintHistoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
+    /// load one blueprint from a file
+    BlueprintLoad(BlueprintLoadArgs),
 
     /// show system properties
     Show,
@@ -720,8 +725,12 @@ struct SledMupdateSource {
     mupdate_id: Option<MupdateUuid>,
 
     /// simulate an error reading the zone manifest
-    #[clap(long, conflicts_with = "sled-mupdate-valid-source")]
+    #[clap(long, conflicts_with_all = ["sled-mupdate-valid-source", "with_measurement_manifest_error"])]
     with_manifest_error: bool,
+
+    /// simulate an error reading the measurement manifest
+    #[clap(long, conflicts_with = "with_manifest_error")]
+    with_measurement_manifest_error: bool,
 
     /// simulate an error validating zones by this artifact ID name
     ///
@@ -1014,6 +1023,25 @@ enum BlueprintEditCommands {
     /// This initiates a handoff from the current generation of Nexus zones to
     /// the next generation of Nexus zones.
     BumpNexusGeneration,
+    /// make a new blueprint from an existing one without any changes
+    Noop,
+    /// Set a sled's measurements to either `unknown` or `install-dataset`
+    SetMeasurements {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        #[command(subcommand)]
+        command: SledMeasurementTarget,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SledMeasurementTarget {
+    /// Set the blueprint to unknown measurements
+    Unknown,
+    /// Set the blueprint to install dataset
+    InstallDataset,
+    // Unlike Omicron zones we don't have a need for the
+    // `Artifact` kind for now
 }
 
 #[derive(Debug, Subcommand)]
@@ -1485,6 +1513,12 @@ struct BlueprintSaveArgs {
 }
 
 #[derive(Debug, Args)]
+struct BlueprintLoadArgs {
+    /// input file
+    filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct BlueprintDiffArgs {
     /// id of the first blueprint, "latest", or "target"
     blueprint1_id: BlueprintIdOpt,
@@ -1526,6 +1560,8 @@ enum SetArgs {
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
     },
+    /// CockroachDB settings
+    CockroachdbSettings(SetCockroachdbSettingsArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -1569,6 +1605,50 @@ impl PlannerConfigOpts {
             add_zones_with_mupdate_override: self
                 .add_zones_with_mupdate_override
                 .unwrap_or(current.add_zones_with_mupdate_override),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Args)]
+struct SetCockroachdbSettingsArgs {
+    #[clap(flatten)]
+    opts: CockroachdbSettingsOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct CockroachdbSettingsOpts {
+    /// state fingerprint (a 40-hex-digit hash)
+    #[clap(long)]
+    fingerprint: Option<String>,
+    /// cluster version (e.g. "22.1")
+    #[clap(long)]
+    version: Option<String>,
+    /// cluster.preserve_downgrade_option value (e.g. "22.1", empty string
+    /// means unset)
+    #[clap(long)]
+    preserve_downgrade: Option<String>,
+}
+
+impl CockroachdbSettingsOpts {
+    fn update_if_modified(
+        &self,
+        current: &CockroachDbSettings,
+    ) -> Option<CockroachDbSettings> {
+        let new = CockroachDbSettings {
+            state_fingerprint: self
+                .fingerprint
+                .clone()
+                .unwrap_or_else(|| current.state_fingerprint.clone()),
+            version: self
+                .version
+                .clone()
+                .unwrap_or_else(|| current.version.clone()),
+            preserve_downgrade: self
+                .preserve_downgrade
+                .clone()
+                .unwrap_or_else(|| current.preserve_downgrade.clone()),
         };
         (new != *current).then_some(new)
     }
@@ -2726,6 +2806,22 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
+        BlueprintEditCommands::SetMeasurements { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            builder.sled_set_measurements(
+                sled_id,
+                match command {
+                    SledMeasurementTarget::InstallDataset => {
+                        BlueprintMeasurements::InstallDataset
+                    }
+                    SledMeasurementTarget::Unknown => {
+                        BlueprintMeasurements::Unknown
+                    }
+                },
+            )?;
+            format!("set sled measurements to '{command:?}' {sled_id}")
+        }
+
         BlueprintEditCommands::Debug {
             command: BlueprintEditDebugCommands::RemoveSled { sled },
         } => {
@@ -2741,19 +2837,10 @@ fn cmd_blueprint_edit(
             builder.debug_sled_force_generation_bump(sled_id)?;
             format!("debug: forced sled {sled_id} generation bump")
         }
+        BlueprintEditCommands::Noop => "noop".to_owned(),
     };
 
-    let mut new_blueprint =
-        builder.build(BlueprintSource::ReconfiguratorCliEdit);
-
-    // Normally `builder.build()` would construct the cockroach fingerprint
-    // based on what we read from CRDB and put into the planning input, but
-    // since we don't have a CRDB we had to make something up for our planning
-    // input's CRDB fingerprint. In the absense of a better alternative, we'll
-    // just copy our parent's CRDB fingerprint and carry it forward.
-    new_blueprint
-        .cockroachdb_fingerprint
-        .clone_from(&blueprint.cockroachdb_fingerprint);
+    let new_blueprint = builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     let rv = format!(
         "blueprint {} created from {}: {}",
@@ -3063,6 +3150,28 @@ fn cmd_blueprint_save(
     Ok(Some(format!("saved {} to {:?}", resolved_id, output_path)))
 }
 
+fn cmd_blueprint_load(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintLoadArgs,
+) -> anyhow::Result<Option<String>> {
+    let filename = args.filename;
+    let blueprint: Blueprint = {
+        let contents = std::fs::read(&filename)
+            .with_context(|| format!("failed to read {filename}"))?;
+        serde_json::from_slice(&contents).with_context(|| {
+            format!("failed to parse {filename} as a blueprint")
+        })?
+    };
+    let blueprint_id = blueprint.id;
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    system.add_blueprint(blueprint).context("failed to load blueprint")?;
+    sim.commit_and_bump("reconfigurator-cli blueprint-load".to_owned(), state);
+
+    Ok(Some(format!("loaded blueprint {blueprint_id} from {filename}")))
+}
+
 fn cmd_save(
     sim: &mut ReconfiguratorSim,
     args: SaveArgs,
@@ -3327,6 +3436,13 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
         swriteln!(s, "not-yet nexus zones: inferred from generation");
     }
 
+    swriteln!(s, "cockroachdb settings:");
+    swrite!(
+        s,
+        "{}",
+        state.system().description().get_cockroachdb_settings().display()
+    );
+
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
@@ -3447,6 +3563,29 @@ fn cmd_set(
                 humantime::format_rfc3339_millis(since.0.into())
             )
         }
+        SetArgs::CockroachdbSettings(args) => {
+            let current = state
+                .system_mut()
+                .description()
+                .get_cockroachdb_settings()
+                .clone();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "cockroachdb settings updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state
+                    .system_mut()
+                    .description_mut()
+                    .set_cockroachdb_settings(new);
+                rv
+            } else {
+                format!(
+                    "no changes to cockroachdb settings:\n{}",
+                    current.display()
+                )
+            }
+        }
     };
 
     sim.commit_and_bump(format!("reconfigurator-cli set: {}", rv), state);
@@ -3475,6 +3614,11 @@ fn mupdate_source_to_description(
             format!("from repo at {repo_path}"),
         )?;
         sim_source.simulate_zone_errors(&source.with_zone_error)?;
+        if source.with_measurement_manifest_error {
+            sim_source.simulate_measurement_error(
+                "simulated error with measurement manifest",
+            );
+        }
         Ok(SimTufRepoDescription::new(sim_source))
     } else if source.valid.to_target_release {
         let description = sim
@@ -3498,6 +3642,11 @@ fn mupdate_source_to_description(
                     "to target release".to_owned(),
                 )?;
                 sim_source.simulate_zone_errors(&source.with_zone_error)?;
+                if source.with_measurement_manifest_error {
+                    sim_source.simulate_measurement_error(
+                        "simulated error with measurement manifest",
+                    );
+                }
                 Ok(SimTufRepoDescription::new(sim_source))
             }
         }

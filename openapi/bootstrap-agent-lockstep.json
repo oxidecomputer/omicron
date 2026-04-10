@@ -236,7 +236,7 @@
             "minimum": 0
           },
           "switch": {
-            "$ref": "#/components/schemas/SwitchLocation"
+            "$ref": "#/components/schemas/SwitchSlot"
           }
         },
         "required": [
@@ -294,9 +294,12 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer. Use `UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
-            "type": "string",
-            "format": "ip"
+            "description": "Address of the peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterPeerType"
+              }
+            ]
           },
           "allowed_export": {
             "description": "Define export policy for a peer.",
@@ -417,15 +420,6 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
-          },
-          "router_lifetime": {
-            "description": "Router lifetime in seconds for unnumbered BGP peers.",
-            "default": 0,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RouterLifetimeConfig"
-              }
-            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -777,7 +771,7 @@
             ]
           },
           "port": {
-            "description": "Nmae of the port this config applies to.",
+            "description": "Name of the port this config applies to.",
             "type": "string"
           },
           "routes": {
@@ -791,7 +785,7 @@
             "description": "Switch the port belongs to.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           },
@@ -870,9 +864,6 @@
         "properties": {
           "allowed_source_ips": {
             "description": "IPs or subnets allowed to make requests to user-facing services",
-            "default": {
-              "allow": "any"
-            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/AllowedSourceIps"
@@ -954,6 +945,7 @@
           }
         },
         "required": [
+          "allowed_source_ips",
           "bootstrap_discovery",
           "dns_servers",
           "external_certificates",
@@ -1258,6 +1250,60 @@
         "minimum": 0,
         "maximum": 9000
       },
+      "RouterPeerIpAddr": {
+        "type": "string",
+        "format": "ip"
+      },
+      "RouterPeerType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "router_lifetime": {
+                "description": "Router lifetime in seconds for unnumbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterLifetimeConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unnumbered"
+                ]
+              }
+            },
+            "required": [
+              "router_lifetime",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "IP address for numbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterPeerIpAddr"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "numbered"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          }
+        ]
+      },
       "RssStep": {
         "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.",
         "oneOf": [
@@ -1337,7 +1383,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "network_config_update"
+                  "initial_network_config_update"
                 ]
               }
             },
@@ -1352,6 +1398,20 @@
                 "type": "string",
                 "enum": [
                   "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "final_network_config_update"
                 ]
               }
             },
@@ -1473,7 +1533,7 @@
           }
         ]
       },
-      "SwitchLocation": {
+      "SwitchSlot": {
         "description": "Identifies switch physical location",
         "oneOf": [
           {
@@ -1528,15 +1588,50 @@
           }
         }
       },
+      "UplinkAddress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "addrconf"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip_net": {
+                "$ref": "#/components/schemas/UplinkIpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "static"
+                ]
+              }
+            },
+            "required": [
+              "ip_net",
+              "type"
+            ]
+          }
+        ]
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
           "address": {
-            "nullable": true,
-            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "description": "The address to be used on the uplink.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNet"
+                "$ref": "#/components/schemas/UplinkAddress"
               }
             ]
           },
@@ -1548,7 +1643,13 @@
             "format": "uint16",
             "minimum": 0
           }
-        }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "UplinkIpNet": {
+        "$ref": "#/components/schemas/IpNet"
       },
       "UserId": {
         "title": "A username for a local-only user",

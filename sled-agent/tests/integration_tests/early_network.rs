@@ -5,13 +5,21 @@
 //! Tests that EarlyNetworkConfig deserializes across versions.
 
 use bootstore::schemes::v0 as bootstore;
+use iddqd::IdOrdMap;
+use nexus_types::inventory::SourceNatConfigGeneric;
+use omicron_common::api::external::Vni;
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
-    BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
-    EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
-    LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, SwitchLocation,
+    BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
+    LldpAdminStatus, LldpPortConfig, MaxPathConfig, PortConfig, PortFec,
+    PortSpeed, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
+    SwitchSlot, UplinkAddress, UplinkAddressConfig,
 };
+use sled_agent_types::system_networking::{
+    ServiceZoneNatEntries, ServiceZoneNatEntry, ServiceZoneNatKind,
+    SystemNetworkingConfig,
+};
+use slog_error_chain::InlineErrorChain;
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
 
@@ -58,13 +66,15 @@ fn early_network_blobs_deserialize() {
         .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt envelope \
-                    \"{blob_desc}\" (line {blob_lineno}): {error}",
+                 \"{blob_desc}\" (line {blob_lineno}): {}",
+                InlineErrorChain::new(&error),
             );
         });
         let config = envelope.deserialize_body().unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt body \
-                 \"{blob_desc}\" (line {blob_lineno}): {error}",
+                 \"{blob_desc}\" (line {blob_lineno}): {}",
+                InlineErrorChain::new(&error),
             );
         });
 
@@ -88,8 +98,8 @@ fn early_network_blobs_deserialize() {
         .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt \
-                 \"{blob_desc}\" (line {blob_lineno}) as bootstore config: \
-                 {error}",
+                 \"{blob_desc}\" (line {blob_lineno}) as bootstore config: {}",
+                InlineErrorChain::new(&error),
             );
         });
 
@@ -123,10 +133,9 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-02-27 r18";
-    let config = EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
-        ntp_servers: vec![],
-        rack_network_config: Some(RackNetworkConfig {
+    let description = "2026-04-01 pre-r19";
+    let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
+        rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
@@ -134,7 +143,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch1,
+                    switch: SwitchSlot::Switch1,
                     port: "qsfp0".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: None,
@@ -146,7 +155,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch1,
+                    switch: SwitchSlot::Switch1,
                     port: "qsfp26".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
@@ -165,15 +174,21 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 },
                 PortConfig {
                     routes: vec![],
-                    addresses: vec!["172.20.15.53/29".parse().unwrap()],
-                    switch: SwitchLocation::Switch1,
+                    addresses: vec![UplinkAddressConfig {
+                        address: UplinkAddress::AddrConf,
+                        vlan_id: Some(1),
+                    }],
+                    switch: SwitchSlot::Switch1,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: "172.20.15.51".parse().unwrap(),
+                        addr: RouterPeerType::Unnumbered {
+                            router_lifetime: RouterLifetimeConfig::new(1234)
+                                .unwrap(),
+                        },
                         hold_time: Some(6),
                         idle_hold_time: Some(3),
                         delay_open: Some(3),
@@ -191,8 +206,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.52.0/22".parse().unwrap(),
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
-                        vlan_id: None,
-                        router_lifetime: Default::default(),
+                        vlan_id: Some(1),
                     }],
                     autoneg: false,
                     tx_eq: None,
@@ -208,15 +222,19 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 },
                 PortConfig {
                     routes: vec![],
-                    addresses: vec!["172.20.15.45/29".parse().unwrap()],
-                    switch: SwitchLocation::Switch0,
+                    addresses: vec![UplinkAddressConfig::without_vlan(
+                        "172.20.15.45/29".parse().unwrap(),
+                    )],
+                    switch: SwitchSlot::Switch0,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: "172.20.15.43".parse().unwrap(),
+                        addr: RouterPeerType::Numbered {
+                            ip: "172.20.15.43".parse().unwrap(),
+                        },
                         hold_time: Some(6),
                         idle_hold_time: Some(0),
                         delay_open: Some(3),
@@ -235,7 +253,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
                         vlan_id: None,
-                        router_lifetime: Default::default(),
                     }],
                     autoneg: false,
                     tx_eq: None,
@@ -252,7 +269,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch0,
+                    switch: SwitchSlot::Switch0,
                     port: "qsfp0".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: None,
@@ -264,7 +281,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch0,
+                    switch: SwitchSlot::Switch0,
                     port: "qsfp26".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
@@ -293,7 +310,104 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 max_paths: MaxPathConfig::default(),
             }],
             bfd: vec![],
-        }),
+        },
+        service_zone_nat_entries: Some(
+            ServiceZoneNatEntries::try_from(
+                [
+                    ServiceZoneNatEntry {
+                        zone_id: "b922e5ec-a05e-4d8a-8378-5277f19426bc"
+                            .parse()
+                            .unwrap(),
+                        sled_underlay_ip: "fd00:1122:3344:103::1"
+                            .parse()
+                            .unwrap(),
+                        nic_mac: "A8:40:25:FF:80:00".parse().unwrap(),
+                        vni: Vni::SERVICES_VNI,
+                        kind: ServiceZoneNatKind::BoundaryNtp {
+                            snat_cfg: SourceNatConfigGeneric::new(
+                                "172.20.26.7".parse().unwrap(),
+                                0,
+                                16383,
+                            )
+                            .expect("valid snat cfg"),
+                        },
+                    },
+                    ServiceZoneNatEntry {
+                        zone_id: "1683d46d-69c4-4adb-a113-70eba32de76f"
+                            .parse()
+                            .unwrap(),
+                        sled_underlay_ip: "fd00:1122:3344:101::1"
+                            .parse()
+                            .unwrap(),
+                        nic_mac: "A8:40:25:FF:80:02".parse().unwrap(),
+                        vni: Vni::SERVICES_VNI,
+                        kind: ServiceZoneNatKind::BoundaryNtp {
+                            snat_cfg: SourceNatConfigGeneric::new(
+                                "172.20.26.7".parse().unwrap(),
+                                16384,
+                                32767,
+                            )
+                            .expect("valid snat cfg"),
+                        },
+                    },
+                    ServiceZoneNatEntry {
+                        zone_id: "84be6867-c3b1-4f54-92c8-1ba3390a9ff7"
+                            .parse()
+                            .unwrap(),
+                        sled_underlay_ip: "fd00:1122:3344:108::1"
+                            .parse()
+                            .unwrap(),
+                        nic_mac: "A8:40:25:FF:80:05".parse().unwrap(),
+                        vni: Vni::SERVICES_VNI,
+                        kind: ServiceZoneNatKind::Nexus {
+                            external_ip: "172.20.26.8".parse().unwrap(),
+                        },
+                    },
+                    ServiceZoneNatEntry {
+                        zone_id: "03ee5ea0-a003-4ff3-9125-bf54d41b1868"
+                            .parse()
+                            .unwrap(),
+                        sled_underlay_ip: "fd00:1122:3344:102::1"
+                            .parse()
+                            .unwrap(),
+                        nic_mac: "A8:40:25:FF:80:04".parse().unwrap(),
+                        vni: Vni::SERVICES_VNI,
+                        kind: ServiceZoneNatKind::Nexus {
+                            external_ip: "172.20.26.6".parse().unwrap(),
+                        },
+                    },
+                    ServiceZoneNatEntry {
+                        zone_id: "45aa654b-77b9-4f73-b0e0-fbf1be4bf30f"
+                            .parse()
+                            .unwrap(),
+                        sled_underlay_ip: "fd00:1122:3344:102::1"
+                            .parse()
+                            .unwrap(),
+                        nic_mac: "A8:40:25:FF:80:03".parse().unwrap(),
+                        vni: Vni::SERVICES_VNI,
+                        kind: ServiceZoneNatKind::ExternalDns {
+                            external_ip: "172.20.26.1".parse().unwrap(),
+                        },
+                    },
+                    ServiceZoneNatEntry {
+                        zone_id: "7d6c20e7-92ca-46b9-8ec2-9c003d05cc83"
+                            .parse()
+                            .unwrap(),
+                        sled_underlay_ip: "fd00:1122:3344:105::1"
+                            .parse()
+                            .unwrap(),
+                        nic_mac: "A8:40:25:FF:80:01".parse().unwrap(),
+                        vni: Vni::SERVICES_VNI,
+                        kind: ServiceZoneNatKind::ExternalDns {
+                            external_ip: "172.20.26.2".parse().unwrap(),
+                        },
+                    },
+                ]
+                .into_iter()
+                .collect::<IdOrdMap<_>>(),
+            )
+            .expect("valid service zone NAT entries"),
+        ),
     });
 
     (description, config)

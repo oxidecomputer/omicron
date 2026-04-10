@@ -56,6 +56,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -169,7 +170,7 @@ async fn rsrss_set_saga_id(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -225,35 +226,35 @@ async fn rsrss_create_replace_params(
             params.request.request_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let Some(old_target_address) = osagactx
         .datastore()
         .read_only_target_addr(&region_snapshot_replace_request)
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     else {
         // This is ok - the next background task invocation will move the
         // request state forward appropriately.
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "request {} target deleted!",
             region_snapshot_replace_request.id,
-        )));
+        ))));
     };
 
     let Some(new_region_id) = region_snapshot_replace_request.new_region_id
     else {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "request {} does not have a new_region_id!",
             region_snapshot_replace_request.id,
-        )));
+        ))));
     };
 
     let new_region_address = osagactx
         .nexus()
         .region_addr(&log, new_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(ReplaceParams { old_target_address, new_region_address })
 }
@@ -298,7 +299,7 @@ async fn rssrs_create_fake_volume(
         .datastore()
         .volume_create(new_volume_id, volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -339,7 +340,7 @@ async fn rsrss_replace_snapshot_in_volume(
             VolumeToDelete(new_volume_id),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     debug!(
         &log,
@@ -429,7 +430,7 @@ async fn rsrss_notify_upstairs(
         .datastore()
         .disk_for_volume_id(params.request.volume_id())
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     else {
         return Ok(());
     };
@@ -447,19 +448,19 @@ async fn rsrss_notify_upstairs(
         .instance_id(instance_id)
         .lookup_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let instance_and_vmm = osagactx
         .datastore()
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let Some(vmm) = instance_and_vmm.vmm() else {
         return Ok(());
     };
 
-    let state = vmm.runtime.state;
+    let state = vmm.state;
 
     info!(
         log,
@@ -487,10 +488,10 @@ async fn rsrss_notify_upstairs(
         | VmmState::Creating => {
             // Propolis server is not ok to receive volume replacement requests
             // - unwind so that this saga can run again.
-            return Err(ActionError::action_failed(format!(
+            return Err(saga_action_failed(Error::internal_error(&format!(
                 "vmm {} propolis not in a state to receive request",
                 vmm.id,
-            )));
+            ))));
         }
     }
 
@@ -498,12 +499,12 @@ async fn rsrss_notify_upstairs(
         .datastore()
         .volume_get(params.request.volume_id())
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
         Some(volume) => volume.data().to_string(),
 
         None => {
-            return Err(ActionError::action_failed(Error::internal_error(
+            return Err(saga_action_failed(Error::internal_error(
                 "new volume is gone!",
             )));
         }
@@ -520,7 +521,7 @@ async fn rsrss_notify_upstairs(
             authz::Action::Modify,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         log,
@@ -545,13 +546,13 @@ async fn rsrss_notify_upstairs(
         .await
         .map_err(|e| match e {
             propolis_client::Error::ErrorResponse(rv) => {
-                ActionError::action_failed(rv.message.clone())
+                saga_action_failed(Error::internal_error(&rv.message))
             }
 
-            _ => ActionError::action_failed(format!(
+            _ => saga_action_failed(Error::internal_error(&format!(
                 "unexpected failure during \
                         `instance_issue_crucible_vcr_request`: {e}",
-            )),
+            ))),
         })?;
 
     let replace_result = result.into_inner();
@@ -588,7 +589,7 @@ async fn rsrss_notify_upstairs(
         ReplaceResult::Missing => {
             // The volume does not contain the region to be replaced. This is an
             // error!
-            return Err(ActionError::action_failed(String::from(
+            return Err(saga_action_failed(Error::internal_error(
                 "saw ReplaceResult::Missing",
             )));
         }
@@ -621,7 +622,7 @@ async fn rsrss_update_request_record(
             new_volume_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }

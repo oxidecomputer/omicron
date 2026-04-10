@@ -32,14 +32,14 @@ use crate::db::raw_query_builder::SelectableSql;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::count;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::OptionalError;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_lookup::DbConnection;
@@ -98,6 +98,14 @@ impl ServiceIpPools {
             IpVersion::V6 => &self.ipv6.db_pool,
         }
     }
+}
+
+/// Default unicast IP pools linked to the current silo, keyed by IP version.
+/// Each field is `None` if no default of that version is linked to the silo.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultIpPools {
+    pub v4: Option<(authz::IpPool, IpPool)>,
+    pub v6: Option<(authz::IpPool, IpPool)>,
 }
 
 // Error message emitted when a user attempts to link an IP Pool and internal
@@ -273,9 +281,9 @@ impl DataStore {
 
     /// Look up the default IP pool for the current silo by pool type.
     ///
-    /// Related to `ip_pools_fetch_default`, but this one allows you to specify
-    /// the pool type (unicast or multicast) to fetch the default pool of that
-    /// type.
+    /// Allows specifying the pool type (unicast or multicast) and optionally
+    /// the IP version. For fetching all default unicast pools across all IP
+    /// versions, see [`Self::ip_pools_fetch_all_unicast_defaults`].
     ///
     /// If `ip_version` is `None` and there are multiple default pools of
     /// different IP versions, this returns an error asking the caller to
@@ -452,19 +460,65 @@ impl DataStore {
         })
     }
 
-    /// Look up the default IP pool for the current silo. If there is no default
-    /// at silo scope, fall back to the next level up, namely the fleet default.
-    ///
-    /// There should always be a default pool at the fleet level, though this
-    /// query can theoretically fail if someone is able to delete that pool or
-    /// make another one the default and delete that.
-    pub async fn ip_pools_fetch_default(
+    /// Fetch all default unicast IP pools for the current silo, one per IP
+    /// version. Returns a [`DefaultIpPools`] where each version field is
+    /// `Some` if a default pool of that version is linked to the silo, or
+    /// `None` if no default of that version is linked.
+    pub async fn ip_pools_fetch_all_unicast_defaults(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
-        // Default to unicast pools (existing behavior), no version preference
-        self.ip_pools_fetch_default_by_type(opctx, IpPoolType::Unicast, None)
+    ) -> Result<DefaultIpPools, Error> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+
+        let pools: Vec<IpPool> = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(ip_pool_resource::is_default.eq(true))
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Unicast))
+            .select(IpPool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::IpPool,
+                    &LookupType::ByOther(
+                        "default unicast IP pools for current silo".into(),
+                    ),
+                )
+            })?;
+
+        let mut result = DefaultIpPools::default();
+        for pool in pools {
+            let version = pool.ip_version;
+            let authz_pool = authz::IpPool::new(
+                authz::FLEET,
+                pool.id(),
+                LookupType::ById(pool.id()),
+            );
+            let prev = match version {
+                IpVersion::V4 => result.v4.replace((authz_pool, pool)),
+                IpVersion::V6 => result.v6.replace((authz_pool, pool)),
+            };
+
+            // NOTE: This is also essentially a check that there are no more
+            // than 2 linked pools, since we'd fail if we have already set the
+            // field for any particular version.
+            if prev.is_some() {
+                return Err(Error::internal_error(&format!(
+                    "found multiple default {:?} unicast pools for silo {}",
+                    version, authz_silo_id,
+                )));
+            }
+        }
+        Ok(result)
     }
 
     /// Fetch the default IP Pool for the current silo of the provided version.
@@ -917,7 +971,7 @@ impl DataStore {
         external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
-            .select(diesel::dsl::count_distinct(external_ip::ip))
+            .select(count(external_ip::ip).aggregate_distinct())
             .first_async::<i64>(conn)
             .await
     }
@@ -1311,6 +1365,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
+        use diesel::dsl::exists;
         use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::ip_pool_resource::dsl;
 
@@ -1322,139 +1377,101 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // if we're making is_default false, we can just do that without
-        // checking any other stuff
         if !is_default {
-            let updated_link = diesel::update(dsl::ip_pool_resource)
+            // Simple case: just unset the default flag.
+            return diesel::update(dsl::ip_pool_resource)
                 .filter(dsl::resource_id.eq(silo_id))
                 .filter(dsl::ip_pool_id.eq(ip_pool_id))
                 .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                .filter(exists(
+                    pool_dsl::ip_pool
+                        .filter(pool_dsl::id.eq(ip_pool_id))
+                        .filter(pool_dsl::time_deleted.is_null())
+                        .select(pool_dsl::id),
+                ))
                 .set(dsl::is_default.eq(false))
                 .returning(IpPoolResource::as_returning())
                 .get_result_async(&*conn)
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "Transaction error: {:?}",
-                        e
-                    ))
-                })?;
-            return Ok(updated_link);
+                .map_err(|e| match e {
+                    DieselError::NotFound => {
+                        LookupType::ByCompositeId(format!(
+                            "ip_pool_id: {}, silo_id: {}",
+                            ip_pool_id, silo_id,
+                        ))
+                        .into_not_found(ResourceType::IpPoolResource)
+                    }
+                    e => public_error_from_diesel(e, ErrorHandler::Server),
+                });
         }
 
-        // Errors returned from the below transactions.
-        #[derive(Debug)]
-        enum IpPoolResourceUpdateError {
-            FailedToUnsetDefault(DieselError),
-            PoolNotFound(DieselError),
-        }
-        type TxnError = TransactionError<IpPoolResourceUpdateError>;
-
-        let err = OptionalError::new();
-
+        // Setting as default: demote any existing default for the same
+        // (silo, pool_type, ip_version), then promote this one.
         self.transaction_retry_wrapper("ip_pool_set_default")
             .transaction(&conn, |conn| {
-                let err = err.clone();
                 async move {
-                    // Get the pool type and IP version of the pool we're
-                    // making default. A silo can have multiple defaults (one
-                    // per pool type + IP version variant), so we only unset the
-                    // default for the matching (pool_type, ip_version) pair.
-                    let (pool_type, ip_version) = pool_dsl::ip_pool
-                        .filter(pool_dsl::id.eq(ip_pool_id))
-                        .filter(pool_dsl::time_deleted.is_null())
-                        .select((pool_dsl::pool_type, pool_dsl::ip_version))
-                        .first_async::<(IpPoolType, IpVersion)>(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail(TxnError::CustomError(
-                                IpPoolResourceUpdateError::PoolNotFound(e),
-                            ))
-                        })?;
-
-                    // Find existing default for this silo with the same pool
-                    // type and IP version.
-                    let existing_default = dsl::ip_pool_resource
-                        .inner_join(pool_dsl::ip_pool)
-                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                    // Read this link to get its pool_type and ip_version, and
+                    // revalidate that the parent pool is still live. This is
+                    // only possible during the narrow window in a concurrent
+                    // pool delete after the pool has been soft-deleted but
+                    // before its link rows have been removed.
+                    let link = dsl::ip_pool_resource
+                        .inner_join(
+                            pool_dsl::ip_pool
+                                .on(pool_dsl::id.eq(dsl::ip_pool_id)),
+                        )
+                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
                         .filter(dsl::resource_id.eq(silo_id))
-                        .filter(dsl::is_default.eq(true))
-                        .filter(pool_dsl::pool_type.eq(pool_type))
-                        .filter(pool_dsl::ip_version.eq(ip_version))
+                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                        .filter(pool_dsl::time_deleted.is_null())
                         .select(IpPoolResource::as_select())
                         .get_result_async(&conn)
-                        .await;
+                        .await?;
 
-                    // If there is an existing default, we need to unset it
-                    // before we can set the new default
-                    if let Ok(existing_default) = existing_default {
-                        // If the pool we're making default is already default
-                        // for this silo, don't error: just noop
-                        if existing_default.ip_pool_id == ip_pool_id {
-                            return Ok(existing_default);
-                        }
-
-                        let unset_default =
-                            diesel::update(dsl::ip_pool_resource)
-                                .filter(
-                                    dsl::resource_id
-                                        .eq(existing_default.resource_id),
-                                )
-                                .filter(
-                                    dsl::ip_pool_id
-                                        .eq(existing_default.ip_pool_id),
-                                )
-                                .filter(
-                                    dsl::resource_type
-                                        .eq(existing_default.resource_type),
-                                )
-                                .set(dsl::is_default.eq(false))
-                                .execute_async(&conn)
-                                .await;
-                        if let Err(e) = unset_default {
-                            return Err(err.bail(TxnError::CustomError(
-                                IpPoolResourceUpdateError::FailedToUnsetDefault(
-                                    e,
-                                ),
-                            )));
-                        }
+                    // Already default — no-op.
+                    if link.is_default {
+                        return Ok(link);
                     }
 
-                    let updated_link = diesel::update(dsl::ip_pool_resource)
-                        .filter(dsl::resource_id.eq(silo_id))
-                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
-                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
-                        .set(dsl::is_default.eq(true))
-                        .returning(IpPoolResource::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
-                    Ok(updated_link)
+                    // Demote any existing default for same
+                    // (silo, pool_type, ip_version).
+                    diesel::update(
+                        dsl::ip_pool_resource
+                            .filter(dsl::resource_id.eq(silo_id))
+                            .filter(
+                                dsl::resource_type.eq(IpPoolResourceType::Silo),
+                            )
+                            .filter(dsl::pool_type.eq(link.pool_type))
+                            .filter(dsl::ip_version.eq(link.ip_version))
+                            .filter(dsl::is_default.eq(true)),
+                    )
+                    .set(dsl::is_default.eq(false))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Promote this one.
+                    diesel::update(
+                        dsl::ip_pool_resource
+                            .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                            .filter(dsl::resource_id.eq(silo_id))
+                            .filter(
+                                dsl::resource_type.eq(IpPoolResourceType::Silo),
+                            ),
+                    )
+                    .set(dsl::is_default.eq(true))
+                    .returning(IpPoolResource::as_returning())
+                    .get_result_async(&conn)
+                    .await
                 }
             })
             .await
-            .map_err(|e| match err.take() {
-                Some(TxnError::CustomError(
-                    IpPoolResourceUpdateError::FailedToUnsetDefault(err),
-                )) => public_error_from_diesel(err, ErrorHandler::Server),
-                Some(TxnError::CustomError(
-                    IpPoolResourceUpdateError::PoolNotFound(err),
-                )) => public_error_from_diesel(
-                    err,
-                    ErrorHandler::NotFoundByResource(authz_ip_pool),
-                ),
-                Some(TxnError::Database(err)) => {
-                    public_error_from_diesel(err, ErrorHandler::Server)
-                }
-                None => public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::IpPoolResource,
-                        // TODO: would be nice to put the actual names and/or ids in
-                        // here but LookupType on each of the two silos doesn't have
-                        // a nice to_string yet or a way of composing them
-                        LookupType::ByCompositeId("(pool, silo)".to_string()),
-                    ),
-                ),
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "ip_pool_id: {}, silo_id: {}",
+                    ip_pool_id, silo_id,
+                ))
+                .into_not_found(ResourceType::IpPoolResource),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
@@ -1646,7 +1663,7 @@ impl DataStore {
                         Error::invalid_request(
                             format!(
                                 "The provided IP range {}-{} overlaps with \
-                            an existing IP Pool range or Subnet Pool member",
+                            an existing IP pool range or subnet pool member",
                                 range.first_address(),
                                 range.last_address(),
                             )
@@ -2114,55 +2131,16 @@ fn extract_uuid_cast_sentinel(msg: &str) -> Option<&str> {
 // Oxide internal usage XOR linked to customer silos. It also checks that the
 // pool and silo still exist when the query is run.
 //
-// The full query is:
-//
-// ```sql
-// WITH
-//   -- Select the IP Pool by ID, used to ensure it still exists when we run
-//   -- this query. Also select the reservation type, and fail if the pool is
-//   -- currently reserved for Oxide. Include `pool_type` and `ip_version` for
-//   -- denormalization into `ip_pool_resource`, which allows for a partial
-//   -- index we can constrain pool defaults on.
-//   ip_pool AS (
-//      SELECT
-//        CAST(IF(reservation_type != 'external_silos', 'bad-link-type', $1) AS UUID) AS id,
-//        pool_type,
-//        ip_version
-//      FROM ip_pool
-//      WHERE id = $2 AND time_deleted IS NULL
-//   ),
-//   -- Select the Silo by ID, used to ensure it still exists when we run this
-//   -- query
-//   silo AS (SELECT id FROM silo WHERE id = $3 AND time_deleted IS NULL)
-// INSERT
-// INTO
-//   ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default, pool_type, ip_version)
-// SELECT
-//   -- If the pool exists, take its ID as a string. If it does not exist, take
-//   -- the string `'ip-pool-deleted'`. Attempt to cast the result to a UUID.
-//   -- This is the "true or cast error" trick we use in many places.
-//   CAST(COALESCE(CAST(ip.id AS STRING), 'ip-pool-deleted') AS UUID),
-//   -- The resource type, always 'silo' here.
-//   $4,
-//   -- If the silo exists, take its ID as a string. If it does not exist, take
-//   -- the string `'silo-deleted'`. Attempt to cast the result to a UUID.
-//   -- This is the "true or cast error" trick we use in many places.
-//   CAST(COALESCE(CAST(s.id AS STRING), 'silo-deleted') AS UUID),
-//   $5,
-//   -- Denormalized from ip_pool for the partial index constraint on defaults.
-//   ip.pool_type,
-//   ip.ip_version
-// FROM
-//   (SELECT 1) AS dummy
-//   LEFT JOIN ip_pool AS ip ON true
-//   LEFT JOIN silo AS s ON true
-// RETURNING
-//  *
-// ```
+// See `tests/output/ip_pool_external_silo_link.sql` for the full generated SQL.
 fn link_ip_pool_to_external_silo_query(
     ip_pool_resource: &IncompleteIpPoolResource,
 ) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
     let mut builder = QueryBuilder::new();
+    // `ip_pool` CTE: select the pool by ID, ensuring it still exists.
+    // Fail with a 'bad-link-type' sentinel (via CAST-to-UUID trick) if
+    // the pool is reserved for Oxide rather than external silos.
+    // Also selects pool_type and ip_version for denormalization into
+    // ip_pool_resource (needed for a partial index constraint on defaults).
     builder
         .sql("WITH ip_pool AS (SELECT CAST(IF(reservation_type != ")
         .param()
@@ -2177,16 +2155,22 @@ fn link_ip_pool_to_external_silo_query(
         .sql(") AS UUID) AS id, pool_type, ip_version FROM ip_pool WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
-        .sql(
-            " \
-            AND time_deleted IS NULL), \
-            silo AS (SELECT id FROM silo WHERE id = ",
-        )
+        .sql(" AND time_deleted IS NULL), ");
+
+    // `silo` CTE: select the silo by ID, ensuring it still exists.
+    builder
+        .sql("silo AS (SELECT id FROM silo WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.resource_id)
+        .sql(" AND time_deleted IS NULL) ");
+
+    // Use COALESCE(CAST(id AS STRING), '<sentinel>') to detect missing
+    // pool/silo: if the CTE returned no rows the LEFT JOIN produces NULL,
+    // COALESCE substitutes the sentinel, and CAST-to-UUID fails at runtime
+    // with a recognizable error message.
+    builder
         .sql(
-            " AND time_deleted IS NULL) \
-            INSERT INTO ip_pool_resource (\
+            "INSERT INTO ip_pool_resource (\
                 ip_pool_id, \
                 resource_type, \
                 resource_id, \
@@ -2537,9 +2521,12 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // we start out with no default pool, so we expect not found
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // we start out with no default pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         let pagparams_id = DataPageParams {
             marker: None,
@@ -2618,10 +2605,12 @@ mod test {
             .await
             .expect("Failed to associate IP pool with silo");
 
-        // because that one was not a default, when we ask for the silo default
-        // pool, we still get nothing
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // because that one was not a default, we still get no defaults
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // now it shows up in the silo list
         let silo_pools = datastore
@@ -2651,12 +2640,15 @@ mod test {
             .await
             .expect("Should be able to make pool default again");
 
-        // now when we ask for the default pool again, we get that one
-        let (authz_pool1_for_silo, ip_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // now when we ask for the default pools again, we get that one as v4
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect("Failed to get silo's default IP pool");
+            .expect("Failed to get silo's default IP pools");
+        let (authz_pool1_for_silo, ip_pool) =
+            pools.v4.expect("Expected v4 default pool");
         assert_eq!(ip_pool.name().as_str(), "pool1-for-silo");
+        assert!(pools.v6.is_none(), "Expected no v6 default pool");
 
         // and we can't create a second default pool for the silo
         let identity = IdentityMetadataCreateParams {
@@ -2729,9 +2721,12 @@ mod test {
                 .unwrap();
         println!("{q:#?}");
 
-        // no default
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // no defaults after unlinking
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // and silo pools list is empty again
         let silo_pools = datastore
@@ -3254,9 +3249,12 @@ mod test {
         assert_eq!(default_pool.1.id(), pool.id());
         assert_eq!(default_pool.1.pool_type, IpPoolType::Multicast);
 
-        // Regular default should still fail (no unicast pool)
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // Regular unicast default should be empty (no unicast pool)
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch unicast defaults");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -4425,6 +4423,166 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // This is probably very hard to reproduce reliably in an integration test:
+    // the real delete path soft-deletes the pool and then removes link rows in
+    // the next statement, so the buggy behavior depends on hitting that narrow
+    // inter-statement window.
+    #[tokio::test]
+    async fn cannot_set_deleted_pool_as_default_even_if_link_exists() {
+        let logctx = dev::test_setup_log(
+            "cannot_set_deleted_pool_as_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should be able to link pool to default silo");
+
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
+        let c = diesel::update(pool_dsl::ip_pool.find(ip_pool.id()))
+            .set(pool_dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        use nexus_db_schema::schema::ip_pool_resource::dsl as resource_dsl;
+        let links: Vec<IpPoolResource> = resource_dsl::ip_pool_resource
+            .filter(resource_dsl::ip_pool_id.eq(ip_pool.id()))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should still have link rows for deleted pool");
+        assert_eq!(links.len(), 1);
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::Fleet,
+            nexus_types::silo::DEFAULT_SILO_ID,
+            LookupType::ById(nexus_types::silo::DEFAULT_SILO_ID),
+        );
+        let err = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err(
+                "Should not be able to set default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unset_deleted_pool_default_even_if_link_exists() {
+        let logctx = dev::test_setup_log(
+            "cannot_unset_deleted_pool_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should be able to link pool to default silo");
+
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
+        let c = diesel::update(pool_dsl::ip_pool.find(ip_pool.id()))
+            .set(pool_dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        use nexus_db_schema::schema::ip_pool_resource::dsl as resource_dsl;
+        let links: Vec<IpPoolResource> = resource_dsl::ip_pool_resource
+            .filter(resource_dsl::ip_pool_id.eq(ip_pool.id()))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should still have link rows for deleted pool");
+        assert_eq!(links.len(), 1);
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::Fleet,
+            nexus_types::silo::DEFAULT_SILO_ID,
+            LookupType::ById(nexus_types::silo::DEFAULT_SILO_ID),
+        );
+        let err = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect_err(
+                "Should not be able to unset default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Test that we can have separate default pools for IPv4 and IPv6 unicast.
     // This verifies that the unique index on (resource_id, pool_type, ip_version)
     // allows multiple defaults when they differ by ip_version.
@@ -4870,9 +5028,9 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Test that ip_pools_fetch_default only returns unicast pools, even when
-    // multicast default pools also exist. This is important because ephemeral
-    // and floating IPs should only come from unicast pools.
+    // Test that ip_pools_fetch_all_unicast_defaults only returns unicast pools,
+    // even when multicast default pools also exist. This is important because
+    // ephemeral and floating IPs should only come from unicast pools.
     #[tokio::test]
     async fn test_fetch_default_returns_unicast_not_multicast() {
         let logctx = dev::test_setup_log(
@@ -4912,13 +5070,12 @@ mod test {
             .await
             .expect("Link multicast pool");
 
-        // At this point, only multicast default exists
-        // `fetch_default` should fail since there's no unicast default
-        let err = datastore
-            .ip_pools_fetch_default(&opctx)
+        // At this point, only multicast default exists; unicast defaults should be empty
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect_err("Should fail: no unicast default");
-        assert_matches!(err, Error::ObjectNotFound { .. });
+            .expect("Should fetch defaults");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // Now create and link a unicast pool as default
         let unicast_pool = datastore
@@ -4949,14 +5106,15 @@ mod test {
             .await
             .expect("Link unicast pool");
 
-        // Now fetch_default should return the unicast pool, not multicast
-        let (_, default_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // Now fetch should return the unicast pool as v4, not multicast
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
             .expect("Should find unicast default");
-
+        let (_, default_pool) = pools.v4.expect("Expected v4 default pool");
         assert_eq!(default_pool.id(), unicast_pool.id());
         assert_eq!(default_pool.pool_type, IpPoolType::Unicast);
+        assert!(pools.v6.is_none(), "Expected no v6 default pool");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -5042,14 +5200,18 @@ mod test {
             "Expected V4/V6 conflict error, got: {error}"
         );
 
-        // Also verify via `ip_pools_fetch_default` (which uses None for ip_version)
-        let error = datastore
-            .ip_pools_fetch_default(&opctx)
+        // But ip_pools_fetch_all_unicast_defaults should return both pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect_err("Should fail when both V4 and V6 defaults exist");
-        assert!(
-            error.to_string().contains("Multiple"),
-            "Expected V4/V6 conflict error, got: {error}"
+            .expect("Should return both defaults without error");
+        assert_eq!(
+            pools.v4.expect("the IPv4 pool to be populated").1.id(),
+            unicast_ipv4.id()
+        );
+        assert_eq!(
+            pools.v6.expect("the IPv6 pool to be populated").1.id(),
+            unicast_ipv6.id()
         );
 
         // Test explicit ip_version preference
@@ -5166,14 +5328,18 @@ mod test {
             "Expected V4/V6 conflict error, got: {error}"
         );
 
-        // Also verify via `ip_pools_fetch_default`
-        let error = datastore
-            .ip_pools_fetch_default(&opctx)
+        // But ip_pools_fetch_all_unicast_defaults should return both pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect_err("Should fail when both V4 and V6 defaults exist");
-        assert!(
-            error.to_string().contains("Multiple"),
-            "Expected V4/V6 conflict error, got: {error}"
+            .expect("Should return both defaults without error");
+        assert_eq!(
+            pools.v4.expect("the IPv4 pool to be populated").1.id(),
+            unicast_ipv4.id()
+        );
+        assert_eq!(
+            pools.v6.expect("the IPv6 pool to be populated").1.id(),
+            unicast_ipv6.id()
         );
 
         // Test explicit ip_version preference
@@ -5248,12 +5414,12 @@ mod test {
             .await
             .expect("Link v6");
 
-        // Should be able to fetch the default
-        let (_, default_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // Should be able to fetch the v6 default
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect("Fetch default");
-
+            .expect("Fetch defaults");
+        let (_, default_pool) = pools.v6.expect("Expected v6 default pool");
         assert_eq!(default_pool.id(), v6_pool.id());
         assert_eq!(default_pool.ip_version, IpVersion::V6);
 
@@ -6027,7 +6193,7 @@ mod test {
             message.external_message(),
             format!(
                 "The provided IP range {}-{} overlaps with an existing \
-                IP Pool range or Subnet Pool member",
+                IP pool range or subnet pool member",
                 range.first_address(),
                 range.last_address(),
             ),

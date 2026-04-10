@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::o;
 use std::net::IpAddr;
@@ -44,7 +44,7 @@ impl PreflightCheckerHandler {
         network_config: UserSpecifiedRackNetworkConfig,
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
-        our_switch_location: SwitchLocation,
+        our_switch_slot: SwitchSlot,
         dns_name_to_query: Option<String>,
     ) -> Result<(), PreflightCheckerBusy> {
         let (check_started_tx, check_started_rx) = oneshot::channel();
@@ -59,7 +59,7 @@ impl PreflightCheckerHandler {
                 network_config,
                 dns_servers,
                 ntp_servers,
-                our_switch_location,
+                our_switch_slot,
                 dns_name_to_query,
                 check_started_tx,
             })
@@ -94,7 +94,7 @@ enum PreflightCheck {
         network_config: UserSpecifiedRackNetworkConfig,
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
-        our_switch_location: SwitchLocation,
+        our_switch_slot: SwitchSlot,
         dns_name_to_query: Option<String>,
         check_started_tx: oneshot::Sender<()>,
     },
@@ -111,7 +111,7 @@ async fn preflight_task_main(
                 network_config,
                 dns_servers,
                 ntp_servers,
-                our_switch_location,
+                our_switch_slot,
                 dns_name_to_query,
                 check_started_tx,
             } => {
@@ -129,7 +129,7 @@ async fn preflight_task_main(
                     network_config,
                     dns_servers,
                     ntp_servers,
-                    our_switch_location,
+                    our_switch_slot,
                     dns_name_to_query,
                     Arc::clone(&uplink_event_buffer),
                     &log,

@@ -321,8 +321,8 @@ async fn spawn_bootstore_tasks(
 
     // Create and spawn the bootstore
     info!(log, "Starting Bootstore");
-    let (mut node, node_handle) = bootstore::Node::new(config, log).await;
-    tokio::spawn(async move { node.run().await });
+    let (node, node_handle) = bootstore::Node::new(config, log).await;
+    tokio::spawn(node.run());
 
     // Spawn a task for polling DDMD and updating bootstore with peer addresses
     info!(log, "Starting Bootstore DDMD poller");

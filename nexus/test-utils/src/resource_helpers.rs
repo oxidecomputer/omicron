@@ -14,7 +14,6 @@ use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::header;
-use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -93,6 +92,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -513,7 +513,7 @@ pub async fn create_external_subnet_in_pool(
     pool_name: &str,
     project_name: &str,
     subnet_name: &str,
-    prefix_len: u8,
+    prefix_length: u8,
 ) -> ExternalSubnet {
     let params = external_subnet::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -521,7 +521,7 @@ pub async fn create_external_subnet_in_pool(
             description: format!("external subnet {subnet_name}"),
         },
         allocator: external_subnet::ExternalSubnetAllocator::Auto {
-            prefix_len,
+            prefix_length,
             pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: pool_name.parse::<Name>().unwrap().into(),
             },
@@ -1357,6 +1357,28 @@ pub async fn assert_ip_pool_utilization(
     );
 }
 
+pub async fn assert_subnet_pool_utilization(
+    client: &ClientTestContext,
+    pool_name: &str,
+    allocated: f64,
+    capacity: f64,
+) {
+    let url = format!("/v1/system/subnet-pools/{}/utilization", pool_name);
+    let utilization: subnet_pool::SubnetPoolUtilization =
+        object_get(client, &url).await;
+    let remaining = capacity - allocated;
+    assert_eq!(
+        remaining, utilization.remaining,
+        "Subnet pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
+    );
+    assert_eq!(
+        capacity, utilization.capacity,
+        "Subnet pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
+    );
+}
+
 /// Grant a role on a resource to a user
 ///
 /// * `grant_resource_url`: URL of the resource we're granting the role on
@@ -1844,6 +1866,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 TestDataset {
                     id: DatasetUuid::new_v4(),
                     kind: DatasetKind::Debug,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::LocalStorageUnencrypted,
                 },
             ],
             gibibytes,

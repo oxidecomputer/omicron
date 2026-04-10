@@ -29,6 +29,7 @@ use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::RendezvousDebugDataset;
+use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
 use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
@@ -50,9 +51,10 @@ use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
@@ -348,7 +350,7 @@ impl nexus_test_interface::NexusServer for Server {
         >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
+        recovery_silo: bootstrap_agent_lockstep_types::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".
@@ -435,11 +437,11 @@ impl nexus_test_interface::NexusServer for Server {
                     external_port_count: ExternalPortDiscovery::Static(
                         HashMap::from([
                             (
-                                SwitchLocation::Switch0,
+                                SwitchSlot::Switch0,
                                 vec!["qsfp0".parse().unwrap()],
                             ),
                             (
-                                SwitchLocation::Switch1,
+                                SwitchSlot::Switch1,
                                 vec!["qsfp0".parse().unwrap()],
                             ),
                         ]),
@@ -574,6 +576,22 @@ impl nexus_test_interface::NexusServer for Server {
                     .await
                     .unwrap();
             }
+            DatasetKind::LocalStorageUnencrypted => {
+                self.apictx
+                    .context
+                    .nexus
+                    .datastore()
+                    .local_storage_unencrypted_dataset_insert_if_not_exists(
+                        &opctx,
+                        RendezvousLocalStorageUnencryptedDataset::new(
+                            dataset_id,
+                            zpool_id,
+                            BlueprintUuid::new_v4(),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+            }
             _ => panic!(
                 "upsert_test_dataset does not support \
                  datasets of kind {kind:?}"
@@ -605,12 +623,11 @@ impl nexus_test_interface::NexusServer for Server {
 /// Run an instance of the Nexus server.
 pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     use slog::Drain;
-    let (drain, registration) =
-        slog_dtrace::with_drain(
-            config.pkg.log.to_logger("nexus").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
+    let (drain, registration) = slog_dtrace::with_drain(
+        config.pkg.log.to_logger("nexus").map_err(|message| {
+            format!("initializing logger: {}", InlineErrorChain::new(&message))
+        })?,
+    );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

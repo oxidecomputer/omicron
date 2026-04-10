@@ -5,6 +5,7 @@
 //! Background task for managing Support Bundles
 
 use crate::app::background::BackgroundTask;
+use anyhow::Context;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -27,10 +28,11 @@ use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use super::support_bundle::collection::BundleCollection;
-use super::support_bundle::request::BundleRequest;
+use super::support_bundle::collection::CHUNK_SIZE;
 
 fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
     authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
@@ -56,6 +58,7 @@ pub struct SupportBundleCollector {
     resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
+    transfer_chunk_size: NonZeroU64,
 }
 
 impl SupportBundleCollector {
@@ -65,7 +68,19 @@ impl SupportBundleCollector {
         disable: bool,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        SupportBundleCollector { datastore, resolver, disable, nexus_id }
+        SupportBundleCollector {
+            datastore,
+            resolver,
+            disable,
+            nexus_id,
+            transfer_chunk_size: CHUNK_SIZE,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_transfer_chunk_size(mut self, size: NonZeroU64) -> Self {
+        self.transfer_chunk_size = size;
+        self
     }
 
     // Tells a sled agent to delete a support bundle
@@ -311,7 +326,6 @@ impl SupportBundleCollector {
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
-        request: &BundleRequest,
     ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
@@ -349,17 +363,23 @@ impl SupportBundleCollector {
             }
         };
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let data_selection = self
+            .datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await
+            .context("failed to query bundle data selection")?;
+
         let collection = Arc::new(BundleCollection::new(
             self.datastore.clone(),
             self.resolver.clone(),
             opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
             opctx.child(std::collections::BTreeMap::new()),
-            request.clone(),
+            data_selection,
             bundle.clone(),
-            request.transfer_chunk_size,
+            self.transfer_chunk_size,
         ));
 
-        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         let mut report = collection.collect_bundle_and_store_on_sled().await?;
         if let Err(err) = self
             .datastore
@@ -416,8 +436,7 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
-            let request = BundleRequest::default();
-            match self.collect_bundle(&opctx, &request).await {
+            match self.collect_bundle(&opctx).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
@@ -441,14 +460,14 @@ mod test {
     use super::*;
 
     use crate::app::background::tasks::support_bundle::perfetto;
-    use crate::app::background::tasks::support_bundle::request::BundleData;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
-    use illumos_utils::zpool::ZpoolHealth;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
+    use nexus_db_queries::db::datastore::SupportBundleCreateParams;
+    use nexus_db_queries::db::datastore::SupportBundleProvenance;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
@@ -456,6 +475,7 @@ mod test {
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -468,7 +488,7 @@ mod test {
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
         PhysicalDiskUuid, SledUuid,
     };
-    use std::collections::HashSet;
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
     use uuid::Uuid;
 
@@ -519,9 +539,8 @@ mod test {
             nexus.id(),
         );
 
-        let request = BundleRequest::default();
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should succeed with no bundles");
         assert!(report.is_none());
@@ -587,10 +606,11 @@ mod test {
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
+        const SLED_SLOT: u16 = 8;
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
@@ -648,7 +668,10 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                Reporter::HostOs {
+                    sled: SledUuid::new_v4(),
+                    slot: Some(SLED_SLOT),
+                },
                 vec![
                     EreportData {
                         id: EreportId {
@@ -681,7 +704,7 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
                         id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
@@ -812,9 +835,17 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    // NOTE: The support bundle querying interface isn't
+                    // supported on the simulated sled agent (yet?) so we're
+                    // using an empty sled selection.
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -828,12 +859,8 @@ mod test {
         );
 
         // The bundle collection should complete successfully.
-        // NOTE: The support bundle querying interface isn't supported on
-        // the simulated sled agent (yet?) so we're using an empty sled selection.
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -867,7 +894,7 @@ mod test {
         // If we retry bundle collection, nothing should happen.
         // The bundle has already been collected.
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
@@ -892,9 +919,14 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For trace file testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For trace file testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -907,10 +939,8 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded")
             .expect("Should have generated a report");
@@ -1002,9 +1032,14 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1015,26 +1050,15 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-        );
+        )
+        .with_transfer_chunk_size(NonZeroU64::new(16).unwrap());
 
         // The bundle collection should complete successfully.
         //
         // We're going to use a really small chunk size here to force the bundle
         // to get split up.
-        let request = BundleRequest {
-            transfer_chunk_size: NonZeroU64::new(16).unwrap(),
-            data_selection: [
-                BundleData::Reconfigurator,
-                BundleData::HostInfo(HashSet::new()),
-                BundleData::SledCubbyInfo,
-                BundleData::SpDumps,
-            ]
-            .into_iter()
-            .collect(),
-        };
-
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1102,18 +1126,28 @@ mod test {
         let bundle1 = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
         let bundle2 = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a second support bundle");
@@ -1126,10 +1160,8 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1160,7 +1192,7 @@ mod test {
         assert_eq!(observed_bundle.state, SupportBundleState::Collecting);
 
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1213,9 +1245,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1277,9 +1313,14 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1291,10 +1332,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1363,9 +1402,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1432,9 +1475,14 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1446,10 +1494,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1517,9 +1563,14 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1531,10 +1582,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1601,9 +1650,14 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "Testing reconfigurator state collection",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "Testing reconfigurator state collection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1617,10 +1671,8 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
@@ -1677,6 +1729,114 @@ mod test {
                 .expect("blueprints should be an array")
                 .is_empty(),
             "Should have blueprints"
+        );
+    }
+
+    // Verify that a bundle created with a limited data selection only runs
+    // the corresponding collection steps (others are skipped).
+    #[nexus_test(server = crate::Server)]
+    async fn test_per_bundle_data_selection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle that only requests reconfigurator state -
+        // everything else should be skipped.
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "Testing per-bundle data selection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::new()
+                        .with_reconfigurator(),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+        assert!(report.activated_in_db_ok);
+
+        // Reconfigurator state should have run successfully.
+        let reconfig_step = report
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE
+            })
+            .expect("should have reconfigurator state step");
+        assert_eq!(reconfig_step.status, SupportBundleCollectionStepStatus::Ok);
+
+        // Ereports should be skipped since we didn't request them.
+        let ereport_step = report
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(
+            ereport_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // Sled cubby info should be skipped.
+        let cubby_step = report
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO
+            })
+            .expect("should have sled cubby info step");
+        assert_eq!(
+            cubby_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // SP dumps should be skipped.
+        let sp_step = report
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS
+            })
+            .expect("should have SP dumps step");
+        assert_eq!(sp_step.status, SupportBundleCollectionStepStatus::Skipped);
+
+        // Sled queries should be skipped.
+        let sled_step = report
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+            .expect("should have sled query step");
+        assert_eq!(
+            sled_step.status,
+            SupportBundleCollectionStepStatus::Skipped
         );
     }
 }

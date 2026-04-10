@@ -19,7 +19,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -180,16 +180,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         self.db_datastore
-            .switch_port_create(
-                opctx,
-                rack_id,
-                switch_location.into(),
-                port.into(),
-            )
+            .switch_port_create(opctx, rack_id, switch_slot, port.into())
             .await
     }
 
@@ -233,7 +228,7 @@ impl super::Nexus {
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
-                selector.switch_location.clone().into(),
+                selector.switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -274,7 +269,7 @@ impl super::Nexus {
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
-                params.switch_location.clone().into(),
+                params.switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -299,16 +294,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ports: &[Name],
-        switch: Name,
+        switch: SwitchSlot,
     ) -> CreateResult<()> {
         for port in ports {
             match self
-                .switch_port_create(
-                    opctx,
-                    self.rack_id,
-                    switch.clone(),
-                    port.clone(),
-                )
+                .switch_port_create(opctx, self.rack_id, switch, port.clone())
                 .await
             {
                 Ok(_) => {}
@@ -324,16 +314,10 @@ impl super::Nexus {
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: Name,
+        switch: SwitchSlot,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e}"
-            ))
-        })?;
 
         let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!("invalid port name: {port} {e}"))
@@ -346,8 +330,8 @@ impl super::Nexus {
             Error::internal_error(&format!("dpd clients get: {e}"))
         })?;
 
-        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
-            &format!("no client for switch {switch}"),
+        let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
+            &format!("no client for switch {switch:?}"),
         ))?;
 
         let status = dpd

@@ -25,7 +25,6 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
@@ -55,10 +54,8 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
-};
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -68,15 +65,17 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
     InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
-    SingleMeasurementInventory, SledRole,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -114,6 +113,10 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    /// Number of remaining local storage operation failures to inject.
+    /// When > 0, local storage ensure/delete operations decrement this
+    /// counter and return 503 Service Unavailable.
+    local_storage_error_count: AtomicU32,
     pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
@@ -140,9 +143,8 @@ impl SledAgent {
         let storage_log = log.new(o!("kind" => "storage"));
 
         let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
+            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
+                rack_network_config: RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -150,7 +152,10 @@ impl SledAgent {
                     ports: Vec::new(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
-                }),
+                },
+                // TODO-correctness Can we fill this in for the simulated
+                // sled-agent?
+                service_zone_nat_entries: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );
@@ -195,6 +200,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
             bootstore_network_config,
@@ -216,13 +222,13 @@ impl SledAgent {
             metadata,
             ..
         } = instance;
-        let v1_spec = crate::instance::spec_v0_to_v1(vmm_spec.0.clone());
+        let spec = vmm_spec.0.clone();
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus = v1_spec.board.cpus;
+        let ncpus = spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
-                &"could not allocate an instance: ran out of CPUs!",
+                "could not allocate an instance: ran out of CPUs!",
             ));
         };
 
@@ -297,7 +303,7 @@ impl SledAgent {
 
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    init: InstanceInitializationMethod::Spec { spec: v1_spec },
+                    init: InstanceInitializationMethod::Spec { spec },
                 };
 
                 // Try to create the instance
@@ -503,6 +509,42 @@ impl SledAgent {
 
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().unwrap() = error;
+    }
+
+    /// Set the number of times local storage operations should fail with 503
+    /// before succeeding. Each failure decrements the counter.
+    pub fn set_local_storage_error_count(&self, count: u32) {
+        self.local_storage_error_count.store(count, Ordering::Relaxed);
+    }
+
+    /// Returns the number of remaining local storage errors to inject.
+    pub fn local_storage_error_remaining(&self) -> u32 {
+        self.local_storage_error_count.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
+        let prev = self.local_storage_error_count.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |n| {
+                // checked_sub returns None if there's an underflow, which only
+                // happens if the counter was already 0.
+                n.checked_sub(1)
+            },
+        );
+        // fetch_update returns Ok(prev) if the value was updated.
+        if let Ok(prev) = prev {
+            // prev was at least 1.
+            let remaining = prev - 1;
+            return Err(HttpError::for_unavail(
+                None,
+                format!(
+                    "injected local storage error ({} remaining after this)",
+                    remaining
+                ),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn disk_ensure(
@@ -849,8 +891,8 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
-        let smf_services_in_maintenance =
-            self.health_monitor.to_inventory().smf_services_in_maintenance;
+        let smf_services_enabled_not_online =
+            self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
@@ -951,7 +993,7 @@ impl SledAgent {
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
-            smf_services_in_maintenance,
+            smf_services_enabled_not_online,
             reference_measurements,
         })
     }

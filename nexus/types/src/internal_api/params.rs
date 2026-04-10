@@ -7,6 +7,7 @@
 use crate::deployment::Blueprint;
 use crate::external_api::hardware::Baseboard;
 use crate::external_api::physical_disk::PhysicalDiskKind;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -22,9 +23,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types_versions::latest::inventory::{SledCpuFamily, SledRole};
-use sled_agent_types_versions::latest::rack_init::RecoverySiloConfig;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -215,9 +215,9 @@ pub struct RackInitializationRequest {
 #[serde(rename_all = "snake_case")]
 pub enum ExternalPortDiscovery {
     // Automatically discover ports via Dendrite
-    Auto(HashMap<SwitchLocation, Ipv6Addr>),
+    Auto(HashMap<SwitchSlot, Ipv6Addr>),
     // Static configuration pairing switches with a collection of ports
-    Static(HashMap<SwitchLocation, Vec<Name>>),
+    Static(HashMap<SwitchSlot, Vec<Name>>),
 }
 
 pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;

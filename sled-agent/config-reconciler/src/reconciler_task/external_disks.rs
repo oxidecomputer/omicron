@@ -15,7 +15,6 @@ use iddqd::id_ord_map::Entry;
 use iddqd::id_upcast;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
-use illumos_utils::zpool::ZpoolHealth;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::ByteCount;
@@ -26,6 +25,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::distr::{Alphanumeric, SampleString};
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::DatasetError;
@@ -856,7 +856,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                     log,
                     "Failed to read epoch from adopted disk";
                     "zpool" => %disk.zpool_name(),
-                    "error" => %e,
+                    InlineErrorChain::new(&e),
                 );
                 None
             }

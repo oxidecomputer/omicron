@@ -11,7 +11,8 @@
 //!
 //! These types are used when inserting and reading sitreps in CRDB; when in
 //! use, the sitrep is represented as a [`nexus_types::fm::Sitrep`]. See the
-//! documentation in [`nexus_types::fm`] for more information.
+//! documentation in [`nexus_types::fm`] for more information, and the
+//! [crate-level documentation](crate) for general conventions.
 
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;
@@ -19,10 +20,14 @@ use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
+mod alert_request;
+pub use alert_request::*;
 mod case;
 pub use case::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod support_bundle_request;
+pub use support_bundle_request::*;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_sitrep)]

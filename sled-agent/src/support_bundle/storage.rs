@@ -761,7 +761,11 @@ impl<'a> SupportBundleManager<'a> {
             if let Err(unlink_err) =
                 tokio::fs::remove_file(support_bundle_path_tmp).await
             {
-                warn!(log, "Failed to unlink bundle after previous error"; "error" => ?unlink_err);
+                warn!(
+                    log,
+                    "Failed to unlink bundle after previous error";
+                    InlineErrorChain::new(&unlink_err),
+                );
             }
             return Err(err);
         }
@@ -1106,7 +1110,6 @@ mod tests {
     use hyper::header::{
         ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
     };
-    use illumos_utils::zpool::ZpoolHealth;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -1115,6 +1118,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use sha2::Sha256;
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
     use uuid::Uuid;
     use zip::ZipWriter;

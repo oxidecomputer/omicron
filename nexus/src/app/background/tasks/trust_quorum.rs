@@ -8,6 +8,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::rack::rack_subnet;
 use anyhow::{Context, Error, anyhow, bail};
 use futures::future::BoxFuture;
+use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_queries::db::DataStore;
@@ -211,8 +212,9 @@ async fn drive_reconfiguration(
     rack_id: RackUuid,
     epoch: Epoch,
 ) -> Result<Status, Error> {
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
     let Some(config) = datastore
-        .tq_get_config(&opctx, rack_id, epoch)
+        .tq_get_config(&opctx, authz_tq.clone(), epoch)
         .await
         .context("Failed to get tq configuration")?
     else {
@@ -398,10 +400,12 @@ async fn commit(
 
     if !acked.is_empty() {
         // Write state back to DB
+        let authz_tq =
+            authz::TrustQuorumConfig::for_rack_id(nexus_config.rack_id);
         let state = datastore
             .tq_update_commit_status(
                 &opctx,
-                nexus_config.rack_id,
+                authz_tq,
                 nexus_config.epoch,
                 acked.clone(),
             )
@@ -476,8 +480,9 @@ async fn allocate_subnets_and_start_sled_agents(
 
     // Retrieve the last committed configuration so we can diff members and see
     // who was added.
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
     let Some(last_committed_config) =
-        datastore.tq_get_config(&opctx, rack_id, last_committed_epoch).await?
+        datastore.tq_get_config(&opctx, authz_tq, last_committed_epoch).await?
     else {
         bail!(
             "Failed to retrieve config from DB for rack {rack_id}, \

@@ -18,9 +18,10 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_ip_pool, create_local_user, create_project, create_silo, grant_iam,
-    link_ip_pool, object_create, object_delete, objects_list_page_authz,
-    projects_list, test_params,
+    create_ip_pool, create_local_user, create_project, create_silo,
+    create_subnet_pool, grant_iam, link_ip_pool, link_subnet_pool,
+    object_create, object_delete, objects_list_page_authz, projects_list,
+    test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::certificate;
@@ -28,6 +29,7 @@ use nexus_types::external_api::identity_provider;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
+use nexus_types::external_api::subnet_pool;
 use nexus_types::external_api::user;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::{IpRange, Ipv4Range};
@@ -950,24 +952,27 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 
     // In the built-in Silo, we expect the test-privileged and test-unprivileged
     // users.
+    let user_key = |u: &user::User| (u.id, u.display_name.clone(), u.silo_id);
     assert_eq!(
-        initial_silo_users,
+        initial_silo_users.iter().map(user_key).collect::<Vec<_>>(),
         vec![
-            user::User {
-                id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
-            user::User {
-                id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED
-                    .external_id
-                    .clone()
-                    .unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
+            (
+                USER_TEST_PRIVILEGED.id(),
+                USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
+            (
+                USER_TEST_UNPRIVILEGED.id(),
+                USER_TEST_UNPRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
         ]
     );
+    // Timestamps should be populated and sensible.
+    for u in &initial_silo_users {
+        assert!(u.time_created > chrono::DateTime::UNIX_EPOCH);
+        assert!(u.time_modified >= u.time_created);
+    }
 
     // Now create another user and make sure we can see them.  While we're at
     // it, use a small limit to check that pagination is really working.
@@ -988,26 +993,23 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .all_items;
     silo_users.sort_by(|u1, u2| u1.display_name.cmp(&u2.display_name));
     assert_eq!(
-        silo_users,
+        silo_users.iter().map(user_key).collect::<Vec<_>>(),
         vec![
-            user::User {
-                id: new_silo_user_id,
-                display_name: new_silo_user_external_id.into(),
-                silo_id: DEFAULT_SILO_ID,
-            },
-            user::User {
-                id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
-            user::User {
-                id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED
-                    .external_id
-                    .clone()
-                    .unwrap(),
-                silo_id: DEFAULT_SILO_ID,
-            },
+            (
+                new_silo_user_id,
+                new_silo_user_external_id.to_string(),
+                DEFAULT_SILO_ID,
+            ),
+            (
+                USER_TEST_PRIVILEGED.id(),
+                USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
+            (
+                USER_TEST_UNPRIVILEGED.id(),
+                USER_TEST_UNPRIVILEGED.external_id.clone().unwrap(),
+                DEFAULT_SILO_ID,
+            ),
         ]
     );
 
@@ -1045,12 +1047,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .parsed_body()
             .unwrap();
     assert_eq!(
-        silo2_users.items,
-        vec![user::User {
-            id: new_silo_user_id,
-            display_name: new_silo_user_name,
-            silo_id: silo.identity.id,
-        }]
+        silo2_users.items.iter().map(user_key).collect::<Vec<_>>(),
+        vec![(new_silo_user_id, new_silo_user_name, silo.identity.id),]
     );
 
     // The "test-privileged" user also shouldn't see the user in this other
@@ -2739,4 +2737,64 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
 
     object_delete(client, "/v1/system/ip-pools/pool1").await;
     object_delete(client, "/v1/system/ip-pools/pool2").await;
+}
+
+#[nexus_test]
+async fn test_silo_delete_cleans_up_subnet_pool_links(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo1 =
+        create_silo(&client, "silo1", true, silo::SiloIdentityMode::SamlJit)
+            .await;
+    let silo2 =
+        create_silo(&client, "silo2", true, silo::SiloIdentityMode::SamlJit)
+            .await;
+
+    create_subnet_pool(client, "pool1", omicron_common::address::IpVersion::V6)
+        .await;
+    link_subnet_pool(client, "pool1", &silo1.identity.id, true).await;
+    link_subnet_pool(client, "pool1", &silo2.identity.id, true).await;
+
+    create_subnet_pool(client, "pool2", omicron_common::address::IpVersion::V4)
+        .await;
+    link_subnet_pool(client, "pool2", &silo1.identity.id, false).await;
+
+    let url = "/v1/system/subnet-pools/pool1/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 2);
+
+    let url = "/v1/system/subnet-pools/pool2/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 1);
+
+    let url = format!("/v1/system/silos/{}", silo1.identity.id);
+    object_delete(client, &url).await;
+
+    let url = "/v1/system/subnet-pools/pool1/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 1);
+
+    let url = "/v1/system/subnet-pools/pool2/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 0);
+
+    let url = "/v1/system/subnet-pools";
+    let pools =
+        objects_list_page_authz::<subnet_pool::SubnetPool>(client, url).await;
+    assert_eq!(pools.items.len(), 2);
+    assert_eq!(pools.items[0].identity.name, "pool1");
+    assert_eq!(pools.items[1].identity.name, "pool2");
+
+    object_delete(client, "/v1/system/subnet-pools/pool1").await;
+    object_delete(client, "/v1/system/subnet-pools/pool2").await;
 }

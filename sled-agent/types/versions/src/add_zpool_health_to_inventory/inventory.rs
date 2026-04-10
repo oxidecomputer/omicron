@@ -3,8 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use iddqd::IdOrdMap;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -19,12 +17,34 @@ use crate::v1;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::SledRole;
+use crate::v12::inventory::SvcsInMaintenanceResult;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v22;
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ZpoolHealth {
+    /// The device is online and functioning.
+    Online,
+    /// One or more components are degraded or faulted, but sufficient
+    /// replicas exist to continue functioning.
+    Degraded,
+    /// One or more components are degraded or faulted, and insufficient
+    /// replicas exist to continue functioning.
+    Faulted,
+    /// The device was explicitly taken offline by "zpool offline".
+    Offline,
+    /// The device was physically removed.
+    Removed,
+    /// The device could not be opened.
+    Unavailable,
+}
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

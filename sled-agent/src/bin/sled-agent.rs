@@ -7,14 +7,14 @@
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
+use nix::sys::signal;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::config::Config as SledConfig;
-use sled_agent_types::rack_init::{
-    RackInitializeRequestParams, rack_initialize_request_from_file,
-};
+use omicron_sled_agent::rack_setup::service::RackInitializeRequestParams;
+use omicron_sled_agent::rack_setup::service::rack_initialize_request_from_file;
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -31,7 +31,26 @@ enum Args {
 }
 
 fn main() {
-    if let Err(message) = oxide_tokio_rt::run(do_run()) {
+    let rt = oxide_tokio_rt::OxideBuilder::new_multi_thread()
+        // Configure `oxide-tokio-rt` to route SIGCHLD signals to a dedicated
+        // signal-handling thread outside the Tokio runtime.
+        //
+        // sled-agent spawns a large number of short-lived of child processes
+        // (using `tokio::process`), and `SIGCHLD` is delivered when those
+        // children exit. Therefore, we should expect to receive `SIGCHLD`
+        // fairly frequently. Receiving a signal on a worker thread can
+        // interfere with IPCC communication (see
+        // https://github.com/oxidecomputer/omicron/issues/9849 and
+        // https://github.com/oxidecomputer/stlouis/issues/922).
+        //
+        // Note: `oxide-tokio-rt` will add `SIGCHLD` to the set of signals
+        // handled by the dedicated signal-handling thread by default if one is
+        // enabled at all, as it anticipates that `tokio::process` is being
+        // used. However, I'm still adding it here for explicitness.
+        .signal_thread(signal::SigSet::empty() | signal::Signal::SIGCHLD)
+        .build()
+        .expect("failed to initialize Tokio runtime");
+    if let Err(message) = rt.block_on(do_run()) {
         fatal(message);
     }
 }

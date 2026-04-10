@@ -1788,7 +1788,6 @@ pub(in crate::db::datastore) mod test {
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use illumos_utils::zpool::ZpoolHealth;
     use itertools::Itertools;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::PhysicalDiskKind;
@@ -1810,6 +1809,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use predicates::{BoxPredicate, prelude::*};
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::HashMap;
     use std::net::SocketAddrV6;
 

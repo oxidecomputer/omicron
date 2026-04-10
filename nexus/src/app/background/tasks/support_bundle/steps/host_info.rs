@@ -19,19 +19,23 @@ use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
+use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
+use tokio_util::sync::CancellationToken;
 
 pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
     cache: &Cache,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let request = collection.request();
-
-    if !request.include_host_info() {
+    let Some(sled_selection) = collection.data_selection().sled_selection()
+    else {
         return Ok(CollectionStepOutput::Skipped);
-    }
+    };
 
-    let all_sleds = cache.get_or_initialize_all_sleds(collection).await;
+    let all_sleds = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = cache.get_or_initialize_all_sleds(collection) => result,
+    };
 
     let Some(all_sleds) = all_sleds else {
         bail!("Could not read list of sleds");
@@ -39,7 +43,7 @@ pub async fn spawn_query_all_sleds(
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
     for sled in all_sleds {
-        if !request.include_sled_host_info(sled.id()) {
+        if !sled_selection.contains(sled.id()) {
             continue;
         }
 
@@ -66,23 +70,37 @@ pub async fn spawn_query_all_sleds(
 // - "sled" is the sled from which we should collect data.
 // - "dir" is a directory where data can be stored, to be turned
 // into a bundle after collection completes.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem and delegates to
+// cancel-unsafe helpers. HTTP requests within helpers and between
+// phases are eagerly cancelled via `select!`.
 async fn collect_data_from_sled(
     collection: &BundleCollection,
     sled: Sled,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let (log, opctx, datastore, request) = (
-        collection.log(),
-        collection.opctx(),
-        collection.datastore(),
-        collection.request(),
-    );
+    let (log, opctx, datastore) =
+        (collection.log(), collection.opctx(), collection.datastore());
 
-    if !request.include_sled_host_info(sled.id()) {
+    let excluded = collection
+        .data_selection()
+        .sled_selection()
+        .map_or(true, |sel| !sel.contains(sled.id()));
+    if excluded {
         return Ok(CollectionStepOutput::Skipped);
     }
 
     info!(log, "Collecting bundle info from sled"; "sled" => %sled.id());
+
+    let sled_client_result = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = nexus_networking::sled_client(
+            &datastore, &opctx, sled.id(), log,
+        ) => result,
+    };
+
     let sled_path = dir
         .join("rack")
         .join(sled.rack_id.to_string())
@@ -91,14 +109,7 @@ async fn collect_data_from_sled(
     tokio::fs::create_dir_all(&sled_path).await?;
     tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}")).await?;
 
-    let sled_client = match nexus_networking::sled_client(
-        &datastore,
-        &opctx,
-        sled.id(),
-        log,
-    )
-    .await
-    {
+    let sled_client = match sled_client_result {
         Ok(client) => client,
         Err(err) => {
             tokio::fs::write(
@@ -112,68 +123,85 @@ async fn collect_data_from_sled(
         }
     };
 
+    // Each helper function handles its own cancellation internally:
+    // HTTP requests are eagerly cancelled via select!, while filesystem
+    // writes complete cooperatively. This means the FuturesUnordered
+    // streams drain quickly on cancellation without dropping in-flight
+    // file writes.
+
     // NB: As new sled-diagnostic commands are added they should
     // be added to this array so that their output can be saved
     // within the support bundle.
+    let cancellation_token = collection.cancellation_token();
     let mut diag_cmds = futures::stream::iter([
         save_diag_cmd_output_or_error(
             &sled_path,
             "zoneadm",
             sled_client.support_zoneadm_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "dladm",
             sled_client.support_dladm_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "ipadm",
             sled_client.support_ipadm_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "nvmeadm",
             sled_client.support_nvmeadm_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "pargs",
             sled_client.support_pargs_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "pfiles",
             sled_client.support_pfiles_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "pstack",
             sled_client.support_pstack_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "zfs",
             sled_client.support_zfs_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "zpool",
             sled_client.support_zpool_info(),
+            cancellation_token,
         )
         .boxed(),
         save_diag_cmd_output_or_error(
             &sled_path,
             "health-check",
             sled_client.support_health_check(),
+            cancellation_token,
         )
         .boxed(),
     ])
@@ -196,14 +224,24 @@ async fn collect_data_from_sled(
         }
     }
 
+    let zones = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = sled_client.support_logs() => result?.into_inner(),
+    };
+
     // For each zone we concurrently fire off a request to its
     // sled-agent to collect its logs in a zip file and write the
     // result to the support bundle.
-    let zones = sled_client.support_logs().await?.into_inner();
     let mut log_futs: FuturesUnordered<_> = zones
         .iter()
         .map(|zone| {
-            save_zone_log_zip_or_error(log, &sled_client, zone, &sled_path)
+            save_zone_log_zip_or_error(
+                log,
+                &sled_client,
+                zone,
+                &sled_path,
+                cancellation_token,
+            )
         })
         .collect();
 
@@ -217,11 +255,19 @@ async fn collect_data_from_sled(
     Ok(CollectionStepOutput::None)
 }
 
-// Run a `sled-dianostics` future and save its output to a corresponding file.
+// Run a `sled-diagnostics` future and save its output to a corresponding file.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// The `future` argument must be cancel-safe (it is dropped via `select!`
+// if cancellation occurs before the HTTP response arrives). The future
+// return by this function must not be dropped mid-flight.
 async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     path: &Utf8Path,
     command: &str,
     future: F,
+    cancellation_token: &CancellationToken,
 ) -> anyhow::Result<()>
 where
     F: Future<
@@ -231,7 +277,11 @@ where
             >,
         > + Send,
 {
-    let result = future.await;
+    let result = tokio::select! {
+        _ = cancellation_token.cancelled() => return Ok(()),
+        result = future => result,
+    };
+
     match result {
         Ok(result) => {
             let output = result.into_inner();
@@ -255,21 +305,34 @@ where
     Ok(())
 }
 
+// Download and extract zone logs from a sled-agent.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem and uses `spawn_blocking`.
+// The initial HTTP download is cancel-safe and uses `select!` internally.
+// All filesystem operations after the download must not be dropped.
 async fn save_zone_log_zip_or_error(
     logger: &slog::Logger,
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
+    cancellation_token: &CancellationToken,
 ) -> anyhow::Result<()> {
     // In the future when support bundle collection exposes tuning parameters
     // this can turn into a collection parameter.
     const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
 
-    match client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS).await {
+    let download_result = tokio::select! {
+        _ = cancellation_token.cancelled() => return Ok(()),
+        result = client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS) => result,
+    };
+
+    match download_result {
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let output_path = output_dir.join("logs.zip");
+            let zipfile_path = output_dir.join("logs.zip");
 
             // Ensure the logs output directory exists.
             tokio::fs::create_dir_all(&output_dir).await.with_context(
@@ -278,22 +341,21 @@ async fn save_zone_log_zip_or_error(
 
             // Stream the log zip file to disk.
             let mut file =
-                tokio::fs::File::create(&output_path).await.with_context(
-                    || format!("failed to create log zip file: {output_path}"),
+                tokio::fs::File::create(&zipfile_path).await.with_context(
+                    || format!("failed to create log zip file: {zipfile_path}"),
                 )?;
 
-            let stream = bytestream.into_inner().map(|chunk| {
-                chunk.map_err(|e| std::io::Error::other(e.to_string()))
-            });
+            let stream = bytestream
+                .into_inner()
+                .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
 
             // Unzip the log file into the same directory.
-            let output_path_unzip = output_dir.join("unzipped_logs");
-            let zipfile_path = output_path.clone();
+            let zip_path = zipfile_path.clone();
             tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_path_unzip, &zipfile_path)
+                extract_zip_file(&output_dir, &zip_path)
             })
             .await
             .map_err(|join_error| {
@@ -302,12 +364,12 @@ async fn save_zone_log_zip_or_error(
             })??;
 
             // Clean up the zip file that was written to disk.
-            if let Err(e) = tokio::fs::remove_file(&output_path).await {
+            if let Err(e) = tokio::fs::remove_file(&zipfile_path).await {
                 error!(
                     logger,
                     "failed to cleanup temporary logs zip file";
-                    "error" => %e,
-                    "file" => %output_path,
+                    InlineErrorChain::new(&e),
+                    "file" => %zipfile_path,
 
                 );
             }
