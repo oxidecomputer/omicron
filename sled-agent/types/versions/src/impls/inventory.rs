@@ -27,8 +27,8 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcState, SvcsEnabledNotOnline,
-    ZoneArtifactInventory, ZoneKind, ZpoolHealth,
+    SingleMeasurementInventory, SvcEnabledNotOnlineState, SvcState,
+    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -944,6 +944,7 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
+// TODO-K: Modify here
 impl From<&'_ str> for SvcState {
     fn from(value: &str) -> Self {
         match value {
@@ -970,6 +971,32 @@ impl fmt::Display for SvcState {
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
             SvcState::Unknown => "unknown",
+        };
+
+        write!(f, "{state}")
+    }
+}
+
+impl From<&'_ str> for SvcEnabledNotOnlineState {
+    fn from(value: &str) -> Self {
+        match value {
+            "uninitialized" => SvcEnabledNotOnlineState::Uninitialized,
+            "offline" => SvcEnabledNotOnlineState::Offline,
+            "degraded" => SvcEnabledNotOnlineState::Degraded,
+            "maintenance" => SvcEnabledNotOnlineState::Maintenance,
+            _ => SvcEnabledNotOnlineState::Unknown,
+        }
+    }
+}
+
+impl fmt::Display for SvcEnabledNotOnlineState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            SvcEnabledNotOnlineState::Uninitialized => "uninitialized",
+            SvcEnabledNotOnlineState::Offline => "offline",
+            SvcEnabledNotOnlineState::Degraded => "degraded",
+            SvcEnabledNotOnlineState::Maintenance => "maintenance",
+            SvcEnabledNotOnlineState::Unknown => "unknown",
         };
 
         write!(f, "{state}")

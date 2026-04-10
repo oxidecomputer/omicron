@@ -21,7 +21,8 @@ use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
 use sled_agent_types::inventory::{
-    SvcState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult, SvcsError,
+    SvcEnabledNotOnlineState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult,
+    SvcsError,
 };
 use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -948,7 +949,7 @@ fn display_svcs_enabled_not_online(
                 struct SvcRow {
                     fmri: String,
                     zone: String,
-                    state: SvcState,
+                    state: SvcEnabledNotOnlineState,
                 }
                 let rows = services.iter().map(|s| SvcRow {
                     fmri: s.fmri.clone(),

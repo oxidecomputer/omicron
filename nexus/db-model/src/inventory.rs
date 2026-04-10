@@ -100,8 +100,8 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
-use sled_agent_types::inventory::Svc;
-use sled_agent_types::inventory::SvcState;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
+use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
@@ -2075,16 +2075,16 @@ pub struct InvSvcEnabledNotOnlineService {
     pub id: DbTypedUuid<SvcEnabledNotOnlineServiceKind>,
     pub fmri: String,
     pub zone: String,
-    pub state: InvSvcState,
+    pub state: InvSvcEnabledNotOnlineState,
 }
 
 impl InvSvcEnabledNotOnlineService {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        svc: Svc,
+        svc: SvcEnabledNotOnline,
     ) -> Self {
-        let Svc { fmri, zone, state } = svc;
+        let SvcEnabledNotOnline { fmri, zone, state } = svc;
 
         // This ID is only used as a primary key, it's fine to generate it here.
         let id = to_db_typed_uuid(SvcEnabledNotOnlineServiceUuid::new_v4());
@@ -2127,50 +2127,61 @@ impl InvSvcEnabledNotOnlineParseError {
     }
 }
 
-// See [`sled_agent_types::inventory::SvcState`].
+// See [`sled_agent_types::inventory::SvcEnabledNotOnlineState`].
 impl_enum_type!(
-    InvSvcStateEnum:
+    InvSvcEnabledNotOnlineStateEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    pub enum InvSvcState;
+    pub enum InvSvcEnabledNotOnlineState;
 
     // Enum values
     Uninitialized => b"uninitialized"
     Offline => b"offline"
-    Online => b"online"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
-    Disabled => b"disabled"
-    LegacyRun => b"legacy_run"
     Unknown => b"unknown"
 );
 
-impl From<SvcState> for InvSvcState {
-    fn from(value: SvcState) -> Self {
+impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
         match value {
-            SvcState::Online => InvSvcState::Online,
-            SvcState::Degraded => InvSvcState::Degraded,
-            SvcState::Uninitialized => InvSvcState::Uninitialized,
-            SvcState::Offline => InvSvcState::Offline,
-            SvcState::Maintenance => InvSvcState::Maintenance,
-            SvcState::Disabled => InvSvcState::Disabled,
-            SvcState::LegacyRun => InvSvcState::LegacyRun,
-            SvcState::Unknown => InvSvcState::Unknown,
+            SvcEnabledNotOnlineState::Degraded => {
+                InvSvcEnabledNotOnlineState::Degraded
+            }
+            SvcEnabledNotOnlineState::Uninitialized => {
+                InvSvcEnabledNotOnlineState::Uninitialized
+            }
+            SvcEnabledNotOnlineState::Offline => {
+                InvSvcEnabledNotOnlineState::Offline
+            }
+            SvcEnabledNotOnlineState::Maintenance => {
+                InvSvcEnabledNotOnlineState::Maintenance
+            }
+            SvcEnabledNotOnlineState::Unknown => {
+                InvSvcEnabledNotOnlineState::Unknown
+            }
         }
     }
 }
 
-impl From<InvSvcState> for SvcState {
-    fn from(value: InvSvcState) -> Self {
+impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
+    fn from(value: InvSvcEnabledNotOnlineState) -> Self {
         match value {
-            InvSvcState::Online => SvcState::Online,
-            InvSvcState::Degraded => SvcState::Degraded,
-            InvSvcState::Uninitialized => SvcState::Uninitialized,
-            InvSvcState::Offline => SvcState::Offline,
-            InvSvcState::Maintenance => SvcState::Maintenance,
-            InvSvcState::Disabled => SvcState::Disabled,
-            InvSvcState::LegacyRun => SvcState::LegacyRun,
-            InvSvcState::Unknown => SvcState::Unknown,
+            InvSvcEnabledNotOnlineState::Degraded => {
+                SvcEnabledNotOnlineState::Degraded
+            }
+            InvSvcEnabledNotOnlineState::Uninitialized => {
+                SvcEnabledNotOnlineState::Uninitialized
+            }
+            InvSvcEnabledNotOnlineState::Offline => {
+                SvcEnabledNotOnlineState::Offline
+            }
+            InvSvcEnabledNotOnlineState::Maintenance => {
+                SvcEnabledNotOnlineState::Maintenance
+            }
+            InvSvcEnabledNotOnlineState::Unknown => {
+                SvcEnabledNotOnlineState::Unknown
+            }
         }
     }
 }

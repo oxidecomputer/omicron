@@ -63,8 +63,8 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::Svc;
-use sled_agent_types::inventory::SvcState;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
+use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
@@ -690,10 +690,10 @@ pub fn representative() -> Representative {
                 ),
                 SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
                     SvcsEnabledNotOnline {
-                        services: vec![Svc {
+                        services: vec![SvcEnabledNotOnline {
                             fmri: "svc:/site/fake-service:default".to_string(),
                             zone: "global".to_string(),
-                            state: SvcState::Maintenance,
+                            state: SvcEnabledNotOnlineState::Maintenance,
                         }],
                         errors: vec!["an unimportant error".to_string()],
                         time_of_status: "2026-01-01T00:00:00Z".parse().unwrap(),

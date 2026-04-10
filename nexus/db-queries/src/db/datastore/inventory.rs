@@ -120,7 +120,7 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
-use sled_agent_types::inventory::Svc;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
@@ -4559,12 +4559,12 @@ impl DataStore {
                     Some(row) => {
                         // Collect all services from svcs_enabled_not_online_services_by_sled
                         // for this sled.
-                        let services: Vec<Svc> =
+                        let services: Vec<SvcEnabledNotOnline> =
                             svcs_enabled_not_online_services_by_sled
                                 .remove(&sled_id)
                                 .unwrap_or_default()
                                 .into_iter()
-                                .map(|svc| Svc {
+                                .map(|svc| SvcEnabledNotOnline {
                                     fmri: svc.fmri,
                                     zone: svc.zone,
                                     state: svc.state.into(),

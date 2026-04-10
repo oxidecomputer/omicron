@@ -1778,7 +1778,7 @@ table! {
         id -> Uuid,
         fmri -> Text,
         zone -> Text,
-        state -> crate::enums::InvSvcStateEnum,
+        state -> crate::enums::InvSvcEnabledNotOnlineStateEnum,
     }
 }
 

@@ -22,7 +22,6 @@ use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v28;
-use crate::v28::inventory::SvcsEnabledNotOnline;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +37,82 @@ impl From<SvcsError> for v28::inventory::SvcsError {
         // error type because this API isn't used yet. It would be adding
         // unnecessary complexity.
         Self::CommandFailure(error)
+    }
+}
+
+/// Each service instance is always in a well-defined state based on its
+/// dependencies, the results of the execution of its methods, and its potential
+/// contracts events.
+///
+/// This enum contains all possible states except `online`, `disabled` and
+/// `legacy_run`. We only want to represent states that represent some sort of
+/// "unhealthy" or "unexpected" state.
+/// See <https://illumos.org/man/7/smf> for more information.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SvcEnabledNotOnlineState {
+    /// Initial state for all service instances.
+    Uninitialized,
+    /// The instance is enabled, but not yet running or available to run.
+    Offline,
+    /// The instance is enabled and running or available to run. It is, however,
+    /// functioning at a limited capacity in comparison to normal operation.
+    Degraded,
+    /// The instance is enabled, but not able to run.
+    Maintenance,
+    /// We were unable to determine the state of the service instance.
+    Unknown,
+}
+
+impl From<SvcEnabledNotOnlineState> for v28::inventory::SvcState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
+        match value {
+            SvcEnabledNotOnlineState::Degraded => Self::Degraded,
+            SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
+            SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Uninitialized => Self::Uninitialized,
+            SvcEnabledNotOnlineState::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Information about an SMF service that is enabled but not running
+pub struct SvcEnabledNotOnline {
+    pub fmri: String,
+    pub zone: String,
+    pub state: SvcEnabledNotOnlineState,
+}
+
+impl From<SvcEnabledNotOnline> for v28::inventory::Svc {
+    fn from(value: SvcEnabledNotOnline) -> Self {
+        let SvcEnabledNotOnline { fmri, zone, state } = value;
+        Self { fmri, zone, state: state.into() }
+    }
+}
+
+/// Lists services that are enabled but not in an online state if any, the time
+/// the sample was collected, and any errors that may have ocurred during the
+/// collection
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SvcsEnabledNotOnline {
+    pub services: Vec<SvcEnabledNotOnline>,
+    pub errors: Vec<String>,
+    pub time_of_status: DateTime<Utc>,
+}
+
+impl From<SvcsEnabledNotOnline> for v28::inventory::SvcsEnabledNotOnline {
+    fn from(value: SvcsEnabledNotOnline) -> Self {
+        let SvcsEnabledNotOnline { services, errors, time_of_status } = value;
+        Self {
+            services: services.into_iter().map(|s| s.into()).collect(),
+            errors,
+            time_of_status,
+        }
     }
 }
 
@@ -61,7 +136,7 @@ impl From<SvcsEnabledNotOnlineResult>
                 Self::SvcsCmdError(e.into())
             }
             SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
-                Self::SvcsEnabledNotOnline(svcs)
+                Self::SvcsEnabledNotOnline(svcs.into())
             }
         }
     }

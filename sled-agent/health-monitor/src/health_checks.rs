@@ -48,6 +48,7 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             Ok(svcs) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
                     *status = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                        // TODO-K: this is where it's converted. Do a try_into()?
                         svcs.into(),
                     );
                 })
