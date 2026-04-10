@@ -90,10 +90,19 @@ impl<'a> SitrepBuilder<'a> {
             .cases
             .cases
             .into_iter()
+            // Note that entries are only pushed to `report_cases` for open
+            // cases, as the closed cases which are just being copied forward
+            // into the next sitrep have, by construction, not been changed in
+            // this builder, since they weren't exposed for modification by the
+            // builder API. Thus, we really don't have anything new to say about
+            // them that's worth including in the report, as the fact that they
+            // were copied forward will be recorded in the input report.
             .map(|case_builder| {
                 let (case, report) = case_builder.build();
-                report_cases.insert_unique(report)
-                    .expect("we are iterating over an IdOrdMap, so the entries should already be unique");
+                report_cases.insert_unique(report).expect(
+                    "we are iterating over an IdOrdMap, so the entries \
+                     should already be unique",
+                );
                 case
             })
             .chain(self.closed_cases_copied_forward.iter().cloned())
