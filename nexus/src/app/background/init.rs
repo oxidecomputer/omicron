@@ -107,7 +107,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
-use super::tasks::fm_analysis::FmAnalysis;
+use super::tasks::fm_analysis::{self, FmAnalysis};
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
@@ -1142,7 +1142,11 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
-            task_fm_sitrep_loader.clone(),
+            fm_analysis::Activators {
+                sitrep_loader: task_fm_sitrep_loader.clone(),
+                sitrep_gc: task_fm_sitrep_gc.clone(),
+            },
+            nexus_id,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",
