@@ -2126,7 +2126,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3d1300de217b2487c447ba1abe6fb51ad2516e67#3d1300de217b2487c447ba1abe6fb51ad2516e67"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad5296d5fb951e3f3bc34b37444bd1d68a2ec866#ad5296d5fb951e3f3bc34b37444bd1d68a2ec866"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2155,7 +2155,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3d1300de217b2487c447ba1abe6fb51ad2516e67#3d1300de217b2487c447ba1abe6fb51ad2516e67"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad5296d5fb951e3f3bc34b37444bd1d68a2ec866#ad5296d5fb951e3f3bc34b37444bd1d68a2ec866"
 dependencies = [
  "anyhow",
  "atty",
@@ -2185,7 +2185,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3d1300de217b2487c447ba1abe6fb51ad2516e67#3d1300de217b2487c447ba1abe6fb51ad2516e67"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad5296d5fb951e3f3bc34b37444bd1d68a2ec866#ad5296d5fb951e3f3bc34b37444bd1d68a2ec866"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2202,7 +2202,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3d1300de217b2487c447ba1abe6fb51ad2516e67#3d1300de217b2487c447ba1abe6fb51ad2516e67"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad5296d5fb951e3f3bc34b37444bd1d68a2ec866#ad5296d5fb951e3f3bc34b37444bd1d68a2ec866"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -9281,6 +9281,7 @@ dependencies = [
  "gateway-messages",
  "generic-array",
  "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "getrandom 0.4.1",
  "group",
  "hashbrown 0.15.5",
@@ -9295,7 +9296,6 @@ dependencies = [
  "iddqd",
  "idna",
  "indexmap 2.13.0",
- "indicatif",
  "inout",
  "ipnet",
  "ipnetwork",
@@ -9396,7 +9396,6 @@ dependencies = [
  "zeroize",
  "zip 0.6.6",
  "zip 4.6.1",
- "zone",
 ]
 
 [[package]]
