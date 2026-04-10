@@ -939,7 +939,18 @@ pub mod fm_analysis {
         PreparationError(String),
 
         /// Preparation succeeded and analysis was performed.
-        RanAnalysis { prep_status: PreparationStatus, outcome: AnalysisOutcome },
+        RanAnalysis {
+            prep_status: PreparationStatus,
+            analysis_status: AnalysisStatus,
+        },
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct AnalysisStatus {
+        pub start_time: DateTime<Utc>,
+        pub end_time: DateTime<Utc>,
+        pub report: crate::fm::analysis_reports::AnalysisReport,
+        pub outcome: AnalysisOutcome,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -953,7 +964,11 @@ pub mod fm_analysis {
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.
-        NotCommitted { sitrep_id: SitrepUuid, error: String },
+        CommitFailed { sitrep_id: SitrepUuid, error: String },
+
+        /// Analysis produced a new sitrep, but the parent sitrep was out of
+        /// date, so it was not committed.
+        NotCommitted { sitrep_id: SitrepUuid },
 
         /// Analysis produced a new sitrep, which was saved and made the current
         /// sitrep.
