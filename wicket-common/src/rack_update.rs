@@ -7,6 +7,7 @@
 use std::{collections::BTreeSet, time::Duration};
 
 use dropshot::HttpError;
+use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -131,5 +132,109 @@ impl UpdateTestError {
                 "XXX request should time out before this is hit".into()
             }
         }
+    }
+}
+
+/// The status of a rack update.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RackUpdateStatus {
+    /// The overall update state, rolled up across all components.
+    pub state: UpdateState,
+    /// The version of the top-level TUF archive.
+    pub system_version: Option<String>,
+    /// The artifacts included in the TUF archive.
+    pub artifacts: Vec<ArtifactId>,
+    /// The update status of each of the target components.
+    pub components: Vec<ComponentUpdateStatus>,
+}
+
+/// The status of an update for a component within a rack.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ComponentUpdateStatus {
+    /// The ID of the component.
+    pub id: SpIdentifier,
+    /// The state of the component update.
+    pub state: UpdateState,
+    /// The index of the current step (if in progress) or the last
+    /// step (if terminal).
+    pub current_step_index: Option<usize>,
+    /// The total number of steps in the update.
+    pub total_steps: Option<usize>,
+    /// The time elapsed since starting the update.
+    pub elapsed_secs: Option<f64>,
+}
+
+/// The state of a rack or component update.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateState {
+    NotStarted,
+    InProgress,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+pub fn rollup_update_state(states: &[UpdateState]) -> UpdateState {
+    if states.is_empty() {
+        UpdateState::NotStarted
+    } else if states.iter().any(|s| matches!(s, UpdateState::Failed)) {
+        UpdateState::Failed
+    } else if states.iter().any(|s| matches!(s, UpdateState::Aborted)) {
+        UpdateState::Aborted
+    } else if states.iter().all(|s| matches!(s, UpdateState::Completed)) {
+        UpdateState::Completed
+    } else if states.iter().all(|s| matches!(s, UpdateState::NotStarted)) {
+        UpdateState::NotStarted
+    } else {
+        UpdateState::InProgress
+    }
+}
+
+impl std::fmt::Display for UpdateState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateState::NotStarted => write!(f, "not_started"),
+            UpdateState::InProgress => write!(f, "in_progress"),
+            UpdateState::Completed => write!(f, "completed"),
+            UpdateState::Failed => write!(f, "failed"),
+            UpdateState::Aborted => write!(f, "aborted"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rollup_update_state() {
+        use UpdateState::*;
+
+        // Empty is treated as NotStarted.
+        assert_eq!(rollup_update_state(&[]), NotStarted);
+
+        // Single states roll up to themselves.
+        assert_eq!(rollup_update_state(&[NotStarted]), NotStarted);
+        assert_eq!(rollup_update_state(&[InProgress]), InProgress);
+        assert_eq!(rollup_update_state(&[Completed]), Completed);
+        assert_eq!(rollup_update_state(&[Failed]), Failed);
+        assert_eq!(rollup_update_state(&[Aborted]), Aborted);
+
+        // Failed / Aborted take priority
+        assert_eq!(rollup_update_state(&[Completed, Failed]), Failed);
+        assert_eq!(rollup_update_state(&[InProgress, Failed]), Failed);
+        assert_eq!(rollup_update_state(&[Aborted, Completed]), Aborted);
+        assert_eq!(rollup_update_state(&[Aborted, Failed]), Failed);
+
+        // Complete if all Completed.
+        assert_eq!(rollup_update_state(&[Completed, Completed]), Completed);
+
+        // Otherwise ... InProgress
+        assert_eq!(rollup_update_state(&[Completed, InProgress]), InProgress);
+        assert_eq!(rollup_update_state(&[NotStarted, InProgress]), InProgress);
+        assert_eq!(rollup_update_state(&[NotStarted, Completed]), InProgress);
     }
 }

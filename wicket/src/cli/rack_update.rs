@@ -16,6 +16,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
+use omicron_common::update::ArtifactId;
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
 use update_engine::{
@@ -24,7 +25,10 @@ use update_engine::{
 };
 use wicket_common::{
     WICKETD_TIMEOUT,
-    rack_update::ClearUpdateStateResponse,
+    rack_update::{
+        ClearUpdateStateResponse, ComponentUpdateStatus, RackUpdateStatus,
+        UpdateState, rollup_update_state,
+    },
     update_events::{EventReport, WicketdEngineSpec},
 };
 use wicketd_client::types::{
@@ -50,6 +54,9 @@ pub(crate) enum RackUpdateArgs {
 
     /// Attach to one or more running updates.
     Attach(AttachArgs),
+
+    /// Get the status of the updates.
+    Status(StatusArgs),
 
     /// Clear updates.
     Clear(ClearArgs),
@@ -79,6 +86,9 @@ impl RackUpdateArgs {
             }
             RackUpdateArgs::Attach(args) => {
                 args.exec(log, wicketd_addr, global_opts, output).await
+            }
+            RackUpdateArgs::Status(args) => {
+                args.exec(log, wicketd_addr, output).await
             }
             RackUpdateArgs::Clear(args) => {
                 args.exec(log, wicketd_addr, global_opts, output).await
@@ -310,6 +320,237 @@ async fn start_fetch_reports_task(
         Ok(())
     });
     (rx, handle)
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct StatusArgs {
+    /// Return the data as JSON for programmatic use.
+    #[clap(long)]
+    json: bool,
+
+    /// Read the event buffer from a file rather than from the wicketd API.
+    /// This allows operating over the output of DebugDump.
+    /// Use `-` to read from stdin.
+    #[clap(long, value_name = "FILE")]
+    file: Option<Utf8PathBuf>,
+}
+
+impl StatusArgs {
+    async fn exec(
+        self,
+        log: Logger,
+        wicketd_addr: SocketAddrV6,
+        output: CommandOutput<'_>,
+    ) -> Result<()> {
+        // Read the artifact & event reports from wicketd, a file, or stdin.
+        let response = if let Some(path) = self.file {
+            if path == "-" {
+                serde_json::from_reader(BufReader::new(std::io::stdin()))
+                    .context("error parsing stdin")?
+            } else {
+                let file = BufReader::new(
+                    std::fs::File::open(&path)
+                        .with_context(|| format!("error opening {path}"))?,
+                );
+                serde_json::from_reader(file)
+                    .with_context(|| format!("error parsing {path}"))?
+            }
+        } else {
+            let client =
+                create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+            client
+                .get_artifacts_and_event_reports()
+                .await
+                .context("error fetching artifacts and event reports")?
+                .into_inner()
+        };
+
+        // Derive the status from events & artifacts.
+        let status = build_rack_update_status(&log, response);
+
+        // Write either JSON or a human-readable table to stdout.
+        if self.json {
+            serde_json::to_writer_pretty(&mut *output.stdout, &status)
+                .context("error writing JSON to output")?;
+            writeln!(output.stdout).context("error writing to output")?;
+        } else {
+            write_status_table(output.stdout, &status)?;
+        }
+
+        // Return:
+        //    - 0 for success - Completed
+        //    - 1 for terminal failure states - Failed & Aborted
+        //    - 2 for non-terminal states - NotStarted & InProgress
+        match status.state {
+            UpdateState::Failed | UpdateState::Aborted => {
+                bail!("one or more components failed or were aborted");
+            }
+            UpdateState::NotStarted | UpdateState::InProgress => {
+                std::process::exit(2);
+            }
+            UpdateState::Completed => {}
+        }
+
+        Ok(())
+    }
+}
+
+fn build_rack_update_status(
+    log: &Logger,
+    response: GetArtifactsAndEventReportsResponse,
+) -> RackUpdateStatus {
+    use update_engine::{ExecutionStatus, TerminalKind};
+
+    // Sort & dedupe ArtifactIds.
+    let mut artifact_map: BTreeMap<_, ArtifactId> = BTreeMap::new();
+    for a in response.artifacts {
+        artifact_map.entry(a.artifact_id.kind.clone()).or_insert(a.artifact_id);
+    }
+    let artifacts: Vec<ArtifactId> = artifact_map.into_values().collect();
+
+    let event_reports = parse_event_report_map(log, response.event_reports);
+
+    let components: Vec<ComponentUpdateStatus> = event_reports
+        .keys()
+        .copied()
+        .map(|id| {
+            let mut buffer = EventBuffer::default();
+            if let Some(report) = event_reports.get(&id) {
+                buffer.add_event_report(report.clone());
+            }
+
+            // Derive the ComponentUpdateStatus status from the output of
+            // update-engine's ExecutionSummary, a rollup of all events.
+            match buffer.root_execution_summary() {
+                None => ComponentUpdateStatus {
+                    id: id.into(),
+                    state: UpdateState::NotStarted,
+                    current_step_index: None,
+                    total_steps: None,
+                    elapsed_secs: None,
+                },
+                Some(summary) => {
+                    let (state, current_step_index, elapsed_secs) =
+                        match &summary.execution_status {
+                            ExecutionStatus::NotStarted => {
+                                (UpdateState::NotStarted, None, None)
+                            }
+                            ExecutionStatus::Running {
+                                step_key,
+                                root_total_elapsed,
+                            } => (
+                                UpdateState::InProgress,
+                                Some(step_key.index),
+                                Some(root_total_elapsed.as_secs_f64()),
+                            ),
+                            ExecutionStatus::Terminal(info) => {
+                                let state = match info.kind {
+                                    TerminalKind::Completed => {
+                                        UpdateState::Completed
+                                    }
+                                    TerminalKind::Failed => UpdateState::Failed,
+                                    TerminalKind::Aborted => {
+                                        UpdateState::Aborted
+                                    }
+                                };
+                                (
+                                    state,
+                                    Some(info.step_key.index),
+                                    info.root_total_elapsed
+                                        .map(|d| d.as_secs_f64()),
+                                )
+                            }
+                        };
+                    ComponentUpdateStatus {
+                        id: id.into(),
+                        state,
+                        current_step_index,
+                        total_steps: Some(summary.total_steps),
+                        elapsed_secs,
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let component_states: Vec<UpdateState> =
+        components.iter().map(|c| c.state).collect();
+    let state = rollup_update_state(&component_states);
+
+    RackUpdateStatus {
+        state,
+        system_version: response.system_version.map(|v| v.to_string()),
+        artifacts,
+        components,
+    }
+}
+
+/// Write a human-readable status table to `out`.
+fn write_status_table(
+    out: &mut dyn Write,
+    status: &RackUpdateStatus,
+) -> Result<()> {
+    // System version and artifacts.
+    writeln!(out, "State: {}\n", status.state)?;
+    writeln!(
+        out,
+        "System version: {}",
+        status.system_version.as_deref().unwrap_or("(none)")
+    )?;
+    for a in &status.artifacts {
+        writeln!(out, "{}\t{}", a.kind, a.version)?;
+    }
+    writeln!(out)?;
+
+    // Component table.
+    let mut n_completed = 0;
+    let mut n_failed = 0;
+    let mut n_aborted = 0;
+    let mut n_inprogress = 0;
+    let mut n_notstarted = 0;
+
+    writeln!(out, "type\tslot\tstate\tprogress\telapsed")?;
+    for c in &status.components {
+        let type_str = c.id.type_.to_string();
+        let progress = match (c.current_step_index, c.total_steps) {
+            (Some(i), Some(t)) => format!("{}/{}", i + 1, t),
+            (None, Some(t)) => format!("-/{}", t),
+            _ => "-".to_string(),
+        };
+        let elapsed = match c.elapsed_secs {
+            Some(secs) => {
+                let total = secs as u64;
+                format!(
+                    "{:02}:{:02}:{:02}",
+                    total / 3600,
+                    (total % 3600) / 60,
+                    total % 60
+                )
+            }
+            None => "-".to_string(),
+        };
+
+        writeln!(
+            out,
+            "{type_str}\t{}\t{}\t{progress}\t{elapsed}",
+            c.id.slot, c.state
+        )?;
+
+        match c.state {
+            UpdateState::Completed => n_completed += 1,
+            UpdateState::Failed => n_failed += 1,
+            UpdateState::Aborted => n_aborted += 1,
+            UpdateState::InProgress => n_inprogress += 1,
+            UpdateState::NotStarted => n_notstarted += 1,
+        }
+    }
+
+    writeln!(
+        out,
+        "\n{n_completed} completed, {n_failed} failed, {n_aborted} aborted, {n_inprogress} in progress, {n_notstarted} not started",
+    )?;
+
+    Ok(())
 }
 
 #[derive(Debug, Args)]
