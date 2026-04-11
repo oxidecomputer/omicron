@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "33.0.0"
+    "version": "34.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -9598,7 +9598,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "Svc": {
+      "SvcEnabledNotOnline": {
         "description": "Information about an SMF service that is enabled but not running",
         "type": "object",
         "properties": {
@@ -9606,7 +9606,7 @@
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/SvcState"
+            "$ref": "#/components/schemas/SvcEnabledNotOnlineState"
           },
           "zone": {
             "type": "string"
@@ -9618,8 +9618,8 @@
           "zone"
         ]
       },
-      "SvcState": {
-        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events. See <https://illumos.org/man/7/smf> for more information.",
+      "SvcEnabledNotOnlineState": {
+        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events.\n\nThis enum contains all possible states except `online`, `disabled` and `legacy_run`. We only want to represent states that represent some sort of \"unhealthy\" or \"unexpected\" state. See <https://illumos.org/man/7/smf> for more information.",
         "oneOf": [
           {
             "description": "Initial state for all service instances.",
@@ -9636,13 +9636,6 @@
             ]
           },
           {
-            "description": "The instance is enabled and running or is available to run.",
-            "type": "string",
-            "enum": [
-              "online"
-            ]
-          },
-          {
             "description": "The instance is enabled and running or available to run. It is, however, functioning at a limited capacity in comparison to normal operation.",
             "type": "string",
             "enum": [
@@ -9654,20 +9647,6 @@
             "type": "string",
             "enum": [
               "maintenance"
-            ]
-          },
-          {
-            "description": "The instance is disabled.",
-            "type": "string",
-            "enum": [
-              "disabled"
-            ]
-          },
-          {
-            "description": "Represents a legacy instance that is not managed by the service management facility.",
-            "type": "string",
-            "enum": [
-              "legacy_run"
             ]
           },
           {
@@ -9692,7 +9671,7 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Svc"
+              "$ref": "#/components/schemas/SvcEnabledNotOnline"
             }
           },
           "time_of_status": {
@@ -9761,118 +9740,19 @@
         ]
       },
       "SvcsError": {
-        "description": "Error that is a one to one mapping of `illumos_utils::ExecutionError`, which uses a String for any type in `ExecutionError` that is not cloneable.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "execution_start"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "command": {
-                    "type": "string"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "command",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "command_failure"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "contract_failure"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  },
-                  "msg": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err",
-                  "msg"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "parse_failure"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "not_running"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
+          "time_of_status": {
+            "type": "string",
+            "format": "date-time"
           }
+        },
+        "required": [
+          "error",
+          "time_of_status"
         ]
       },
       "SwitchPorts": {

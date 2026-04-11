@@ -5329,6 +5329,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "smf 0.2.3",
+ "strum 0.27.2",
  "thiserror 2.0.18",
  "tofino",
  "tokio",
@@ -13445,6 +13446,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "derive_more 0.99.20",
  "dropshot 0.16.7",
  "futures",
