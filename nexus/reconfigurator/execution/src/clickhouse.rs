@@ -5,6 +5,7 @@
 //! Deployment of Clickhouse keeper and server nodes via clickhouse-admin running in
 //! deployed clickhouse zones.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
@@ -259,11 +260,11 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         let client = ClickhouseSingleClient::new(&admin_url, log.clone());
-        client.init_db().await.map(|_| ()).map_err(|e| {
-            anyhow!(
-                "failed to initialize single-node clickhouse database: {e}",
-            )
-        })
+        client
+            .init_db()
+            .await
+            .map(|_| ())
+            .context("failed to initialize single-node clickhouse database")
     } else {
         Ok(())
     }
