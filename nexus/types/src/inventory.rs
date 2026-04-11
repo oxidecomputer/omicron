@@ -52,10 +52,12 @@ use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
+use uuid::Uuid;
 
 mod display;
 
@@ -184,6 +186,11 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+
+    // TODO-K: Use IdOrdMap probably, indexing based on the nexus zone they were
+    // created by?
+    /// A list of sagas that have been active for an extended period
+    pub stale_sagas: Vec<InventorySaga>,
 }
 
 impl Collection {
@@ -704,4 +711,38 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+// TODO-K: Is this necessary?
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub enum SagaState {
+    Running,
+    Unwinding,
+    Done,
+    Abandoned,
+}
+
+impl Display for SagaState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            SagaState::Running => "running",
+            SagaState::Unwinding => "unwinding",
+            SagaState::Done => "done",
+            SagaState::Abandoned => "abandoned",
+        };
+        write!(f, "{s}")
+    }
+}
+
+// TODO-K: Is this necessary? Can I just use `Saga`?
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct InventorySaga {
+    // TODO-K: Use own Uuid types?
+    pub creator: Uuid,
+    pub current_sec: Option<Uuid>,
+    pub name: String,
+    pub saga_id: Uuid,
+    pub state: SagaState,
+    pub time_created: DateTime<Utc>,
+    pub time_collected: DateTime<Utc>,
 }

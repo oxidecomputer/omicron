@@ -9,11 +9,14 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-bb8-diesel.workspace = true
 base64.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clickhouse-admin-keeper-client.workspace = true
+diesel.workspace = true
 dns-service-client.workspace = true
+dropshot.workspace = true
 clickhouse-admin-server-client.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-types.workspace = true
@@ -25,6 +28,9 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 itertools.workspace = true
 sled-agent-types-versions.workspace = true
+nexus-db-queries.workspace = true
+nexus-db-model.workspace = true
+nexus-db-schema.workspace = true
 nexus-types.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
