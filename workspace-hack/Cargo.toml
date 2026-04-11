@@ -116,6 +116,7 @@ reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features 
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.37", features = ["ring"] }
+rustls-pki-types = { version = "1.14.0", features = ["std"] }
 rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -263,6 +264,7 @@ reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features 
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.37", features = ["ring"] }
+rustls-pki-types = { version = "1.14.0", features = ["std"] }
 rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -318,7 +320,6 @@ zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = 
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -333,7 +334,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -347,7 +347,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -360,7 +359,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -373,7 +371,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -386,7 +383,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -401,7 +397,6 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.1", default-features = false, features = ["std", "sys_rng"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
@@ -419,7 +414,6 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.1", default-features = false, features = ["std", "sys_rng"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
