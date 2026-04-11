@@ -588,8 +588,8 @@ libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f1250
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
-lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client", rev = "81d801175cd4df29aeee5dc5303bafcfe54560fe" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol", rev = "81d801175cd4df29aeee5dc5303bafcfe54560fe" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
@@ -597,8 +597,8 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "bb47507694adb24f45a408dcb93a4a28ec05c2df" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "bb47507694adb24f45a408dcb93a4a28ec05c2df" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -734,7 +734,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6" }
+rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "bb47507694adb24f45a408dcb93a4a28ec05c2df" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"

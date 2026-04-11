@@ -53,6 +53,8 @@ async fn test_setup<'a>(
     starter.start_gateway(SwitchSlot::Switch1, None, sp_conf).await;
     starter.start_dendrite(SwitchSlot::Switch0).await;
     starter.start_dendrite(SwitchSlot::Switch1).await;
+    starter.start_lldp(SwitchSlot::Switch0).await;
+    starter.start_lldp(SwitchSlot::Switch1).await;
     starter.start_mgd(SwitchSlot::Switch0).await;
     starter.start_mgd(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;

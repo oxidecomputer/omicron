@@ -2524,7 +2524,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=bb47507694adb24f45a408dcb93a4a28ec05c2df#bb47507694adb24f45a408dcb93a4a28ec05c2df"
 dependencies = [
  "oxnet",
  "progenitor 0.13.0",
@@ -6298,14 +6298,15 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#d22509dfdb051321b859e924948605115691b93c"
+source = "git+https://github.com/oxidecomputer/lldp?rev=81d801175cd4df29aeee5dc5303bafcfe54560fe#81d801175cd4df29aeee5dc5303bafcfe54560fe"
 dependencies = [
  "chrono",
  "futures",
  "lldpd-common",
- "progenitor 0.11.2",
+ "lldpd-types-versions",
+ "progenitor 0.13.0",
  "protocol",
- "reqwest 0.12.28",
+ "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -6316,7 +6317,7 @@ dependencies = [
 [[package]]
 name = "lldpd-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#d22509dfdb051321b859e924948605115691b93c"
+source = "git+https://github.com/oxidecomputer/lldp?rev=81d801175cd4df29aeee5dc5303bafcfe54560fe#81d801175cd4df29aeee5dc5303bafcfe54560fe"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
@@ -6328,6 +6329,18 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "lldpd-types-versions"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp?rev=81d801175cd4df29aeee5dc5303bafcfe54560fe#81d801175cd4df29aeee5dc5303bafcfe54560fe"
+dependencies = [
+ "chrono",
+ "protocol",
+ "schemars 0.8.22",
+ "serde",
+ "uuid",
 ]
 
 [[package]]
@@ -6500,7 +6513,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=bb47507694adb24f45a408dcb93a4a28ec05c2df#bb47507694adb24f45a408dcb93a4a28ec05c2df"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -8378,6 +8391,7 @@ dependencies = [
  "gateway-client",
  "gateway-test-utils",
  "libc",
+ "mg-admin-client",
  "nexus-config",
  "nexus-test-interface",
  "nexus-test-utils",
@@ -8390,6 +8404,9 @@ dependencies = [
  "oxide-tokio-rt",
  "pq-sys",
  "signal-hook-tokio",
+ "slog",
+ "slog-async",
+ "slog-term",
  "subprocess",
  "tokio",
  "tokio-postgres",
@@ -11352,7 +11369,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#d22509dfdb051321b859e924948605115691b93c"
+source = "git+https://github.com/oxidecomputer/lldp?rev=81d801175cd4df29aeee5dc5303bafcfe54560fe#81d801175cd4df29aeee5dc5303bafcfe54560fe"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
@@ -11738,7 +11755,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=bb47507694adb24f45a408dcb93a4a28ec05c2df#bb47507694adb24f45a408dcb93a4a28ec05c2df"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -12059,6 +12076,7 @@ dependencies = [
  "bytes",
  "cookie",
  "cookie_store",
+ "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
@@ -12071,6 +12089,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
