@@ -28,14 +28,13 @@ pub struct FmAnalysis {
     datastore: Arc<DataStore>,
     sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
-    inventory_loader: Activator,
-    sitrep_loader: Activator,
-    sitrep_gc: Activator,
+    activators: Activators,
     nexus_id: OmicronZoneUuid,
 }
 
 /// This is just because I don't like it when a constructor takes multiple
 /// positional arguments of the same type...
+#[derive(Clone)]
 pub struct Activators {
     pub inventory_loader: Activator,
     pub sitrep_loader: Activator,
@@ -71,17 +70,7 @@ impl FmAnalysis {
         activators: Activators,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        let Activators { inventory_loader, sitrep_loader, sitrep_gc } =
-            activators;
-        Self {
-            datastore,
-            sitrep_rx,
-            inv_rx,
-            inventory_loader,
-            sitrep_loader,
-            sitrep_gc,
-            nexus_id,
-        }
+        Self { datastore, sitrep_rx, inv_rx, activators, nexus_id }
     }
 
     async fn actually_activate(
@@ -158,7 +147,7 @@ impl FmAnalysis {
                     );
                     // Activate the inventory loader so that it will
                     // (hopefully) load a newer collection.
-                    self.inventory_loader.activate();
+                    self.activators.inventory_loader.activate();
                     return FmAnalysisStatus {
                         parent_sitrep_id,
                         inv_collection_id: Some(inv_collection_id),
@@ -342,7 +331,7 @@ impl FmAnalysis {
                 slog::info!(&opctx.log, "updated the current sitrep!");
                 // If we committed a new sitrep, we ought to go ahead and load it
                 // now...
-                self.sitrep_loader.activate();
+                self.activators.sitrep_loader.activate();
                 status::AnalysisStatus {
                     start_time,
                     end_time,
@@ -357,9 +346,9 @@ impl FmAnalysis {
                      out of date";
                 );
                 // We are behind, activate the sitrep loader to try and catch up!
-                self.sitrep_loader.activate();
+                self.activators.sitrep_loader.activate();
                 // Also, we should probably clean up after ourselves...
-                self.sitrep_gc.activate();
+                self.activators.sitrep_gc.activate();
 
                 status::AnalysisStatus {
                     start_time,
