@@ -189,7 +189,6 @@ impl From<steno::SagaCachedState> for SagaState {
     }
 }
 
-// TODO-K: Can I delete this?
 impl From<SagaState> for nexus_types::inventory::SagaState {
     fn from(value: SagaState) -> Self {
         match value {

@@ -62,7 +62,6 @@ use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
-//use nexus_db_model::SagaState;
 use nexus_db_model::ArtifactHash;
 use nexus_db_model::SledRole;
 use nexus_db_model::SpType;
