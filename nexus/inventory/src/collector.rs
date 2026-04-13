@@ -515,7 +515,7 @@ impl<'a> Collector<'a> {
 
     /// Collect long running sagas from all nexus instances
     async fn collect_all_stale_sagas(&mut self) {
-        let mut sagas = match self
+        let sagas = match self
             .datastore
             .saga_list_by_states_batched(
                 self.opctx,
@@ -530,38 +530,28 @@ impl<'a> Collector<'a> {
             }
         };
 
-        // TODO-K: What's the point of sorting? is this necessary?
-        // is it faster to sort and assume all sagas after a cutoff are longrunning?
-        // or just check the time created of all of them?
-        // Sort them by creation time (how long they've been running)
-        sagas.sort_by_key(|s| s.time_created);
-        sagas.reverse();
-
-        let mut s = vec![];
         let time_collected = Utc::now();
-        for saga in sagas {
-            let is_stale =
-                (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD;
+        let stale_sagas: Vec<_> = sagas
+            .into_iter()
+            .filter(|saga| {
+                (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD
+            })
+            .map(|saga| InventorySaga {
+                creator: SagaCreatorUuid::from_untyped_uuid(
+                    saga.creator.into(),
+                ),
+                current_sec: saga
+                    .current_sec
+                    .map(|s| SagaSecUuid::from_untyped_uuid(s.into())),
+                name: saga.name,
+                saga_id: SagaUuid::from_untyped_uuid(saga.id.0.into()),
+                state: saga.saga_state.into(),
+                time_created: saga.time_created,
+                time_collected,
+            })
+            .collect();
 
-            if is_stale {
-                let inv_saga = InventorySaga {
-                    creator: SagaCreatorUuid::from_untyped_uuid(
-                        saga.creator.into(),
-                    ),
-                    current_sec: saga
-                        .current_sec
-                        .map(|s| SagaSecUuid::from_untyped_uuid(s.into())),
-                    name: saga.name,
-                    saga_id: SagaUuid::from_untyped_uuid(saga.id.0.into()),
-                    state: saga.saga_state.into(),
-                    time_created: saga.time_created,
-                    time_collected,
-                };
-                s.push(inv_saga);
-            };
-        }
-
-        self.in_progress.found_stale_sagas(s)
+        self.in_progress.found_stale_sagas(stale_sagas)
     }
 
     /// Collect timesync status from all sleds

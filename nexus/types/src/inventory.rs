@@ -716,6 +716,7 @@ impl IdOrdItem for InternalDnsGenerationStatus {
 }
 
 // TODO-K: Is this necessary?
+// Probably, but it should be StaleSagaState, and only include Running and Unwinding
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum SagaState {
     Running,

@@ -713,18 +713,16 @@ pub fn representative() -> Representative {
         })
         .unwrap();
 
-    // We'll add two stale sagas here, one with current SEC and one without
-    builder.found_stale_sagas(vec![
-        InventorySaga {
-            creator: omicron_uuid_kinds::SagaCreatorUuid::new_v4(),
-            current_sec: Some(omicron_uuid_kinds::SagaSecUuid::new_v4()),
-            name: "test-saga-1".to_string(),
-            saga_id: omicron_uuid_kinds::SagaUuid::new_v4(),
-            state: nexus_types::inventory::SagaState::Running,
-            time_created: "2026-01-01T00:00:00Z".parse().unwrap(),
-            time_collected: "2026-01-01T01:00:00Z".parse().unwrap(),
-        },
-    ]);
+    // We'll add a stale saga here
+    builder.found_stale_sagas(vec![InventorySaga {
+        creator: omicron_uuid_kinds::SagaCreatorUuid::new_v4(),
+        current_sec: Some(omicron_uuid_kinds::SagaSecUuid::new_v4()),
+        name: "test-saga-1".to_string(),
+        saga_id: omicron_uuid_kinds::SagaUuid::new_v4(),
+        state: nexus_types::inventory::SagaState::Running,
+        time_created: "2026-01-01T00:00:00Z".parse().unwrap(),
+        time_collected: "2026-01-01T01:00:00Z".parse().unwrap(),
+    }]);
 
     Representative {
         builder,

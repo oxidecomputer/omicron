@@ -1160,6 +1160,7 @@ impl SystemDescription {
         }
 
         // TODO-K: DO I need to add long running sagas here?
+        // Probably not? We don't want to generate stale sagas on every collection?
 
         Ok(builder)
     }
