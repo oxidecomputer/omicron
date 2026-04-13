@@ -132,7 +132,7 @@ pub struct CollectionBuilder {
     cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
-    stale_sagas: Vec<InventorySaga>,
+    stale_sagas: IdOrdMap<InventorySaga>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -167,7 +167,7 @@ impl CollectionBuilder {
             cockroach_status: BTreeMap::new(),
             ntp_timesync: IdOrdMap::new(),
             internal_dns_generation_status: IdOrdMap::new(),
-            stale_sagas: vec![],
+            stale_sagas: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -701,9 +701,15 @@ impl CollectionBuilder {
         self.clickhouse_keeper_cluster_membership.insert(membership);
     }
 
-    /// Record information about long running sagas
-    pub fn found_stale_sagas(&mut self, mut sagas: Vec<InventorySaga>) {
-        self.stale_sagas.append(&mut sagas);
+    /// Record information about a long running saga
+    pub fn found_stale_saga(
+        &mut self,
+        saga: InventorySaga,
+    ) -> Result<(), anyhow::Error> {
+        self.stale_sagas
+            .insert_unique(saga)
+            .map_err(|err| err.into_owned())
+            .context("stale saga reported multiple times")
     }
 
     /// Record information about timesync

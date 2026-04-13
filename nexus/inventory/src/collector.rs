@@ -515,6 +515,7 @@ impl<'a> Collector<'a> {
 
     /// Collect long running sagas from all nexus instances
     async fn collect_all_stale_sagas(&mut self) {
+        debug!(&self.opctx.log, "begin collection from stale sagas");
         let sagas = match self
             .datastore
             .saga_list_by_states_batched(
@@ -531,12 +532,10 @@ impl<'a> Collector<'a> {
         };
 
         let time_collected = Utc::now();
-        let stale_sagas: Vec<_> = sagas
-            .into_iter()
-            .filter(|saga| {
-                (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD
-            })
-            .map(|saga| InventorySaga {
+        for saga in sagas.into_iter().filter(|saga| {
+            (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD
+        }) {
+            let inventory_saga = InventorySaga {
                 creator: SagaCreatorUuid::from_untyped_uuid(
                     saga.creator.into(),
                 ),
@@ -548,10 +547,18 @@ impl<'a> Collector<'a> {
                 state: saga.saga_state.into(),
                 time_created: saga.time_created,
                 time_collected,
-            })
-            .collect();
-
-        self.in_progress.found_stale_sagas(stale_sagas)
+            };
+            if let Err(err) = self.in_progress.found_stale_saga(inventory_saga)
+            {
+                error!(
+                    &self.opctx.log,
+                    "stale saga collection error";
+                    "creator_id" => ?saga.creator,
+                    slog_error_chain::InlineErrorChain::new(err.as_ref())
+                );
+            }
+        }
+        debug!(&self.opctx.log, "finished collection from stale sagas");
     }
 
     /// Collect timesync status from all sleds

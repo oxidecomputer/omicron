@@ -1003,7 +1003,7 @@ fn display_boot_partition_contents(
 }
 
 fn display_stale_sagas(
-    stale_sagas: &Vec<InventorySaga>,
+    stale_sagas: &IdOrdMap<InventorySaga>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     writeln!(f, "\nSTALE SAGAS")?;

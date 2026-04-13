@@ -189,10 +189,8 @@ pub struct Collection {
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 
-    // TODO-K: Use IdOrdMap probably, indexing based on the nexus zone they were
-    // created by?
-    /// A list of sagas that have been active for an extended period
-    pub stale_sagas: Vec<InventorySaga>,
+    /// Sagas that have been active for an extended period, keyed by creator
+    pub stale_sagas: IdOrdMap<InventorySaga>,
 }
 
 impl Collection {
@@ -744,4 +742,12 @@ pub struct InventorySaga {
     pub state: SagaState,
     pub time_created: DateTime<Utc>,
     pub time_collected: DateTime<Utc>,
+}
+
+impl IdOrdItem for InventorySaga {
+    type Key<'a> = SagaCreatorUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.creator
+    }
+    id_upcast!();
 }

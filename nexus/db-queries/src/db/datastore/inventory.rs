@@ -30,6 +30,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
+use nexus_db_model::ArtifactHash;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
@@ -62,7 +63,6 @@ use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
-use nexus_db_model::ArtifactHash;
 use nexus_db_model::SledRole;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
@@ -4158,7 +4158,7 @@ impl DataStore {
         };
 
         // Load stale saga information
-        let stale_sagas: Vec<InventorySaga> = {
+        let stale_sagas: IdOrdMap<InventorySaga> = {
             use nexus_db_schema::schema::inv_stale_saga::dsl;
 
             let records: Vec<InvStaleSaga> = dsl::inv_stale_saga
