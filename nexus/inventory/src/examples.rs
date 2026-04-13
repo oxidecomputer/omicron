@@ -18,6 +18,7 @@ use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::InventorySaga;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
@@ -711,6 +712,19 @@ pub fn representative() -> Representative {
             generation: 1.into(),
         })
         .unwrap();
+
+    // We'll add two stale sagas here, one with current SEC and one without
+    builder.found_stale_sagas(vec![
+        InventorySaga {
+            creator: omicron_uuid_kinds::SagaCreatorUuid::new_v4(),
+            current_sec: Some(omicron_uuid_kinds::SagaSecUuid::new_v4()),
+            name: "test-saga-1".to_string(),
+            saga_id: omicron_uuid_kinds::SagaUuid::new_v4(),
+            state: nexus_types::inventory::SagaState::Running,
+            time_created: "2026-01-01T00:00:00Z".parse().unwrap(),
+            time_collected: "2026-01-01T01:00:00Z".parse().unwrap(),
+        },
+    ]);
 
     Representative {
         builder,

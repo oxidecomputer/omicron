@@ -30,6 +30,9 @@ pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SagaCreatorUuid;
+use omicron_uuid_kinds::SagaSecUuid;
+use omicron_uuid_kinds::SagaUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -57,7 +60,6 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
-use uuid::Uuid;
 
 mod display;
 
@@ -734,14 +736,12 @@ impl Display for SagaState {
     }
 }
 
-// TODO-K: Is this necessary? Can I just use `Saga`?
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct InventorySaga {
-    // TODO-K: Use own Uuid types?
-    pub creator: Uuid,
-    pub current_sec: Option<Uuid>,
+    pub creator: SagaCreatorUuid,
+    pub current_sec: Option<SagaSecUuid>,
     pub name: String,
-    pub saga_id: Uuid,
+    pub saga_id: SagaUuid,
     pub state: SagaState,
     pub time_created: DateTime<Utc>,
     pub time_collected: DateTime<Utc>,

@@ -29,7 +29,11 @@ use nexus_types::inventory::SpType;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SagaCreatorUuid;
+use omicron_uuid_kinds::SagaSecUuid;
+use omicron_uuid_kinds::SagaUuid;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
@@ -39,7 +43,6 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
-use uuid::Uuid;
 
 /// connection and request timeout used for Sled Agent HTTP client
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -527,7 +530,10 @@ impl<'a> Collector<'a> {
             }
         };
 
-        // Sort them by creation time (equivalently: how long they've been running)
+        // TODO-K: What's the point of sorting? is this necessary?
+        // is it faster to sort and assume all sagas after a cutoff are longrunning?
+        // or just check the time created of all of them?
+        // Sort them by creation time (how long they've been running)
         sagas.sort_by_key(|s| s.time_created);
         sagas.reverse();
 
@@ -539,10 +545,14 @@ impl<'a> Collector<'a> {
 
             if is_stale {
                 let inv_saga = InventorySaga {
-                    creator: saga.creator.into(),
-                    current_sec: saga.current_sec.map(|s| s.0),
+                    creator: SagaCreatorUuid::from_untyped_uuid(
+                        saga.creator.into(),
+                    ),
+                    current_sec: saga
+                        .current_sec
+                        .map(|s| SagaSecUuid::from_untyped_uuid(s.into())),
                     name: saga.name,
-                    saga_id: Uuid::from(saga.id.0),
+                    saga_id: SagaUuid::from_untyped_uuid(saga.id.0.into()),
                     state: saga.saga_state.into(),
                     time_created: saga.time_created,
                     time_collected,

@@ -72,6 +72,9 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SagaCreatorKind;
+use omicron_uuid_kinds::SagaKind;
+use omicron_uuid_kinds::SagaSecKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
@@ -3342,10 +3345,10 @@ impl From<InvInternalDns> for InternalDnsGenerationStatus {
 #[diesel(table_name = inv_stale_saga)]
 pub struct InvStaleSaga {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub creator: Uuid,
-    pub current_sec: Option<Uuid>,
+    pub creator: DbTypedUuid<SagaCreatorKind>,
+    pub current_sec: Option<DbTypedUuid<SagaSecKind>>,
     pub name: String,
-    pub saga_id: Uuid,
+    pub saga_id: DbTypedUuid<SagaKind>,
     pub state: SagaState,
     pub time_created: DateTime<Utc>,
     pub time_collected: DateTime<Utc>,
@@ -3358,10 +3361,10 @@ impl InvStaleSaga {
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
-            creator: saga.creator,
-            current_sec: saga.current_sec,
+            creator: saga.creator.into(),
+            current_sec: saga.current_sec.map(Into::into),
             name: saga.name.clone(),
-            saga_id: saga.saga_id,
+            saga_id: saga.saga_id.into(),
             state: saga.state.clone().into(),
             time_created: saga.time_created,
             time_collected: saga.time_collected,
@@ -3372,10 +3375,10 @@ impl InvStaleSaga {
 impl From<InvStaleSaga> for InventorySaga {
     fn from(value: InvStaleSaga) -> Self {
         Self {
-            creator: value.creator,
-            current_sec: value.current_sec,
+            creator: value.creator.into(),
+            current_sec: value.current_sec.map(Into::into),
             name: value.name,
-            saga_id: value.saga_id,
+            saga_id: value.saga_id.into(),
             state: value.state.into(),
             time_created: value.time_created,
             time_collected: value.time_collected,

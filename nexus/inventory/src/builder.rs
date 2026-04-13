@@ -702,7 +702,6 @@ impl CollectionBuilder {
     }
 
     /// Record information about long running sagas
-    // TODO-K: Will probably have to remove mut
     pub fn found_stale_sagas(&mut self, mut sagas: Vec<InventorySaga>) {
         self.stale_sagas.append(&mut sagas);
     }
