@@ -4,6 +4,7 @@
 
 use crate::deployment::PlanningReport;
 use crate::external_api::alert;
+use crate::inventory::CollectionMetadata;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -931,9 +932,17 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
-        /// Fault management analysis was not performed as no inventory
+        /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,
+
+        /// Fault management analysis was not performed because the loaded
+        /// inventory collection is not strictly newer than the collection
+        /// used to produce the parent sitrep.
+        InventoryStale {
+            parent_inv: CollectionMetadata,
+            loaded_inv: CollectionMetadata,
+        },
 
         /// Preparing analysis input failed.
         PreparationError(String),

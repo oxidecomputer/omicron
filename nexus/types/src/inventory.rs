@@ -61,6 +61,33 @@ mod display;
 
 pub use display::*;
 
+/// Metadata from an inventory collection (i.e., the contents of just the
+/// `inv_collection` row, without any of the child tables).
+///
+/// This can be obtained either from a full [`Collection`] (via
+/// [`Collection::metadata`]),` or can be read directly from the database by ID.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CollectionMetadata {
+    /// unique identifier for this collection
+    pub id: CollectionUuid,
+    /// time the collection started
+    pub time_started: DateTime<Utc>,
+    /// time the collection ended
+    pub time_done: DateTime<Utc>,
+}
+
+impl CollectionMetadata {
+    /// Returns `true` if this collection is strictly newer than `other`.
+    ///
+    /// A collection is strictly newer if it *started* after `other` *ended*.
+    /// This means there is no overlap in time between the two collections:
+    /// everything observed by `self` was observed after everything observed
+    /// by `other`.
+    pub fn is_strictly_newer_than(&self, other: &CollectionMetadata) -> bool {
+        self.time_started > other.time_done
+    }
+}
+
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
 ///
@@ -187,6 +214,15 @@ pub struct Collection {
 }
 
 impl Collection {
+    /// Returns [`CollectionMetadata`] describing this collection.
+    pub fn metadata(&self) -> CollectionMetadata {
+        CollectionMetadata {
+            id: self.id,
+            time_started: self.time_started,
+            time_done: self.time_done,
+        }
+    }
+
     pub fn host_phase_1_active_slot_for(
         &self,
         baseboard_id: &BaseboardId,

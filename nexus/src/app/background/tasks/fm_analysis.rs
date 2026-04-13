@@ -28,6 +28,7 @@ pub struct FmAnalysis {
     datastore: Arc<DataStore>,
     sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
+    inventory_loader: Activator,
     sitrep_loader: Activator,
     sitrep_gc: Activator,
     nexus_id: OmicronZoneUuid,
@@ -36,6 +37,7 @@ pub struct FmAnalysis {
 /// This is just because I don't like it when a constructor takes multiple
 /// positional arguments of the same type...
 pub struct Activators {
+    pub inventory_loader: Activator,
     pub sitrep_loader: Activator,
     pub sitrep_gc: Activator,
 }
@@ -69,11 +71,13 @@ impl FmAnalysis {
         activators: Activators,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        let Activators { sitrep_loader, sitrep_gc } = activators;
+        let Activators { inventory_loader, sitrep_loader, sitrep_gc } =
+            activators;
         Self {
             datastore,
             sitrep_rx,
             inv_rx,
+            inventory_loader,
             sitrep_loader,
             sitrep_gc,
             nexus_id,
@@ -112,6 +116,84 @@ impl FmAnalysis {
             .into_iter()
             .collect(),
         );
+
+        // First, ensure that we are operating on an inventory collection which
+        // is newer than the inventory included in the parent sitrep. It is
+        // necessary to check for this because *this Nexus*'s `inventory_load`
+        // background task may be have loaded an older inventory collection than
+        // the Nexus that produced the parent sitrep, and we wish to avoid
+        // generating a sitrep with stale inventory data, since this could cause
+        // us to output a sitrep based on an earlier state of the system than
+        // the current one.
+        let parent_inv_id =
+            parent_sitrep.as_ref().map(|s| s.1.metadata.inv_collection_id);
+        if let Some(parent_inv_id) = parent_inv_id
+            && parent_inv_id != inv_collection_id
+        {
+            let loaded_inv = inv.metadata();
+            match self
+                .datastore
+                .inventory_collection_read_metadata(&opctx, parent_inv_id)
+                .await
+            {
+                // If the loaded inventory collection is not strictly newer than
+                // the parent sitrep's inventory collection (i.e. collecting it
+                // started after the parent collection finished), we must wait
+                // for a newer collection to be loaded before performing
+                // analysis.
+                Ok(Some(parent_inv))
+                    if !loaded_inv.is_strictly_newer_than(&parent_inv) =>
+                {
+                    slog::info!(
+                        opctx.log,
+                        "refusing to perform fault management analysis based \
+                         on an inventory collection that is older than the \
+                         collection in the parent sitrep";
+                        "inv_collection_time_started" =>
+                            %loaded_inv.time_started,
+                        "inv_collection_time_done" => %loaded_inv.time_done,
+                        "parent_inv_id" => %parent_inv.id,
+                        "parent_inv_time_started" =>  %parent_inv.time_started,
+                        "parent_inv_time_done" =>  %parent_inv.time_done,
+                    );
+                    // Activate the inventory loader so that it will
+                    // (hopefully) load a newer collection.
+                    self.inventory_loader.activate();
+                    return FmAnalysisStatus {
+                        parent_sitrep_id,
+                        inv_collection_id: Some(inv_collection_id),
+                        outcome: status::Outcome::InventoryStale {
+                            parent_inv,
+                            loaded_inv,
+                        },
+                    };
+                }
+                // Otherwise, the loaded inventory collection is newer than the
+                // one in the parent sitrep. This is the case if
+                // `inventory_collection_read_metadata` returns `None`, since if
+                // the parent sitrep's inventory collection has been garbage
+                // collected, it is definitely older than the loaded one.
+                Ok(_) => {}
+                Err(error) => {
+                    let error = InlineErrorChain::new(&error);
+                    const MSG: &str = "failed to read parent sitrep's \
+                         inventory collection metadata";
+                    slog::error!(
+                        opctx.log,
+                        "{MSG}";
+                        "parent_inv_id" => %parent_inv_id,
+                        &error,
+                    );
+                    return FmAnalysisStatus {
+                        parent_sitrep_id,
+                        inv_collection_id: Some(inv_collection_id),
+                        outcome: status::Outcome::PreparationError(format!(
+                            "{MSG}: {error}"
+                        )),
+                    };
+                }
+            }
+        }
 
         // Prepare analysis inputs.
         let (inputs, prep_status) = match self

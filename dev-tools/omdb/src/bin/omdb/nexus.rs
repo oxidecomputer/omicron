@@ -3485,6 +3485,8 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
+    use nexus_types::inventory::CollectionMetadata;
+
     let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
         match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
             Err(error) => {
@@ -3510,6 +3512,35 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                      not yet been loaded.\n\
                  (i) note: this should only happen if Nexus has just started.",
             );
+            return;
+        }
+        Outcome::InventoryStale { parent_inv, loaded_inv } => {
+            fn print_inv_meta_timestamps(
+                &CollectionMetadata { time_started, time_done, .. }: &CollectionMetadata,
+            ) {
+                println!(
+                    "        started at:  {}",
+                    humantime::format_rfc3339_millis(time_started.into())
+                );
+                println!(
+                    "        finished at: {}",
+                    humantime::format_rfc3339_millis(time_done.into())
+                );
+            }
+
+            println!(
+                "    refused to perform analysis based on a stale inventory \
+                 collection!"
+            );
+            println!(
+                "(i) note: the loaded inventory collection is not strictly \
+                 newer than"
+            );
+            println!("    the collection that produced the parent sitrep.");
+            println!("      parent sitrep's inventory: {}", parent_inv.id,);
+            print_inv_meta_timestamps(&parent_inv);
+            println!("      loaded inventory:          {}", loaded_inv.id,);
+            print_inv_meta_timestamps(&loaded_inv);
             return;
         }
         Outcome::PreparationError(error) => {
