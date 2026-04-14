@@ -2185,7 +2185,7 @@ table! {
         creator -> Uuid,
         current_sec -> Nullable<Uuid>,
         name -> Text,
-        state -> crate::enums::SagaStateEnum,
+        state -> crate::enums::StaleSagaStateEnum,
         time_created -> Timestamptz,
         time_collected -> Timestamptz,
     }

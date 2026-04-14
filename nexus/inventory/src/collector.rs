@@ -22,7 +22,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
-use nexus_types::inventory::InventorySaga;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
@@ -529,7 +529,19 @@ impl<'a> Collector<'a> {
         for saga in sagas.into_iter().filter(|saga| {
             (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD
         }) {
-            let inventory_saga = InventorySaga {
+            let state = match saga.saga_state.try_into() {
+                Ok(state) => state,
+                Err(msg) => {
+                    error!(
+                        &self.opctx.log,
+                        "stale saga collection error";
+                        "creator_id" => ?saga.creator,
+                        "error" => msg,
+                    );
+                    continue;
+                }
+            };
+            let inventory_saga = InventoryStaleSaga {
                 creator: SagaCreatorUuid::from_untyped_uuid(
                     saga.creator.into(),
                 ),
@@ -538,7 +550,7 @@ impl<'a> Collector<'a> {
                     .map(|s| SagaSecUuid::from_untyped_uuid(s.into())),
                 name: saga.name,
                 saga_id: SagaUuid::from_untyped_uuid(saga.id.0.into()),
-                state: saga.saga_state.into(),
+                state,
                 time_created: saga.time_created,
                 time_collected,
             };

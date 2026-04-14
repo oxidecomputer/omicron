@@ -235,7 +235,7 @@ switch0.address = "[::1]:44927"
 
 # Look for "management gateway:    http://[::1]:39352 (switch1)"
 # The "http://" does not go in this string -- just the socket address.
-#switch1.address = "[::1]:39352"
+switch1.address = "[::1]:39352"
 
 [deployment.internal_dns]
 # Look for "internal DNS:          [::1]:54025"

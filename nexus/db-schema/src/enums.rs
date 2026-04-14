@@ -108,6 +108,7 @@ define_enums! {
     SnapshotStateEnum => "snapshot_state",
     SpTypeEnum => "sp_type",
     SupportBundleStateEnum => "support_bundle_state",
+    StaleSagaStateEnum => "stale_saga_state",
     SwitchInterfaceKindEnum => "switch_interface_kind",
     SwitchLinkFecEnum => "switch_link_fec",
     SwitchLinkSpeedEnum => "switch_link_speed",

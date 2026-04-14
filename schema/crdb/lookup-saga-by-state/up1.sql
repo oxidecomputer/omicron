@@ -1,3 +1,4 @@
-CREATE INDEX IF NOT EXISTS lookup_saga_by_state ON omicron.public.saga (
-    saga_state, id
+CREATE TYPE IF NOT EXISTS omicron.public.stale_saga_state AS ENUM (
+    'running',
+    'unwinding'
 );

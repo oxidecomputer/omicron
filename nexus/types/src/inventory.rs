@@ -190,7 +190,7 @@ pub struct Collection {
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 
     /// Sagas that have been active for an extended period, keyed by creator
-    pub stale_sagas: IdOrdMap<InventorySaga>,
+    pub stale_sagas: IdOrdMap<InventoryStaleSaga>,
 }
 
 impl Collection {
@@ -714,37 +714,33 @@ impl IdOrdItem for InternalDnsGenerationStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub enum SagaState {
+pub enum StaleSagaState {
     Running,
     Unwinding,
-    Done,
-    Abandoned,
 }
 
-impl Display for SagaState {
+impl Display for StaleSagaState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            SagaState::Running => "running",
-            SagaState::Unwinding => "unwinding",
-            SagaState::Done => "done",
-            SagaState::Abandoned => "abandoned",
+            StaleSagaState::Running => "running",
+            StaleSagaState::Unwinding => "unwinding",
         };
         write!(f, "{s}")
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct InventorySaga {
+pub struct InventoryStaleSaga {
     pub creator: SagaCreatorUuid,
     pub current_sec: Option<SagaSecUuid>,
     pub name: String,
     pub saga_id: SagaUuid,
-    pub state: SagaState,
+    pub state: StaleSagaState,
     pub time_created: DateTime<Utc>,
     pub time_collected: DateTime<Utc>,
 }
 
-impl IdOrdItem for InventorySaga {
+impl IdOrdItem for InventoryStaleSaga {
     type Key<'a> = SagaCreatorUuid;
     fn key(&self) -> Self::Key<'_> {
         self.creator

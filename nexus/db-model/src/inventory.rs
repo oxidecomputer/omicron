@@ -7,7 +7,7 @@
 use crate::ArtifactHash;
 use crate::Generation;
 use crate::PhysicalDiskKind;
-use crate::SagaState;
+use crate::StaleSagaState;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::to_db_typed_uuid;
@@ -52,7 +52,7 @@ use nexus_db_schema::schema::{
     sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
-use nexus_types::inventory::InventorySaga;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
@@ -3502,7 +3502,7 @@ pub struct InvStaleSaga {
     pub current_sec: Option<DbTypedUuid<SagaSecKind>>,
     pub name: String,
     pub saga_id: DbTypedUuid<SagaKind>,
-    pub state: SagaState,
+    pub state: StaleSagaState,
     pub time_created: DateTime<Utc>,
     pub time_collected: DateTime<Utc>,
 }
@@ -3510,7 +3510,7 @@ pub struct InvStaleSaga {
 impl InvStaleSaga {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        saga: &InventorySaga,
+        saga: &InventoryStaleSaga,
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
@@ -3525,7 +3525,7 @@ impl InvStaleSaga {
     }
 }
 
-impl From<InvStaleSaga> for InventorySaga {
+impl From<InvStaleSaga> for InventoryStaleSaga {
     fn from(value: InvStaleSaga) -> Self {
         Self {
             creator: value.creator.into(),

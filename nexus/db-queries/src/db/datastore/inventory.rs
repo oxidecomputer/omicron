@@ -94,7 +94,7 @@ use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
-use nexus_types::inventory::InventorySaga;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::TimeSync;
@@ -4443,7 +4443,7 @@ impl DataStore {
         };
 
         // Load stale saga information
-        let stale_sagas: IdOrdMap<InventorySaga> = {
+        let stale_sagas: IdOrdMap<InventoryStaleSaga> = {
             use nexus_db_schema::schema::inv_stale_saga::dsl;
 
             let records: Vec<InvStaleSaga> = dsl::inv_stale_saga
@@ -4457,7 +4457,7 @@ impl DataStore {
 
             records
                 .into_iter()
-                .map(|record| InventorySaga::from(record))
+                .map(|record| InventoryStaleSaga::from(record))
                 .collect()
         };
 

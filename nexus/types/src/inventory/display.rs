@@ -39,7 +39,7 @@ use uuid::Uuid;
 
 use crate::inventory::{
     CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    InventorySaga, PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
+    InventoryStaleSaga, PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -1078,7 +1078,7 @@ fn display_boot_partition_contents(
 }
 
 fn display_stale_sagas(
-    stale_sagas: &IdOrdMap<InventorySaga>,
+    stale_sagas: &IdOrdMap<InventoryStaleSaga>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     writeln!(f, "\nSTALE SAGAS")?;

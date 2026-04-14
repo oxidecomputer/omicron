@@ -25,7 +25,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
-use nexus_types::inventory::InventorySaga;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -132,7 +132,7 @@ pub struct CollectionBuilder {
     cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
-    stale_sagas: IdOrdMap<InventorySaga>,
+    stale_sagas: IdOrdMap<InventoryStaleSaga>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -704,7 +704,7 @@ impl CollectionBuilder {
     /// Record information about a long running saga
     pub fn found_stale_saga(
         &mut self,
-        saga: InventorySaga,
+        saga: InventoryStaleSaga,
     ) -> Result<(), anyhow::Error> {
         self.stale_sagas
             .insert_unique(saga)

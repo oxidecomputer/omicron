@@ -149,6 +149,54 @@ where
 }
 
 impl_enum_type!(
+    StaleSagaStateEnum:
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum StaleSagaState;
+
+    Running => b"running"
+    Unwinding => b"unwinding"
+);
+
+impl From<StaleSagaState> for SagaState {
+    fn from(value: StaleSagaState) -> Self {
+        match value {
+            StaleSagaState::Running => Self::Running,
+            StaleSagaState::Unwinding => Self::Unwinding,
+        }
+    }
+}
+
+impl From<nexus_types::inventory::StaleSagaState> for StaleSagaState {
+    fn from(value: nexus_types::inventory::StaleSagaState) -> Self {
+        match value {
+            nexus_types::inventory::StaleSagaState::Running => Self::Running,
+            nexus_types::inventory::StaleSagaState::Unwinding => {
+                Self::Unwinding
+            }
+        }
+    }
+}
+
+impl From<StaleSagaState> for nexus_types::inventory::StaleSagaState {
+    fn from(value: StaleSagaState) -> Self {
+        match value {
+            StaleSagaState::Running => Self::Running,
+            StaleSagaState::Unwinding => Self::Unwinding,
+        }
+    }
+}
+
+impl_enum_type!(
     SagaStateEnum:
 
     #[derive(
@@ -179,34 +227,27 @@ impl SagaState {
         &[Self::Running, Self::Unwinding];
 }
 
+impl TryFrom<SagaState> for nexus_types::inventory::StaleSagaState {
+    type Error = String;
+
+    fn try_from(value: SagaState) -> Result<Self, Self::Error> {
+        match value {
+            SagaState::Running => Ok(Self::Running),
+            SagaState::Unwinding => Ok(Self::Unwinding),
+            other => Err(format!(
+                "cannot convert SagaState::{other:?} to StaleSagaState \
+                 (only Running and Unwinding are valid)"
+            )),
+        }
+    }
+}
+
 impl From<steno::SagaCachedState> for SagaState {
     fn from(value: steno::SagaCachedState) -> Self {
         match value {
             steno::SagaCachedState::Running => Self::Running,
             steno::SagaCachedState::Unwinding => Self::Unwinding,
             steno::SagaCachedState::Done => Self::Done,
-        }
-    }
-}
-
-impl From<SagaState> for nexus_types::inventory::SagaState {
-    fn from(value: SagaState) -> Self {
-        match value {
-            SagaState::Running => Self::Running,
-            SagaState::Unwinding => Self::Unwinding,
-            SagaState::Done => Self::Done,
-            SagaState::Abandoned => Self::Abandoned,
-        }
-    }
-}
-
-impl From<nexus_types::inventory::SagaState> for SagaState {
-    fn from(value: nexus_types::inventory::SagaState) -> Self {
-        match value {
-            nexus_types::inventory::SagaState::Running => Self::Running,
-            nexus_types::inventory::SagaState::Unwinding => Self::Unwinding,
-            nexus_types::inventory::SagaState::Done => Self::Done,
-            nexus_types::inventory::SagaState::Abandoned => Self::Abandoned,
         }
     }
 }
