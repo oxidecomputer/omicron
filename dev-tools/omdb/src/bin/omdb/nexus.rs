@@ -1199,7 +1199,7 @@ fn print_start_end_time(
     end: DateTime<Utc>,
     indent: usize,
 ) {
-    if let Ok(elapsed) = start.signed_duration_since(end).to_std() {
+    if let Ok(elapsed) = end.signed_duration_since(start).to_std() {
         print_run_time(start, elapsed, indent);
     } else {
         println!(

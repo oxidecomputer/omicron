@@ -712,7 +712,7 @@ task: "fm_analysis"
     --------------------------------
     sitrep ID: ..........<REDACTED_UUID>...........
     no cases changed in this analysis step
-    started at: <REDACTED_TIMESTAMP> (end time <REDACTED_TIMESTAMP> less than start time, which seems weird?)
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1393,7 +1393,7 @@ task: "fm_analysis"
     --------------------------------
     sitrep ID: ..........<REDACTED_UUID>...........
     no cases changed in this analysis step
-    started at: <REDACTED_TIMESTAMP> (end time <REDACTED_TIMESTAMP> less than start time, which seems weird?)
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
