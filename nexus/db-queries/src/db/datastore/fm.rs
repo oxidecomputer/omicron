@@ -2265,6 +2265,8 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    /// Test that deeply orphaned child rows (whose fm_sitrep metadata
     /// row doesn't exist) are cleaned up by `fm_sitrep_gc_orphans`.
     #[tokio::test]
     async fn test_gc_deeply_orphaned_children() {
