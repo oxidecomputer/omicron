@@ -48,7 +48,8 @@ use nexus_db_schema::schema::{
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_stale_saga, inv_svc_enabled_not_online,
     inv_svc_enabled_not_online_parse_error, inv_svc_enabled_not_online_service,
-    inv_zone_manifest_measurement, inv_zpool, sw_caboose, sw_root_of_trust_page,
+    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::InventorySaga;
