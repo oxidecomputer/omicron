@@ -566,12 +566,6 @@ impl DataStore {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
-        // TODO-K: Remove this debugging code
-        println!("SAGAS!");
-        for saga in &inv_stale_saga_records {
-            println!("{saga:?}");
-        }
-
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
         // means we don't have to worry about other readers seeing a

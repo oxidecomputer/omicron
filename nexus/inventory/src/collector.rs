@@ -48,8 +48,7 @@ use tufaceous_artifact::ArtifactHash;
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Threshold at which we consider an active saga stale
-// TODO-K: Change back to 15 minutes
-const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(1);
+const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
