@@ -137,6 +137,32 @@ impl UpdateTestError {
     }
 }
 
+/// Counts of component updates by state.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateStateCounts {
+    pub completed: usize,
+    pub failed: usize,
+    pub aborted: usize,
+    pub in_progress: usize,
+    pub not_started: usize,
+}
+
+impl UpdateStateCounts {
+    pub fn from_components(components: &[ComponentUpdateStatus]) -> Self {
+        let mut counts = Self::default();
+        for c in components {
+            match c.state {
+                UpdateState::Completed => counts.completed += 1,
+                UpdateState::Failed => counts.failed += 1,
+                UpdateState::Aborted => counts.aborted += 1,
+                UpdateState::InProgress => counts.in_progress += 1,
+                UpdateState::NotStarted => counts.not_started += 1,
+            }
+        }
+        counts
+    }
+}
+
 /// The status of a rack update.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RackUpdateStatus {
@@ -148,6 +174,8 @@ pub struct RackUpdateStatus {
     pub artifacts: Vec<ArtifactId>,
     /// The update status of each of the target components.
     pub components: Vec<ComponentUpdateStatus>,
+    /// Counts of component updates by state.
+    pub state_counts: UpdateStateCounts,
 }
 
 /// The status of an update for a component within a rack.

@@ -37,7 +37,7 @@ use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{
         ClearUpdateStateResponse, ComponentUpdateStatus, RackUpdateStatus,
-        UpdateState, rollup_update_state,
+        UpdateState, UpdateStateCounts, rollup_update_state,
     },
     update_events::{EventReport, WicketdEngineSpec},
 };
@@ -477,12 +477,14 @@ fn build_rack_update_status(
     let component_states: Vec<UpdateState> =
         components.iter().map(|c| c.state).collect();
     let state = rollup_update_state(&component_states);
+    let counts = UpdateStateCounts::from_components(&components);
 
     Ok(RackUpdateStatus {
         state,
         system_version: response.system_version,
         artifacts,
         components,
+        state_counts: counts,
     })
 }
 
@@ -539,12 +541,6 @@ fn write_status_table(
     writeln!(out, "{artifact_table}\n")?;
 
     // Component table.
-    let mut n_completed = 0;
-    let mut n_failed = 0;
-    let mut n_aborted = 0;
-    let mut n_inprogress = 0;
-    let mut n_notstarted = 0;
-
     let component_rows: Vec<ComponentRow> = status
         .components
         .iter()
@@ -567,14 +563,6 @@ fn write_status_table(
                 None => "-".to_string(),
             };
 
-            match c.state {
-                UpdateState::Completed => n_completed += 1,
-                UpdateState::Failed => n_failed += 1,
-                UpdateState::Aborted => n_aborted += 1,
-                UpdateState::InProgress => n_inprogress += 1,
-                UpdateState::NotStarted => n_notstarted += 1,
-            }
-
             ComponentRow {
                 type_: c.id.type_.to_string(),
                 slot: c.id.slot,
@@ -591,10 +579,11 @@ fn write_status_table(
         .to_string();
     writeln!(out, "{component_table}")?;
 
+    let c = &status.state_counts;
     writeln!(
         out,
-        "\n{n_completed} completed, {n_failed} failed, {n_aborted} aborted, \
-         {n_inprogress} in progress, {n_notstarted} not started",
+        "\n{} completed, {} failed, {} aborted, {} in progress, {} not started",
+        c.completed, c.failed, c.aborted, c.in_progress, c.not_started,
     )?;
 
     Ok(())
