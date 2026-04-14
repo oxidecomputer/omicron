@@ -93,56 +93,56 @@ impl SvcsResult {
 
             if let Some(svc_state) = svc.next() {
                 // Only parse services that are in a known SMF service state.
-                let state = SvcState::from(svc_state);
-                match &state {
-                    SvcState::Maintenance
-                    | SvcState::Degraded
-                    | SvcState::LegacyRun
-                    | SvcState::Disabled
-                    | SvcState::Offline
-                    | SvcState::Online
-                    | SvcState::Uninitialized => {
-                        let fmri = if let Some(fmri) = svc.next() {
-                            fmri.to_string()
-                        } else {
-                            errors.push(format!(
-                                "Unexpected output line: {line}"
-                            ));
-                            error!(
-                                log,
-                                "unable to parse; output line missing FMRI:";
-                                "line" => line,
-                            );
-                            continue;
-                        };
+                if let Some(state) = parse_svc_state(svc_state) {
+                    match &state {
+                        SvcState::Maintenance
+                        | SvcState::Degraded
+                        | SvcState::LegacyRun
+                        | SvcState::Disabled
+                        | SvcState::Offline
+                        | SvcState::Online
+                        | SvcState::Uninitialized => {
+                            let fmri = if let Some(fmri) = svc.next() {
+                                fmri.to_string()
+                            } else {
+                                errors.push(format!(
+                                    "Unexpected output line: {line}"
+                                ));
+                                error!(
+                                    log,
+                                    "unable to parse; output line missing FMRI:";
+                                    "line" => line,
+                                );
+                                continue;
+                            };
 
-                        let zone = if let Some(zone) = svc.next() {
-                            zone.to_string()
-                        } else {
-                            errors.push(format!(
-                                "Unexpected output line: {line}"
-                            ));
-                            error!(
-                                log,
-                                "unable to parse; output line missing zone:";
-                                "line" => line,
-                            );
-                            continue;
-                        };
+                            let zone = if let Some(zone) = svc.next() {
+                                zone.to_string()
+                            } else {
+                                errors.push(format!(
+                                    "Unexpected output line: {line}"
+                                ));
+                                error!(
+                                    log,
+                                    "unable to parse; output line missing zone:";
+                                    "line" => line,
+                                );
+                                continue;
+                            };
 
-                        services.push(Svc { fmri, zone, state });
+                            services.push(Svc { fmri, zone, state });
+                        }
                     }
+                } else {
                     // If there is a weird state let's log it.
-                    SvcState::Unknown => {
-                        errors.push(format!(
-                            "Found a service with an unknown state: {line}"
-                        ));
-                        info!(
-                            log,
-                            "output from 'svcs' contains a service with an \
-                            unknown state: {state}",
-                        )
-                    }
+                    errors.push(format!(
+                        "Found a service with an unknown state: {line}"
+                    ));
+                    info!(
+                        log,
+                        "output from 'svcs' contains a service with an \
+                                                unknown state: {svc_state}",
+                    )
                 }
             }
         }
@@ -169,7 +169,6 @@ impl SvcsResult {
                     SvcState::Maintenance => {
                         SvcEnabledNotOnlineState::Maintenance
                     }
-                    SvcState::Unknown => SvcEnabledNotOnlineState::Unknown,
                     // legacy_run is included here because this state doesn't
                     // really say anything about whether a service is running or
                     // not. It just states that this is a service that isn't
@@ -191,6 +190,19 @@ impl SvcsResult {
             errors: self.errors,
             time_of_status: self.time_of_status,
         }
+    }
+}
+
+fn parse_svc_state(state: &str) -> Option<SvcState> {
+    match state {
+        "uninitialized" => Some(SvcState::Uninitialized),
+        "offline" => Some(SvcState::Offline),
+        "online" => Some(SvcState::Online),
+        "degraded" => Some(SvcState::Degraded),
+        "maintenance" => Some(SvcState::Maintenance),
+        "disabled" => Some(SvcState::Disabled),
+        "legacy_run" => Some(SvcState::LegacyRun),
+        _ => None,
     }
 }
 
@@ -447,10 +459,9 @@ disabled       svc:/network/tcpkey:default                      global
             mk_svc(4, SvcState::Disabled),
             mk_svc(5, SvcState::Disabled),
             mk_svc(6, SvcState::LegacyRun),
-            mk_svc(7, SvcState::Unknown),
+            mk_svc(7, SvcState::Maintenance),
             mk_svc(8, SvcState::Maintenance),
-            mk_svc(9, SvcState::Maintenance),
-            mk_svc(10, SvcState::Uninitialized),
+            mk_svc(9, SvcState::Uninitialized),
         ];
         let result = SvcsResult {
             services,
@@ -465,10 +476,9 @@ disabled       svc:/network/tcpkey:default                      global
             vec![
                 mk_e_not_o_svc(2, SvcEnabledNotOnlineState::Offline),
                 mk_e_not_o_svc(3, SvcEnabledNotOnlineState::Degraded),
-                mk_e_not_o_svc(7, SvcEnabledNotOnlineState::Unknown),
+                mk_e_not_o_svc(7, SvcEnabledNotOnlineState::Maintenance),
                 mk_e_not_o_svc(8, SvcEnabledNotOnlineState::Maintenance),
-                mk_e_not_o_svc(9, SvcEnabledNotOnlineState::Maintenance),
-                mk_e_not_o_svc(10, SvcEnabledNotOnlineState::Uninitialized),
+                mk_e_not_o_svc(9, SvcEnabledNotOnlineState::Uninitialized),
             ]
         );
     }

@@ -944,17 +944,13 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
-impl From<&'_ str> for SvcState {
-    fn from(value: &str) -> Self {
+impl From<SvcEnabledNotOnlineState> for SvcState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
         match value {
-            "uninitialized" => SvcState::Uninitialized,
-            "offline" => SvcState::Offline,
-            "online" => SvcState::Online,
-            "degraded" => SvcState::Degraded,
-            "maintenance" => SvcState::Maintenance,
-            "disabled" => SvcState::Disabled,
-            "legacy_run" => SvcState::LegacyRun,
-            _ => SvcState::Unknown,
+            SvcEnabledNotOnlineState::Degraded => Self::Degraded,
+            SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
+            SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Uninitialized => Self::Uninitialized,
         }
     }
 }
@@ -969,22 +965,9 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
-            SvcState::Unknown => "unknown",
         };
 
         write!(f, "{state}")
-    }
-}
-
-impl From<&'_ str> for SvcEnabledNotOnlineState {
-    fn from(value: &str) -> Self {
-        match value {
-            "uninitialized" => SvcEnabledNotOnlineState::Uninitialized,
-            "offline" => SvcEnabledNotOnlineState::Offline,
-            "degraded" => SvcEnabledNotOnlineState::Degraded,
-            "maintenance" => SvcEnabledNotOnlineState::Maintenance,
-            _ => SvcEnabledNotOnlineState::Unknown,
-        }
     }
 }
 
@@ -995,7 +978,6 @@ impl fmt::Display for SvcEnabledNotOnlineState {
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",
-            SvcEnabledNotOnlineState::Unknown => "unknown",
         };
 
         write!(f, "{state}")

@@ -222,17 +222,22 @@ impl DataStore {
         for sled_agent in &collection.sled_agents {
             match &sled_agent.smf_services_enabled_not_online {
                 SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                    let SvcsEnabledNotOnline {
+                        services,
+                        errors,
+                        time_of_status,
+                    } = svcs;
+
                     // Pull services enabled not online result out of each sled agent
                     svcs_enabled_not_online.push(InvSvcEnabledNotOnline::new(
                         collection_id,
                         sled_agent.sled_id,
                         None,
-                        svcs.time_of_status,
+                        *time_of_status,
                     ));
 
-                    // Pull services in maintenance details out of each sled agent
                     svcs_enabled_not_online_services.extend(
-                        svcs.services.iter().map(|svc| {
+                        services.iter().map(|svc| {
                             InvSvcEnabledNotOnlineService::new(
                                 collection_id,
                                 sled_agent.sled_id,
@@ -241,24 +246,25 @@ impl DataStore {
                         }),
                     );
 
-                    // Pull services in maintenance errors out of each sled agent
-                    svcs_enabled_not_online_errors.extend(
-                        svcs.errors.iter().map(|error| {
+                    svcs_enabled_not_online_errors.extend(errors.iter().map(
+                        |error| {
                             InvSvcEnabledNotOnlineParseError::new(
                                 collection_id,
                                 sled_agent.sled_id,
                                 error.clone(),
                             )
-                        }),
-                    );
+                        },
+                    ));
                 }
                 SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
+                    let SvcsError { error, time_of_status } = e;
+
                     // Pull services enabled not online result out of each sled agent
                     svcs_enabled_not_online.push(InvSvcEnabledNotOnline::new(
                         collection_id,
                         sled_agent.sled_id,
-                        Some(e.error.clone()),
-                        e.time_of_status,
+                        Some(error.to_string()),
+                        *time_of_status,
                     ));
                 }
                 SvcsEnabledNotOnlineResult::DataUnavailable => {}

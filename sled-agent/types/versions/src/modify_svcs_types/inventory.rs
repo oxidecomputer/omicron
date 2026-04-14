@@ -71,8 +71,6 @@ pub enum SvcEnabledNotOnlineState {
     Degraded,
     /// The instance is enabled, but not able to run.
     Maintenance,
-    /// We were unable to determine the state of the service instance.
-    Unknown,
 }
 
 impl From<SvcEnabledNotOnlineState> for v28::inventory::SvcState {
@@ -82,8 +80,63 @@ impl From<SvcEnabledNotOnlineState> for v28::inventory::SvcState {
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
             SvcEnabledNotOnlineState::Uninitialized => Self::Uninitialized,
-            SvcEnabledNotOnlineState::Unknown => Self::Unknown,
         }
+    }
+}
+
+/// Each service instance is always in a well-defined state based on its
+/// dependencies, the results of the execution of its methods, and its potential
+/// contracts events. See <https://illumos.org/man/7/smf> for more information.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SvcState {
+    /// Initial state for all service instances.
+    Uninitialized,
+    /// The instance is enabled, but not yet running or available to run.
+    Offline,
+    /// The instance is enabled and running or is available to run.
+    Online,
+    /// The instance is enabled and running or available to run. It is, however,
+    /// functioning at a limited capacity in comparison to normal operation.
+    Degraded,
+    /// The instance is enabled, but not able to run.
+    Maintenance,
+    /// The instance is disabled.
+    Disabled,
+    /// Represents a legacy instance that is not managed by the service
+    /// management facility.
+    LegacyRun,
+}
+
+impl From<SvcState> for v28::inventory::SvcState {
+    fn from(value: SvcState) -> Self {
+        match value {
+            SvcState::Degraded => Self::Degraded,
+            SvcState::Maintenance => Self::Maintenance,
+            SvcState::Offline => Self::Offline,
+            SvcState::Uninitialized => Self::Uninitialized,
+            SvcState::Disabled => Self::Disabled,
+            SvcState::LegacyRun => Self::LegacyRun,
+            SvcState::Online => Self::Online,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Information about an SMF service that is enabled but not running
+pub struct Svc {
+    pub fmri: String,
+    pub zone: String,
+    pub state: SvcState,
+}
+
+impl From<Svc> for v28::inventory::Svc {
+    fn from(value: Svc) -> Self {
+        let Svc { fmri, zone, state } = value;
+        Self { fmri, zone, state: state.into() }
     }
 }
 
