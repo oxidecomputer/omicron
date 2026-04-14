@@ -330,6 +330,9 @@ async fn start_fetch_reports_task(
 
 #[derive(Debug, Args)]
 pub(crate) struct StatusArgs {
+    #[clap(flatten)]
+    component_ids: ComponentIdSelector,
+
     /// Return the data as JSON for programmatic use.
     #[clap(long)]
     json: bool,
@@ -370,8 +373,9 @@ impl StatusArgs {
                 .into_inner()
         };
 
-        // Derive the status from events & artifacts.
-        let status = build_rack_update_status(&log, response);
+        // Derive the status from events, artifacts, and component selector.
+        let status =
+            build_rack_update_status(&log, response, &self.component_ids)?;
 
         // Write either JSON or a human-readable table to stdout.
         if self.json {
@@ -389,7 +393,8 @@ impl StatusArgs {
 fn build_rack_update_status(
     log: &Logger,
     response: GetArtifactsAndEventReportsResponse,
-) -> RackUpdateStatus {
+    selector: &ComponentIdSelector,
+) -> Result<RackUpdateStatus> {
     let artifacts: Vec<ArtifactId> = response
         .artifacts
         .into_iter()
@@ -399,6 +404,15 @@ fn build_rack_update_status(
         .collect();
 
     let event_reports = parse_event_report_map(log, response.event_reports);
+
+    // Filter to the selected components if any are specified.
+    let event_reports = if selector.is_empty() {
+        // Default to all components if no selectors specified.
+        event_reports
+    } else {
+        let ids = selector.to_component_ids()?;
+        event_reports.into_iter().filter(|(id, _)| ids.contains(id)).collect()
+    };
 
     let components: Vec<ComponentUpdateStatus> = event_reports
         .iter()
@@ -464,12 +478,12 @@ fn build_rack_update_status(
         components.iter().map(|c| c.state).collect();
     let state = rollup_update_state(&component_states);
 
-    RackUpdateStatus {
+    Ok(RackUpdateStatus {
         state,
         system_version: response.system_version,
         artifacts,
         components,
-    }
+    })
 }
 
 /// Write a human-readable status table to `out`.
@@ -877,5 +891,9 @@ impl ComponentIdSelector {
         }
 
         Ok(component_ids)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.sled.is_empty() && self.switch.is_empty() && self.psc.is_empty()
     }
 }
