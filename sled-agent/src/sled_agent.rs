@@ -5,7 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
@@ -45,6 +44,7 @@ use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -73,7 +73,6 @@ use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -85,6 +84,7 @@ use sled_agent_types::resolvable_files::{
 };
 use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -620,19 +620,20 @@ impl SledAgent {
         let svc_config =
             services::Config::new(identifiers, config.sidecar_revision.clone());
 
-        // Get our rack network config from the bootstore; we cannot proceed
-        // until we have this, as we need to know which switches have uplinks to
-        // correctly set up services.
+        // Get our system network config from the bootstore; we cannot proceed
+        // until we have this, as we need to set up uplinks inside the switch
+        // zone (if we're a scrimlet) and configure services that need NAT
+        // entries in dendrite (if we start any such services).
         let mut bootstore_network_config_rx =
             long_running_task_handles.bootstore.network_config_subscribe();
-        let rack_network_config = loop {
+        let network_config = loop {
             let maybe_serialized_config =
                 bootstore_network_config_rx.borrow_and_update().clone();
 
             // If we don't have a network config at all yet, wait until the
             // watch channel changes then try again.
             let Some(serialized_config) = maybe_serialized_config else {
-                warn!(log, "Waiting for early network config from bootstore");
+                warn!(log, "Waiting for network config from bootstore");
                 bootstore_network_config_rx
                     .changed()
                     .await
@@ -648,8 +649,8 @@ impl SledAgent {
             )
             .and_then(|envelope| envelope.deserialize_body())
             {
-                Ok(early_network_config) => {
-                    break early_network_config.rack_network_config;
+                Ok(network_config) => {
+                    break network_config;
                 }
                 Err(err) => {
                     warn!(
@@ -673,14 +674,14 @@ impl SledAgent {
         // This is spiritually a "long-running task", but we can't spawn it with
         // the other long-running tasks because it can't begin prior to this
         // point: we must have already received and successfully deserialized a
-        // `RackNetworkConfig`.
-        let (rack_network_config_tx, rack_network_config_rx) =
-            watch::channel(rack_network_config);
-        tokio::spawn(rack_network_config_deserialization_task(
+        // `SystemNetworkingConfig`.
+        let (network_config_tx, network_config_rx) =
+            watch::channel(network_config);
+        tokio::spawn(network_config_deserialization_task(
             bootstore_network_config_rx,
-            rack_network_config_tx,
+            network_config_tx,
             parent_log
-                .new(o!("component" => "RackNetworkConfigDeserializationTask")),
+                .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
         // Start reconciling against our ledgered sled config.
@@ -711,7 +712,7 @@ impl SledAgent {
                         &request,
                     ),
                 rack_id: request.body.rack_id,
-                rack_network_config_rx,
+                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -1440,13 +1441,9 @@ impl SledAgent {
             HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
         })?;
 
-        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs::Raw {
             name: &delegated_zvol.volume_name(),
             size: volume_size,
-            raw: true,
-            // Set the volblocksize (read: the allocation size for the zvol,
-            // _not_ the actual block size!) to 128k
-            volblocksize: Some(131072),
         })
         .await
         .map_err(|e| {
@@ -1721,17 +1718,17 @@ pub async fn sled_add(
     Ok(())
 }
 
-// Long-running task that updates the contents of `rack_network_config_tx` any
+// Long-running task that updates the contents of `network_config_tx` any
 // time the contents of `bootstore_network_config_rx` changes.
 //
 // Assumes the caller already deserialized the current bootstore network config
-// and used the result to initialize `rack_network_config_tx`; this task starts
+// and used the result to initialize `network_config_tx`; this task starts
 // by waiting for any changes to `bootstore_network_config_rx`.
-async fn rack_network_config_deserialization_task(
+async fn network_config_deserialization_task(
     mut bootstore_network_config_rx: watch::Receiver<
         Option<bootstore::NetworkConfig>,
     >,
-    rack_network_config_tx: watch::Sender<RackNetworkConfig>,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
     log: Logger,
 ) {
     loop {
@@ -1740,7 +1737,7 @@ async fn rack_network_config_deserialization_task(
             error!(
                 log,
                 "bootstore task exited - \
-                 rack_network_config_deserialization_task exiting"
+                 network_config_deserialization_task exiting"
             );
             return;
         }
@@ -1769,16 +1766,14 @@ async fn rack_network_config_deserialization_task(
         )
         .and_then(|envelope| envelope.deserialize_body())
         {
-            Ok(early_network_config) => {
-                let rack_network_config =
-                    early_network_config.rack_network_config;
+            Ok(network_config) => {
                 info!(
                     log,
-                    "received new RackNetworkConfig from bootstore";
+                    "received new network config from bootstore";
                     "generation" => %bootstore_network_config.generation,
                 );
-                rack_network_config_tx.send_modify(|c| {
-                    *c = rack_network_config;
+                network_config_tx.send_modify(|c| {
+                    *c = network_config;
                 });
             }
             Err(err) => {

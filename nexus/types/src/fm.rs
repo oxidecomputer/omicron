@@ -7,6 +7,7 @@
 //! Of particular importance is the [`Sitrep`], which is the top-level data
 //! structure containing fault management state.
 
+pub mod analysis_reports;
 pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
@@ -80,8 +81,17 @@ impl Sitrep {
         &self,
     ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
         self.cases.iter().flat_map(|case| {
-            let case_id = case.id;
+            let case_id = *case.id();
             case.alerts_requested.iter().map(move |alert| (case_id, alert))
+        })
+    }
+
+    /// Iterate over all support bundles requested by cases in this sitrep.
+    pub fn support_bundles_requested(
+        &self,
+    ) -> impl Iterator<Item = (&Case, &case::SupportBundleRequest)> {
+        self.cases.iter().flat_map(|case| {
+            case.support_bundles_requested.iter().map(move |req| (case, req))
         })
     }
 }

@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use indent_write::indentable::Indentable;
-use ls_apis_shared::DagEdgesFile;
+use omicron_deployment_graph::DagEdgesFile;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
     FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
@@ -103,6 +103,7 @@ fn run_dag_edges(apis: &SystemApis) -> Result<()> {
     print!(
         "# BEGIN @generated server-side deployment unit DAG edges.\n\
          # To regenerate, run `EXPECTORATE=overwrite cargo nextest run -p omicron-ls-apis`.\n\
+         # YOU SHOULD STILL REVIEW CHANGES TO THIS FILE FOR CORRECTNESS.\n\
          \n\
          {toml_str}"
     );
@@ -240,7 +241,7 @@ fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
                     });
                 let server_components =
                     apis.deployment_unit_servers(unit_id)?;
-                println!("{}", info.label);
+                println!("{}", info.name);
                 print_server_components(
                     apis,
                     metadata,

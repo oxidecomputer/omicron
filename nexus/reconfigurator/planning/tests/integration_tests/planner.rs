@@ -10,10 +10,6 @@ use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::keeper::KeeperId;
 use expectorate::assert_contents;
 use iddqd::IdOrdMap;
-use ls_apis_shared::DEPLOYMENT_UNIT_DAG_PATH;
-use ls_apis_shared::DagEdgesFile;
-use ls_apis_shared::DeploymentUnitId;
-use ls_apis_shared::OMICRON_LS_APIS_PATH;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::CollectionId;
@@ -73,6 +69,10 @@ use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::ArtifactId;
+use omicron_deployment_graph::DEPLOYMENT_UNIT_DAG_PATH;
+use omicron_deployment_graph::DagEdgesFile;
+use omicron_deployment_graph::DeploymentUnitName;
+use omicron_deployment_graph::OMICRON_LS_APIS_PATH;
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -5048,21 +5048,23 @@ fn test_multiple_measurements() {
     panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
 }
 
-/// Maps a `ZoneKind` to its omicron-ls-apis deployment unit ID.
-fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitId {
+/// Maps a `ZoneKind` to its deployment unit name.
+fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitName {
     let s = match kind {
-        ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+        ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "NTP",
         ZoneKind::Clickhouse
         | ZoneKind::ClickhouseKeeper
-        | ZoneKind::ClickhouseServer => "clickhouse",
-        ZoneKind::CockroachDb => "cockroach",
-        ZoneKind::Crucible => "crucible",
-        ZoneKind::CruciblePantry => "crucible_pantry",
-        ZoneKind::ExternalDns | ZoneKind::InternalDns => "dns_server",
-        ZoneKind::Nexus => "nexus",
-        ZoneKind::Oximeter => "oximeter",
+        | ZoneKind::ClickhouseServer => {
+            "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
+        }
+        ZoneKind::CockroachDb => "Cockroach",
+        ZoneKind::Crucible => "Crucible",
+        ZoneKind::CruciblePantry => "Crucible Pantry",
+        ZoneKind::ExternalDns | ZoneKind::InternalDns => "DNS Server",
+        ZoneKind::Nexus => "Nexus",
+        ZoneKind::Oximeter => "Oximeter",
     };
-    DeploymentUnitId::from(s)
+    DeploymentUnitName::from(s)
 }
 
 /// Verify that the planner's zone update ordering is a topological sort of the
@@ -5092,9 +5094,9 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     // Deployment units that don't correspond to zones or MGS updates, and
     // therefore aren't tracked in this test. These are expected to be absent
     // from `progress`.
-    let non_zone_units: BTreeSet<DeploymentUnitId> =
-        [DeploymentUnitId::from("installinator")].into_iter().collect();
-    let host_os_unit = DeploymentUnitId::from("host_os");
+    let non_zone_units: BTreeSet<DeploymentUnitName> =
+        [DeploymentUnitName::from("Installinator")].into_iter().collect();
+    let host_os_unit = DeploymentUnitName::from("Host OS");
     assert!(
         dag_unit_ids.contains(&host_os_unit),
         "host_os_unit does not appear in the deployment unit DAG \
@@ -5202,7 +5204,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
         // Check which deployment units have all in-service zones at the
         // target image in this blueprint.
         let mut zones_by_unit: BTreeMap<
-            DeploymentUnitId,
+            DeploymentUnitName,
             Vec<&BlueprintZoneConfig>,
         > = BTreeMap::new();
         for (_, zone) in blueprint.in_service_zones() {
@@ -5273,7 +5275,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     // not part of the DAG. We check that they are not present in dag_unit_ids.
     // (We do also check all_at_target for these units, since they *are*
     // deployed.)
-    let client_side_units = [DeploymentUnitId::from("ntp")];
+    let client_side_units = [DeploymentUnitName::from("NTP")];
 
     for unit in &zone_based_units {
         let p = progress.get(unit).unwrap_or_else(|| {

@@ -9,7 +9,7 @@
 //!
 //! This isn't (supposed to be) a test for the `ls-apis` tool itself.
 
-use ls_apis_shared::DEPLOYMENT_UNIT_DAG_PATH;
+use omicron_deployment_graph::DEPLOYMENT_UNIT_DAG_PATH;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;

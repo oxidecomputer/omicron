@@ -67,8 +67,7 @@ ignored_non_clients = [
 # The host OS includes Sled Agent, Propolis, and all the components that get
 # bundled into the switch zone.
 [[deployment_units]]
-id = "host_os"
-label = "Host OS"
+name = "Host OS"
 packages = [
     "omicron-sled-agent",
     "propolis-server",
@@ -84,53 +83,44 @@ packages = [
 
 # Installinator gets packaged into its own host OS image.
 [[deployment_units]]
-id = "installinator"
-label = "Installinator"
+name = "Installinator"
 packages = [ "installinator" ]
 
 # The rest of these get bundled by standard control plane zone images.
 
 [[deployment_units]]
-id = "crucible"
-label = "Crucible"
+name = "Crucible"
 packages = [ "crucible-agent", "crucible-downstairs" ]
 
 [[deployment_units]]
-id = "crucible_pantry"
-label = "Crucible Pantry"
+name = "Crucible Pantry"
 packages = [ "crucible-pantry" ]
 
 [[deployment_units]]
-id = "cockroach"
-label = "Cockroach"
+name = "Cockroach"
 packages = [ "omicron-cockroach-admin" ]
 
 # These are really three distinct deployment units, but they behave the same for
 # our purposes, and the tooling doesn't support multiple deployment units
 # that each expose a particular service.
 [[deployment_units]]
-id = "clickhouse"
-label = "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
+name = "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
 packages = [ "omicron-clickhouse-admin" ]
 
 [[deployment_units]]
-id = "dns_server"
-label = "DNS Server"
+name = "DNS Server"
 packages = [ "dns-server" ]
 
 [[deployment_units]]
-id = "nexus"
-label = "Nexus"
+name = "Nexus"
 packages = [ "omicron-nexus" ]
 
 [[deployment_units]]
-id = "ntp"
-label = "NTP"
+name = "NTP"
 packages = [ "omicron-ntp-admin" ]
 
 [[deployment_units]]
-id = "oximeter"
-label = "Oximeter"
+name = "Oximeter"
 packages = [ "oximeter-collector" ]
 
 
@@ -513,6 +503,10 @@ Sled Agent only uses the DNS service client during RSS, which we don't care
 about for the purpose of upgrade.
 """
 
+#
+# Non-DAG dependencies.  See above for details.
+#
+
 [[dependency_filter_rules]]
 ancestor = "oximeter-producer"
 client = "nexus-client"
@@ -572,6 +566,39 @@ deployed.
 # TODO It would be nice to remove the need for all of these to avoid accidental
 # future false negatives.
 #
+
+[[dependency_filter_rules]]
+ancestor = "dice-verifier"
+client = "sled-agent-client"
+evaluation = "bogus"
+note = """
+propolis-server does actually talk to sled-agent-client, but by virtue of both
+APIs being server-side versioned, trips a check in the component graph that
+requires server-side versioned APIs to not form a cycle. This is a deficiency
+in the server-side API checking, since this cycle is acceptable on the basis of
+propolis-server and sled-agent being in the same deployment unit.
+
+This filter should be removed when the intra-deployment relationship between
+propolis-server and sled-agent can be tolerated in the component graph check.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-client"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+Same as the bogus rule between sled-agent-types and propolis-client.
+sled-agent-client re-exports some (Crucible!) types from propolis-client for
+sled-agent-client's consumers.
+
+This bogus rule would be fine enough on its own, though ideally we should not
+need sled-agent-client to depend on propolis-client even just for types. But,
+perhaps surprisingly, this was necessary to add even though the
+dice-verifier->sled-agent-client rule above "broke" the dependency path from
+propolis-server through to propolis-client. Once we've fixed the issue requiring
+the dice-verifier rule above, we should probably keep this dependency filter
+rule.
+"""
 
 [[dependency_filter_rules]]
 ancestor = "omicron-common"

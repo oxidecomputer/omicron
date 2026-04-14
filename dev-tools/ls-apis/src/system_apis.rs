@@ -27,8 +27,8 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use itertools::Itertools;
-use ls_apis_shared::DagEdge;
-use ls_apis_shared::DeploymentUnitId;
+use omicron_deployment_graph::DagEdge;
+use omicron_deployment_graph::DeploymentUnitName;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use petgraph::graph::Graph;
@@ -43,10 +43,10 @@ use std::fmt;
 pub struct SystemApis {
     /// maps a deployment unit to its list of service components
     unit_server_components:
-        BTreeMap<DeploymentUnitId, BTreeSet<ServerComponentName>>,
+        BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
     /// maps a server component to the deployment unit that it's part of
     /// (reverse of `unit_server_components`)
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitId>,
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
 
     /// maps a server component to the list of APIs it uses (using the client
     /// package name as a primary key for the API)
@@ -165,8 +165,10 @@ impl SystemApis {
         let mut tracker = ServerComponentsTracker::new(&server_packages);
         for dunit_info in api_metadata.deployment_units() {
             for dunit_pkg in &dunit_info.packages {
-                tracker
-                    .found_deployment_unit_package(&dunit_info.id, dunit_pkg)?;
+                tracker.found_deployment_unit_package(
+                    &dunit_info.name,
+                    dunit_pkg,
+                )?;
                 let (workspace, server_pkg) =
                     workspaces.find_package_workspace(dunit_pkg)?;
                 let dep_path = DepPath::for_pkg(server_pkg.id.clone());
@@ -346,7 +348,9 @@ impl SystemApis {
     }
 
     /// Iterate over the deployment units
-    pub fn deployment_units(&self) -> impl Iterator<Item = &DeploymentUnitId> {
+    pub fn deployment_units(
+        &self,
+    ) -> impl Iterator<Item = &DeploymentUnitName> {
         self.unit_server_components.keys()
     }
 
@@ -354,14 +358,14 @@ impl SystemApis {
     pub fn server_component_unit(
         &self,
         server_component: &ServerComponentName,
-    ) -> Option<&DeploymentUnitId> {
+    ) -> Option<&DeploymentUnitName> {
         self.server_component_units.get(server_component)
     }
 
     /// For one deployment unit, iterate over the servers contained in it
     pub fn deployment_unit_servers(
         &self,
-        unit: &DeploymentUnitId,
+        unit: &DeploymentUnitName,
     ) -> Result<impl Iterator<Item = &ServerComponentName> + use<'_>> {
         Ok(self
             .unit_server_components
@@ -534,18 +538,7 @@ impl SystemApis {
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
         let (graph, _) =
             self.make_deployment_unit_graph(filter, EdgeFilter::All)?;
-        // Map IDs to human-readable labels for dot output.
-        let labeled = graph.map(
-            |_, id| {
-                &self
-                    .api_metadata
-                    .deployment_unit_info(id)
-                    .expect("deployment unit info in graph exists in metadata")
-                    .label
-            },
-            |_, edge| *edge,
-        );
-        Ok(Dot::new(&labeled).to_string())
+        Ok(Dot::new(&graph).to_string())
     }
 
     /// Returns the edges of the deployment unit dependency DAG.
@@ -579,8 +572,8 @@ impl SystemApis {
         dependency_filter: ApiDependencyFilter,
         edge_filter: EdgeFilter<'_>,
     ) -> Result<(
-        Graph<&DeploymentUnitId, &ClientPackageName>,
-        BTreeMap<&DeploymentUnitId, NodeIndex>,
+        Graph<&DeploymentUnitName, &ClientPackageName>,
+        BTreeMap<&DeploymentUnitName, NodeIndex>,
     )> {
         let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
@@ -1332,9 +1325,9 @@ struct ServerComponentsTracker<'a> {
         &'a BTreeMap<ServerPackageName, Vec<&'a ApiMetadata>>,
 
     // outputs (structures that we're building up)
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitId>,
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
     unit_server_components:
-        BTreeMap<DeploymentUnitId, BTreeSet<ServerComponentName>>,
+        BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
 }
 
@@ -1431,7 +1424,7 @@ impl<'a> ServerComponentsTracker<'a> {
     /// packages (server components)
     pub fn found_deployment_unit_package(
         &mut self,
-        deployment_unit: &DeploymentUnitId,
+        deployment_unit: &DeploymentUnitName,
         server_component: &ServerComponentName,
     ) -> Result<()> {
         if let Some(previous) = self

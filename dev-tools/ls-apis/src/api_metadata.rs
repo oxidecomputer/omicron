@@ -5,7 +5,6 @@
 //! Developer-maintained API metadata
 
 use crate::ClientPackageName;
-use crate::DeploymentUnitName;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
 use crate::cargo::DepPath;
@@ -14,7 +13,7 @@ use anyhow::{Result, bail};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use ls_apis_shared::DeploymentUnitId;
+use omicron_deployment_graph::DeploymentUnitName;
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -47,12 +46,12 @@ impl AllApiMetadata {
         self.deployment_units.iter()
     }
 
-    /// Look up a deployment unit's info by its ID
+    /// Look up a deployment unit's info by its name
     pub fn deployment_unit_info(
         &self,
-        id: &DeploymentUnitId,
+        name: &DeploymentUnitName,
     ) -> Option<&DeploymentUnitInfo> {
-        self.deployment_units.get(id)
+        self.deployment_units.get(name)
     }
 
     /// Iterate over the package names for all the APIs' clients
@@ -179,8 +178,8 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         for info in raw.deployment_units {
             if let Err(e) = deployment_units.insert_unique(info) {
                 bail!(
-                    "duplicate deployment unit id in API metadata: {}",
-                    e.new_item().id,
+                    "duplicate deployment unit name in API metadata: {}",
+                    e.new_item().name,
                 );
             }
         }
@@ -418,18 +417,16 @@ pub enum ApiConsumerStatus {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentUnitInfo {
-    /// short, machine-friendly identifier (e.g. "nexus", "dns_server")
-    pub id: DeploymentUnitId,
-    /// human-readable label for display
-    pub label: DeploymentUnitName,
+    /// human-readable name (e.g. "Nexus", "DNS Server")
+    pub name: DeploymentUnitName,
     /// list of Rust packages that are shipped in this unit
     pub packages: Vec<ServerComponentName>,
 }
 
 impl IdOrdItem for DeploymentUnitInfo {
-    type Key<'a> = &'a DeploymentUnitId;
+    type Key<'a> = &'a DeploymentUnitName;
     fn key(&self) -> Self::Key<'_> {
-        &self.id
+        &self.name
     }
     id_upcast!();
 }
@@ -465,8 +462,8 @@ pub enum Evaluation {
     NonDag,
     /// This dependency is only used during RSS, not during normal operation or
     /// upgrade. Like `NonDag`, this means the dependency should not be part of
-    /// the update DAG. Unlike `NonDag`,
-    /// this does not require that the target API uses client-side versioning.
+    /// the update DAG. Unlike `NonDag`, this does not require that the target
+    /// API uses client-side versioning.
     RssOnly,
     /// This dependency should be part of the update DAG
     Dag,
