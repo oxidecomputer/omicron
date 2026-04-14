@@ -12,6 +12,7 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, zpool};
 use nexus_types::external_api::physical_disk as physical_disk_types;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::PhysicalDiskAdoptionRequestKind;
 use omicron_uuid_kinds::PhysicalDiskKind as PhysicalDiskUuidKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
@@ -74,6 +75,18 @@ impl PhysicalDisk {
     }
 }
 
+impl From<PhysicalDisk>
+    for physical_disk_types::PhysicalDiskManufacturerIdentity
+{
+    fn from(value: PhysicalDisk) -> Self {
+        Self {
+            vendor: value.vendor.clone(),
+            serial: value.serial.clone(),
+            model: value.model.clone(),
+        }
+    }
+}
+
 impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
     fn from(disk: PhysicalDisk) -> Self {
         Self {
@@ -85,6 +98,32 @@ impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
             serial: disk.serial,
             model: disk.model,
             form_factor: disk.variant.into(),
+        }
+    }
+}
+
+/// A request to adopt a physical disk into the control plane.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[diesel(table_name = nexus_db_schema::schema::physical_disk_adoption_request)]
+pub struct PhysicalDiskAdoptionRequest {
+    pub id: DbTypedUuid<PhysicalDiskAdoptionRequestKind>,
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+    pub time_created: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+}
+
+impl From<PhysicalDiskAdoptionRequest>
+    for physical_disk_types::PhysicalDiskAdoptionRequest
+{
+    fn from(req: PhysicalDiskAdoptionRequest) -> Self {
+        Self {
+            id: req.id.into(),
+            vendor: req.vendor,
+            serial: req.serial,
+            model: req.model,
+            time_created: req.time_created,
         }
     }
 }
