@@ -698,7 +698,7 @@ task: "fm_analysis"
     parent sitrep ID:                None
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
     FAULT MANAGEMENT ANALYSIS SUMMARY
-    ===== ========== ======== =======
+    =================================
 /!\ analysis failed: FM analysis is not yet implemented
 
     fault management analysis inputs
@@ -708,6 +708,11 @@ task: "fm_analysis"
     no new ereports since the parent sitrep
     no cases copied forward
 
+    fault management analysis report
+    --------------------------------
+    sitrep ID: ..........<REDACTED_UUID>...........
+    no cases changed in this analysis step
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1374,7 +1379,7 @@ task: "fm_analysis"
     parent sitrep ID:                None
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
     FAULT MANAGEMENT ANALYSIS SUMMARY
-    ===== ========== ======== =======
+    =================================
 /!\ analysis failed: FM analysis is not yet implemented
 
     fault management analysis inputs
@@ -1384,6 +1389,11 @@ task: "fm_analysis"
     no new ereports since the parent sitrep
     no cases copied forward
 
+    fault management analysis report
+    --------------------------------
+    sitrep ID: ..........<REDACTED_UUID>...........
+    no cases changed in this analysis step
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m

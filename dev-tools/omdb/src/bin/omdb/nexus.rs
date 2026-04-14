@@ -1194,6 +1194,24 @@ fn print_run_time(start_time: DateTime<Utc>, elapsed: Duration, indent: usize) {
     );
 }
 
+fn print_start_end_time(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    indent: usize,
+) {
+    if let Ok(elapsed) = end.signed_duration_since(start).to_std() {
+        print_run_time(start, elapsed, indent);
+    } else {
+        println!(
+            "{:indent$}started at: {} (end time {} less than start time, \
+            which seems weird?)",
+            "",
+            humantime::format_rfc3339_millis(start.into()),
+            humantime::format_rfc3339_millis(end.into()),
+        );
+    }
+}
+
 /// Interprets the unstable, schemaless output from each particular background
 /// task and print a human-readable summary
 ///
@@ -3465,7 +3483,7 @@ mod ereporter_status_fields {
 
 fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
-        AnalysisOutcome, Outcome, PreparationStatus,
+        AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
     let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
         match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
@@ -3484,8 +3502,8 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
     println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
-    println!("    ===== ========== ======== =======");
-    let (prep_status, analysis_outcome) = match outcome {
+    println!("    =================================");
+    let (prep_status, analysis_status) = match outcome {
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
@@ -3500,9 +3518,18 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             return;
         }
-        Outcome::RanAnalysis { prep_status, outcome } => (prep_status, outcome),
+        Outcome::RanAnalysis { prep_status, analysis_status } => {
+            (prep_status, analysis_status)
+        }
     };
-    match analysis_outcome {
+
+    let AnalysisStatus {
+        start_time,
+        end_time,
+        report: analysis_report,
+        outcome,
+    } = analysis_status;
+    match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
         }
@@ -3512,9 +3539,20 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                 parent_sitrep_id
             );
         }
-        AnalysisOutcome::NotCommitted { sitrep_id, error } => {
+        AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
-                "    analysis succeeded, but the sitrep was not committed!"
+                "    analysis succeeded, but the sitrep was not committed"
+            );
+            println!(
+                "    since the parent sitrep ({parent_sitrep_id:?}) was out \
+                of date"
+            );
+            println!("    sitrep ID: {sitrep_id:?}");
+        }
+        AnalysisOutcome::CommitFailed { sitrep_id, error } => {
+            println!(
+                "{ERRICON} analysis succeeded, but committing the new sitrep \
+                 failed!"
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
@@ -3526,17 +3564,17 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     }
     println!();
 
-    let PreparationStatus { errors, report } = prep_status;
-    println!("{}", report.display_multiline(4));
+    let PreparationStatus { errors, report: prep_report } = prep_status;
+    print!("{}", prep_report.display_multiline(4));
     if !errors.is_empty() {
         println!("{ERRICON}   errors preparing analysis inputs:");
         for error in errors {
             println!("      > {error}")
         }
     }
-
-    // TODO(eliza): eventually there will also be a detailed analysis report,
-    // print that here as well...
+    println!();
+    print!("{}", analysis_report.display_multiline(4));
+    print_start_end_time(start_time, end_time, 4);
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
@@ -3643,16 +3681,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
                 println!("(i)   note: this operation was not executed")
             }
             fm_rendezvous::OpResult::Executed { start, end } => {
-                if let Ok(elapsed) = start.signed_duration_since(end).to_std() {
-                    print_run_time(start, elapsed, 6);
-                } else {
-                    println!(
-                        "      started at: {} (end time {} less than start time, \
-                        which seems weird?)",
-                        humantime::format_rfc3339_millis(start.into()),
-                        humantime::format_rfc3339_millis(end.into()),
-                    );
-                }
+                print_start_end_time(start, end, 6);
             }
         }
 
