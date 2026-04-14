@@ -2372,7 +2372,11 @@ impl JsonSchema for IcmpParamRange {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct MacAddr(pub macaddr::MacAddr6);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(any(test, feature = "testing"), map(|x: [u8; 6]| x.into()))]
+    pub macaddr::MacAddr6,
+);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2539,7 +2543,10 @@ impl JsonSchema for MacAddr {
     JsonSchema,
     Diffable,
 )]
-pub struct Vni(u32);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Vni(
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=Vni::MAX_VNI))] u32,
+);
 
 impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "32.0.0"
+    "version": "34.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -5097,18 +5097,6 @@
           "secs"
         ]
       },
-      "EarlyNetworkConfigBody": {
-        "description": "This is the actual configuration of EarlyNetworking.",
-        "type": "object",
-        "properties": {
-          "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfig"
-          }
-        },
-        "required": [
-          "rack_network_config"
-        ]
-      },
       "EncryptedRackSecrets": {
         "description": "All possibly relevant __encrypted__ rack secrets for _prior_ committed configurations.",
         "type": "object",
@@ -8994,6 +8982,113 @@
           "com4"
         ]
       },
+      "ServiceZoneNatEntries": {
+        "title": "IdOrdMap",
+        "description": "Description of all NAT entries for control plane services.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/ServiceZoneNatEntry"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/ServiceZoneNatEntry"
+        },
+        "uniqueItems": true
+      },
+      "ServiceZoneNatEntry": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ServiceZoneNatKind"
+          },
+          "nic_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "sled_underlay_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          },
+          "zone_id": {
+            "$ref": "#/components/schemas/OmicronZoneUuid"
+          }
+        },
+        "required": [
+          "kind",
+          "nic_mac",
+          "sled_underlay_ip",
+          "vni",
+          "zone_id"
+        ]
+      },
+      "ServiceZoneNatKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigGeneric"
+              }
+            },
+            "required": [
+              "kind",
+              "snat_cfg"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "external_ip": {
+                "type": "string",
+                "format": "ip"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "external_ip",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "external_ip": {
+                "type": "string",
+                "format": "ip"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_ip",
+              "kind"
+            ]
+          }
+        ]
+      },
       "SingleMeasurementInventory": {
         "description": "An attempt at resolving a single measurement file to a valid path",
         "type": "object",
@@ -9503,7 +9598,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "Svc": {
+      "SvcEnabledNotOnline": {
         "description": "Information about an SMF service that is enabled but not running",
         "type": "object",
         "properties": {
@@ -9511,7 +9606,7 @@
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/SvcState"
+            "$ref": "#/components/schemas/SvcEnabledNotOnlineState"
           },
           "zone": {
             "type": "string"
@@ -9523,8 +9618,8 @@
           "zone"
         ]
       },
-      "SvcState": {
-        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events. See <https://illumos.org/man/7/smf> for more information.",
+      "SvcEnabledNotOnlineState": {
+        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events.\n\nThis enum contains all possible states except `online`, `disabled` and `legacy_run`. We only want to represent states that represent some sort of \"unhealthy\" or \"unexpected\" state. See <https://illumos.org/man/7/smf> for more information.",
         "oneOf": [
           {
             "description": "Initial state for all service instances.",
@@ -9541,13 +9636,6 @@
             ]
           },
           {
-            "description": "The instance is enabled and running or is available to run.",
-            "type": "string",
-            "enum": [
-              "online"
-            ]
-          },
-          {
             "description": "The instance is enabled and running or available to run. It is, however, functioning at a limited capacity in comparison to normal operation.",
             "type": "string",
             "enum": [
@@ -9559,27 +9647,6 @@
             "type": "string",
             "enum": [
               "maintenance"
-            ]
-          },
-          {
-            "description": "The instance is disabled.",
-            "type": "string",
-            "enum": [
-              "disabled"
-            ]
-          },
-          {
-            "description": "Represents a legacy instance that is not managed by the service management facility.",
-            "type": "string",
-            "enum": [
-              "legacy_run"
-            ]
-          },
-          {
-            "description": "We were unable to determine the state of the service instance.",
-            "type": "string",
-            "enum": [
-              "unknown"
             ]
           }
         ]
@@ -9597,7 +9664,7 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Svc"
+              "$ref": "#/components/schemas/SvcEnabledNotOnline"
             }
           },
           "time_of_status": {
@@ -9666,118 +9733,19 @@
         ]
       },
       "SvcsError": {
-        "description": "Error that is a one to one mapping of `illumos_utils::ExecutionError`, which uses a String for any type in `ExecutionError` that is not cloneable.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "execution_start"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "command": {
-                    "type": "string"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "command",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "command_failure"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "contract_failure"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  },
-                  "msg": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err",
-                  "msg"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "parse_failure"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "not_running"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
+          "time_of_status": {
+            "type": "string",
+            "format": "date-time"
           }
+        },
+        "required": [
+          "error",
+          "time_of_status"
         ]
       },
       "SwitchPorts": {
@@ -9812,6 +9780,27 @@
               "switch1"
             ]
           }
+        ]
+      },
+      "SystemNetworkingConfig": {
+        "description": "All configuration needed to set up system-level networking.",
+        "type": "object",
+        "properties": {
+          "rack_network_config": {
+            "$ref": "#/components/schemas/RackNetworkConfig"
+          },
+          "service_zone_nat_entries": {
+            "nullable": true,
+            "description": "Set of all Omicron service zone NAT entries.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceZoneNatEntries"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rack_network_config"
         ]
       },
       "TrustQuorumNetworkConfig": {
@@ -10447,11 +10436,11 @@
         ]
       },
       "WriteNetworkConfigRequest": {
-        "description": "Structure for requests from Nexus to sled-agent to write a new `EarlyNetworkConfigBody` into the replicated bootstore.\n\n[`WriteNetworkConfigRequest`] INTENTIONALLY does not have a `From` implementation from prior API versions. It is critically important that sled-agent not attempt to rewrite old `EarlyNetworkConfigBody` types to the latest version. For more about this, see the comments on the relevant endpoint in `sled-agent-api`.",
+        "description": "Structure for requests from Nexus to sled-agent to write a new [`SystemNetworkingConfig`] into the replicated bootstore.\n\n[`WriteNetworkConfigRequest`] INTENTIONALLY does not have a `From` implementation from prior API versions. It is critically important that sled-agent not attempt to rewrite old [`SystemNetworkingConfig`] types to the latest version. For more about this, see the comments on the relevant endpoint in `sled-agent-api`.",
         "type": "object",
         "properties": {
           "body": {
-            "$ref": "#/components/schemas/EarlyNetworkConfigBody"
+            "$ref": "#/components/schemas/SystemNetworkingConfig"
           },
           "generation": {
             "type": "integer",

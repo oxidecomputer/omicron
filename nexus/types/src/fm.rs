@@ -7,6 +7,7 @@
 //! Of particular importance is the [`Sitrep`], which is the top-level data
 //! structure containing fault management state.
 
+pub mod analysis_reports;
 pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
@@ -19,9 +20,6 @@ use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::fmt;
 use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
@@ -85,6 +83,15 @@ impl Sitrep {
         self.cases.iter().flat_map(|case| {
             let case_id = *case.id();
             case.alerts_requested.iter().map(move |alert| (case_id, alert))
+        })
+    }
+
+    /// Iterate over all support bundles requested by cases in this sitrep.
+    pub fn support_bundles_requested(
+        &self,
+    ) -> impl Iterator<Item = (&Case, &case::SupportBundleRequest)> {
+        self.cases.iter().flat_map(|case| {
+            case.support_bundles_requested.iter().map(move |req| (case, req))
         })
     }
 }
@@ -154,292 +161,4 @@ pub struct SitrepVersion {
 #[strum(serialize_all = "snake_case")]
 pub enum DiagnosisEngineKind {
     PowerShelf,
-}
-
-/// Summarizes the inputs to sitrep analysis.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AnalysisInputReport {
-    pub parent_sitrep_id: Option<SitrepUuid>,
-    pub parent_inv_id: Option<CollectionUuid>,
-    pub inv_id: CollectionUuid,
-    pub new_ereport_ids: BTreeSet<EreportId>,
-    /// Cases which were open in the parent sitrep.
-    pub open_cases: BTreeMap<CaseUuid, case::Metadata>,
-    /// Cases which have closed, but which have been copied forwards as they
-    /// contain ereports which have not yet been marked seen.
-    pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ClosedCaseReport {
-    pub metadata: case::Metadata,
-    pub unmarked_ereports: BTreeSet<EreportId>,
-}
-
-impl AnalysisInputReport {
-    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
-        InputReportMultilineDisplay { report: self, indent }
-    }
-}
-
-struct InputReportMultilineDisplay<'report> {
-    report: &'report AnalysisInputReport,
-    indent: usize,
-}
-
-impl fmt::Display for InputReportMultilineDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self {
-            report:
-                AnalysisInputReport {
-                    parent_sitrep_id,
-                    parent_inv_id,
-                    inv_id,
-                    new_ereport_ids,
-                    open_cases,
-                    closed_cases_copied_forward,
-                },
-            indent,
-        } = self;
-
-        writeln!(f, "{:indent$}fault management analysis inputs", "")?;
-        writeln!(f, "{:indent$}----- ---------- -------- ------", "")?;
-        if let Some(id) = parent_sitrep_id {
-            writeln!(f, "{:indent$}parent sitrep:        {id}", "",)?;
-        } else {
-            writeln!(f, "{:indent$}parent sitrep:        <none>", "")?;
-        }
-
-        writeln!(f, "{:indent$}inventory collection: {inv_id}", "",)?;
-        if Some(inv_id) == parent_inv_id.as_ref() {
-            writeln!(f, "{:indent$} --> same collection as parent sitrep", "",)?;
-        } else if let Some(parent_inv_id) = parent_inv_id {
-            writeln!(
-                f,
-                "{:indent$} --> different from parent sitrep \
-                 (collection {parent_inv_id})",
-                "",
-            )?;
-        }
-
-        if !new_ereport_ids.is_empty() {
-            writeln!(
-                f,
-                "\n{:indent$}new ereports ({} total):",
-                "",
-                new_ereport_ids.len()
-            )?;
-            for ereport_id in new_ereport_ids {
-                writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
-            }
-        } else {
-            writeln!(
-                f,
-                "{:indent$}no new ereports since the parent sitrep",
-                "",
-            )?;
-        }
-
-        let total_cases = open_cases.len() + closed_cases_copied_forward.len();
-        if total_cases > 0 {
-            writeln!(f, "\n{:indent$}cases ({} total):", "", total_cases)?;
-            let indent = indent + 2;
-            if open_cases.is_empty() {
-                writeln!(f, "{:indent$}no open cases", "",)?;
-            } else {
-                writeln!(
-                    f,
-                    "{:indent$}open cases ({} total):",
-                    "",
-                    open_cases.len()
-                )?;
-                for (case_id, metadata) in open_cases {
-                    writeln!(f, "{:indent$}* case {case_id}", "")?;
-                    metadata.display_multiline(indent + 2, None).fmt(f)?;
-                }
-            }
-
-            if closed_cases_copied_forward.is_empty() {
-                writeln!(
-                    f,
-                    "{:indent$}no closed cases must be copied forwards",
-                    "",
-                )?;
-            } else {
-                writeln!(
-                    f,
-                    "{:indent$}closed cases copied forwards ({} total):",
-                    "",
-                    closed_cases_copied_forward.len()
-                )?;
-                for (
-                    case_id,
-                    ClosedCaseReport { metadata, unmarked_ereports },
-                ) in closed_cases_copied_forward
-                {
-                    writeln!(f, "{:indent$}* case {case_id}", "")?;
-                    let indent = indent + 2;
-                    metadata.display_multiline(indent, None).fmt(f)?;
-                    writeln!(
-                        f,
-                        "\n{:indent$}copied forwards because these ereports \
-                         haven't been marked seen yet:",
-                        ""
-                    )?;
-                    for ereport_id in unmarked_ereports {
-                        writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
-                    }
-                }
-            }
-        } else {
-            writeln!(f, "{:indent$}no cases copied forward", "")?;
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ereport_types::{Ena, EreportId};
-    use omicron_uuid_kinds::{
-        CaseUuid, CollectionUuid, EreporterRestartUuid, SitrepUuid,
-    };
-    use std::str::FromStr;
-
-    fn example_report_with_cases() -> AnalysisInputReport {
-        let parent_sitrep_id =
-            SitrepUuid::from_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-                .unwrap();
-        let inv_id =
-            CollectionUuid::from_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-                .unwrap();
-        let parent_inv_id =
-            CollectionUuid::from_str("cccccccc-cccc-cccc-cccc-cccccccccccc")
-                .unwrap();
-        let restart_id = EreporterRestartUuid::from_str(
-            "dddddddd-dddd-dddd-dddd-dddddddddddd",
-        )
-        .unwrap();
-
-        let case1_id =
-            CaseUuid::from_str("11111111-1111-1111-1111-111111111111").unwrap();
-        let case1_created_sitrep =
-            SitrepUuid::from_str("22222222-2222-2222-2222-222222222222")
-                .unwrap();
-
-        let case2_id =
-            CaseUuid::from_str("33333333-3333-3333-3333-333333333333").unwrap();
-        let case2_created_sitrep =
-            SitrepUuid::from_str("44444444-4444-4444-4444-444444444444")
-                .unwrap();
-        let case2_closed_sitrep =
-            SitrepUuid::from_str("55555555-5555-5555-5555-555555555555")
-                .unwrap();
-
-        let mut open_cases = BTreeMap::new();
-        open_cases.insert(
-            case1_id,
-            case::Metadata {
-                created_sitrep_id: case1_created_sitrep,
-                closed_sitrep_id: None,
-                de: DiagnosisEngineKind::PowerShelf,
-                comment: "PSU 0 faulted".to_string(),
-            },
-        );
-
-        let mut new_ereport_ids = BTreeSet::new();
-        new_ereport_ids.insert(EreportId { restart_id, ena: Ena::from(3) });
-        new_ereport_ids.insert(EreportId { restart_id, ena: Ena::from(4) });
-
-        let mut closed_cases_copied_forward = BTreeMap::new();
-        let mut unmarked_ereports = BTreeSet::new();
-        unmarked_ereports
-            .insert(EreportId { restart_id, ena: Ena::from(2u64) });
-        closed_cases_copied_forward.insert(
-            case2_id,
-            ClosedCaseReport {
-                metadata: case::Metadata {
-                    created_sitrep_id: case2_created_sitrep,
-                    closed_sitrep_id: Some(case2_closed_sitrep),
-                    de: DiagnosisEngineKind::PowerShelf,
-                    comment: "PSU 1 replaced".to_string(),
-                },
-                unmarked_ereports,
-            },
-        );
-
-        AnalysisInputReport {
-            parent_sitrep_id: Some(parent_sitrep_id),
-            parent_inv_id: Some(parent_inv_id),
-            inv_id,
-            new_ereport_ids,
-            open_cases,
-            closed_cases_copied_forward,
-        }
-    }
-
-    fn example_report_empty() -> AnalysisInputReport {
-        let inv_id =
-            CollectionUuid::from_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-                .unwrap();
-
-        AnalysisInputReport {
-            parent_sitrep_id: None,
-            parent_inv_id: None,
-            inv_id,
-            new_ereport_ids: BTreeSet::new(),
-            open_cases: BTreeMap::new(),
-            closed_cases_copied_forward: BTreeMap::new(),
-        }
-    }
-
-    fn example_report_same_inv() -> AnalysisInputReport {
-        let parent_sitrep_id =
-            SitrepUuid::from_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-                .unwrap();
-        let inv_id =
-            CollectionUuid::from_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-                .unwrap();
-
-        AnalysisInputReport {
-            parent_sitrep_id: Some(parent_sitrep_id),
-            parent_inv_id: Some(inv_id),
-            inv_id,
-            new_ereport_ids: BTreeSet::new(),
-            open_cases: BTreeMap::new(),
-            closed_cases_copied_forward: BTreeMap::new(),
-        }
-    }
-
-    #[test]
-    fn test_analysis_input_report_display_with_cases() {
-        let report = example_report_with_cases();
-        let output = format!("{}", report.display_multiline(0));
-        expectorate::assert_contents(
-            "output/analysis_input_report_with_cases.out",
-            &output,
-        );
-    }
-
-    #[test]
-    fn test_analysis_input_report_display_empty() {
-        let report = example_report_empty();
-        let output = format!("{}", report.display_multiline(0));
-        expectorate::assert_contents(
-            "output/analysis_input_report_empty.out",
-            &output,
-        );
-    }
-
-    #[test]
-    fn test_analysis_input_report_display_same_inv() {
-        let report = example_report_same_inv();
-        let output = format!("{}", report.display_multiline(0));
-        expectorate::assert_contents(
-            "output/analysis_input_report_same_inv.out",
-            &output,
-        );
-    }
 }

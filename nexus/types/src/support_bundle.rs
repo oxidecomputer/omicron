@@ -170,12 +170,37 @@ impl BundleDataSelection {
         self.data.insert(bundle_data.category(), bundle_data);
     }
 
-    pub fn contains(&self, category: BundleDataCategory) -> bool {
-        self.data.contains_key(&category)
+    /// Returns `true` if reconfigurator state should be collected.
+    pub fn contains_reconfigurator(&self) -> bool {
+        self.data.contains_key(&BundleDataCategory::Reconfigurator)
     }
 
-    pub fn get(&self, category: BundleDataCategory) -> Option<&BundleData> {
-        self.data.get(&category)
+    /// Returns the sled selection for host info, or `None` if host info
+    /// is not in the selection.
+    pub fn sled_selection(&self) -> Option<&SledSelection> {
+        match self.data.get(&BundleDataCategory::HostInfo) {
+            Some(BundleData::HostInfo(sel)) => Some(sel),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if sled cubby info should be collected.
+    pub fn contains_sled_cubby_info(&self) -> bool {
+        self.data.contains_key(&BundleDataCategory::SledCubbyInfo)
+    }
+
+    /// Returns `true` if SP dumps should be collected.
+    pub fn contains_sp_dumps(&self) -> bool {
+        self.data.contains_key(&BundleDataCategory::SpDumps)
+    }
+
+    /// Returns the ereport filters, or `None` if ereports are not in
+    /// the selection.
+    pub fn ereport_filters(&self) -> Option<&EreportFilters> {
+        match self.data.get(&BundleDataCategory::Ereports) {
+            Some(BundleData::Ereports(filters)) => Some(filters),
+            _ => None,
+        }
     }
 }
 
@@ -257,6 +282,14 @@ pub struct DisplaySledSelection<'a> {
 }
 
 impl SledSelection {
+    /// Returns `true` if this selection includes the given sled.
+    pub fn contains(&self, id: SledUuid) -> bool {
+        match self {
+            Self::All => true,
+            Self::Specific(sleds) => sleds.contains(&id),
+        }
+    }
+
     pub fn display(&self) -> DisplaySledSelection<'_> {
         DisplaySledSelection { selection: self }
     }

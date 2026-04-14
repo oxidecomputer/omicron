@@ -14,9 +14,7 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::fm;
 use nexus_types::fm::ereport::{EreportFilters, EreportFiltersParams};
-use nexus_types::support_bundle::{
-    BundleData, BundleDataCategory, SledSelection,
-};
+use nexus_types::support_bundle::{BundleData, SledSelection};
 use omicron_uuid_kinds::{
     CaseKind, GenericUuid, SitrepKind, SledUuid, SupportBundleKind,
 };
@@ -71,12 +69,9 @@ impl DataSelectionFlags {
         DataSelectionFlags {
             sitrep_id: sitrep_id.into(),
             request_id: request_id.into(),
-            include_reconfigurator: data_selection
-                .contains(BundleDataCategory::Reconfigurator),
-            include_sled_cubby_info: data_selection
-                .contains(BundleDataCategory::SledCubbyInfo),
-            include_sp_dumps: data_selection
-                .contains(BundleDataCategory::SpDumps),
+            include_reconfigurator: data_selection.contains_reconfigurator(),
+            include_sled_cubby_info: data_selection.contains_sled_cubby_info(),
+            include_sp_dumps: data_selection.contains_sp_dumps(),
         }
     }
 }

@@ -3306,7 +3306,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors, disabled } =
+    let SpEreportIngesterStatus { sps, errors, disabled, sps_not_present } =
         match serde_json::from_value(details.clone()) {
             Err(error) => {
                 eprintln!(
@@ -3331,6 +3331,10 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
     }
 
+    if sps_not_present > 0 {
+        println!("(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}");
+    }
+
     if !sps.is_empty() {
         if disabled {
             println!(
@@ -3340,11 +3344,12 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         }
 
         println!("\n    service processors:");
-        for SpEreporterStatus { sp_type, slot, status } in &sps {
+        for SpEreporterStatus { sp_type, slot, status, ignition_type } in &sps {
             println!(
                 "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
                 status.ereports_received
             );
+            println!("      ignition type: {ignition_type:?}",);
             println!(
                 "      {NEW_EREPORTS:<WIDTH$}{:>NUM_WIDTH$}",
                 status.new_ereports
@@ -3375,7 +3380,9 @@ fn print_ereporter_status_totals<'status>(
     let mut total_reqs = 0;
     let mut total_errors = 0;
     let mut reporters_with_ereports = 0;
+    let mut reporters_without_ereports = 0;
     let mut reporters_with_errors = 0;
+    let mut reporters_without_errors = 0;
 
     for &EreporterStatus {
         ereports_received,
@@ -3390,20 +3397,34 @@ fn print_ereporter_status_totals<'status>(
         total_errors += errors.len();
         if total_received > 0 {
             reporters_with_ereports += 1;
+        } else {
+            reporters_without_ereports += 1;
         }
         if total_errors > 0 {
             reporters_with_errors += 1;
+        } else {
+            reporters_without_errors += 1;
         }
     }
+    let total_reporters = reporters_with_ereports + reporters_without_ereports;
 
     use ereporter_status_fields::*;
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
     println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
+    println!(
+        "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
+        {reporters_without_errors:>NUM_WIDTH$}",
+    );
     println!(
         "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
          {reporters_with_ereports:>NUM_WIDTH$}"
+    );
+    println!(
+        "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
+         {reporters_without_ereports:>NUM_WIDTH$}"
     );
     println!(
         "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
@@ -3419,8 +3440,13 @@ mod ereporter_status_fields {
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
     pub const ERRORS: &str = "  total collection errors:";
-    pub const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
-    pub const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    pub const TOTAL_REPORTERS: &str = "total reporters:";
+    pub const REPORTERS_CONTACTED_SUCCESSFULLY: &str =
+        "  contacted successfully:";
+    pub const REPORTERS_WITH_EREPORTS: &str = "    with ereports:";
+    pub const REPORTERS_WITHOUT_EREPORTS: &str = "    without ereports:";
+    pub const REPORTERS_WITH_ERRORS: &str = "  with collection errors:";
+    pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
         TOTAL_NEW_EREPORTS,
         TOTAL_HTTP_REQUESTS,
@@ -3428,8 +3454,11 @@ mod ereporter_status_fields {
         NEW_EREPORTS,
         HTTP_REQUESTS,
         ERRORS,
+        REPORTERS_CONTACTED_SUCCESSFULLY,
         REPORTERS_WITH_EREPORTS,
+        REPORTERS_WITHOUT_EREPORTS,
         REPORTERS_WITH_ERRORS,
+        SPS_NOT_PRESENT,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
 }
@@ -3630,17 +3659,21 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         print_details(&op.details)
     }
 
-    let FmRendezvousStatus { sitrep_id, alerts, ereport_marking: marking } =
-        match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let FmRendezvousStatus {
+        sitrep_id,
+        alerts,
+        support_bundles,
+        ereport_marking: marking,
+    } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     match sitrep_id {
         Some(id) => println!("    current sitrep: {id}"),
         None => println!(
@@ -3680,6 +3713,51 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
                 current_sitrep_alerts_requested
             );
             println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
+            println!(
+                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+            );
+            println!(
+                "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                warn_if_nonzero(errors.len()),
+                errors.len()
+            );
+            for error in errors {
+                println!("        > {error}");
+            }
+        },
+    );
+    print_op(
+        "creating requested support bundles",
+        &support_bundles,
+        |fm_rendezvous::SupportBundleCreationStatus {
+             total_bundles_requested,
+             current_sitrep_bundles_requested,
+             bundles_created,
+             errors,
+         }| {
+            let already_created =
+                total_bundles_requested - bundles_created - errors.len();
+            const REQUESTED: &str = "support bundles requested:";
+            const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+            const CREATED: &str = "  created in this activation:";
+            const ALREADY_CREATED: &str = "  already created:";
+            const ERRORS: &str = "  errors:";
+            const WIDTH: usize = const_max_len(&[
+                REQUESTED,
+                REQUESTED_THIS_SITREP,
+                CREATED,
+                ALREADY_CREATED,
+                ERRORS,
+            ]) + 1;
+            pub const NUM_WIDTH: usize = 4;
+            println!(
+                "      {REQUESTED:<WIDTH$}{total_bundles_requested:>NUM_WIDTH$}"
+            );
+            println!(
+                "      {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+                current_sitrep_bundles_requested
+            );
+            println!("      {CREATED:<WIDTH$}{bundles_created:>NUM_WIDTH$}");
             println!(
                 "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
             );
@@ -4928,19 +5006,24 @@ async fn cmd_nexus_support_bundles_list(
     struct SupportBundleInfo {
         id: Uuid,
         time_created: DateTime<Utc>,
+        state: String,
+        fm_case_id: String,
         reason_for_creation: String,
         reason_for_failure: String,
-        state: String,
         user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
         id: sb.id,
         time_created: sb.time_created,
+        state: format!("{:?}", sb.state),
+        fm_case_id: sb
+            .fm_case_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_string()),
         reason_for_creation: sb.reason_for_creation,
         reason_for_failure: sb
             .reason_for_failure
             .unwrap_or_else(|| "-".to_string()),
-        state: format!("{:?}", sb.state),
         user_comment: sb.user_comment.unwrap_or_else(|| "-".to_string()),
     });
     let table = tabled::Table::new(rows)
