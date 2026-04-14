@@ -1243,6 +1243,7 @@ mod test {
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
         sled1.http_server.close().await.unwrap();
+        db.terminate().await;
         gwtestctx.teardown().await;
     }
 
@@ -1324,6 +1325,7 @@ mod test {
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
         sled1.http_server.close().await.unwrap();
+        db.terminate().await;
         gwtestctx1.teardown().await;
         gwtestctx2.teardown().await;
     }
@@ -1376,6 +1378,7 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_errors.txt", &s);
 
+        db.terminate().await;
         gwtestctx.teardown().await;
     }
 
@@ -1443,6 +1446,7 @@ mod test {
         );
 
         sled1.http_server.close().await.unwrap();
+        db.terminate().await;
         gwtestctx.teardown().await;
     }
 }
