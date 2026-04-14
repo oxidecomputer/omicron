@@ -557,3 +557,13 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(health.status, system::PingStatus::Ok);
 }
+
+#[nexus_test]
+async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let version = NexusRequest::object_get(client, "/v1/system/version")
+        .execute_and_parse_unwrap::<system::SystemVersion>()
+        .await;
+    assert_eq!(version.version, omicron_common::RELEASE_VERSION);
+}

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026032500.0.0"
+    "version": "2026040800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -13405,6 +13405,34 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/version": {
+      "get": {
+        "tags": [
+          "system/status"
+        ],
+        "summary": "Fetch system version",
+        "description": "Returns the current version of the Oxide software running on this system.",
+        "operationId": "system_version",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemVersion"
                 }
               }
             }
@@ -29359,6 +29387,20 @@
         "required": [
           "interface_config_id",
           "vlan_id"
+        ]
+      },
+      "SystemVersion": {
+        "description": "The version of the Oxide software running on this system.",
+        "type": "object",
+        "properties": {
+          "version": {
+            "description": "The current system software version",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        },
+        "required": [
+          "version"
         ]
       },
       "TargetRelease": {
