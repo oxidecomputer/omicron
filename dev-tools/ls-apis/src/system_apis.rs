@@ -119,6 +119,39 @@ impl<'a> IdOrdItem for FilteredApiConsumer<'a> {
     id_upcast!();
 }
 
+/// Find a cycle in `graph` and render that cycle as a String. Returns None if
+/// there is no cycle containing `node`.
+///
+/// This is primarily useful for debugging, especially when considering graphs
+/// that are typically acyclic. Any cycle containing `node` is, hopefully,
+/// informative. There is no particular order promised about how the cycle is
+/// printed.
+fn print_example_cycle<Name: fmt::Display>(
+    graph: &Graph<&Name, &ClientPackageName>,
+    reverse_nodes: &BTreeMap<&NodeIndex, &&Name>,
+    node: &NodeIndex,
+) -> Option<String> {
+    let mut sccs = petgraph::algo::scc::tarjan_scc(&graph);
+    sccs.retain(|scc| scc.contains(node));
+
+    let Some(first_cycle) = sccs.get(0) else {
+        return None;
+    };
+
+    let mut cycle_rendered = String::new();
+    for component in first_cycle.iter() {
+        if !cycle_rendered.is_empty() {
+            cycle_rendered.push_str(", ");
+        }
+
+        use fmt::Write;
+        write!(cycle_rendered, "{}", reverse_nodes.get(&component).unwrap())
+            .unwrap()
+    }
+
+    Some(cycle_rendered)
+}
+
 impl SystemApis {
     /// Load information about APIs in the system based on both developer-
     /// maintained metadata and Cargo-provided metadata
@@ -861,10 +894,14 @@ impl SystemApis {
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            let example_cycle =
+                print_example_cycle(&graph, &reverse_nodes, &error.node_id())
+                    .expect("graph has a cycle containing the node");
             bail!(
                 "graph of server-managed API dependencies between components \
-                 has a cycle (includes node: {:?})",
-                reverse_nodes.get(&error.node_id()).unwrap()
+                 has a cycle (includes node: {:?}, example cycle: {})",
+                reverse_nodes.get(&error.node_id()).unwrap(),
+                example_cycle,
             );
         }
 
@@ -876,10 +913,14 @@ impl SystemApis {
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            let example_cycle =
+                print_example_cycle(&graph, &reverse_nodes, &error.node_id())
+                    .expect("graph has a cycle containing the node");
             bail!(
                 "graph of server-managed API dependencies between deployment \
-                 units has a cycle (includes node: {:?})",
-                reverse_nodes.get(&error.node_id()).unwrap()
+                 units has a cycle (includes node: {:?}, example cycle: {})",
+                reverse_nodes.get(&error.node_id()).unwrap(),
+                example_cycle,
             );
         }
 
