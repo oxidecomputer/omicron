@@ -182,16 +182,24 @@ pub enum UpdateState {
 
 pub fn rollup_update_state(states: &[UpdateState]) -> UpdateState {
     if states.is_empty() {
+        // An empty list is treated as "not started".
         UpdateState::NotStarted
     } else if states.iter().any(|s| matches!(s, UpdateState::Failed)) {
+        // If *any* component failed, the update failed.
         UpdateState::Failed
     } else if states.iter().any(|s| matches!(s, UpdateState::Aborted)) {
+        // If *any* component was aborted (and none failed),
+        // the update is aborted.
         UpdateState::Aborted
     } else if states.iter().all(|s| matches!(s, UpdateState::Completed)) {
+        // If *all* components are completed, the update is completed.
         UpdateState::Completed
     } else if states.iter().all(|s| matches!(s, UpdateState::NotStarted)) {
+        // If *all* components are not started, the update is not started.
         UpdateState::NotStarted
-    } else {
+    } else 
+        // Here, some components have started, none have failed or been aborted,
+        // and not all are completed. Therefore, the update is in progress.
         UpdateState::InProgress
     }
 }
