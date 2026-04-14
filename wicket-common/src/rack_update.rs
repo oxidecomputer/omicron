@@ -197,7 +197,7 @@ pub fn rollup_update_state(states: &[UpdateState]) -> UpdateState {
     } else if states.iter().all(|s| matches!(s, UpdateState::NotStarted)) {
         // If *all* components are not started, the update is not started.
         UpdateState::NotStarted
-    } else 
+    } else {
         // Here, some components have started, none have failed or been aborted,
         // and not all are completed. Therefore, the update is in progress.
         UpdateState::InProgress
