@@ -10,9 +10,18 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufReader, Write},
     net::SocketAddrV6,
+    process::ExitCode,
     time::Duration,
 };
 
+use crate::{
+    cli::GlobalOpts,
+    state::{
+        ComponentId, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
+        parse_event_report_map,
+    },
+    wicketd::create_wicketd_client,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
@@ -23,6 +32,7 @@ use update_engine::{
     EventBuffer, NestedError,
     display::{GroupDisplay, LineDisplayStyles},
 };
+use update_engine::{ExecutionStatus, TerminalKind};
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{
@@ -34,15 +44,6 @@ use wicket_common::{
 use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
     StartUpdateParams,
-};
-
-use crate::{
-    cli::GlobalOpts,
-    state::{
-        ComponentId, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
-        parse_event_report_map,
-    },
-    wicketd::create_wicketd_client,
 };
 
 use super::command::CommandOutput;
@@ -79,25 +80,30 @@ impl RackUpdateArgs {
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
-    ) -> Result<()> {
+    ) -> Result<ExitCode> {
         match self {
             RackUpdateArgs::Start(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await
+                args.exec(log, wicketd_addr, global_opts, output).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::Attach(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await
+                args.exec(log, wicketd_addr, global_opts, output).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::Status(args) => {
                 args.exec(log, wicketd_addr, output).await
             }
             RackUpdateArgs::Clear(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await
+                args.exec(log, wicketd_addr, global_opts, output).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugDump(args) => {
-                args.exec(log, wicketd_addr).await
+                args.exec(log, wicketd_addr).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugReplay(args) => {
-                args.exec(log, global_opts, output)
+                args.exec(log, global_opts, output)?;
+                Ok(ExitCode::SUCCESS)
             }
         }
     }
@@ -328,9 +334,8 @@ pub(crate) struct StatusArgs {
     #[clap(long)]
     json: bool,
 
-    /// Read the event buffer from a file rather than from the wicketd API.
-    /// This allows operating over the output of DebugDump.
-    /// Use `-` to read from stdin.
+    /// Read debug-dump output from a file, or - for stdin.
+    /// If omitted, fetch data from wicketd.
     #[clap(long, value_name = "FILE")]
     file: Option<Utf8PathBuf>,
 }
@@ -341,7 +346,7 @@ impl StatusArgs {
         log: Logger,
         wicketd_addr: SocketAddrV6,
         output: CommandOutput<'_>,
-    ) -> Result<()> {
+    ) -> Result<ExitCode> {
         // Read the artifact & event reports from wicketd, a file, or stdin.
         let response = if let Some(path) = self.file {
             if path == "-" {
@@ -377,21 +382,7 @@ impl StatusArgs {
             write_status_table(output.stdout, &status)?;
         }
 
-        // Return:
-        //    - 0 for success - Completed
-        //    - 1 for terminal failure states - Failed & Aborted
-        //    - 2 for non-terminal states - NotStarted & InProgress
-        match status.state {
-            UpdateState::Failed | UpdateState::Aborted => {
-                bail!("one or more components failed or were aborted");
-            }
-            UpdateState::NotStarted | UpdateState::InProgress => {
-                std::process::exit(2);
-            }
-            UpdateState::Completed => {}
-        }
-
-        Ok(())
+        Ok(ExitCode::from(status.state.exit_code()))
     }
 }
 
@@ -399,25 +390,21 @@ fn build_rack_update_status(
     log: &Logger,
     response: GetArtifactsAndEventReportsResponse,
 ) -> RackUpdateStatus {
-    use update_engine::{ExecutionStatus, TerminalKind};
-
-    // Sort & dedupe ArtifactIds.
-    let mut artifact_map: BTreeMap<_, ArtifactId> = BTreeMap::new();
-    for a in response.artifacts {
-        artifact_map.entry(a.artifact_id.kind.clone()).or_insert(a.artifact_id);
-    }
-    let artifacts: Vec<ArtifactId> = artifact_map.into_values().collect();
+    let artifacts: Vec<ArtifactId> = response
+        .artifacts
+        .into_iter()
+        .map(|a| a.artifact_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
 
     let event_reports = parse_event_report_map(log, response.event_reports);
 
     let components: Vec<ComponentUpdateStatus> = event_reports
-        .keys()
-        .copied()
-        .map(|id| {
+        .iter()
+        .map(|(&id, report)| {
             let mut buffer = EventBuffer::default();
-            if let Some(report) = event_reports.get(&id) {
-                buffer.add_event_report(report.clone());
-            }
+            buffer.add_event_report(report.clone());
 
             // Derive the ComponentUpdateStatus status from the output of
             // update-engine's ExecutionSummary, a rollup of all events.
@@ -425,7 +412,7 @@ fn build_rack_update_status(
                 None => ComponentUpdateStatus {
                     id: id.into(),
                     state: UpdateState::NotStarted,
-                    current_step_index: None,
+                    step_index: None,
                     total_steps: None,
                     elapsed_secs: None,
                 },
@@ -464,7 +451,7 @@ fn build_rack_update_status(
                     ComponentUpdateStatus {
                         id: id.into(),
                         state,
-                        current_step_index,
+                        step_index: current_step_index,
                         total_steps: Some(summary.total_steps),
                         elapsed_secs,
                     }
@@ -479,7 +466,7 @@ fn build_rack_update_status(
 
     RackUpdateStatus {
         state,
-        system_version: response.system_version.map(|v| v.to_string()),
+        system_version: response.system_version,
         artifacts,
         components,
     }
@@ -490,17 +477,52 @@ fn write_status_table(
     out: &mut dyn Write,
     status: &RackUpdateStatus,
 ) -> Result<()> {
+    #[derive(tabled::Tabled)]
+    #[tabled(rename_all = "UPPERCASE")]
+    struct ArtifactRow {
+        name: String,
+        kind: String,
+        version: String,
+    }
+
+    #[derive(tabled::Tabled)]
+    #[tabled(rename_all = "UPPERCASE")]
+    struct ComponentRow {
+        #[tabled(rename = "TYPE")]
+        type_: String,
+        slot: u16,
+        state: String,
+        progress: String,
+        elapsed: String,
+    }
+
     // System version and artifacts.
     writeln!(out, "State: {}\n", status.state)?;
     writeln!(
         out,
         "System version: {}",
-        status.system_version.as_deref().unwrap_or("(none)")
+        status
+            .system_version
+            .as_ref()
+            .map(|v| v.to_string())
+            .as_deref()
+            .unwrap_or("(none)")
     )?;
-    for a in &status.artifacts {
-        writeln!(out, "{}\t{}", a.kind, a.version)?;
-    }
-    writeln!(out)?;
+
+    let artifact_rows: Vec<ArtifactRow> = status
+        .artifacts
+        .iter()
+        .map(|a| ArtifactRow {
+            name: a.name.clone(),
+            kind: a.kind.to_string(),
+            version: a.version.to_string(),
+        })
+        .collect();
+    let artifact_table = tabled::Table::new(artifact_rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 2, 0, 0))
+        .to_string();
+    writeln!(out, "{artifact_table}\n")?;
 
     // Component table.
     let mut n_completed = 0;
@@ -509,45 +531,56 @@ fn write_status_table(
     let mut n_inprogress = 0;
     let mut n_notstarted = 0;
 
-    writeln!(out, "type\tslot\tstate\tprogress\telapsed")?;
-    for c in &status.components {
-        let type_str = c.id.type_.to_string();
-        let progress = match (c.current_step_index, c.total_steps) {
-            (Some(i), Some(t)) => format!("{}/{}", i + 1, t),
-            (None, Some(t)) => format!("-/{}", t),
-            _ => "-".to_string(),
-        };
-        let elapsed = match c.elapsed_secs {
-            Some(secs) => {
-                let total = secs as u64;
-                format!(
-                    "{:02}:{:02}:{:02}",
-                    total / 3600,
-                    (total % 3600) / 60,
-                    total % 60
-                )
+    let component_rows: Vec<ComponentRow> = status
+        .components
+        .iter()
+        .map(|c| {
+            let progress = match (c.step_index, c.total_steps) {
+                (Some(i), Some(t)) => format!("{}/{}", i + 1, t),
+                (None, Some(t)) => format!("-/{t}"),
+                _ => "-".to_string(),
+            };
+            let elapsed = match c.elapsed_secs {
+                Some(secs) => {
+                    let total = secs as u64;
+                    format!(
+                        "{:02}:{:02}:{:02}",
+                        total / 3600,
+                        (total % 3600) / 60,
+                        total % 60
+                    )
+                }
+                None => "-".to_string(),
+            };
+
+            match c.state {
+                UpdateState::Completed => n_completed += 1,
+                UpdateState::Failed => n_failed += 1,
+                UpdateState::Aborted => n_aborted += 1,
+                UpdateState::InProgress => n_inprogress += 1,
+                UpdateState::NotStarted => n_notstarted += 1,
             }
-            None => "-".to_string(),
-        };
 
-        writeln!(
-            out,
-            "{type_str}\t{}\t{}\t{progress}\t{elapsed}",
-            c.id.slot, c.state
-        )?;
+            ComponentRow {
+                type_: c.id.type_.to_string(),
+                slot: c.id.slot,
+                state: c.state.to_string(),
+                progress,
+                elapsed,
+            }
+        })
+        .collect();
 
-        match c.state {
-            UpdateState::Completed => n_completed += 1,
-            UpdateState::Failed => n_failed += 1,
-            UpdateState::Aborted => n_aborted += 1,
-            UpdateState::InProgress => n_inprogress += 1,
-            UpdateState::NotStarted => n_notstarted += 1,
-        }
-    }
+    let component_table = tabled::Table::new(component_rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 2, 0, 0))
+        .to_string();
+    writeln!(out, "{component_table}")?;
 
     writeln!(
         out,
-        "\n{n_completed} completed, {n_failed} failed, {n_aborted} aborted, {n_inprogress} in progress, {n_notstarted} not started",
+        "\n{n_completed} completed, {n_failed} failed, {n_aborted} aborted, \
+         {n_inprogress} in progress, {n_notstarted} not started",
     )?;
 
     Ok(())

@@ -6,6 +6,8 @@
 
 use std::{collections::BTreeSet, time::Duration};
 
+use semver::Version;
+
 use dropshot::HttpError;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
@@ -141,7 +143,7 @@ pub struct RackUpdateStatus {
     /// The overall update state, rolled up across all components.
     pub state: UpdateState,
     /// The version of the top-level TUF archive.
-    pub system_version: Option<String>,
+    pub system_version: Option<Version>,
     /// The artifacts included in the TUF archive.
     pub artifacts: Vec<ArtifactId>,
     /// The update status of each of the target components.
@@ -149,6 +151,7 @@ pub struct RackUpdateStatus {
 }
 
 /// The status of an update for a component within a rack.
+/// Here, a component means a Sled, Switch, or PSC.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ComponentUpdateStatus {
     /// The ID of the component.
@@ -157,7 +160,7 @@ pub struct ComponentUpdateStatus {
     pub state: UpdateState,
     /// The index of the current step (if in progress) or the last
     /// step (if terminal).
-    pub current_step_index: Option<usize>,
+    pub step_index: Option<usize>,
     /// The total number of steps in the update.
     pub total_steps: Option<usize>,
     /// The time elapsed since starting the update.
@@ -193,11 +196,34 @@ pub fn rollup_update_state(states: &[UpdateState]) -> UpdateState {
     }
 }
 
+impl UpdateState {
+    /// The exit code corresponding to this state.
+    ///
+    /// State-specific codes start at 4: exit code 1 tends to be used for
+    /// generic errors, and 2 and 3 tend to be reserved for things like
+    /// incorrect CLI args.
+    ///
+    /// - 0: Completed
+    /// - 4: NotStarted
+    /// - 5: InProgress
+    /// - 6: Failed
+    /// - 7: Aborted
+    pub fn exit_code(self) -> u8 {
+        match self {
+            UpdateState::Completed => 0,
+            UpdateState::NotStarted => 4,
+            UpdateState::InProgress => 5,
+            UpdateState::Failed => 6,
+            UpdateState::Aborted => 7,
+        }
+    }
+}
+
 impl std::fmt::Display for UpdateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UpdateState::NotStarted => write!(f, "not_started"),
-            UpdateState::InProgress => write!(f, "in_progress"),
+            UpdateState::NotStarted => write!(f, "not started"),
+            UpdateState::InProgress => write!(f, "in progress"),
             UpdateState::Completed => write!(f, "completed"),
             UpdateState::Failed => write!(f, "failed"),
             UpdateState::Aborted => write!(f, "aborted"),
