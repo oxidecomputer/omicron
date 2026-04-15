@@ -7435,12 +7435,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     --
     -- This field is not semantically meaningful and is intended for
     -- debugging purposes.
-    comment TEXT NOT NULL
+    comment TEXT NOT NULL,
 
     -- The earliest time at which an inventory collection may have started if
     -- it is to be considered newer than the inventory collection that was used
     -- to produce this sitrep.
-    next_inv_min_time_started TIMESTAMPTZ NOT NULL,
+    next_inv_min_time_started TIMESTAMPTZ NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.

@@ -1906,6 +1906,7 @@ mod tests {
                 comment: "TEST SITREP WITH BAD PARENT".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

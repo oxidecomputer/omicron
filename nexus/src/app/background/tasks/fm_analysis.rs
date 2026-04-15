@@ -390,34 +390,30 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Build two inventory collections.  `CollectionBuilder` uses
-        // `now()` for timestamps, so building them sequentially gives us
-        // collections whose timestamps may overlap.  Force explicit
-        // timestamps to guarantee the ordering we need:
+        // Build three inventory collections. We will manually set the
+        // timestamps on these collections after building them, as
+        // `CollectionBuilder` produces timestamps using `Utc::now()`.
         //
-        //   older:  [time_started ............. time_done]
-        //   newer:                                         [time_started ... time_done]
-        //
-        // `newer.time_started > older.time_done`  ⟹  newer is *strictly*
-        // newer than older.
-        let older = CollectionBuilder::new("test").build();
-        let mut newer = CollectionBuilder::new("test").build();
-        newer.time_started = older.time_done + chrono::Duration::seconds(1);
-        newer.time_done = newer.time_started + chrono::Duration::seconds(1);
+        // This is the oldest one:
+        let older = Arc::new(CollectionBuilder::new("test (old)").build());
+        // This one started after `older` finished:
+        let newer = {
+            let mut newer = CollectionBuilder::new("test (new)").build();
+            newer.time_started = older.time_done + chrono::Duration::seconds(1);
+            newer.time_done = newer.time_started + chrono::Duration::seconds(1);
+            Arc::new(newer)
+        };
 
-        // Also build a collection that *overlaps* with `newer`: it started
-        // during newer's collection window, so it is NOT strictly newer.
-        //
-        //   newer:       [time_started ............ time_done]
-        //   overlapping:        [time_started ........................ time_done]
-        let mut overlapping = CollectionBuilder::new("test").build();
-        overlapping.time_started =
-            newer.time_started + chrono::Duration::milliseconds(500);
-        overlapping.time_done = newer.time_done + chrono::Duration::seconds(1);
-
-        let older = Arc::new(older);
-        let newer = Arc::new(newer);
-        let overlapping = Arc::new(overlapping);
+        // This one started after `older` started, but before `older` finished:
+        let overlapping = {
+            let mut overlapping =
+                CollectionBuilder::new("test (overlapping)").build();
+            overlapping.time_started =
+                older.time_started + chrono::Duration::milliseconds(500);
+            overlapping.time_done =
+                older.time_done + chrono::Duration::seconds(1);
+            Arc::new(overlapping)
+        };
 
         // If our "currently loaded" inventory started before the parent
         // sitrep's `next_inv_min_time_started`, we should refuse to run
@@ -539,7 +535,7 @@ mod tests {
         // newer, so we should refuse to run analysis.
         {
             let (_sitrep_tx, sitrep_rx) =
-                watch::channel(Some(make_current_sitrep(&newer)));
+                watch::channel(Some(make_current_sitrep(&older)));
             let (_inv_tx, inv_rx) = watch::channel(Some(overlapping.clone()));
             let mut task = FmAnalysis::new(
                 datastore.clone(),
