@@ -936,6 +936,9 @@ pub mod fm_analysis {
         /// collection has been loaded.
         WaitingForInventory,
 
+        /// Fault management analysis was not performed, as the currently-loaded
+        /// inventory collection was collected prior to the earliest newer start
+        /// time indicated by the current sitrep.
         WaitingForNewerInventory {
             parent_inv_id: CollectionUuid,
             next_inv_min_time_started: DateTime<Utc>,
