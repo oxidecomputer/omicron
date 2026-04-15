@@ -5054,9 +5054,7 @@ fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitName {
         ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "NTP",
         ZoneKind::Clickhouse
         | ZoneKind::ClickhouseKeeper
-        | ZoneKind::ClickhouseServer => {
-            "ClickHouse"
-        }
+        | ZoneKind::ClickhouseServer => "ClickHouse",
         ZoneKind::CockroachDb => "Cockroach",
         ZoneKind::Crucible => "Crucible",
         ZoneKind::CruciblePantry => "Crucible Pantry",
