@@ -438,26 +438,31 @@ fn build_rack_update_status(
         event_reports.into_iter().filter(|(id, _)| ids.contains(id)).collect()
     };
 
-    let components: Vec<ComponentUpdateStatus> = event_reports
-        .iter()
-        .map(|(&id, report)| {
-            let mut buffer = EventBuffer::default();
-            buffer.add_event_report(report.clone());
+    let components: Vec<ComponentUpdateStatus> =
+        event_reports
+            .iter()
+            .map(|(&id, report)| {
+                let mut buffer = EventBuffer::default();
+                buffer.add_event_report(report.clone());
 
-            // Derive the ComponentUpdateStatus status from the output of
-            // update-engine's ExecutionSummary, a rollup of all events.
-            match buffer.root_execution_summary() {
-                None => ComponentUpdateStatus {
-                    id: id.into(),
-                    state: UpdateState::NotStarted,
-                    step_index: None,
-                    total_steps: None,
-                    elapsed_secs: None,
-                    exit_message: None,
-                },
-                Some(summary) => {
-                    let (state, current_step_index, elapsed_secs, exit_message) =
-                        match &summary.execution_status {
+                // Derive the ComponentUpdateStatus status from the output of
+                // update-engine's ExecutionSummary, a rollup of all events.
+                match buffer.root_execution_summary() {
+                    None => ComponentUpdateStatus {
+                        id: id.into(),
+                        state: UpdateState::NotStarted,
+                        step_index: None,
+                        total_steps: None,
+                        elapsed_secs: None,
+                        exit_message: None,
+                    },
+                    Some(summary) => {
+                        let (
+                            state,
+                            current_step_index,
+                            elapsed_secs,
+                            exit_message,
+                        ) = match &summary.execution_status {
                             ExecutionStatus::NotStarted => {
                                 (UpdateState::NotStarted, None, None, None)
                             }
@@ -491,18 +496,18 @@ fn build_rack_update_status(
                                 )
                             }
                         };
-                    ComponentUpdateStatus {
-                        id: id.into(),
-                        state,
-                        step_index: current_step_index,
-                        total_steps: Some(summary.total_steps),
-                        elapsed_secs,
-                        exit_message,
+                        ComponentUpdateStatus {
+                            id: id.into(),
+                            state,
+                            step_index: current_step_index,
+                            total_steps: Some(summary.total_steps),
+                            elapsed_secs,
+                            exit_message,
+                        }
                     }
                 }
-            }
-        })
-        .collect();
+            })
+            .collect();
 
     let component_states: Vec<UpdateState> =
         components.iter().map(|c| c.state).collect();
