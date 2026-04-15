@@ -36,8 +36,8 @@ use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
     rack_update::{
-        ClearUpdateStateResponse, RackUpdateStatus, StartUpdateOptions,
-        UpdateState,
+        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
+        StartUpdateOptions, UpdateState,
     },
     update_events::{StepEventKind, UpdateComponent},
 };
@@ -268,6 +268,10 @@ async fn test_updates() {
             .find(|c| c.id == target_sp)
             .expect("sled 0 should appear in components");
         assert_eq!(sled0.state, UpdateState::Failed);
+        assert!(
+            matches!(&sled0.exit_message, Some(ExitMessage { message, .. }) if !message.is_empty()),
+            "failed component should have a non-empty exit message",
+        );
 
         // If we filter to sled 0 only, still show Failed.
         let filtered =

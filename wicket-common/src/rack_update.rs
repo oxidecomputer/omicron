@@ -178,6 +178,13 @@ pub struct RackUpdateStatus {
     pub state_counts: UpdateStateCounts,
 }
 
+/// The message from a failed or aborted update step.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ExitMessage {
+    pub message: String,
+    pub causes: Vec<String>,
+}
+
 /// The status of an update for a component within a rack.
 /// Here, a component means a Sled, Switch, or PSC.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -193,6 +200,9 @@ pub struct ComponentUpdateStatus {
     pub total_steps: Option<usize>,
     /// The time elapsed since starting the update.
     pub elapsed_secs: Option<f64>,
+    /// The failure or abort message, if the update reached a terminal failed
+    /// or aborted state.
+    pub exit_message: Option<ExitMessage>,
 }
 
 /// The state of a rack or component update.

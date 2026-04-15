@@ -29,15 +29,15 @@ use omicron_common::update::ArtifactId;
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
 use update_engine::{
-    EventBuffer, NestedError,
+    AbortReason, EventBuffer, ExecutionStatus, FailureReason, NestedError,
+    StepKey, StepSpec, TerminalKind,
     display::{GroupDisplay, LineDisplayStyles},
 };
-use update_engine::{ExecutionStatus, TerminalKind};
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{
-        ClearUpdateStateResponse, ComponentUpdateStatus, RackUpdateStatus,
-        UpdateState, UpdateStateCounts, rollup_update_state,
+        ClearUpdateStateResponse, ComponentUpdateStatus, ExitMessage,
+        RackUpdateStatus, UpdateState, UpdateStateCounts, rollup_update_state,
     },
     update_events::{EventReport, WicketdEngineSpec},
 };
@@ -390,6 +390,30 @@ impl StatusArgs {
     }
 }
 
+fn get_exit_message<S: StepSpec>(
+    buffer: &EventBuffer<S>,
+    key: &StepKey,
+) -> Option<ExitMessage> {
+    let step = buffer.get(key)?;
+    if let Some(FailureReason::StepFailed(fi)) =
+        step.step_status().failure_reason()
+    {
+        return Some(ExitMessage {
+            message: fi.message.clone(),
+            causes: fi.causes.clone(),
+        });
+    }
+    if let Some(AbortReason::StepAborted(ai)) =
+        step.step_status().abort_reason()
+    {
+        return Some(ExitMessage {
+            message: ai.message.clone(),
+            causes: vec![],
+        });
+    }
+    None
+}
+
 fn build_rack_update_status(
     log: &Logger,
     response: GetArtifactsAndEventReportsResponse,
@@ -429,12 +453,13 @@ fn build_rack_update_status(
                     step_index: None,
                     total_steps: None,
                     elapsed_secs: None,
+                    exit_message: None,
                 },
                 Some(summary) => {
-                    let (state, current_step_index, elapsed_secs) =
+                    let (state, current_step_index, elapsed_secs, exit_message) =
                         match &summary.execution_status {
                             ExecutionStatus::NotStarted => {
-                                (UpdateState::NotStarted, None, None)
+                                (UpdateState::NotStarted, None, None, None)
                             }
                             ExecutionStatus::Running {
                                 step_key,
@@ -443,6 +468,7 @@ fn build_rack_update_status(
                                 UpdateState::InProgress,
                                 Some(step_key.index),
                                 Some(root_total_elapsed.as_secs_f64()),
+                                None,
                             ),
                             ExecutionStatus::Terminal(info) => {
                                 let state = match info.kind {
@@ -454,11 +480,14 @@ fn build_rack_update_status(
                                         UpdateState::Aborted
                                     }
                                 };
+                                let exit_message =
+                                    get_exit_message(&buffer, &info.step_key);
                                 (
                                     state,
                                     Some(info.step_key.index),
                                     info.root_total_elapsed
                                         .map(|d| d.as_secs_f64()),
+                                    exit_message,
                                 )
                             }
                         };
@@ -468,6 +497,7 @@ fn build_rack_update_status(
                         step_index: current_step_index,
                         total_steps: Some(summary.total_steps),
                         elapsed_secs,
+                        exit_message,
                     }
                 }
             }
@@ -585,6 +615,22 @@ fn write_status_table(
         "\n{} completed, {} failed, {} aborted, {} in progress, {} not started",
         c.completed, c.failed, c.aborted, c.in_progress, c.not_started,
     )?;
+
+    for component in &status.components {
+        if let Some(exit_message) = &component.exit_message {
+            writeln!(
+                out,
+                "\n{} {} ({}): {}",
+                component.id.type_,
+                component.id.slot,
+                component.state,
+                exit_message.message,
+            )?;
+            for cause in &exit_message.causes {
+                writeln!(out, "  caused by: {cause}")?;
+            }
+        }
+    }
 
     Ok(())
 }
