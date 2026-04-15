@@ -163,7 +163,7 @@ impl super::Nexus {
             blueprint.id
         );
         let deposit = self
-            .debug_dropbox
+            .debug_dropbox_reconfigurator
             .deposit_file_str(&debug_name, &debug)
             .await
             .map_err(|error| {
@@ -333,7 +333,7 @@ impl super::Nexus {
             blueprint.id
         );
         let deposit = self
-            .debug_dropbox
+            .debug_dropbox_reconfigurator
             .deposit_file_str(&debug_name, &debug)
             .await
             .map_err(|error| {

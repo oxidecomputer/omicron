@@ -73,7 +73,7 @@ async fn do_run() -> Result<(), CmdError> {
     }
 
     let debug_dropbox = Arc::new(
-        DebugDropbox::for_real(&log)
+        DebugDropbox::for_non_global_non_switch_zone(&log)
             .await
             .context("creating debug dropbox")
             .map_err(CmdError::Failure)?,

@@ -27,7 +27,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid as _;
-use oxide_debug_dropbox::DebugDropbox;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -69,7 +68,7 @@ pub struct BlueprintPlanner {
     rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
     tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
-    debug_dropbox: Arc<DebugDropbox>,
+    debug_dropbox: Arc<oxide_debug_dropbox::Producer>,
 }
 
 /// The default number of blueprints, beyond which the auto-planner will stop
@@ -94,7 +93,7 @@ impl BlueprintPlanner {
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: Arc<oxide_debug_dropbox::Producer>,
     ) -> Self {
         let (tx_planned, _) = watch::channel(None);
         Self {
@@ -513,6 +512,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use oxide_debug_dropbox::DebugDropbox;
     use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =
@@ -571,7 +571,12 @@ mod test {
                 time_modified: now_db_precision(),
             }),
         );
-        let debug_dropbox = Arc::new(DebugDropbox::for_tests_noop(log));
+        let debug_dropbox = Arc::new(
+            DebugDropbox::for_tests_noop(log)
+                .initialize_producer("test")
+                .await
+                .unwrap(),
+        );
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
@@ -749,7 +754,12 @@ mod test {
         // check_blueprint_limit_reached.
         let (_tx_inventory, rx_inventory) = watch::channel(None);
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
-        let debug_dropbox = Arc::new(DebugDropbox::for_tests_noop(&logctx.log));
+        let debug_dropbox = Arc::new(
+            DebugDropbox::for_tests_noop(&logctx.log)
+                .initialize_producer("test")
+                .await
+                .unwrap(),
+        );
 
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),

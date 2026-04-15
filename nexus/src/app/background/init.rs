@@ -160,7 +160,6 @@ use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use oxide_debug_dropbox::DebugDropbox;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -1338,7 +1337,7 @@ pub struct BackgroundTasksData {
     /// Console session absolute timeout, from
     /// `pkg.console.session_absolute_timeout_minutes`.
     pub console_session_absolute_timeout: chrono::TimeDelta,
-    pub debug_dropbox: Arc<DebugDropbox>,
+    pub debug_dropbox: Arc<oxide_debug_dropbox::Producer>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either
