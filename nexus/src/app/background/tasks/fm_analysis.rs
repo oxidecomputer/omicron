@@ -553,8 +553,8 @@ mod tests {
                     next_inv_min_time_started,
                     input_inv_time_started,
                 } => {
-                    assert_eq!(*parent_inv_id, newer.id);
-                    assert_eq!(*next_inv_min_time_started, newer.time_done,);
+                    assert_eq!(*parent_inv_id, older.id);
+                    assert_eq!(*next_inv_min_time_started, older.time_done,);
                     assert_eq!(
                         *input_inv_time_started,
                         overlapping.time_started,

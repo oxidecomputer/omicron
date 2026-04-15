@@ -439,7 +439,7 @@ mod tests {
                 metadata: fm::SitrepMetadata {
                     id: parent_sitrep_id,
                     parent_sitrep_id: Some(SitrepUuid::new_v4()),
-                    inv_collection_id: CollectionUuid::new_v4(),
+                    inv_collection_id: inv.id,
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "parent sitrep for test".to_string(),
                     time_created: chrono::Utc::now(),

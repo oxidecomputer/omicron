@@ -1,4 +1,4 @@
--- Backfill the next_inv_min_start_time column for any existing sitreps. If the
+-- Backfill the next_inv_min_time_started column for any existing sitreps. If the
 -- inventory ID referenced by the sitrep still exists in the database, use the
 -- corresponding `inv_collection` record's `time_done`. If that collection no
 -- longer exists, (as inventory collections are pruned on a separate schedule
@@ -8,7 +8,7 @@
 SET LOCAL disallow_full_table_scans = off;
 
 UPDATE omicron.public.fm_sitrep
-    SET next_inv_min_start_time = COALESCE(
+    SET next_inv_min_time_started = COALESCE(
         (
             SELECT inv_collection.time_done
             FROM omicron.public.inv_collection
@@ -16,4 +16,4 @@ UPDATE omicron.public.fm_sitrep
         ),
         NOW()
     )
-    WHERE fm_sitrep.next_inv_min_start_time IS NULL;
+    WHERE fm_sitrep.next_inv_min_time_started IS NULL;
