@@ -6,12 +6,17 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 nexus-types.workspace = true
 sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 tufaceous-artifact.workspace = true
 
 [dev-dependencies]
