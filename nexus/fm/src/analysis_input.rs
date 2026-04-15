@@ -248,7 +248,7 @@ mod tests {
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
     use omicron_uuid_kinds::{
-        CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
+        CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
     };
     use std::sync::Arc;
 
