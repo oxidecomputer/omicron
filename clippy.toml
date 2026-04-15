@@ -33,6 +33,19 @@ disallowed-methods = [
     # #[expect]ing an entire module.
     { path = "once_cell::unsync::Lazy::new", reason = "use `std::cell::LazyCell` instead, unless you need into_value" },
     { path = "once_cell::sync::Lazy::new", reason = "use `std::sync::LazyLock` instead, unless you need into_value" },
+
+    # ActionError::action_failed accepts any Debug + DeserializeOwned type,
+    # which makes it easy to accidentally pass raw Strings or other types
+    # that lose structured error information. Use
+    # nexus_types::saga::saga_action_failed instead, which only accepts
+    # omicron_common::api::external::Error.
+    { path = "steno::ActionError::action_failed", reason = "use nexus_types::saga::saga_action_failed instead" },
+
+    # The finite-retry variants can silently exhaust retries. Use the
+    # `_indefinitely` variants instead, which retry transient failures forever
+    # (or until a gone check aborts).
+    { path = "progenitor_extras::retry::retry_operation", reason = "use retry_operation_indefinitely instead" },
+    { path = "progenitor_extras::retry::retry_operation_while", reason = "use retry_operation_while_indefinitely instead" },
 ]
 
 [[disallowed-macros]]

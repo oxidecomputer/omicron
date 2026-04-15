@@ -59,6 +59,7 @@ bootstrap-agent-client.workspace = true
 bootstrap-agent-lockstep-client.workspace = true
 omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
+gateway-types.workspace = true
 installinator-api.workspace = true
 installinator-common.workspace = true
 omicron-certificates.workspace = true
@@ -74,6 +75,7 @@ wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+slog-error-chain.workspace = true
 
 [[bin]]
 name = "wicketd"

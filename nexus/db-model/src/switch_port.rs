@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -226,6 +227,47 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
     }
 }
 
+impl_enum_type!(
+    SwitchSlotEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum DbSwitchSlot;
+
+    Switch0 => b"switch0"
+    Switch1 => b"switch1"
+);
+
+impl From<DbSwitchSlot> for SwitchSlot {
+    fn from(value: DbSwitchSlot) -> Self {
+        match value {
+            DbSwitchSlot::Switch0 => Self::Switch0,
+            DbSwitchSlot::Switch1 => Self::Switch1,
+        }
+    }
+}
+
+impl From<SwitchSlot> for DbSwitchSlot {
+    fn from(value: SwitchSlot) -> Self {
+        match value {
+            SwitchSlot::Switch0 => Self::Switch0,
+            SwitchSlot::Switch1 => Self::Switch1,
+        }
+    }
+}
+
 #[derive(
     Queryable,
     Insertable,
@@ -242,35 +284,33 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
 pub struct SwitchPort {
     pub id: Uuid,
     pub rack_id: Uuid,
-    // TODO: #3594 Correctness
-    // Change this field to a `SwitchLocation` type.
-    pub switch_location: String,
     pub port_name: Name,
     pub port_settings_id: Option<Uuid>,
+    pub switch_slot: DbSwitchSlot,
 }
 
 impl SwitchPort {
     pub fn new(
         rack_id: Uuid,
-        switch_location: String,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
             rack_id,
-            switch_location,
+            switch_slot: switch_slot.into(),
             port_name,
             port_settings_id: None,
         }
     }
 }
 
-impl Into<external::SwitchPort> for SwitchPort {
-    fn into(self) -> external::SwitchPort {
-        external::SwitchPort {
+impl Into<networking_types::SwitchPort> for SwitchPort {
+    fn into(self) -> networking_types::SwitchPort {
+        networking_types::SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
-            switch_location: self.switch_location,
+            switch_slot: self.switch_slot.into(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
         }

@@ -3,15 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Subnet Pools, collections of IP subnets for external subnet allocation
-//!
-//! TODO(#9453): This module contains stub implementations that return
-//! "not implemented" errors. Full implementation requires:
-//! - Database schema and models (see nexus/db-model/)
-//! - Datastore methods (see nexus/db-queries/src/db/datastore/)
-//! - Authorization resources (see nexus/auth/src/authz/)
-//! - Replacing these stubs with real implementations
 
-use crate::app::Unimpl;
 use nexus_auth::authz;
 use nexus_db_lookup::lookup;
 use nexus_db_model::SubnetPool;
@@ -25,23 +17,20 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use oxnet::IpNet;
 use uuid::Uuid;
 
-// TODO(#9453): Remove this helper once real lookup logic is implemented.
-// When using LookupPath for database lookups, errors are handled internally
-// by the lookup machinery, making this helper unnecessary.
-fn not_found_error(pool: &NameOrId, resource_type: ResourceType) -> Error {
-    match pool {
-        NameOrId::Name(name) => Error::not_found_by_name(resource_type, &name),
-        NameOrId::Id(id) => Error::not_found_by_id(resource_type, &id),
-    }
-}
-
 impl super::Nexus {
+    pub fn subnet_pool_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        pool: &'a NameOrId,
+    ) -> lookup::SubnetPool<'a> {
+        self.datastore().lookup_subnet_pool(opctx, pool)
+    }
+
     // === Subnet Pool CRUD ===
 
     pub(crate) async fn subnet_pool_list(
@@ -334,15 +323,29 @@ impl super::Nexus {
 
     // === Utilization ===
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore aggregation
     pub(crate) async fn subnet_pool_utilization_view(
         &self,
         opctx: &OpContext,
-        pool: &NameOrId,
+        pool_lookup: &lookup::SubnetPool<'_>,
     ) -> LookupResult<subnet_pool_types::SubnetPoolUtilization> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Read).await?;
+
+        let (allocated, capacity) = self
+            .db_datastore
+            .subnet_pool_utilization(opctx, &authz_pool)
+            .await?;
+
+        let remaining = capacity - allocated;
+        if remaining < 0.0 {
+            return Err(Error::internal_error(
+                format!(
+                    "Computed an impossible negative count of remaining \
+                    addresses. Capacity = {capacity}, allocated = {allocated}"
+                )
+                .as_str(),
+            ));
+        };
+        Ok(subnet_pool_types::SubnetPoolUtilization { remaining, capacity })
     }
 }

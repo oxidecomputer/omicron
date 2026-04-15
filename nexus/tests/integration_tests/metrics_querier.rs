@@ -20,6 +20,7 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use oximeter::Datum;
 use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
+use oximeter_collector::ForcedCollectionError;
 use serde::de::DeserializeOwned;
 use slog::Logger;
 use std::borrow::Cow;
@@ -220,10 +221,28 @@ impl<'a, N> MetricsQuerier<'a, N> {
     {
         let result = wait_for_condition(
             || async {
-                self.ctx
-                    .oximeter
-                    .try_force_collect()
-                    .expect("sent trigger to force oximeter collection");
+                // On faster CI runners we encountered a lot of flakiness caused
+                // by try_force_collect() returning the QueueFull error.
+                //
+                // At the time of writing this, the method just puts a message
+                // in a bounded channel (with a capacity of 4), with QueueFull
+                // indicating that the channel reached capacity.
+                //
+                // wait_for_condition() will call this every second until the
+                // condition matches, so if collection is not done within four
+                // seconds this will error with QueueFull.
+                //
+                // In those cases, rather than failing the test we should just
+                // respect the backpressure and try again the next iteration.
+                match self.ctx.oximeter.try_force_collect() {
+                    Ok(()) => {}
+                    Err(ForcedCollectionError::QueueFull) => {
+                        return Err(CondCheckError::<()>::NotYet);
+                    }
+                    Err(e) => {
+                        panic!("failed to start oximeter collection: {e:?}");
+                    }
+                }
 
                 let page = objects_list_page_authz::<U>(
                     &self.ctx.external_client,
@@ -274,10 +293,28 @@ impl<'a, N> MetricsQuerier<'a, N> {
     {
         let result = wait_for_condition(
             || async {
-                self.ctx
-                    .oximeter
-                    .try_force_collect()
-                    .expect("sent trigger to force oximeter collection");
+                // On faster CI runners we encountered a lot of flakiness caused
+                // by try_force_collect() returning the QueueFull error.
+                //
+                // At the time of writing this, the method just puts a message
+                // in a bounded channel (with a capacity of 4), with QueueFull
+                // indicating that the channel reached capacity.
+                //
+                // wait_for_condition() will call this every second until the
+                // condition matches, so if collection is not done within four
+                // seconds this will error with QueueFull.
+                //
+                // In those cases, rather than failing the test we should just
+                // respect the backpressure and try again the next iteration.
+                match self.ctx.oximeter.try_force_collect() {
+                    Ok(()) => {}
+                    Err(ForcedCollectionError::QueueFull) => {
+                        return Err(CondCheckError::<()>::NotYet);
+                    }
+                    Err(e) => {
+                        panic!("failed to start oximeter collection: {e:?}");
+                    }
+                }
 
                 let tables = match self
                     .execute_query_once(endpoint, query.to_string())

@@ -1020,15 +1020,15 @@ pub enum ResourceType {
 /// Identity-related metadata that's included in nearly all public API objects
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct IdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
+    /// Unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /// unique, mutable, user-controlled identifier for each resource
+    /// Unique, mutable, user-controlled identifier for each resource
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// timestamp when this resource was created
+    /// Timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
+    /// Timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }
 
@@ -1199,17 +1199,17 @@ pub struct Instance {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this Instance
+    /// ID for the project containing this instance
     pub project_id: Uuid,
 
-    /// number of CPUs allocated for this Instance
+    /// Number of CPUs allocated for this instance
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
+    /// Memory allocated for this instance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the instance
     pub hostname: String,
 
-    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
     pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
@@ -1877,16 +1877,35 @@ pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
     Icmp(Option<VpcFirewallIcmpFilter>),
-    // TODO: IPv6 not supported by instances.
-    // Icmpv6(Option<VpcFirewallIcmpFilter>),
+    Icmp6(Option<VpcFirewallIcmpFilter>),
     // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
     // Other(u16),
 }
 
-impl FromStr for VpcFirewallRuleProtocol {
-    type Err = Error;
+impl VpcFirewallRuleProtocol {
+    /// Returns a string representation of this protocol filter suitable for
+    /// use as an API string or in the database.
+    ///
+    /// This is the inverse of `from_api_string`.
+    pub fn to_api_string(&self) -> String {
+        match self {
+            VpcFirewallRuleProtocol::Tcp => "tcp".to_string(),
+            VpcFirewallRuleProtocol::Udp => "udp".to_string(),
+            VpcFirewallRuleProtocol::Icmp(None) => "icmp".to_string(),
+            VpcFirewallRuleProtocol::Icmp(Some(v)) => {
+                format!("icmp:{}", v.to_api_string())
+            }
+            VpcFirewallRuleProtocol::Icmp6(None) => "icmp6".to_string(),
+            VpcFirewallRuleProtocol::Icmp6(Some(v)) => {
+                format!("icmp6:{}", v.to_api_string())
+            }
+        }
+    }
 
-    fn from_str(proto: &str) -> Result<Self, Self::Err> {
+    /// Parses a protocol filter from the API string format.
+    ///
+    /// This is the inverse of `to_api_string`.
+    pub fn from_api_string(proto: &str) -> Result<Self, Error> {
         let (ty_str, content_str) = match proto.split_once(':') {
             None => (proto, None),
             Some((lhs, rhs)) => (lhs, Some(rhs)),
@@ -1898,9 +1917,15 @@ impl FromStr for VpcFirewallRuleProtocol {
             (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
                 Ok(Self::Icmp(None))
             }
-            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
-                Ok(Self::Icmp(Some(rhs.parse()?)))
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => Ok(
+                Self::Icmp(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
+            ),
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp6") => {
+                Ok(Self::Icmp6(None))
             }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => Ok(
+                Self::Icmp6(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
+            ),
             (lhs, None) => Err(Error::invalid_value(
                 "vpc_firewall_rule_protocol",
                 format!("unrecognized protocol: {lhs}"),
@@ -1915,45 +1940,28 @@ impl FromStr for VpcFirewallRuleProtocol {
     }
 }
 
-impl TryFrom<String> for VpcFirewallRuleProtocol {
-    type Error = <VpcFirewallRuleProtocol as FromStr>::Err;
-
-    fn try_from(proto: String) -> Result<Self, Self::Error> {
-        proto.parse()
-    }
-}
-
-impl Display for VpcFirewallRuleProtocol {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        match self {
-            VpcFirewallRuleProtocol::Tcp => write!(f, "tcp"),
-            VpcFirewallRuleProtocol::Udp => write!(f, "udp"),
-            VpcFirewallRuleProtocol::Icmp(None) => write!(f, "icmp"),
-            VpcFirewallRuleProtocol::Icmp(Some(v)) => write!(f, "icmp:{v}"),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallIcmpFilter {
     pub icmp_type: u8,
     pub code: Option<IcmpParamRange>,
 }
 
-impl Display for VpcFirewallIcmpFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        write!(f, "{}", self.icmp_type)?;
-        if let Some(code) = self.code {
-            write!(f, ",{code}")?;
+impl VpcFirewallIcmpFilter {
+    /// Returns a string representation of this ICMP filter suitable for use
+    /// as part of an API string or in the database.
+    ///
+    /// This is the inverse of `from_api_string`.
+    pub fn to_api_string(&self) -> String {
+        match self.code {
+            None => self.icmp_type.to_string(),
+            Some(code) => format!("{},{code}", self.icmp_type),
         }
-        Ok(())
     }
-}
 
-impl FromStr for VpcFirewallIcmpFilter {
-    type Err = Error;
-
-    fn from_str(filter: &str) -> Result<Self, Self::Err> {
+    /// Parses an ICMP filter from the API string format.
+    ///
+    /// This is the inverse of `to_api_string`.
+    pub fn from_api_string(filter: &str) -> Result<Self, Error> {
         let (ty_str, code_str) = match filter.split_once(',') {
             None => (filter, None),
             Some((lhs, rhs)) => (lhs, Some(rhs)),
@@ -2364,7 +2372,11 @@ impl JsonSchema for IcmpParamRange {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct MacAddr(pub macaddr::MacAddr6);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(any(test, feature = "testing"), map(|x: [u8; 6]| x.into()))]
+    pub macaddr::MacAddr6,
+);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2531,7 +2543,10 @@ impl JsonSchema for MacAddr {
     JsonSchema,
     Diffable,
 )]
-pub struct Vni(u32);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Vni(
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=Vni::MAX_VNI))] u32,
+);
 
 impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
@@ -2839,46 +2854,6 @@ pub struct AddressLotBlock {
 
     /// The last address of the block (inclusive).
     pub last_address: IpAddr,
-}
-
-/// A loopback address is an address that is assigned to a rack switch but is
-/// not associated with any particular port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LoopbackAddress {
-    /// The id of the loopback address.
-    pub id: Uuid,
-
-    /// The address lot block this address came from.
-    pub address_lot_block_id: Uuid,
-
-    /// The id of the rack where this loopback address is assigned.
-    pub rack_id: Uuid,
-
-    /// Switch location where this loopback address is assigned.
-    pub switch_location: String,
-
-    /// The loopback IP address and prefix length.
-    pub address: oxnet::IpNet,
-}
-
-/// A switch port represents a physical external port on a rack switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPort {
-    /// The id of the switch port.
-    pub id: Uuid,
-
-    /// The rack this switch port belongs to.
-    pub rack_id: Uuid,
-
-    /// The switch location of this switch port.
-    pub switch_location: String,
-
-    /// The name of this switch port.
-    pub port_name: Name,
-
-    /// The primary settings group of this switch port. Will be `None` until
-    /// this switch port is configured.
-    pub port_settings_id: Option<Uuid>,
 }
 
 /// A switch port settings identity whose id may be used to view additional
@@ -3967,72 +3942,78 @@ mod test {
     }
 
     #[test]
-    fn test_firewall_rule_proto_filter_parse() {
-        assert_eq!(VpcFirewallRuleProtocol::Tcp, "tcp".parse().unwrap());
-        assert_eq!(VpcFirewallRuleProtocol::Udp, "udp".parse().unwrap());
+    fn test_firewall_rule_proto_filter_from_api_string() {
+        assert_eq!(
+            VpcFirewallRuleProtocol::Tcp,
+            VpcFirewallRuleProtocol::from_api_string("tcp").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Udp,
+            VpcFirewallRuleProtocol::from_api_string("udp").unwrap()
+        );
 
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(None),
-            "icmp".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp").unwrap()
         );
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 4,
                 code: None
             })),
-            "icmp:4".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp:4").unwrap()
         );
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
                 code: Some(0.into())
             })),
-            "icmp:60,0".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp:60,0").unwrap()
         );
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
                 code: Some((0..=10).try_into().unwrap())
             })),
-            "icmp:60,0-10".parse().unwrap()
+            VpcFirewallRuleProtocol::from_api_string("icmp:60,0-10").unwrap()
         );
         assert_eq!(
-            "icmp:".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:"),
             Err(Error::invalid_value(
                 "icmp_type",
                 "\"\" unparsable for type: cannot parse integer from empty string"
             ))
         );
         assert_eq!(
-            "icmp:20-30".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:20-30"),
             Err(Error::invalid_value(
                 "icmp_type",
                 "\"20-30\" unparsable for type: invalid digit found in string"
             ))
         );
         assert_eq!(
-            "icmp:10,".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:10,"),
             Err(Error::invalid_value(
                 "code",
                 "\"\" unparsable for type: cannot parse integer from empty string"
             ))
         );
         assert_eq!(
-            "icmp:257,".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:257,"),
             Err(Error::invalid_value(
                 "icmp_type",
                 "\"257\" unparsable for type: number too large to fit in target type"
             ))
         );
         assert_eq!(
-            "icmp:0,1000-1001".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:0,1000-1001"),
             Err(Error::invalid_value(
                 "code",
                 "\"1000\" unparsable for type: number too large to fit in target type"
             ))
         );
         assert_eq!(
-            "icmp:0,30-".parse::<VpcFirewallRuleProtocol>(),
+            VpcFirewallRuleProtocol::from_api_string("icmp:0,30-"),
             Err(Error::invalid_value("code", "range has no end value"))
         );
     }

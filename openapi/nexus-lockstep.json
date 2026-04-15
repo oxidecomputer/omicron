@@ -1687,7 +1687,7 @@
             "minimum": 0
           },
           "switch": {
-            "$ref": "#/components/schemas/SwitchLocation"
+            "$ref": "#/components/schemas/SwitchSlot"
           }
         },
         "required": [
@@ -1745,9 +1745,12 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer. Use `UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
-            "type": "string",
-            "format": "ip"
+            "description": "Address of the peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterPeerType"
+              }
+            ]
           },
           "allowed_export": {
             "description": "Define export policy for a peer.",
@@ -1868,15 +1871,6 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
-          },
-          "router_lifetime": {
-            "description": "Router lifetime in seconds for unnumbered BGP peers.",
-            "default": 0,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RouterLifetimeConfig"
-              }
-            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -2064,7 +2058,7 @@
         ]
       },
       "BlueprintArtifactMeasurements": {
-        "description": "This is a private inner type to ensure the measurment set is always non-empty",
+        "description": "This is a private inner type to ensure the measurement set is always non-empty",
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/BlueprintSingleMeasurement"
@@ -2637,6 +2631,9 @@
               "expunge": {
                 "$ref": "#/components/schemas/PlanningExpungeStepReport"
               },
+              "measurement_updates": {
+                "$ref": "#/components/schemas/PlanningMeasurementUpdatesStepReport"
+              },
               "mgs_updates": {
                 "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
               },
@@ -2669,6 +2666,7 @@
               "cockroachdb_settings",
               "decommission",
               "expunge",
+              "measurement_updates",
               "mgs_updates",
               "nexus_generation_bump",
               "noop_image_source",
@@ -3292,6 +3290,15 @@
           "stage0",
           "stage0_next"
         ]
+      },
+      "CaseUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::CaseUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Certificate": {
         "type": "object",
@@ -5232,7 +5239,7 @@
           },
           "boot_disk_id": {
             "nullable": true,
-            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "description": "The ID of the disk used to boot this instance, if a specific one is assigned",
             "type": "string",
             "format": "uuid"
           },
@@ -5246,20 +5253,20 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
+            "description": "RFC1035-compliant hostname for the instance",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "memory": {
-            "description": "memory allocated for this Instance",
+            "description": "Memory allocated for this instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -5267,7 +5274,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -5275,7 +5282,7 @@
             ]
           },
           "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
+            "description": "Number of CPUs allocated for this instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
@@ -5283,7 +5290,7 @@
             ]
           },
           "project_id": {
-            "description": "id for the project containing this Instance",
+            "description": "ID for the project containing this instance",
             "type": "string",
             "format": "uuid"
           },
@@ -5291,7 +5298,7 @@
             "$ref": "#/components/schemas/InstanceState"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
@@ -5302,7 +5309,7 @@
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -7108,6 +7115,140 @@
           "orphan_disks"
         ]
       },
+      "PlanningMeasurementUpdatesStepReport": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "modified"
+                ]
+              }
+            },
+            "required": [
+              "count",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blocked_add_update"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "empty_measurements"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_sled_agent_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_sled_config"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "still_install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "matches_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
@@ -7193,6 +7334,9 @@
           "host_phase_2_slot_b_eligible": {
             "type": "boolean"
           },
+          "measurement_eligible": {
+            "type": "boolean"
+          },
           "num_dataset": {
             "type": "integer",
             "format": "uint",
@@ -7207,12 +7351,45 @@
         "required": [
           "host_phase_2_slot_a_eligible",
           "host_phase_2_slot_b_eligible",
+          "measurement_eligible",
           "num_dataset",
           "num_eligible"
         ]
       },
       "PlanningNoopImageSourceSkipSledHostPhase2Reason": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceSkipSledMeasurementsReason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both_slots_already_artifact"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -7380,6 +7557,12 @@
               "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledHostPhase2Reason"
             }
           },
+          "skipped_sled_measurements": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledMeasurementsReason"
+            }
+          },
           "skipped_sled_zones": {
             "type": "object",
             "additionalProperties": {
@@ -7399,6 +7582,13 @@
             },
             "uniqueItems": true
           },
+          "sled_measurements_already_artifact": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUuid"
+            },
+            "uniqueItems": true
+          },
           "sled_zones_all_already_artifact": {
             "type": "array",
             "items": {
@@ -7411,9 +7601,11 @@
           "converted",
           "no_target_release",
           "skipped_sled_host_phase_2",
+          "skipped_sled_measurements",
           "skipped_sled_zones",
           "skipped_zones",
           "sled_host_phase_2_both_already_artifact",
+          "sled_measurements_already_artifact",
           "sled_zones_all_already_artifact"
         ]
       },
@@ -7541,7 +7733,7 @@
             ]
           },
           "port": {
-            "description": "Nmae of the port this config applies to.",
+            "description": "Name of the port this config applies to.",
             "type": "string"
           },
           "routes": {
@@ -7555,7 +7747,7 @@
             "description": "Switch the port belongs to.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           },
@@ -8356,6 +8548,60 @@
         "minimum": 0,
         "maximum": 9000
       },
+      "RouterPeerIpAddr": {
+        "type": "string",
+        "format": "ip"
+      },
+      "RouterPeerType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "router_lifetime": {
+                "description": "Router lifetime in seconds for unnumbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterLifetimeConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unnumbered"
+                ]
+              }
+            },
+            "required": [
+              "router_lifetime",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "IP address for numbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterPeerIpAddr"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "numbered"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          }
+        ]
+      },
       "Saga": {
         "description": "Sagas\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
         "type": "object",
@@ -8929,8 +9175,18 @@
         }
       },
       "SupportBundleInfo": {
+        "description": "Support bundle info with internal-only fields.\n\nThis wraps the external API's [`ExternalSupportBundleInfo`] and extends it with fields that are only exposed through the lockstep API (e.g., for OMDB).",
         "type": "object",
         "properties": {
+          "fm_case_id": {
+            "nullable": true,
+            "description": "The FM case ID that triggered creation of this bundle, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CaseUuid"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -9024,7 +9280,7 @@
           }
         }
       },
-      "SwitchLocation": {
+      "SwitchSlot": {
         "description": "Identifies switch physical location",
         "oneOf": [
           {
@@ -9387,15 +9643,50 @@
           "sleds"
         ]
       },
+      "UplinkAddress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "addrconf"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip_net": {
+                "$ref": "#/components/schemas/UplinkIpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "static"
+                ]
+              }
+            },
+            "required": [
+              "ip_net",
+              "type"
+            ]
+          }
+        ]
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
           "address": {
-            "nullable": true,
-            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "description": "The address to be used on the uplink.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNet"
+                "$ref": "#/components/schemas/UplinkAddress"
               }
             ]
           },
@@ -9407,7 +9698,13 @@
             "format": "uint16",
             "minimum": 0
           }
-        }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "UplinkIpNet": {
+        "$ref": "#/components/schemas/IpNet"
       },
       "UserId": {
         "title": "A username for a local-only user",
@@ -9653,6 +9950,21 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "description": "Waiting on measurements",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurements"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -9720,7 +10032,7 @@
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
           {
-            "description": "sort in increasing order of \"id\"",
+            "description": "Sort in increasing order of \"id\"",
             "type": "string",
             "enum": [
               "id_ascending"
@@ -9732,14 +10044,14 @@
         "description": "Supported set of sort modes for scanning by timestamp and ID",
         "oneOf": [
           {
-            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "description": "Sort in increasing order of timestamp and ID, i.e., earliest first",
             "type": "string",
             "enum": [
               "time_and_id_ascending"
             ]
           },
           {
-            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "description": "Sort in increasing order of timestamp and ID, i.e., most recent first",
             "type": "string",
             "enum": [
               "time_and_id_descending"

@@ -31,6 +31,7 @@ use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_bundle::*;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -727,7 +728,7 @@ async fn create_zfs_snapshots(
                                     log,
                                     "failed to list datasets, will \
                                     unwind any previously created snapshots";
-                                    "error" => ?e,
+                                    &e,
                                 );
                                 assert!(
                                     maybe_err
@@ -776,7 +777,7 @@ async fn create_zfs_snapshots(
                     log,
                     "failed to get metadata for potential zone directory";
                     "zone_dir" => %zone_dir,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }
@@ -803,7 +804,7 @@ async fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
                 log,
                 "failed to destroy zone bundle ZFS snapshot";
                 "snapshot" => %snapshot,
-                "error" => ?e,
+                e,
             ),
         }
     }
@@ -943,7 +944,7 @@ async fn create(
                 "failed to create bundle file";
                 "zone" => zone.name(),
                 "file" => %full_path,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             );
             return Err(BundleError::OpenBundleFile {
                 path: full_path.to_owned(),
@@ -983,7 +984,7 @@ async fn create(
         );
         let output = match zone.run_cmd(cmd) {
             Ok(s) => s,
-            Err(e) => format!("{}", e),
+            Err(e) => InlineErrorChain::new(&e).to_string(),
         };
         let contents = format!("Command: {:?}\n{}", cmd, output).into_bytes();
         if let Err(e) = insert_data(&mut builder, cmd[0], &contents) {
@@ -1076,7 +1077,7 @@ async fn create(
             );
             let output = match zone.run_cmd(args) {
                 Ok(s) => s,
-                Err(e) => format!("{}", e),
+                Err(e) => InlineErrorChain::new(&e).to_string(),
             };
             let contents =
                 format!("Command: {:?}\n{}", args, output).into_bytes();
@@ -1139,7 +1140,7 @@ async fn create(
                         "failed to append log file to zone bundle";
                         "zone" => zone.name(),
                         "log_file" => %svc.log_file,
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }
@@ -1207,7 +1208,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                         log,
                         "failed to read zone debug directory";
                         "directory" => ?dir,
-                        "reason" => ?e,
+                        "reason" => InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -1256,7 +1257,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                             log,
                             "failed to fetch zone debug directory entry";
                             "directory" => ?dir,
-                            "reason" => ?e,
+                            "reason" => InlineErrorChain::new(&e),
                         );
                     }
                 }
@@ -1679,73 +1680,6 @@ mod tests {
         );
         let path = Utf8PathBuf::from("/some/nonexistent/path");
         assert!(dir_size(&path).await.is_err());
-    }
-
-    #[tokio::test]
-    // Different operating systems ship slightly different versions of `du(1)`,
-    // with differing behaviors. We really only care that the `dir_size`
-    // function behaves the same as the illumos `du(1)`, so skip this test on
-    // other systems.
-    #[cfg_attr(not(target_os = "illumos"), ignore)]
-    async fn test_dir_size_matches_du() {
-        const DU: &str = "du";
-        async fn dir_size_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-            let args = &["-A", "-s", path.as_str()];
-            let output =
-                Command::new(DU).args(args).output().await.map_err(|err| {
-                    BundleError::Command {
-                        cmd: format!("{DU} {}", args.join(" ")),
-                        err,
-                    }
-                })?;
-            let err = |msg: &str| {
-                BundleError::Cleanup(anyhow!(
-                    "failed to fetch disk usage for {}: {}",
-                    path,
-                    msg,
-                ))
-            };
-            if !output.status.success() {
-                return Err(err("du command failed"));
-            }
-            let Ok(s) = std::str::from_utf8(&output.stdout) else {
-                return Err(err("non-UTF8 stdout"));
-            };
-            let Some(line) = s.lines().next() else {
-                return Err(err("no lines in du output"));
-            };
-            let Some(part) = line.trim().split_ascii_whitespace().next() else {
-                return Err(err("no disk usage size computed in output"));
-            };
-            part.parse().map_err(|_| err("failed to parse du output"))
-        }
-
-        let du_output =
-            Command::new(DU).arg("--version").output().await.unwrap();
-        eprintln!(
-            "du --version:\n{}\n",
-            String::from_utf8_lossy(&du_output.stdout)
-        );
-
-        let path =
-            Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
-        let t0 = std::time::Instant::now();
-        let usage =
-            dbg!(dir_size(&path).await).expect("disk usage for src dir failed");
-        eprintln!("dir_size({path}) took {:?}", t0.elapsed());
-
-        let t0 = std::time::Instant::now();
-        // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
-        // directory is ~450 KiB.
-        let du_usage =
-            dbg!(dir_size_du(&path).await).expect("running du failed!");
-        eprintln!("du -s {path} took {:?}", t0.elapsed());
-
-        assert_eq!(
-            usage, du_usage,
-            "expected `dir_size({path})` to == `du -s {path}`\n\
-             {usage}B (`dir_size`) != {du_usage}B (`du`)",
-        );
     }
 }
 

@@ -27,6 +27,7 @@ use nexus_types::external_api::snapshot;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::ZpoolHealth;
 use std::sync::LazyLock;
 
 type DiskTest<'a> =
@@ -87,6 +88,7 @@ async fn test_unauthorized() {
                 },
             ],
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+            ZpoolHealth::Online,
         )
         .await;
     disk_test.propagate_datasets_to_sleds().await;

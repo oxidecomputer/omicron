@@ -25,6 +25,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::distr::{Alphanumeric, SampleString};
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::DatasetError;
@@ -187,7 +188,7 @@ impl CurrentlyManagedZpoolsReceiver {
     pub(crate) async fn to_inventory(
         &self,
         log: &Logger,
-    ) -> Vec<(ZpoolName, ByteCount)> {
+    ) -> Vec<(ZpoolName, ByteCount, ZpoolHealth)> {
         let current_zpools = self.current();
 
         let zpool_futs =
@@ -225,7 +226,7 @@ impl CurrentlyManagedZpoolsReceiver {
                         return None;
                     }
                 };
-                Some((zpool_name, total_size))
+                Some((zpool_name, total_size, info.health()))
             })
             .collect()
     }
@@ -855,7 +856,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                     log,
                     "Failed to read epoch from adopted disk";
                     "zpool" => %disk.zpool_name(),
-                    "error" => %e,
+                    InlineErrorChain::new(&e),
                 );
                 None
             }

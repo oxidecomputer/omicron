@@ -40,6 +40,7 @@ sha2.workspace = true
 walkdir.workspace = true
 omicron-workspace-hack.workspace = true
 uuid.workspace = true
+slog-error-chain.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
@@ -49,12 +50,3 @@ serde.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-libfalcon.workspace = true
-
-[[bin]]
-name = "falcon_runner"
-
-[[bin]]
-name = "falcon_runner_cli"

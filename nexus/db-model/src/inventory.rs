@@ -9,6 +9,7 @@ use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
+use crate::to_db_typed_uuid;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -44,8 +45,9 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
-    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
+    inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
+    inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
@@ -72,6 +74,12 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineParseErrorKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineParseErrorUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineServiceKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineServiceUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
@@ -92,7 +100,10 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
+use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -2026,6 +2037,148 @@ impl From<InvMupdateOverrideNonBoot> for MupdateOverrideNonBootInventory {
     }
 }
 
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online)]
+pub struct InvSvcEnabledNotOnline {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub svcs_cmd_error: Option<String>,
+    pub time_of_status: DateTime<Utc>,
+}
+
+impl InvSvcEnabledNotOnline {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svcs_cmd_error: Option<String>,
+        time_of_status: DateTime<Utc>,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::new_v4());
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            svcs_cmd_error,
+            time_of_status,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online_service)]
+pub struct InvSvcEnabledNotOnlineService {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineServiceKind>,
+    pub fmri: String,
+    pub zone: String,
+    pub state: InvSvcEnabledNotOnlineState,
+}
+
+impl InvSvcEnabledNotOnlineService {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svc: SvcEnabledNotOnline,
+    ) -> Self {
+        let SvcEnabledNotOnline { fmri, zone, state } = svc;
+
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineServiceUuid::new_v4());
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            fmri,
+            zone,
+            state: state.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online_parse_error)]
+pub struct InvSvcEnabledNotOnlineParseError {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineParseErrorKind>,
+    pub error_message: String,
+}
+
+impl InvSvcEnabledNotOnlineParseError {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        error_message: String,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineParseErrorUuid::new_v4());
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            error_message,
+        }
+    }
+}
+
+// See [`sled_agent_types::inventory::SvcEnabledNotOnlineState`].
+impl_enum_type!(
+    InvSvcEnabledNotOnlineStateEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvSvcEnabledNotOnlineState;
+
+    // Enum values
+    Uninitialized => b"uninitialized"
+    Offline => b"offline"
+    Degraded => b"degraded"
+    Maintenance => b"maintenance"
+);
+
+impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
+        match value {
+            SvcEnabledNotOnlineState::Degraded => {
+                InvSvcEnabledNotOnlineState::Degraded
+            }
+            SvcEnabledNotOnlineState::Uninitialized => {
+                InvSvcEnabledNotOnlineState::Uninitialized
+            }
+            SvcEnabledNotOnlineState::Offline => {
+                InvSvcEnabledNotOnlineState::Offline
+            }
+            SvcEnabledNotOnlineState::Maintenance => {
+                InvSvcEnabledNotOnlineState::Maintenance
+            }
+        }
+    }
+}
+
+impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
+    fn from(value: InvSvcEnabledNotOnlineState) -> Self {
+        match value {
+            InvSvcEnabledNotOnlineState::Degraded => {
+                SvcEnabledNotOnlineState::Degraded
+            }
+            InvSvcEnabledNotOnlineState::Uninitialized => {
+                SvcEnabledNotOnlineState::Uninitialized
+            }
+            InvSvcEnabledNotOnlineState::Offline => {
+                SvcEnabledNotOnlineState::Offline
+            }
+            InvSvcEnabledNotOnlineState::Maintenance => {
+                SvcEnabledNotOnlineState::Maintenance
+            }
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::PhysicalDisk`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_physical_disk)]
@@ -2258,6 +2411,48 @@ impl From<InvNvmeDiskFirmware>
     }
 }
 
+// See [`sled_agent_types::inventory::ZpoolHealth`].
+impl_enum_type!(
+    InvZpoolHealthEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvZpoolHealth;
+
+    // Enum values
+    Online => b"online"
+    Degraded => b"degraded"
+    Faulted => b"faulted"
+    Offline => b"offline"
+    Removed => b"removed"
+    Unavailable => b"unavailable"
+);
+
+impl From<ZpoolHealth> for InvZpoolHealth {
+    fn from(value: ZpoolHealth) -> Self {
+        match value {
+            ZpoolHealth::Online => InvZpoolHealth::Online,
+            ZpoolHealth::Degraded => InvZpoolHealth::Degraded,
+            ZpoolHealth::Faulted => InvZpoolHealth::Faulted,
+            ZpoolHealth::Offline => InvZpoolHealth::Offline,
+            ZpoolHealth::Removed => InvZpoolHealth::Removed,
+            ZpoolHealth::Unavailable => InvZpoolHealth::Unavailable,
+        }
+    }
+}
+
+impl From<InvZpoolHealth> for ZpoolHealth {
+    fn from(value: InvZpoolHealth) -> Self {
+        match value {
+            InvZpoolHealth::Online => ZpoolHealth::Online,
+            InvZpoolHealth::Degraded => ZpoolHealth::Degraded,
+            InvZpoolHealth::Faulted => ZpoolHealth::Faulted,
+            InvZpoolHealth::Offline => ZpoolHealth::Offline,
+            InvZpoolHealth::Removed => ZpoolHealth::Removed,
+            InvZpoolHealth::Unavailable => ZpoolHealth::Unavailable,
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::Zpool`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_zpool)]
@@ -2267,6 +2462,7 @@ pub struct InvZpool {
     pub id: DbTypedUuid<ZpoolKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub total_size: ByteCount,
+    pub health: InvZpoolHealth,
 }
 
 impl InvZpool {
@@ -2281,6 +2477,7 @@ impl InvZpool {
             id: zpool.id.into(),
             sled_id: sled_id.into(),
             total_size: zpool.total_size.into(),
+            health: zpool.health.into(),
         }
     }
 }
@@ -2291,6 +2488,7 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
             time_collected: pool.time_collected,
             id: pool.id.into(),
             total_size: *pool.total_size,
+            health: pool.health.into(),
         }
     }
 }

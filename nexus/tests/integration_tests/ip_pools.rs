@@ -732,15 +732,27 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silo =
         create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
-    // put 404s if link doesn't exist yet
+    // put 404s if link doesn't exist yet (is_default: true path)
     let params = IpPoolSiloUpdate { is_default: true };
     let p0_silo_url = format!("/v1/system/ip-pools/p0/silos/{}", silo.name());
     let error =
         object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
             .await;
-    assert_eq!(
+    assert!(
+        error.message.starts_with("not found: ip-pool-resource with id"),
+        "unexpected error: {}",
         error.message,
-        "not found: ip-pool-resource with id \"(pool, silo)\""
+    );
+
+    // same for is_default: false path (different code path, no transaction)
+    let params = IpPoolSiloUpdate { is_default: false };
+    let error =
+        object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
+            .await;
+    assert!(
+        error.message.starts_with("not found: ip-pool-resource with id"),
+        "unexpected error: {}",
+        error.message,
     );
 
     // associate both pools with the test silo
@@ -1158,7 +1170,7 @@ async fn test_bad_ip_ranges(
         .unwrap();
         let expected_message = format!(
             "The provided IP range {}-{} overlaps with an existing \
-            IP Pool range or Subnet Pool member",
+            IP pool range or subnet pool member",
             bad_range.first_address(),
             bad_range.last_address(),
         );

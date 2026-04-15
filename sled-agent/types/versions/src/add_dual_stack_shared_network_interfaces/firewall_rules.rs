@@ -5,8 +5,8 @@
 //! Firewall rule types for version `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
 
 use crate::v9;
+use crate::v10::instance::ResolvedVpcFirewallRule;
 use omicron_common::api::external;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

@@ -6,15 +6,16 @@
 // where these types come from.
 pub use gateway_client::types::{
     RotState, SpComponentCaboose, SpComponentInfo, SpComponentPresence,
-    SpIdentifier, SpIgnition, SpIgnitionSystemType, SpState,
+    SpIdentifier, SpState,
 };
 pub use gateway_types::component::SpType;
+pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
 pub use gateway_types::rot::RotSlot;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::{collections::HashMap, time::Duration};
 use transceiver_controller::{
     Datapath, Monitors, PowerMode, VendorInfo, message::ExtendedStatus,
@@ -91,7 +92,7 @@ pub struct RotInventory {
 #[serde(tag = "transceiver_inventory_snapshot", rename_all = "snake_case")]
 pub struct TransceiverInventorySnapshot {
     /// The transceivers in each switch.
-    pub inventory: HashMap<SwitchLocation, Vec<Transceiver>>,
+    pub inventory: HashMap<SwitchSlot, Vec<Transceiver>>,
     pub last_seen: Duration,
 }
 

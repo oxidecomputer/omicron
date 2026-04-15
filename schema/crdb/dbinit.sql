@@ -149,9 +149,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
      */
     initialized BOOL NOT NULL,
 
-    /* Used to configure the updates service URL */
-    tuf_base_url STRING(512),
-
     /* The IPv6 underlay /56 prefix for the rack */
     rack_subnet INET
 );
@@ -554,7 +551,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_silo ON omicron.public.c
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the collection.
     collection_type STRING(63) NOT NULL,
@@ -587,7 +584,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the resource.
     resource_type STRING(63) NOT NULL,
@@ -913,7 +910,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     user_name TEXT,
@@ -921,11 +918,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- if user provision type is 'scim', this field _may_ contain a value: it
     -- is not mandatory that the SCIM provisioning client support this field.
     active BOOL,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -982,15 +974,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     display_name TEXT,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -2216,8 +2203,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
-    internet_gateway_id UUID,
-    ip_pool_id UUID
+    internet_gateway_id UUID NOT NULL,
+    ip_pool_id UUID NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.public.internet_gateway_ip_pool (
@@ -2232,8 +2219,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
-    internet_gateway_id UUID,
-    address INET
+    internet_gateway_id UUID NOT NULL,
+    address INET NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id ON omicron.public.internet_gateway_ip_address (
@@ -3166,7 +3153,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     -- and later managing its storage.
     assigned_nexus UUID,
 
-    user_comment TEXT
+    user_comment TEXT,
+
+    -- If this bundle was requested by an FM case, the case UUID.
+    fm_case_id UUID
 
 );
 
@@ -3183,6 +3173,41 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
     time_created
+);
+
+-- Child data selection tables owned by `support_bundle`. The flags table stores
+-- boolean columns for payload-less categories; the host_info and ereports tables
+-- use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
+    bundle_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (bundle_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_info (
+    bundle_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
 
 /*******************************************************************/
@@ -3506,6 +3531,11 @@ CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_anycast ON omicron.p
     anycast
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.switch_slot AS ENUM (
+    'switch0',
+    'switch1'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -3513,26 +3543,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     address_lot_block_id UUID NOT NULL,
     rsvd_address_lot_block_id UUID NOT NULL,
     rack_id UUID NOT NULL,
-    switch_location TEXT NOT NULL,
     address INET NOT NULL,
-    anycast BOOL NOT NULL
+    anycast BOOL NOT NULL,
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loopback_address (
-    address, rack_id, switch_location
+    address, rack_id, switch_slot
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
-    rack_id UUID,
-    switch_location TEXT,
-    port_name TEXT,
+    rack_id UUID NOT NULL,
+    port_name TEXT NOT NULL,
     port_settings_id UUID,
+    switch_slot omicron.public.switch_slot NOT NULL,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
-        rack_id, switch_location, port_name
+        rack_id, switch_slot, port_name
     )
 );
 
@@ -3961,7 +3991,7 @@ CREATE INDEX IF NOT EXISTS inv_collectionby_time_done
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
     idx INT4 NOT NULL,
-    message TEXT
+    message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS errors_by_collection
     ON omicron.public.inv_collection_error (inv_collection_id, idx);
@@ -4490,16 +4520,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- staged firmware slot to be active on reset
     next_active_slot INT2 CHECK (next_active_slot BETWEEN 1 AND 7),
     -- slot1 is distinct in the NVMe spec in the sense that it can be read only
-    slot1_is_read_only BOOLEAN,
+    slot1_is_read_only BOOLEAN NOT NULL,
     -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
     -- slot exists but is empty
-    slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
+    slot_firmware_versions STRING(8)[] NOT NULL CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
 
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The slot in which the disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zpool_health AS ENUM (
+    -- The device is online and functioning.
+    'online',
+    -- One or more components are degraded or faulted, but sufficient replicas
+    -- exist to continue functioning.
+    'degraded',
+    -- One or more components are degraded or faulted, and insufficient replicas
+    -- exist to continue functioning.
+    'faulted',
+    -- The device was explicitly taken offline by "zpool offline".
+    'offline',
+    -- The device was physically removed.
+    'removed',
+    -- The device could not be opened.
+    'unavailable'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
@@ -4513,6 +4560,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     id UUID NOT NULL,
     sled_id UUID NOT NULL,
     total_size INT NOT NULL,
+    health omicron.public.inv_zpool_health NOT NULL,
 
     -- PK consisting of:
     -- - Which collection this was
@@ -5035,6 +5083,50 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
     zone_id UUID NOT NULL,
     generation INT8 NOT NULL,
     PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
+    'uninitialized',
+    'offline',
+    'degraded',
+    'maintenance'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    -- This represents an error when calling the `svcs` command.
+    -- This column will always be NULL unless something went very wrong and we
+    -- were unable to retrieve any information from the state of the services
+    -- due to a command error.
+    svcs_cmd_error TEXT,
+    time_of_status TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS inv_svc_enabled_not_online_collection_by_sled
+    ON omicron.public.inv_svc_enabled_not_online (inv_collection_id, sled_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    fmri TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    state omicron.public.inv_svc_enabled_not_online_state NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    error_message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
 /*
@@ -5839,7 +5931,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
     state omicron.public.vmm_state NOT NULL,
-    cpu_platform omicron.public.vmm_cpu_platform
+    cpu_platform omicron.public.vmm_cpu_platform NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -6018,17 +6110,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     remote INET NOT NULL,
     detection_threshold INT8 NOT NULL,
     required_rx INT8 NOT NULL,
-    switch TEXT NOT NULL,
-    mode  omicron.public.bfd_mode,
+    mode  omicron.public.bfd_mode NOT NULL,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (
     remote,
-    switch
+    switch_slot
 ) WHERE time_deleted IS NULL;
 
 
@@ -6150,7 +6243,7 @@ CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name)
 CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
 AS
 SELECT
- sp.switch_location,
+ sp.switch_slot,
  sp.port_name,
  bpc.addr,
  bpc.hold_time,
@@ -6173,7 +6266,7 @@ ON sp.port_settings_id = bpc.port_settings_id
 JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX IF NOT EXISTS switch_port_id_and_name
-ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_slot);
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
@@ -6638,6 +6731,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS audit_log_by_time_completed
     ON omicron.public.audit_log (time_completed, id)
     WHERE time_completed IS NOT NULL;
 
+-- Supports "find stale incomplete rows ordered by time_started".
+CREATE INDEX IF NOT EXISTS audit_log_incomplete_by_time_started
+    ON omicron.public.audit_log (time_started, id)
+    WHERE time_completed IS NULL;
+
 -- View of audit log entries that have been "completed". This lets us treat that
 -- subset of rows as its own table in the data model code. Completing an entry
 -- means updating the entry after an operation is complete with the result of
@@ -6840,6 +6938,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     time_dispatched TIMESTAMPTZ,
     -- The number of receivers that this alart was dispatched to.
     num_dispatched INT8 NOT NULL,
+
+    -- The ID of the fault management case that created this alert, if any.
+    case_id UUID,
 
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
@@ -7166,54 +7267,86 @@ ON omicron.public.user_data_export (state);
     /*
      * whether this ereport was generated by SP firmware or the host OS.
      *
-     * this determines the key used to identify the reporter:
+     * This determines the key used to identify the reporter:
      * - for SP ereports, the reporter is identified by its SP type and slot,
      *   which is how the SP is indexed when requesting ereports from MGS.
      * - for host OS ereports, the reporter is identified by the sled UUID.
      *
-     * depending on the reporter type, either the SP location or sled UUID
-     * fields will be non-NULL.
+     * The reporter type dictates the following:
+     * - whether a sled UUID is present (for host OS reporters, this identifies
+     *   the sled-agent from which the ereports were received).
+     * - whether the `slot` number field is nullable (it is always present for
+     *   SP ereports).
      */
     reporter omicron.public.ereporter_type NOT NULL,
-
-    /*  physical location for SP reporters. */
-    sp_type omicron.public.sp_type,
-    sp_slot INT4,
 
     /* sled UUID for host OS reporters. */
     sled_id UUID,
 
+    /*
+     * physical location of the reporter is represented by the slot type and
+     * slot number.
+     */
+    slot_type omicron.public.sp_type NOT NULL,
+    /*
+     * for SP reporters, the slot number is never NULL, as the slot type and
+     * number are used to identify the SP's location when requesting ereports
+     * from MGS.
+     *
+     * for host OS reporters, the slot number may be NULL, as it is possible
+     * for a sled to be part of the control plane before Nexus is aware of
+     * its location, since inventory collection is performed asynchronously.
+     */
+    slot INT4,
+
+    /*
+     * if this is non-NULL, the ereport has *definitely* been seen by at least
+     * one committed sitrep at some point in time. if it is `NULL`, the
+     * ereport may or may not have been included in a sitrep, and you will
+     * have to actually check the sitrep to find out.
+     *
+     * when this is non-NULL, the value is the ID of the sitrep which the
+     `fm_rendezvous` task was executing when this ereport was marked as seen.
+     * because execution may lag arbitrarily behind the generation of new
+     * sitreps, this does *not* indicate that this was the *first* sitrep in
+     * which this ereport was seen (which is why this is called "marked seen
+     * in" rather than "first seen in" or similar) --- in general, this field
+     * should basically just be treated as a `bool` (`true` if non-NULL,
+     * `false` if NULL), and the actual value of the sitrep ID is included
+    * only to provide *some* record for human-readable debugging purposes.
+     *
+     * have fun!
+     */
+    marked_seen_in UUID,
+
     CONSTRAINT reporter_identity_validity CHECK (
-    (
-        -- ereports from SPs must have a SP type and slot,
-        -- and must not have a sled ID.
-        reporter = 'sp'
-            AND sp_type IS NOT NULL
-            AND sp_slot IS NOT NULL
-            AND sled_id IS NULL
-    ) OR (
-        -- ereports from the sled host OS must have a sled ID,
-        -- and must not have a SP type or slot.
-        reporter = 'host'
-            AND sled_id IS NOT NULL
-            AND sp_type IS NULL
-            AND sp_slot IS NULL
-    )
+        (
+            -- ereports from SPs must have a SP type and slot, and must not
+            -- have a sled ID.
+            reporter = 'sp'
+                AND slot IS NOT NULL
+                AND sled_id IS NULL
+        ) OR (
+            -- ereports from the sled host OS must have a sled ID, and must
+            -- have the 'sled' slot type (as switches and PSCs do not have
+            -- a host OS)
+            reporter = 'host'
+                AND sled_id IS NOT NULL
+                AND slot_type = 'sled'
+        )
     ),
 
     PRIMARY KEY (restart_id, ena)
 );
 
-CREATE INDEX IF NOT EXISTS lookup_ereports_by_sp_slot
+CREATE INDEX IF NOT EXISTS lookup_ereports_by_location
 ON omicron.public.ereport (
-    sp_type,
-    sp_slot,
+    slot_type,
+    slot,
     time_collected
 )
 WHERE
-    time_deleted IS NULL
-    AND sp_type IS NOT NULL
-    AND sp_slot IS NOT NULL;
+    time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_ereports_by_sled
 ON omicron.public.ereport (
@@ -7231,9 +7364,9 @@ ON omicron.public.ereport (
 STORING (
     time_collected,
     reporter,
-    sp_type,
-    sp_slot,
-    sled_id
+    sled_id,
+    slot_type,
+    slot
 )
 WHERE
      time_deleted IS NULL;
@@ -7244,6 +7377,14 @@ ON omicron.public.ereport (
 )
 WHERE
     time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_unseen_ereports
+ON omicron.public.ereport (
+    restart_id, ena
+)
+WHERE
+    marked_seen_in IS NULL
+    AND time_deleted IS NULL;
 
 /*
     * Fault management situation reports (and accessories)
@@ -7383,6 +7524,107 @@ ON omicron.public.fm_ereport_in_case (
 CREATE INDEX IF NOT EXISTS
     lookup_ereports_assigned_to_fm_case
 ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
+
+-- Alerts requested by a fault management sitrep.
+--
+-- These represent the list of alerts which the fault management system would
+-- like to have created as of a given sitrep. If (and only if) the sitrep is
+-- made current, then the `fm_rendezvous` background task will create
+-- corresponding entries in the `omicron.public.fm_alert` table. The primary
+-- keys for these alerts (the alert UUID) is provided by the alert request,
+-- preventing the same alert from being created multiple times.
+--
+-- Records in this table are inserted when a sitrep is created, and are deleted
+-- when the sitrep corresponding to the alert request record's `sitrep_id` is
+-- deleted. However, alert requests are carried forwards into subsequent sitreps
+-- for as long as the fault management case containing them exists, so that the
+-- fault management system may track which events within a case it has already
+-- requested alerts for.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
+    -- Requested alert UUID
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this alert request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the alert was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the alert was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this alert request belongs.
+    case_id UUID NOT NULL,
+
+    -- The class of alert that was requested
+    alert_class omicron.public.alert_class NOT NULL,
+    -- Actual alert data. The structure of this depends on the alert class.
+    payload JSONB NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_alert_requests_for_case
+ON omicron.public.fm_alert_request (sitrep_id, case_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
+    -- Requested support bundle UUID.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the bundle was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the bundle was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this request belongs.
+    case_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_requests_for_case
+ON omicron.public.fm_support_bundle_request (sitrep_id, case_id);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_request_by_id
+ON omicron.public.fm_support_bundle_request (id)
+STORING (requested_sitrep_id);
+
+-- Child data selection tables owned by `fm_support_bundle_request`. The flags
+-- table stores boolean columns for payload-less categories; the host_info and
+-- ereports tables use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_flags (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_host_info (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
 
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
@@ -7681,11 +7923,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
 
-    /* Multicast VLAN (MVLAN) for egress to upstream networks */
-    /* Tags packets leaving the rack to traverse VLAN-segmented upstream networks */
-    /* Internal rack traffic uses VNI-based underlay forwarding */
-    mvlan INT2,
-
     /* Associated underlay group for NAT */
     /* We fill this as part of the RPW */
     underlay_group_id UUID,
@@ -7726,12 +7963,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
             NOT multicast_ip << 'ff01::/16' AND         -- Interface-local scope
             NOT multicast_ip << 'ff02::/16'             -- Link-local scope
         )
-    ),
-
-    -- MVLAN validation (Dendrite requires >= 2)
-    CONSTRAINT mvlan_valid_range CHECK (
-        mvlan IS NULL OR (mvlan >= 2 AND mvlan <= 4094)
     )
+
 );
 
 /*
@@ -7796,7 +8029,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* Empty array means any source is allowed (ASM) */
     /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
     /* The group's source_ips in API views is the union of all active members */
-    source_ips INET[] DEFAULT ARRAY[]::INET[]
+    source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[]
 );
 
 /* External Multicast Group Indexes */
@@ -8223,7 +8456,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '233.0.0', NULL)
+    (TRUE, NOW(), NOW(), '250.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

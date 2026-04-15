@@ -1809,6 +1809,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use predicates::{BoxPredicate, prelude::*};
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::HashMap;
     use std::net::SocketAddrV6;
 
@@ -3921,6 +3922,7 @@ pub(in crate::db::datastore) mod test {
                     u2.zpool_id,
                     sled_config.sled_id,
                     u2.inventory_total_size.into(),
+                    ZpoolHealth::Online,
                 )
                 .await;
 
@@ -4083,6 +4085,7 @@ pub(in crate::db::datastore) mod test {
         zpool_id: ZpoolUuid,
         sled_id: SledUuid,
         total_size: ByteCount,
+        health: ZpoolHealth,
     ) {
         use nexus_db_schema::schema::inv_zpool::dsl;
 
@@ -4094,6 +4097,7 @@ pub(in crate::db::datastore) mod test {
             id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size,
+            health: health.into(),
         };
 
         diesel::insert_into(dsl::inv_zpool)

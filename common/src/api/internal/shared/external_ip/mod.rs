@@ -10,11 +10,10 @@ use crate::address::ConcreteIp;
 use crate::address::Ip;
 use crate::address::NUM_SOURCE_NAT_PORTS;
 use daft::Diffable;
-use itertools::Either;
-use itertools::Itertools as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -89,6 +88,32 @@ pub struct SourceNatConfig<T: Ip> {
     first_port: u16,
     /// The last port used for source NAT, also inclusive.
     last_port: u16,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
+where
+    T: Ip + proptest::arbitrary::Arbitrary,
+    T::Strategy: 'static,
+{
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        let num_possible_first_ports = u16::MAX / NUM_SOURCE_NAT_PORTS + 1;
+        let first_port_strategy = (0u16..num_possible_first_ports)
+            .prop_map(|i| i * NUM_SOURCE_NAT_PORTS);
+
+        (T::arbitrary(), first_port_strategy)
+            .prop_map(|(ip, first_port)| {
+                let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+                Self::new(ip, first_port, last_port)
+                    .expect("Arbitrary impl produces aligned port pairs")
+            })
+            .boxed()
+    }
 }
 
 /// An IP address and port range used for source NAT, i.e., making
@@ -249,68 +274,38 @@ pub enum SourceNatConfigError {
 /// External IP address configuration.
 ///
 /// This encapsulates all the external addresses of a single IP version,
-/// including source NAT, Ephemeral, and Floating IPs. Note that not all of
-/// these need to be specified, but this type can only be constructed if _at
-/// least one_ of them is.
-#[derive(Clone, Debug, Serialize, PartialEq)]
+/// including source NAT, Ephemeral, and Floating IPs.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(bound = "T: ConcreteIp + SnatSchema + serde::de::DeserializeOwned")]
 pub struct ExternalIps<T>
 where
     T: ConcreteIp,
 {
     /// Source NAT configuration, for outbound-only connectivity.
-    source_nat: Option<SourceNatConfig<T>>,
+    pub source_nat: Option<SourceNatConfig<T>>,
     /// An Ephemeral address for in- and outbound connectivity.
-    ephemeral_ip: Option<T>,
+    pub ephemeral_ip: Option<T>,
     /// Additional Floating IPs for in- and outbound connectivity.
-    floating_ips: Vec<T>,
+    pub floating_ips: BTreeSet<T>,
 }
 
-impl<T: ConcreteIp> ExternalIps<T>
-where
-    T: ConcreteIp,
-{
-    /// Return a reference to the SNAT address, if it exists.
-    pub fn source_nat(&self) -> &Option<SourceNatConfig<T>> {
-        &self.source_nat
-    }
-
-    /// Return a reference to the Ephemeral adress, if it exists.
-    pub fn ephemeral_ip(&self) -> &Option<T> {
-        &self.ephemeral_ip
-    }
-
-    /// Return a mutable reference to the Ephemeral address, if it exists.
-    pub fn ephemeral_ip_mut(&mut self) -> &mut Option<T> {
-        &mut self.ephemeral_ip
-    }
-
-    /// Return the list of Floating IP addresses.
-    ///
-    /// The slice will be empty if no such addresses exist.
-    pub fn floating_ips(&self) -> &[T] {
-        &self.floating_ips
-    }
-
-    /// Return a mutable reference to the list of Floating IP addresses.
-    ///
-    /// The slice will be empty if no such addresses exist.
-    pub fn floating_ips_mut(&mut self) -> &mut Vec<T> {
-        &mut self.floating_ips
+impl<T: ConcreteIp> Default for ExternalIps<T> {
+    fn default() -> Self {
+        Self {
+            source_nat: None,
+            ephemeral_ip: None,
+            floating_ips: BTreeSet::new(),
+        }
     }
 }
 
 pub type ExternalIpv4Config = ExternalIps<Ipv4Addr>;
 pub type ExternalIpv6Config = ExternalIps<Ipv6Addr>;
 
-/// External IP address configuration.
-///
-/// This encapsulates all the external addresses of a single IP version,
-/// including source NAT, Ephemeral, and Floating IPs. Note that not all of
-/// these need to be specified, but this type can only be constructed if _at
-/// least one_ of them is.
-#[derive(Deserialize, JsonSchema)]
-#[serde(remote = "ExternalIps")]
-struct ExternalIpsShadow<T>
+// Private type only used for deriving the JSON schema for `ExternalIps`.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct ExternalIpsSchema<T>
 where
     T: ConcreteIp + SnatSchema + ExternalIpSchema,
 {
@@ -319,7 +314,7 @@ where
     /// An Ephemeral address for in- and outbound connectivity.
     ephemeral_ip: Option<T>,
     /// Additional Floating IPs for in- and outbound connectivity.
-    floating_ips: Vec<T>,
+    floating_ips: BTreeSet<T>,
 }
 
 impl JsonSchema for ExternalIpv4Config {
@@ -330,7 +325,7 @@ impl JsonSchema for ExternalIpv4Config {
     fn json_schema(
         generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        ExternalIpsShadow::<Ipv4Addr>::json_schema(generator)
+        ExternalIpsSchema::<Ipv4Addr>::json_schema(generator)
     }
 }
 
@@ -342,495 +337,101 @@ impl JsonSchema for ExternalIpv6Config {
     fn json_schema(
         generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        ExternalIpsShadow::<Ipv6Addr>::json_schema(generator)
+        ExternalIpsSchema::<Ipv6Addr>::json_schema(generator)
     }
 }
 
-// We implement `Deserialize` manually to ensure we have at least one of the
-// SNAT, ephemeral, and floating IPs in the input data.
-impl<'de, T> Deserialize<'de> for ExternalIps<T>
-where
-    T: ConcreteIp + SnatSchema + ExternalIpSchema + Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::Error;
-        let ExternalIps { source_nat, ephemeral_ip, floating_ips } =
-            ExternalIpsShadow::deserialize(deserializer)?;
-        let mut builder = ExternalIpConfigBuilder::new();
-        if let Some(snat) = source_nat {
-            builder = builder.with_source_nat(snat);
-        }
-        if let Some(ip) = ephemeral_ip {
-            builder = builder.with_ephemeral_ip(ip);
-        }
-        builder
-            .with_floating_ips(floating_ips)
-            .build()
-            .map_err(D::Error::custom)
-    }
-}
-
-/// A builder for `ExternalIps` and the concrete type aliases.
+/// External IP address configuration.
 ///
-/// This enforces the constraint that `ExternalIps` always has _at least one_ IP
-/// address.
-pub struct ExternalIpConfigBuilder<T: ConcreteIp> {
-    source_nat: Option<SourceNatConfig<T>>,
-    ephemeral_ip: Option<T>,
-    floating_ips: Vec<T>,
-}
-
-impl<T> ExternalIpConfigBuilder<T>
-where
-    T: ConcreteIp,
-{
-    /// Construct a new builder.
-    pub fn new() -> Self {
-        Self { source_nat: None, ephemeral_ip: None, floating_ips: Vec::new() }
-    }
-
-    /// Add a source NAT address.
-    ///
-    /// Note that this overwrites any previous such information.
-    pub fn with_source_nat(mut self, source_nat: SourceNatConfig<T>) -> Self {
-        self.source_nat = Some(source_nat);
-        self
-    }
-
-    /// Add an Ephemeral IP address.
-    ///
-    /// Note that this overwrites any previous such information.
-    pub fn with_ephemeral_ip(mut self, ip: T) -> Self {
-        self.ephemeral_ip = Some(ip);
-        self
-    }
-
-    /// Add floating IPs.
-    ///
-    /// Note that this overwrites any previous such information.
-    pub fn with_floating_ips(mut self, ips: Vec<T>) -> Self {
-        self.floating_ips = ips;
-        self
-    }
-
-    /// Attempt to build an `ExternalIps`.
-    ///
-    /// This will fail if no addresses at all have been specified.
-    pub fn build(self) -> Result<ExternalIps<T>, ExternalIpsError> {
-        let ExternalIpConfigBuilder { source_nat, ephemeral_ip, floating_ips } =
-            self;
-        if source_nat.is_none()
-            && ephemeral_ip.is_none()
-            && floating_ips.is_empty()
-        {
-            return Err(ExternalIpsError::NoIps);
-        }
-        Ok(ExternalIps { source_nat, ephemeral_ip, floating_ips })
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ExternalIpsError {
-    #[error(
-        "Must specify at least one SNAT, ephemeral, or floating IP address"
-    )]
-    NoIps,
-    #[error(
-        "SNAT, ephemeral, and floating IPs must all be of the same IP version"
-    )]
-    MixedIpVersions,
-    #[error(transparent)]
-    SourceNat(#[from] SourceNatConfigError),
-}
-
-/// A single- or dual-stack external IP configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum ExternalIpConfig {
-    /// Single-stack IPv4 external IP configuration.
-    V4(ExternalIpv4Config),
-    /// Single-stack IPv6 external IP configuration.
-    V6(ExternalIpv6Config),
-    /// Both IPv4 and IPv6 external IP configuration.
-    DualStack { v4: ExternalIpv4Config, v6: ExternalIpv6Config },
-}
-
-impl From<ExternalIpv4Config> for ExternalIpConfig {
-    fn from(cfg: ExternalIpv4Config) -> Self {
-        Self::V4(cfg)
-    }
-}
-
-impl From<ExternalIpv6Config> for ExternalIpConfig {
-    fn from(cfg: ExternalIpv6Config) -> Self {
-        Self::V6(cfg)
-    }
+/// This encapsulates all external addresses for an instance, with separate
+/// optional configurations for IPv4 and IPv6.
+#[derive(
+    Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize,
+)]
+pub struct ExternalIpConfig {
+    /// IPv4 external IP configuration.
+    pub v4: Option<ExternalIpv4Config>,
+    /// IPv6 external IP configuration.
+    pub v6: Option<ExternalIpv6Config>,
 }
 
 impl ExternalIpConfig {
-    /// Attempt to convert from generic IP addressing information.
-    ///
-    /// This is used to convert previous versions of the external addressing
-    /// information, which used version-agnostic IP address types, like
-    /// `IpAddr`, rather than concrete `Ipv4Addr` or `Ipv6Addr`. This handles
-    /// all the possible flavors of addresses for SNAT, Ephemeral, and Floating
-    /// IPs.
-    ///
-    /// This returns an error if:
-    ///
-    /// - There are no addresses at all in the input parameters
-    /// - The input parameters specify mixed IP versions
-    pub fn try_from_generic(
-        source_nat: Option<v1::SourceNatConfig>,
-        ephemeral_ip: Option<IpAddr>,
-        floating_ips: Vec<IpAddr>,
-    ) -> Result<Self, ExternalIpsError> {
-        // This is a terrible conversion method. We need to handle all the
-        // possible IP versions for three different sources: SNAT, Ephemeral,
-        // and Floating IPs. We also need to handle the possibility that the
-        // floating IPs are not all the same version.
-        //
-        // This proceeds in 3 steps:
-        //
-        // - Convert the provided SNAT configuration into either an SNATv4 or
-        //   SNATv6 configuration. At most one of these should be non-none.
-        // - Extract all the floating IPs into arrays of one or the other
-        //   version. At most one of these should be non-empty.
-        // - Match on all of the possible states, which is huge and annoying.
-
-        // Populate one or the other SNAT configuration.
-        let snat_v4;
-        let snat_v6;
-        match source_nat {
-            Some(snat) => {
-                let (first_port, last_port) = snat.port_range_raw();
-                match snat.ip {
-                    IpAddr::V4(ipv4) => {
-                        snat_v6 = None;
-                        snat_v4 = Some(SourceNatConfig::new(
-                            ipv4, first_port, last_port,
-                        )?);
-                    }
-                    IpAddr::V6(ipv6) => {
-                        snat_v6 = Some(SourceNatConfig::new(
-                            ipv6, first_port, last_port,
-                        )?);
-                        snat_v4 = None;
-                    }
-                }
-            }
-            None => {
-                snat_v4 = None;
-                snat_v6 = None;
-            }
-        };
-
-        // Populate one or the other arrays of floating IPs.
-        let (fips_v4, fips_v6): (Vec<_>, Vec<_>) =
-            floating_ips.into_iter().partition_map(|fip| match fip {
-                IpAddr::V4(v4) => Either::Left(v4),
-                IpAddr::V6(v6) => Either::Right(v6),
-            });
-
-        match (snat_v4, snat_v6, ephemeral_ip) {
-            (None, None, None) => {
-                // Only floating IPs.
-                match (fips_v4.is_empty(), fips_v6.is_empty()) {
-                    (true, true) => Err(ExternalIpsError::NoIps),
-                    (true, false) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(fips_v6)
-                        .build()
-                        .map(Into::into),
-                    (false, true) => ExternalIpConfigBuilder::new()
-                        .with_floating_ips(fips_v4)
-                        .build()
-                        .map(Into::into),
-                    (false, false) => Err(ExternalIpsError::MixedIpVersions),
-                }
-            }
-            (None, None, Some(IpAddr::V4(v4))) => {
-                // Ephemeral IPv4, ensure we have no v6 floating IPs.
-                if !fips_v6.is_empty() {
-                    return Err(ExternalIpsError::MixedIpVersions);
-                }
-                ExternalIpConfigBuilder::new()
-                    .with_ephemeral_ip(v4)
-                    .with_floating_ips(fips_v4)
-                    .build()
-                    .map(Into::into)
-            }
-            (None, None, Some(IpAddr::V6(v6))) => {
-                // Ephemeral IPv6, ensure we have no v4 floating IPs.
-                if !fips_v4.is_empty() {
-                    return Err(ExternalIpsError::MixedIpVersions);
-                }
-                ExternalIpConfigBuilder::new()
-                    .with_ephemeral_ip(v6)
-                    .with_floating_ips(fips_v6)
-                    .build()
-                    .map(Into::into)
-            }
-            (None, Some(snat_v6), None) => {
-                // IPv6 source nat, ensure we have no v4 floating IPs.
-                if !fips_v4.is_empty() {
-                    return Err(ExternalIpsError::MixedIpVersions);
-                }
-                ExternalIpConfigBuilder::new()
-                    .with_source_nat(snat_v6)
-                    .with_floating_ips(fips_v6)
-                    .build()
-                    .map(Into::into)
-            }
-            (None, Some(snat_v6), Some(IpAddr::V6(eip_v6))) => {
-                // IPv6 source nat and ephemeral, ensure we have no v4 floating
-                // IPs.
-                if !fips_v4.is_empty() {
-                    return Err(ExternalIpsError::MixedIpVersions);
-                }
-                ExternalIpConfigBuilder::new()
-                    .with_source_nat(snat_v6)
-                    .with_ephemeral_ip(eip_v6)
-                    .with_floating_ips(fips_v6)
-                    .build()
-                    .map(Into::into)
-            }
-            (Some(snat_v4), None, None) => {
-                // IPv4 source nat, ensure we have no v6 floating IPs.
-                if !fips_v6.is_empty() {
-                    return Err(ExternalIpsError::MixedIpVersions);
-                }
-                ExternalIpConfigBuilder::new()
-                    .with_source_nat(snat_v4)
-                    .with_floating_ips(fips_v4)
-                    .build()
-                    .map(Into::into)
-            }
-            (Some(snat_v4), None, Some(IpAddr::V4(eip_v4))) => {
-                // IPv4 source nat and ephemeral, ensure we have no v6 floating
-                // IPs.
-                if !fips_v6.is_empty() {
-                    return Err(ExternalIpsError::MixedIpVersions);
-                }
-                ExternalIpConfigBuilder::new()
-                    .with_source_nat(snat_v4)
-                    .with_ephemeral_ip(eip_v4)
-                    .with_floating_ips(fips_v4)
-                    .build()
-                    .map(Into::into)
-            }
-            (Some(_), None, Some(IpAddr::V6(_)))
-            | (None, Some(_), Some(IpAddr::V4(_))) => {
-                Err(ExternalIpsError::MixedIpVersions)
-            }
-            (Some(_), Some(_), None) | (Some(_), Some(_), Some(_)) => {
-                // Both SNAT v4 and v6 configurations. Shouldn't be possible,
-                // but not valid.
-                Err(ExternalIpsError::MixedIpVersions)
-            }
+    /// Create a new configuration with only a Floating IPv4 address.
+    pub fn new_floating_ipv4(ipv4: Ipv4Addr) -> Self {
+        Self {
+            v4: Some(ExternalIpv4Config {
+                floating_ips: BTreeSet::from([ipv4]),
+                ..Default::default()
+            }),
+            v6: None,
         }
     }
 
-    /// Return the IPv4 configuration, if it exists.
-    pub fn ipv4_config(&self) -> Option<&ExternalIpv4Config> {
-        match self {
-            ExternalIpConfig::V4(v4)
-            | ExternalIpConfig::DualStack { v4, .. } => Some(v4),
-            ExternalIpConfig::V6(_) => None,
+    /// Create a new configuration with only an IPv4 SNAT address.
+    pub fn new_ipv4_source_nat(snat: SourceNatConfig<Ipv4Addr>) -> Self {
+        Self {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v6: None,
         }
     }
 
-    /// Return a mutable reference to the IPv4 configuration, if it exists.
-    pub fn ipv4_config_mut(&mut self) -> Option<&mut ExternalIpv4Config> {
-        match self {
-            ExternalIpConfig::V4(v4)
-            | ExternalIpConfig::DualStack { v4, .. } => Some(v4),
-            ExternalIpConfig::V6(_) => None,
+    /// Create a new configuration with only a Floating IPv6 address.
+    pub fn new_floating_ipv6(ipv6: Ipv6Addr) -> Self {
+        Self {
+            v6: Some(ExternalIpv6Config {
+                floating_ips: BTreeSet::from([ipv6]),
+                ..Default::default()
+            }),
+            v4: None,
         }
     }
 
-    /// Return the IPv6 configuration, if it exists.
-    pub fn ipv6_config(&self) -> Option<&ExternalIpv6Config> {
-        match self {
-            ExternalIpConfig::V6(v6)
-            | ExternalIpConfig::DualStack { v6, .. } => Some(v6),
-            ExternalIpConfig::V4(_) => None,
-        }
-    }
-
-    /// Return a mutable reference to the IPv6 configuration, if it exists.
-    pub fn ipv6_config_mut(&mut self) -> Option<&mut ExternalIpv6Config> {
-        match self {
-            ExternalIpConfig::V6(v6)
-            | ExternalIpConfig::DualStack { v6, .. } => Some(v6),
-            ExternalIpConfig::V4(_) => None,
+    /// Create a new configuration with only an IPv6 SNAT address.
+    pub fn new_ipv6_source_nat(snat: SourceNatConfig<Ipv6Addr>) -> Self {
+        Self {
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v4: None,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn try_from_generic_fails_with_no_ips() {
-        assert!(
-            ExternalIpConfig::try_from_generic(None, None, vec![]).is_err(),
-            "Should fail to construct an ExternalIpConfig from no IP addresses"
-        );
-    }
-
-    #[test]
-    fn try_from_generic_fails_with_mixed_address_versions() {
-        let v4 = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
-        let v6 = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
-        let snat_v4 = v1::SourceNatConfig::new(v4, 0, 16383).unwrap();
-        let snat_v6 = v1::SourceNatConfig::new(v6, 0, 16383).unwrap();
-
-        for (snat, ephemeral, floating) in [
-            (Some(snat_v4), Some(v6), vec![]),
-            (Some(snat_v4), None, vec![v6]),
-            (Some(snat_v6), Some(v4), vec![]),
-            (Some(snat_v6), None, vec![v4]),
-            (None, Some(v4), vec![v6]),
-            (None, Some(v6), vec![v4]),
-        ] {
-            assert!(
-                ExternalIpConfig::try_from_generic(snat, ephemeral, floating,)
-                    .is_err(),
-                "Should fail to construct an ExternalIpConfig with mixed IP versions"
-            );
+impl From<v1::ExternalIpv4Config> for ExternalIpv4Config {
+    fn from(old: v1::ExternalIpv4Config) -> Self {
+        Self {
+            source_nat: old.source_nat,
+            ephemeral_ip: old.ephemeral_ip,
+            floating_ips: old.floating_ips.into_iter().collect(),
         }
     }
+}
 
-    #[test]
-    fn try_from_generic_successes() {
-        let ipv4 = Ipv4Addr::new(1, 1, 1, 1);
-        let v4 = IpAddr::V4(ipv4);
-        let ipv6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
-        let v6 = IpAddr::V6(ipv6);
-        let snat_v4 = v1::SourceNatConfig::new(v4, 0, 16383).unwrap();
-        let snat_v6 = v1::SourceNatConfig::new(v6, 0, 16383).unwrap();
-
-        for (ipv4_snat, ipv4_ephemeral, ipv4_floating) in [
-            (Some(snat_v4), None, vec![]),
-            (None, Some(v4), vec![]),
-            (None, None, vec![v4]),
-            (Some(snat_v4), Some(v4), vec![]),
-            (Some(snat_v4), None, vec![v4]),
-            (None, Some(v4), vec![v4]),
-            (Some(snat_v4), Some(v4), vec![v4]),
-        ] {
-            let config = ExternalIpConfig::try_from_generic(
-                ipv4_snat,
-                ipv4_ephemeral,
-                ipv4_floating.clone(),
-            )
-            .unwrap();
-            assert!(config.ipv6_config().is_none());
-            let ipv4_config = config.ipv4_config().unwrap();
-
-            match (ipv4_config.source_nat(), ipv4_snat) {
-                (None, None) => {}
-                (Some(actual), Some(expected)) => {
-                    let IpAddr::V4(addr) = expected.ip else {
-                        unreachable!("Should have an IPv4 address");
-                    };
-                    assert_eq!(actual.ip, addr);
-                    let (expected_first, expected_last) =
-                        expected.port_range_raw();
-                    assert_eq!(actual.first_port, expected_first);
-                    assert_eq!(actual.last_port, expected_last);
-                }
-                (None, Some(_)) | (Some(_), None) => {
-                    panic!("IPv4 SNAT was not carried over correctly",)
-                }
-            }
-
-            match (ipv4_config.ephemeral_ip(), ipv4_ephemeral) {
-                (None, None) => {}
-                (Some(actual), Some(expected)) => {
-                    let IpAddr::V4(addr) = expected else {
-                        unreachable!("Should have an IPv4 address");
-                    };
-                    assert_eq!(actual, &addr);
-                }
-                (None, Some(_)) | (Some(_), None) => {
-                    panic!("IPv4 Ephemeral IP not carried over correctly")
-                }
-            }
-
-            let actual_fips = ipv4_config.floating_ips();
-            assert_eq!(actual_fips.len(), ipv4_floating.len());
-            for (actual, expected) in
-                actual_fips.iter().zip(ipv4_floating.iter())
-            {
-                let IpAddr::V4(expected) = expected else {
-                    unreachable!("Should have an IPv4 address");
-                };
-                assert_eq!(actual, expected);
-            }
+impl From<v1::ExternalIpv6Config> for ExternalIpv6Config {
+    fn from(old: v1::ExternalIpv6Config) -> Self {
+        Self {
+            source_nat: old.source_nat,
+            ephemeral_ip: old.ephemeral_ip,
+            floating_ips: old.floating_ips.into_iter().collect(),
         }
+    }
+}
 
-        for (ipv6_snat, ipv6_ephemeral, ipv6_floating) in [
-            (Some(snat_v6), None, vec![]),
-            (None, Some(v6), vec![]),
-            (None, None, vec![v6]),
-            (Some(snat_v6), Some(v6), vec![]),
-            (Some(snat_v6), None, vec![v6]),
-            (None, Some(v6), vec![v6]),
-            (Some(snat_v6), Some(v6), vec![v6]),
-        ] {
-            let config = ExternalIpConfig::try_from_generic(
-                ipv6_snat,
-                ipv6_ephemeral,
-                ipv6_floating.clone(),
-            )
-            .unwrap();
-            assert!(config.ipv4_config().is_none());
-            let ipv6_config = config.ipv6_config().unwrap();
-
-            match (ipv6_config.source_nat(), ipv6_snat) {
-                (None, None) => {}
-                (Some(actual), Some(expected)) => {
-                    let IpAddr::V6(addr) = expected.ip else {
-                        unreachable!("Should have an IPv6 address");
-                    };
-                    assert_eq!(actual.ip, addr);
-                    let (expected_first, expected_last) =
-                        expected.port_range_raw();
-                    assert_eq!(actual.first_port, expected_first);
-                    assert_eq!(actual.last_port, expected_last);
-                }
-                (None, Some(_)) | (Some(_), None) => {
-                    panic!("IPv6 SNAT was not carried over correctly",)
-                }
+impl From<v1::ExternalIpConfig> for ExternalIpConfig {
+    fn from(old: v1::ExternalIpConfig) -> Self {
+        match old {
+            v1::ExternalIpConfig::V4(v4) => {
+                Self { v4: Some(v4.into()), v6: None }
             }
-
-            match (ipv6_config.ephemeral_ip(), ipv6_ephemeral) {
-                (None, None) => {}
-                (Some(actual), Some(expected)) => {
-                    let IpAddr::V6(addr) = expected else {
-                        unreachable!("Should have an IPv6 address");
-                    };
-                    assert_eq!(actual, &addr);
-                }
-                (None, Some(_)) | (Some(_), None) => {
-                    panic!("IPv6 Ephemeral IP not carried over correctly")
-                }
+            v1::ExternalIpConfig::V6(v6) => {
+                Self { v4: None, v6: Some(v6.into()) }
             }
-
-            let actual_fips = ipv6_config.floating_ips();
-            assert_eq!(actual_fips.len(), ipv6_floating.len());
-            for (actual, expected) in
-                actual_fips.iter().zip(ipv6_floating.iter())
-            {
-                let IpAddr::V6(expected) = expected else {
-                    unreachable!("Should have an IPv6 address");
-                };
-                assert_eq!(actual, expected);
+            v1::ExternalIpConfig::DualStack { v4, v6 } => {
+                Self { v4: Some(v4.into()), v6: Some(v6.into()) }
             }
         }
     }

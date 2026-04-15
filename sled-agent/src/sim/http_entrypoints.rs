@@ -53,7 +53,7 @@ use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -84,7 +84,13 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
+use sled_agent_types_versions::v20;
+use sled_agent_types_versions::v25;
+use sled_agent_types_versions::v26;
+use sled_agent_types_versions::v30;
+use sled_agent_types_versions::v33;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{
@@ -393,20 +399,123 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        // Read the current envelope, then convert it back down to the version
+        // we have to report for this (now-removed!) API endpoint.
+        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
+        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
+        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
+
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
-        Ok(HttpResponseOk(config))
+
+        let envelope =
+            EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+                .map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "could not deserialize bootstore contents: {}",
+                        InlineErrorChain::new(&err)
+                    ))
+                })?;
+        let latest_version_body =
+            envelope.deserialize_body().map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "could not deserialize early network config body: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?;
+
+        // Downconvert from the current version to the v20 version we have to
+        // return from this endpoint.
+        let body =
+            BodyV20::from(BodyV26::from(BodyV30::from(latest_version_body)));
+
+        Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
+            generation: config.generation,
+            schema_version: BodyV20::SCHEMA_VERSION,
+            body,
+        }))
     }
 
-    async fn write_network_bootstore_config(
+    async fn write_network_bootstore_config_v33(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();
-        *config = body.into_inner();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v26(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v25(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v20(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
+    }
+
+    async fn write_network_bootstore_config_v1(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
     }
 
     /// Fetch basic information about this sled
@@ -699,6 +808,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
+        sa.check_local_storage_error()?;
         sa.ensure_local_storage_dataset(body.into_inner());
 
         Ok(HttpResponseUpdatedNoContent())
@@ -718,6 +828,7 @@ impl SledAgentApi for SledAgentSimImpl {
             encrypted_at_rest: _,
         } = body.into_inner();
 
+        sa.check_local_storage_error()?;
         sa.drop_dataset(
             ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
             dataset_id,

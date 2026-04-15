@@ -28,6 +28,7 @@ use oxide_debug_dropbox::DebugDropbox;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::env;
 use std::future::Future;
 use std::sync::Arc;
@@ -205,8 +206,8 @@ impl ServerContext {
                     error!(
                         log,
                         "Failed to get current directory, \
-                         setting assets dir to None: {}",
-                        error
+                         setting assets dir to None";
+                        InlineErrorChain::new(&error),
                     );
                     None
                 }

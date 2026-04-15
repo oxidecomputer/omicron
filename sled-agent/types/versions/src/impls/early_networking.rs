@@ -4,65 +4,33 @@
 
 //! Implementations for early networking types.
 
-use bootstore::schemes::v0 as bootstore;
+use crate::latest::early_networking::BgpPeerConfig;
+use crate::latest::early_networking::InvalidIpAddrError;
+use crate::latest::early_networking::LldpAdminStatus;
+use crate::latest::early_networking::MaxPathConfig;
+use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::PortFec;
+use crate::latest::early_networking::PortSpeed;
+use crate::latest::early_networking::RouterLifetimeConfig;
+use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::RouterPeerIpAddr;
+use crate::latest::early_networking::RouterPeerIpAddrError;
+use crate::latest::early_networking::RouterPeerType;
+use crate::latest::early_networking::SwitchSlot;
+use crate::latest::early_networking::UplinkAddress;
+use crate::latest::early_networking::UplinkAddressConfig;
+use crate::latest::early_networking::UplinkIpNet;
+use crate::latest::early_networking::UplinkIpNetError;
 use omicron_common::api::external;
-use slog::Logger;
+use oxnet::IpNet;
+use oxnet::IpNetParseError;
+use oxnet::Ipv6Net;
 use std::fmt;
+use std::net::AddrParseError;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
-
-use crate::latest::early_networking::{
-    BgpPeerConfig, EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
-    MaxPathConfig, MaxPathConfigError, ParseLldpAdminStatusError,
-    ParseSwitchLocationError, PortFec, PortSpeed, RouterLifetimeConfig,
-    RouterLifetimeConfigError, SwitchLocation, UplinkAddressConfig,
-    UplinkAddressConfigError,
-};
-
-impl FromStr for EarlyNetworkConfig {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        #[derive(serde::Deserialize)]
-        struct ShadowConfig {
-            generation: u64,
-            schema_version: u32,
-            body: EarlyNetworkConfigBody,
-        }
-
-        match serde_json::from_str::<ShadowConfig>(&value) {
-            Ok(cfg) => Ok(EarlyNetworkConfig {
-                generation: cfg.generation,
-                schema_version: cfg.schema_version,
-                body: cfg.body,
-            }),
-            Err(e) => Err(format!("unable to parse EarlyNetworkConfig: {e:?}")),
-        }
-    }
-}
-
-impl EarlyNetworkConfig {
-    pub fn schema_version() -> u32 {
-        2
-    }
-
-    /// Attempt to read the contents of the bootstore, converting from old
-    /// versions if necessary.
-    pub fn deserialize_bootstore_config(
-        _log: &Logger,
-        config: &bootstore::NetworkConfig,
-    ) -> Result<Self, serde_json::Error> {
-        // Try to serialize the latest version. We don't currently try to read
-        // any old versions - the last time we changed it in a wire-incompatible
-        // way was many releases ago.
-        //
-        // If a wire-incompatible change to `EarlyNetworkConfig` is made, this
-        // function will need to change to account for that (at least during the
-        // one major release where the change is rolled out).
-        serde_json::from_slice::<EarlyNetworkConfig>(&config.blob)
-    }
-}
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
@@ -157,149 +125,188 @@ impl std::fmt::Display for RouterLifetimeConfig {
     }
 }
 
-impl UplinkAddressConfig {
-    pub fn addr(&self) -> IpAddr {
-        match self.address {
-            Some(ipaddr) => ipaddr.addr(),
-            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-        }
-    }
-}
-
-impl std::fmt::Display for UplinkAddressConfig {
+impl std::fmt::Display for UplinkIpNet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn addr_string(addr: &oxnet::IpNet) -> String {
-            if addr.addr().is_unspecified() {
-                "link-local".into()
-            } else {
-                addr.to_string()
-            }
-        }
-
-        match (&self.address, self.vlan_id) {
-            (Some(addr), None) => write!(f, "{}", addr_string(addr)),
-            (Some(addr), Some(v)) => write!(f, "{};{v}", addr_string(addr)),
-            (None, None) => write!(f, "link-local"),
-            (None, Some(v)) => write!(f, "link-local;{v}"),
-        }
+        IpNet::from(*self).fmt(f)
     }
 }
 
-impl std::fmt::Display for UplinkAddressConfigError {
+impl std::fmt::Display for RouterPeerIpAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse switch location error: {}", self.0)
+        self.0.fmt(f)
     }
 }
 
-/// Convert a string into an UplinkAddressConfig.
-/// 192.168.1.1/24 => UplinkAddressConfig { Some(192.168.1.1/24), None }
-/// 192.168.1.1/24;200 => UplinkAddressConfig { Some(192.168.1.1/24), Some(200) }
-/// link-local => UplinkAddressConfig { None, None }
-/// link-local;200 => UplinkAddressConfig { None, Some(200) }
-impl FromStr for UplinkAddressConfig {
-    type Err = UplinkAddressConfigError;
+impl UplinkIpNet {
+    pub const fn addr(&self) -> IpAddr {
+        self.0.addr()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UplinkIpNetParseError {
+    #[error("invalid IP net")]
+    IpNetParseError(#[from] IpNetParseError),
+    #[error(transparent)]
+    InvalidIpError(#[from] UplinkIpNetError),
+}
+
+impl FromStr for UplinkIpNet {
+    type Err = UplinkIpNetParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let fields: Vec<&str> = s.split(';').collect();
-        let (address_str, vlan_id) = match fields.len() {
-            1 => Ok((fields[0], None)),
-            2 => Ok((fields[0], Some(fields[1]))),
-            _ => Err(UplinkAddressConfigError(format!(
-                "not a valid uplink address: {s}"
-            ))),
-        }?;
-        let address = if address_str == "link-local" {
-            None
-        } else {
-            Some(address_str.parse().map_err(|_| {
-                UplinkAddressConfigError(format!(
-                    "not a valid ip address: {address_str}"
-                ))
-            })?)
-        };
-        let vlan_id = match vlan_id {
-            None => Ok(None),
-            Some(v) => match v.parse() {
-                Err(_) => Err(format!("invalid vlan id: {v}")),
-                Ok(vlan_id) if vlan_id > 1 && vlan_id < 4096 => {
-                    Ok(Some(vlan_id))
-                }
-                Ok(vlan_id) => Err(format!("vlan id out of range: {vlan_id}")),
+        let ip = IpNet::from_str(s)?;
+        let addr = Self::try_from(ip)?;
+        Ok(addr)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RouterPeerIpAddrParseError {
+    #[error(transparent)]
+    AddrParseError(#[from] AddrParseError),
+    #[error(transparent)]
+    InvalidIpAddr(#[from] RouterPeerIpAddrError),
+}
+
+impl FromStr for RouterPeerIpAddr {
+    type Err = RouterPeerIpAddrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let ip = IpAddr::from_str(s)?;
+        let addr = Self::try_from(ip)?;
+        Ok(addr)
+    }
+}
+
+impl RouterPeerType {
+    /// In contexts where we cannot use this strong type to describe
+    /// "unnumbered" addresses, we have two or three possible representations:
+    ///
+    /// * In a context where we need a non-optional `IpAddr`, we could use
+    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
+    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
+    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
+    ///
+    /// In the optional case, we always prefer `None`. In the non-optional case,
+    /// we choose this sentinel value.
+    pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+    /// Squash this address down to an [`IpAddr`] by converting
+    /// [`RouterPeerType::Unnumbered`] to
+    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
+        match *self {
+            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
+            Self::Numbered { ip } => ip.into(),
+        }
+    }
+}
+
+impl UplinkAddress {
+    /// Squash this address down to a flat IP address by converting
+    /// [`UplinkAddress::AddrConf`] to `::`.
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_squashing_addrconf_to_unspecified(&self) -> IpAddr {
+        match self {
+            UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            UplinkAddress::Static { ip_net } => ip_net.addr(),
+        }
+    }
+
+    /// Squash this address down to an [`IpNet`] address by converting
+    /// [`UplinkAddress::AddrConf`] to `::/128`.
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_net_squashing_addrconf_to_unspecified(&self) -> IpNet {
+        match *self {
+            UplinkAddress::AddrConf => {
+                IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
+            }
+            UplinkAddress::Static { ip_net } => ip_net.into(),
+        }
+    }
+
+    /// Convert an arbitrary [`IpNet`] into an [`UplinkAddress`] by converting
+    /// an unspecified IP to [`UplinkAddress::AddrConf`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn try_from_ip_net_treating_unspecified_as_addrconf(
+        ip_net: IpNet,
+    ) -> Result<Self, InvalidIpAddrError> {
+        match UplinkIpNet::try_from(ip_net) {
+            Ok(ip_net) => Ok(Self::Static { ip_net }),
+            Err(err) => match err.err {
+                InvalidIpAddrError::UnspecifiedAddress => Ok(Self::AddrConf),
+                InvalidIpAddrError::LoopbackAddress
+                | InvalidIpAddrError::MulticastAddress
+                | InvalidIpAddrError::Ipv4Broadcast
+                | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                | InvalidIpAddrError::Ipv4MappedIpv6 => Err(err.err),
             },
         }
-        .map_err(|e| UplinkAddressConfigError(e))?;
-        Ok(UplinkAddressConfig { address, vlan_id })
     }
 }
 
-impl fmt::Display for LldpAdminStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl UplinkAddressConfig {
+    /// Helper to construct an `UplinkAddressConfig` with a specified IP net and
+    /// no VLAN ID.
+    pub fn without_vlan(ip_net: UplinkIpNet) -> Self {
+        Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
+    }
+
+    /// Format `self` appropriately for passing to `uplinkd`'s SMF properties.
+    pub fn to_uplinkd_smf_property(&self) -> String {
+        let addr: &dyn fmt::Display = match &self.address {
+            UplinkAddress::AddrConf => &"link-local",
+            UplinkAddress::Static { ip_net } => ip_net,
+        };
+
+        match self.vlan_id {
+            Some(v) => format!("{addr};{v}"),
+            None => addr.to_string(),
+        }
+    }
+}
+
+impl LldpAdminStatus {
+    /// Format `self` appropriately for passing to `lldpd`'s SMF properties.
+    pub fn to_lldpd_smf_property(&self) -> &'static str {
         match self {
-            LldpAdminStatus::Enabled => write!(f, "enabled"),
-            LldpAdminStatus::Disabled => write!(f, "disabled"),
-            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
-            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
+            LldpAdminStatus::Enabled => "enabled",
+            LldpAdminStatus::Disabled => "disabled",
+            LldpAdminStatus::RxOnly => "rx_only",
+            LldpAdminStatus::TxOnly => "tx_only",
         }
     }
 }
 
-impl std::fmt::Display for ParseLldpAdminStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LLDP admin status error: {}", self.0)
-    }
-}
-
-impl FromStr for LldpAdminStatus {
-    type Err = ParseLldpAdminStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "enabled" => Ok(Self::Enabled),
-            "disabled" => Ok(Self::Disabled),
-            "rxonly" | "rx_only" => Ok(Self::RxOnly),
-            "txonly" | "tx_only" => Ok(Self::TxOnly),
-            _ => Err(ParseLldpAdminStatusError(format!(
-                "not a valid admin status: {s}"
-            ))),
-        }
-    }
-}
-
-impl SwitchLocation {
-    /// Return the location of the other switch, not ourself.
+impl SwitchSlot {
+    /// Return the slot of the other switch, not ourself.
     pub const fn other(&self) -> Self {
         match self {
-            SwitchLocation::Switch0 => SwitchLocation::Switch1,
-            SwitchLocation::Switch1 => SwitchLocation::Switch0,
+            SwitchSlot::Switch0 => SwitchSlot::Switch1,
+            SwitchSlot::Switch1 => SwitchSlot::Switch0,
         }
     }
 }
 
-impl fmt::Display for SwitchLocation {
+// Customize `Debug` so we get lower-cased variants. We used to have a `Display`
+// impl used in a variety of logging and error message contexts; we've switched
+// that over to using this `Debug` impl, but it's nice for the capitalization to
+// remain consistent.
+impl fmt::Debug for SwitchSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SwitchLocation::Switch0 => write!(f, "switch0"),
-            SwitchLocation::Switch1 => write!(f, "switch1"),
-        }
-    }
-}
-
-impl std::fmt::Display for ParseSwitchLocationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse switch location error: {}", self.0)
-    }
-}
-
-impl FromStr for SwitchLocation {
-    type Err = ParseSwitchLocationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "switch0" => Ok(Self::Switch0),
-            "switch1" => Ok(Self::Switch1),
-            _ => Err(ParseSwitchLocationError(format!(
-                "not a valid location: {s}"
-            ))),
+            SwitchSlot::Switch0 => write!(f, "switch0"),
+            SwitchSlot::Switch1 => write!(f, "switch1"),
         }
     }
 }
@@ -326,6 +333,285 @@ impl fmt::Display for PortFec {
             PortFec::Firecode => write!(f, "Firecode R-FEC"),
             PortFec::None => write!(f, "None"),
             PortFec::Rs => write!(f, "RS-FEC"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::latest::early_networking::InvalidIpAddrError;
+    use oxnet::Ipv4Net;
+    use proptest::prelude::*;
+    use serde::{Deserialize, Serialize};
+    use test_strategy::proptest;
+
+    #[test]
+    fn test_uplink_smf_property_formatting() {
+        for (address, expected_addr) in [
+            (
+                UplinkAddress::Static {
+                    ip_net: UplinkIpNet::try_from(IpNet::V6(
+                        Ipv6Net::new("fd80::123".parse().unwrap(), 16).unwrap(),
+                    ))
+                    .unwrap(),
+                },
+                "fd80::123/16",
+            ),
+            (
+                UplinkAddress::Static {
+                    ip_net: UplinkIpNet::try_from(IpNet::V4(
+                        Ipv4Net::new("10.0.0.1".parse().unwrap(), 8).unwrap(),
+                    ))
+                    .unwrap(),
+                },
+                "10.0.0.1/8",
+            ),
+            (UplinkAddress::AddrConf, "link-local"),
+        ] {
+            for (vlan_id, expected_vlan) in
+                [(Some(1), ";1"), (Some(1234), ";1234"), (None, "")]
+            {
+                let config = UplinkAddressConfig { address, vlan_id };
+                let expected = format!("{expected_addr}{expected_vlan}");
+                assert_eq!(
+                    config.to_uplinkd_smf_property(),
+                    expected,
+                    "unexpected SMF property for {config:?}"
+                );
+            }
+        }
+    }
+
+    // We want our proptests below to hit all the invalid categories of IPs, so
+    // define our own input mapping that chooses from all the particular
+    // categories we want to reject.
+    //
+    // Returns an IP and the expected kind of error we should get if we try to
+    // parse it, if any.
+    fn arb_ip_addr()
+    -> impl Strategy<Value = (IpAddr, Option<InvalidIpAddrError>)> {
+        prop_oneof![
+            // ipv4 unspecified
+            Just((
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                Some(InvalidIpAddrError::UnspecifiedAddress)
+            )),
+            // ipv6 unspecified
+            Just((
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                Some(InvalidIpAddrError::UnspecifiedAddress)
+            )),
+            // ipv4 loopback
+            Just((
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                Some(InvalidIpAddrError::LoopbackAddress)
+            )),
+            // ipv6 loopback
+            Just((
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+                Some(InvalidIpAddrError::LoopbackAddress)
+            )),
+            // ipv4 multicast: 224.0.0.0 – 239.255.255.255
+            (224u8..=239u8, any::<[u8; 3]>()).prop_map(|(hi, rest)| {
+                (
+                    IpAddr::V4(Ipv4Addr::new(hi, rest[0], rest[1], rest[2])),
+                    Some(InvalidIpAddrError::MulticastAddress),
+                )
+            }),
+            // ipv6 multicast: ff00::/8
+            any::<[u8; 15]>().prop_map(|rest| {
+                let mut octets = [0u8; 16];
+                octets[0] = 0xff;
+                octets[1..].copy_from_slice(&rest);
+                (
+                    IpAddr::V6(Ipv6Addr::from(octets)),
+                    Some(InvalidIpAddrError::MulticastAddress),
+                )
+            }),
+            // ipv4 broadcast
+            Just((
+                IpAddr::V4(Ipv4Addr::BROADCAST),
+                Some(InvalidIpAddrError::Ipv4Broadcast)
+            )),
+            // ipv6 unicast link-local: fe80::/10
+            any::<[u8; 15]>().prop_map(|rest| {
+                let mut octets = [0u8; 16];
+                octets[0] = 0xfe;
+                octets[1] = 0x80 | (rest[0] & 0x3f);
+                octets[2..].copy_from_slice(&rest[1..]);
+                (
+                    IpAddr::V6(Ipv6Addr::from(octets)),
+                    Some(InvalidIpAddrError::Ipv6UnicastLinkLocal),
+                )
+            }),
+            // ipv4-mapped ipv6
+            any::<Ipv4Addr>()
+                .prop_map(|ip| ip.to_ipv6_mapped())
+                .prop_map(IpAddr::V6)
+                .prop_map(|ip| (ip, Some(InvalidIpAddrError::Ipv4MappedIpv6))),
+            // any other ipv4 (filtered)
+            any::<Ipv4Addr>()
+                .prop_filter(
+                    "not unspecified, loopback, multicast, or broadcast",
+                    |ip| {
+                        !ip.is_unspecified()
+                            && !ip.is_loopback()
+                            && !ip.is_multicast()
+                            && !ip.is_broadcast()
+                    }
+                )
+                .prop_map(IpAddr::V4)
+                .prop_map(|ip| (ip, None)),
+            // any other ipv6 (filtered)
+            any::<[u8; 16]>()
+                .prop_map(|b| Ipv6Addr::from(b))
+                .prop_filter(
+                    "not unspecified, loopback, multicast, or link-local",
+                    |ip| {
+                        !ip.is_unspecified()
+                            && !ip.is_loopback()
+                            && !ip.is_multicast()
+                            && !ip.is_unicast_link_local()
+                            && ip.to_ipv4_mapped().is_none()
+                    }
+                )
+                .prop_map(IpAddr::V6)
+                .prop_map(|ip| (ip, None)),
+        ]
+    }
+
+    #[proptest]
+    fn test_ip_parsing(
+        #[strategy(arb_ip_addr())] input: (IpAddr, Option<InvalidIpAddrError>),
+    ) {
+        let (ip, expected_err) = input;
+        // Test both RouterPeerIpAddr and UplinkIpNet; we don't bother
+        // proptesting the network side of `IpNet` because that's not relevant
+        // to any of our specific parsing.
+        let ip_net = IpNet::new(ip, 24).unwrap();
+        let ip_string = ip.to_string();
+        let ip_net_string = ip_net.to_string();
+        let ip_result = ip_string.parse::<RouterPeerIpAddr>();
+        let ip_net_result = ip_net_string.parse::<UplinkIpNet>();
+
+        if let Some(expected_err) = expected_err {
+            let ip_err = ip_result.expect_err("parsing failed");
+            match ip_err {
+                RouterPeerIpAddrParseError::AddrParseError(_) => {
+                    panic!("unexpected error {ip_err:?}")
+                }
+                RouterPeerIpAddrParseError::InvalidIpAddr(ip_err) => {
+                    assert_eq!(ip_err.ip, ip);
+                    assert_eq!(ip_err.err, expected_err);
+                }
+            }
+            let ip_net_err = ip_net_result.expect_err("parsing failed");
+            match ip_net_err {
+                UplinkIpNetParseError::IpNetParseError(_) => {
+                    panic!("unexpected error {ip_net_err:?}")
+                }
+                UplinkIpNetParseError::InvalidIpError(ip_net_err) => {
+                    assert_eq!(ip_net_err.ip_net, ip_net);
+                    assert_eq!(ip_net_err.err, expected_err);
+                }
+            }
+        } else {
+            let parsed_ip = ip_result.expect("parsing succeeded");
+            assert_eq!(parsed_ip.0, ip);
+            let parsed_ip_net = ip_net_result.expect("parsing succeeded");
+            assert_eq!(IpNet::from(parsed_ip_net), ip_net);
+        }
+    }
+
+    #[proptest]
+    fn test_router_peer_ip_addr_serialization(
+        #[strategy(arb_ip_addr())] input: (IpAddr, Option<InvalidIpAddrError>),
+    ) {
+        let (ip, expected_err) = input;
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct WrapIp {
+            ip: IpAddr,
+        }
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct WrapRouterIp {
+            ip: RouterPeerIpAddr,
+        }
+
+        let wrapped = WrapIp { ip };
+
+        let jsonified = serde_json::to_string(&wrapped).unwrap();
+        let tomlified = toml::to_string(&wrapped).unwrap();
+
+        let json_result = serde_json::from_str::<WrapRouterIp>(&jsonified);
+        let toml_result = toml::from_str::<WrapRouterIp>(&tomlified);
+
+        if let Some(expected_err) = expected_err {
+            let expected_err = expected_err.to_string();
+            let err =
+                json_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
+            );
+            let err =
+                toml_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
+            );
+        } else {
+            let json_result = json_result.expect("deserialization succeeded");
+            assert_eq!(json_result.ip.0, ip);
+            let toml_result = toml_result.expect("deserialization succeeded");
+            assert_eq!(toml_result.ip.0, ip);
+        }
+    }
+
+    #[proptest]
+    fn test_uplink_ip_net_serialization(
+        #[strategy(arb_ip_addr())] input: (IpAddr, Option<InvalidIpAddrError>),
+    ) {
+        let (ip, expected_err) = input;
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct WrapIpNet {
+            ip_net: IpNet,
+        }
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct WrapUplinkIpNet {
+            ip_net: UplinkIpNet,
+        }
+
+        let ip_net = IpNet::new(ip, 24).unwrap();
+        let wrapped = WrapIpNet { ip_net };
+
+        let jsonified = serde_json::to_string(&wrapped).unwrap();
+        let tomlified = toml::to_string(&wrapped).unwrap();
+
+        let json_result = serde_json::from_str::<WrapUplinkIpNet>(&jsonified);
+        let toml_result = toml::from_str::<WrapUplinkIpNet>(&tomlified);
+
+        if let Some(expected_err) = expected_err {
+            let expected_err = expected_err.to_string();
+            let err =
+                json_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
+            );
+            let err =
+                toml_result.expect_err("deserialization failed").to_string();
+            assert!(
+                err.contains(&expected_err),
+                "got error {err:?}, but expected it to contain {expected_err:?}"
+            );
+        } else {
+            let json_result = json_result.expect("deserialization succeeded");
+            assert_eq!(IpNet::from(json_result.ip_net), ip_net);
+            let toml_result = toml_result.expect("deserialization succeeded");
+            assert_eq!(IpNet::from(toml_result.ip_net), ip_net);
         }
     }
 }

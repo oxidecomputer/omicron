@@ -60,7 +60,7 @@ async fn do_run() -> Result<(), CmdError> {
             .pkg
             .log
             .to_logger("nexus")
-            .map_err(|message| anyhow!("initializing logger: {}", message))
+            .context("initializing logger")
             .map_err(CmdError::Failure)?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));

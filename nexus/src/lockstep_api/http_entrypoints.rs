@@ -23,6 +23,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
 use http::StatusCode;
+use nexus_db_queries::authz;
 use nexus_lockstep_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -37,7 +38,8 @@ use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::rack::RackMembershipConfigPathParams;
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle::{
-    self, SupportBundleFilePath, SupportBundlePath, SupportBundleUpdate,
+    SupportBundleCreate, SupportBundleFilePath, SupportBundlePath,
+    SupportBundleUpdate,
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
@@ -46,6 +48,7 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
@@ -617,10 +620,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ResultsPage<SupportBundleInfo>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -641,8 +641,11 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
-                &|_, bundle: &support_bundle::SupportBundleInfo| {
-                    (bundle.time_created, bundle.id.into_untyped_uuid())
+                &|_, bundle: &SupportBundleInfo| {
+                    (
+                        bundle.base.time_created,
+                        bundle.base.id.into_untyped_uuid(),
+                    )
                 },
             )?))
         };
@@ -656,8 +659,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -861,9 +863,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<support_bundle::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>
-    {
+        body: TypedBody<SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -920,8 +921,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
         body: TypedBody<SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -1080,15 +1080,17 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path_params = path_params.into_inner();
-        let rack_id = RackUuid::from_untyped_uuid(path_params.rack_id);
         let epoch = query_params.into_inner().epoch;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
+            let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                RackUuid::from_untyped_uuid(path_params.rack_id),
+            );
             let config = if let Some(epoch) = epoch {
-                nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?
+                nexus.datastore().tq_get_config(&opctx, authz_tq, epoch).await?
             } else {
-                nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?
+                nexus.datastore().tq_get_latest_config(&opctx, authz_tq).await?
             };
             if let Some(config) = config {
                 Ok(HttpResponseOk(config))

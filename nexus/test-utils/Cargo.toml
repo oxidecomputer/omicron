@@ -12,14 +12,14 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 chrono.workspace = true
 crucible-agent-client.workspace = true
-dns-server.workspace = true
-dpd-client.workspace = true
 dns-service-client.workspace = true
+dpd-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
@@ -64,6 +64,7 @@ slog-error-chain.workspace = true
 tokio.workspace = true
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util.workspace = true
+transient-dns-server.workspace = true
 uuid.workspace = true
 
 [features]

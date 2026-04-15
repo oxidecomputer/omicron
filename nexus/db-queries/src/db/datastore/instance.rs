@@ -82,9 +82,9 @@ pub struct InstanceStateComputer<'s> {
 impl<'s> InstanceStateComputer<'s> {
     pub fn new(instance: &'s Instance, vmm: Option<&'s Vmm>) -> Self {
         Self {
-            instance_state: &instance.runtime_state.nexus_state,
-            migration_id: instance.runtime_state.migration_id.as_ref(),
-            vmm_state: vmm.as_ref().map(|vmm| &vmm.runtime.state),
+            instance_state: &instance.nexus_state,
+            migration_id: instance.migration_id.as_ref(),
+            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
         }
     }
 
@@ -213,29 +213,28 @@ impl From<InstanceAndActiveVmm> for external::Instance {
         let time_run_state_updated = value
             .vmm
             .as_ref()
-            .map(|vmm| vmm.runtime.time_state_updated)
-            .unwrap_or(value.instance.runtime_state.time_updated);
+            .map(|vmm| vmm.time_state_updated)
+            .unwrap_or(value.instance.time_state_updated);
         let auto_restart_status = {
             let cooldown_expiration =
-                value.instance.runtime_state.time_last_auto_restarted.map(
-                    |t| {
-                        // The instance may or may not explicitly override the cooldown and
-                        // auto-restart policy settings. If it does not, return whatever
-                        // default values Nexus is currently using, so that they can be
-                        // displayed in the UI.
-                        //
-                        // Eventually, these fields may have project-level defaults, so if the
-                        // instance doesn't provide a value we'll have to use the
-                        // project's default if one exists. For now, though, fall back
-                        // to the hard- coded default if the instance hasn't overridden
-                        // it.
-                        let cooldown_duration =
-                            value.instance.auto_restart.cooldown.unwrap_or(
-                                InstanceAutoRestart::DEFAULT_COOLDOWN,
-                            );
-                        t + cooldown_duration
-                    },
-                );
+                value.instance.time_last_auto_restarted.map(|t| {
+                    // The instance may or may not explicitly override the cooldown and
+                    // auto-restart policy settings. If it does not, return whatever
+                    // default values Nexus is currently using, so that they can be
+                    // displayed in the UI.
+                    //
+                    // Eventually, these fields may have project-level defaults, so if the
+                    // instance doesn't provide a value we'll have to use the
+                    // project's default if one exists. For now, though, fall back
+                    // to the hard- coded default if the instance hasn't overridden
+                    // it.
+                    let cooldown_duration = value
+                        .instance
+                        .auto_restart
+                        .cooldown
+                        .unwrap_or(InstanceAutoRestart::DEFAULT_COOLDOWN);
+                    t + cooldown_duration
+                });
 
             let policy = value.instance.auto_restart.policy;
             // The active policy for this instance --- either its configured
@@ -273,7 +272,6 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 time_run_state_updated,
                 time_last_auto_restarted: value
                     .instance
-                    .runtime_state
                     .time_last_auto_restarted,
             },
 
@@ -1571,14 +1569,13 @@ impl DataStore {
             // See also: "test_instance_deletion_is_idempotent".
             DetachManyError::CollectionNotFound => Ok(()),
             DetachManyError::NoUpdate { collection } => {
-                if collection.runtime_state.propolis_id.is_some() {
+                if collection.propolis_id.is_some() {
                     return Err(Error::invalid_request(
                         "cannot delete instance: instance is running or has \
                                 not yet fully stopped",
                     ));
                 }
-                let instance_state =
-                    collection.runtime_state.nexus_state.state();
+                let instance_state = collection.nexus_state.state();
                 match instance_state {
                     api::external::InstanceState::Stopped
                     | api::external::InstanceState::Failed => {
@@ -2264,7 +2261,7 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(instance.map(|i| i.runtime_state))
+        Ok(instance.map(|i| i.runtime()))
     }
 
     /// Look up the sled hosting an instance via its active VMM.
@@ -2991,11 +2988,9 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3008,11 +3003,11 @@ mod tests {
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
                     generation: Generation(
-                        snapshot.instance.runtime_state.generation.0.next(),
+                        snapshot.instance.state_generation.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
-                    ..snapshot.instance.runtime_state.clone()
+                    ..snapshot.instance.runtime()
                 },
             )
             .await
@@ -3054,11 +3049,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 666.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3081,7 +3074,7 @@ mod tests {
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
                     generation: Generation(
-                        snapshot.instance.runtime_state.generation.0.next(),
+                        snapshot.instance.state_generation.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
@@ -3152,11 +3145,9 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Stopped,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Stopped,
                 },
             )
             .await
@@ -3172,12 +3163,10 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        instance.runtime_state.generation.0.next(),
-                    ),
+                    generation: Generation(instance.state_generation.0.next()),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
-                    ..instance.runtime_state.clone()
+                    ..instance.runtime()
                 },
             )
             .await
@@ -3195,11 +3184,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3236,9 +3223,7 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        generation: Generation(
-                            vmm2.runtime.generation.0.next()
-                        ),
+                        generation: Generation(vmm2.generation.0.next()),
                         state: VmmState::Running,
                     },
                 )
@@ -3300,11 +3285,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3339,9 +3322,7 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        generation: Generation(
-                            vmm2.runtime.generation.0.next().next()
-                        ),
+                        generation: Generation(vmm2.generation.0.next().next()),
                         state: VmmState::SagaUnwound,
                     },
                 )
@@ -3449,11 +3430,9 @@ mod tests {
                             propolis_ip: "10.1.9.42".parse().unwrap(),
                             propolis_port: 420.into(),
                             cpu_platform: VmmCpuPlatform::SledDefault,
-                            runtime: VmmRuntimeState {
-                                time_state_updated: Utc::now(),
-                                generation: Generation::new(),
-                                state: VmmState::Running,
-                            },
+                            time_state_updated: Utc::now(),
+                            generation: Generation::new(),
+                            state: VmmState::Running,
                         },
                     )
                     .await

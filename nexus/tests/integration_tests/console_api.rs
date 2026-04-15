@@ -429,41 +429,32 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .parsed_body::<user::CurrentUser>()
         .unwrap();
 
+    assert_eq!(priv_user.user.id, USER_TEST_PRIVILEGED.id());
     assert_eq!(
-        priv_user,
-        user::CurrentUser {
-            user: user::User {
-                id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
-                silo_id: DEFAULT_SILO.id(),
-            },
-            silo_name: DEFAULT_SILO.name().clone(),
-            fleet_viewer: true,
-            silo_admin: true,
-        }
+        priv_user.user.display_name,
+        USER_TEST_PRIVILEGED.external_id.clone().unwrap()
     );
+    assert_eq!(priv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(priv_user.silo_name, DEFAULT_SILO.name().clone());
+    assert!(priv_user.fleet_viewer);
+    assert!(priv_user.silo_admin);
+    assert!(priv_user.user.time_created > chrono::DateTime::UNIX_EPOCH);
+    assert!(priv_user.user.time_modified >= priv_user.user.time_created);
 
     let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute_and_parse_unwrap::<user::CurrentUser>()
         .await;
 
+    assert_eq!(unpriv_user.user.id, USER_TEST_UNPRIVILEGED.id());
     assert_eq!(
-        unpriv_user,
-        user::CurrentUser {
-            user: user::User {
-                id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED
-                    .external_id
-                    .clone()
-                    .unwrap(),
-                silo_id: DEFAULT_SILO.id(),
-            },
-            silo_name: DEFAULT_SILO.name().clone(),
-            fleet_viewer: false,
-            silo_admin: false,
-        }
+        unpriv_user.user.display_name,
+        USER_TEST_UNPRIVILEGED.external_id.clone().unwrap()
     );
+    assert_eq!(unpriv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(unpriv_user.silo_name, DEFAULT_SILO.name().clone());
+    assert!(!unpriv_user.fleet_viewer);
+    assert!(!unpriv_user.silo_admin);
 
     // now make unpriv user silo admin and see it change
     grant_iam(

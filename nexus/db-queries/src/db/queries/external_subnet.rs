@@ -455,7 +455,7 @@ pub fn insert_external_subnet_query(
         }
         ExternalSubnetAllocator::Auto {
             pool_selector: PoolSelector::Explicit { pool },
-            prefix_len,
+            prefix_length,
         } => {
             // We're given the pool itself. Select it as a constant, ensure it's
             // actually linked to the current Silo, and then push the CTE that
@@ -465,11 +465,14 @@ pub fn insert_external_subnet_query(
             builder.sql(", ");
             push_cte_to_ensure_pool_is_linked_to_silo(&mut builder, silo_id);
             builder.sql(", ");
-            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix_len);
+            push_cte_to_select_next_subnet_from_pool(
+                &mut builder,
+                *prefix_length,
+            );
         }
         ExternalSubnetAllocator::Auto {
             pool_selector: PoolSelector::Auto { ip_version },
-            prefix_len,
+            prefix_length,
         } => {
             // THis is the same as the above, but we're taking the pool by
             // looking up the default pool linked to the current silo for the
@@ -484,7 +487,10 @@ pub fn insert_external_subnet_query(
                 ip_version.map(Into::into),
             );
             builder.sql(", ");
-            push_cte_to_select_next_subnet_from_pool(&mut builder, *prefix_len);
+            push_cte_to_select_next_subnet_from_pool(
+                &mut builder,
+                *prefix_length,
+            );
         }
     }
     builder.sql(", ");
@@ -834,9 +840,11 @@ fn push_cte_to_select_default_pool_by_version(
     builder
         .sql(
             "pool_id AS (\
-        SELECT subnet_pool_id AS id \
-        FROM subnet_pool_silo_link \
-        WHERE silo_id = ",
+        SELECT l.subnet_pool_id AS id \
+        FROM subnet_pool_silo_link AS l \
+        INNER JOIN subnet_pool AS sp \
+            ON sp.id = l.subnet_pool_id \
+        WHERE l.silo_id = ",
         )
         .param()
         .bind::<sql_types::Uuid, _>(*silo_id);
@@ -844,11 +852,11 @@ fn push_cte_to_select_default_pool_by_version(
     // Add the version filter if it's provided.
     if let Some(ip_version) = &maybe_ip_version {
         builder
-            .sql(" AND ip_version = ")
+            .sql(" AND l.ip_version = ")
             .param()
             .bind::<IpVersionEnum, _>(*ip_version);
     }
-    builder.sql(" AND is_default)");
+    builder.sql(" AND l.is_default AND sp.time_deleted IS NULL)");
 
     // Add a CTE to check the count of default pools.
     builder
@@ -1118,7 +1126,7 @@ pub fn decode_insert_external_subnet_error(
                 Error::internal_error(&format!(
                     "Silo appears to have been deleted between \
                     looking it up and running the query to insert \
-                    the new External Subnet in it. silo_id = {silo_id}",
+                    the new external subnet in it. silo_id = {silo_id}",
                 ))
             } else if is_bool_parse_error(
                 msg,
@@ -1132,10 +1140,10 @@ pub fn decode_insert_external_subnet_error(
                 } = subnet
                 else {
                     return Error::internal_error(&format!(
-                        "Query to insert External Subnet failed \
-                        because an explicitly requested Silo was not \
+                        "Query to insert external subnet failed \
+                        because an explicitly requested silo was not \
                         linked, but the parameters for the query \
-                        do not have an explicit Silo by name or ID. \
+                        do not have an explicit silo by name or ID. \
                         This is a programmer error. \
                         selector = {subnet:#?}"
                     ));
@@ -1176,24 +1184,24 @@ pub fn decode_insert_external_subnet_error(
 fn report_exhaustion(subnet: &ExternalSubnetAllocator) -> Error {
     match subnet {
         ExternalSubnetAllocator::Explicit { .. } => Error::internal_error(
-            "Inserted 0 rows during the External Subnet \
+            "Inserted 0 rows during the external subnet \
                 insert query, which should only happen when \
                 we're doing an automatic allocation from a \
                 pool or IP version. This is a programmer bug.",
         ),
-        ExternalSubnetAllocator::Auto { pool_selector, .. } => {
+        ExternalSubnetAllocator::Auto { pool_selector, prefix_length } => {
             let msg = match pool_selector {
                 PoolSelector::Explicit { pool } => match pool {
                     NameOrId::Id(id) => {
                         format!(
-                            "All subnets are used in the \
-                                Subnet Pool with ID '{id}'"
+                            "Could not allocate a /{prefix_length} subnet \
+                                from the subnet pool with ID '{id}'"
                         )
                     }
                     NameOrId::Name(name) => {
                         format!(
-                            "All subnets are used in the \
-                                Subnet Pool with name '{name}'"
+                            "Could not allocate a /{prefix_length} subnet \
+                                from the subnet pool with name '{name}'"
                         )
                     }
                 },
@@ -1202,8 +1210,9 @@ fn report_exhaustion(subnet: &ExternalSubnetAllocator) -> Error {
                         .map(|v| format!("IP{v} "))
                         .unwrap_or_else(String::new);
                     format!(
-                        "All subnets are used in the default \
-                        {version}Subnet Pool for the current Silo"
+                        "Could not allocate a /{prefix_length} subnet \
+                        from the default {version}subnet pool \
+                        for the current silo"
                     )
                 }
             };
@@ -1269,13 +1278,13 @@ const NO_LINKED_POOL_CONTAINS_REQUESTED_SUBNET_SENTINEL: &str =
     "no-linked-pool";
 pub const NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG: &'static str = "\
 The requested IP subnet is not contained in \
-    any Subnet Pool available in the current Silo.";
+    any subnet pool available in the current silo.";
 
 // Error sentinel emitted when requesting an explicit subnet, and it overlaps
 // an existing subnet that's already allocated.
 const SUBNET_OVERLAPS_EXISTING_SENTINEL: &str = "overlap-existing";
 pub const SUBNET_OVERLAPS_EXISTING_ERR_MSG: &'static str =
-    "The requested IP subnet overlaps with an existing External Subnet";
+    "The requested IP subnet overlaps with an existing external subnet";
 
 // Error sentinel emitted when we try to insert a subnet into a project that
 // has now been deleted.
@@ -1300,14 +1309,14 @@ const REQUESTED_POOL_NOT_LINKED_TO_SILO_SENTINEL: &str = "pool-not-linked";
 // Error emitted when there are no default pools for the silo.
 const NO_LINKED_DEFAULT_POOL: &str = "no-linked-default";
 pub const NO_LINKED_DEFAULT_POOL_ERR_MSG: &str = "\
-Must specify a Subnet Pool, as there is no linked default pool for the \
-        current Silo";
+Must specify a subnet pool, as there is no linked default pool for the \
+        current silo";
 
 // Error emitted when there are multiple default pools for the silo.
 const MULTIPLE_LINKED_DEFAULT_POOLS: &str = "multiple-linked-defaults";
 pub const MULTIPLE_LINKED_DEFAULT_POOLS_ERR_MSG: &str = "\
 Must specify an IP version when there is more than one default \
-        Subnet Pool for the Silo";
+        subnet pool for the silo";
 
 #[cfg(test)]
 mod tests {
@@ -1435,7 +1444,7 @@ mod tests {
             pool_selector: PoolSelector::Explicit {
                 pool: NameOrId::Id(SUBNET_POOL_ID),
             },
-            prefix_len: 64,
+            prefix_length: 64,
         };
         let path = "tests/output/insert_external_subnet_from_explicit_pool.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;
@@ -1447,7 +1456,7 @@ mod tests {
             pool_selector: PoolSelector::Auto {
                 ip_version: Some(IpVersion::V6),
             },
-            prefix_len: 64,
+            prefix_length: 64,
         };
         let path = "tests/output/insert_external_subnet_from_ip_version.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;
@@ -1457,7 +1466,7 @@ mod tests {
     async fn expectorate_insert_external_subnet_from_default_pool_query() {
         let subnet = ExternalSubnetAllocator::Auto {
             pool_selector: PoolSelector::Auto { ip_version: None },
-            prefix_len: 64,
+            prefix_length: 64,
         };
         let path = "tests/output/insert_external_subnet_from_default_pool.sql";
         expectorate_insert_external_subnet_query_impl(subnet, path).await;

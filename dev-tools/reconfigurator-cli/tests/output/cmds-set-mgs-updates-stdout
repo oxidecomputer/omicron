@@ -15,7 +15,7 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::28
+    last allocated IP:   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -75,18 +75,18 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::23
-    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::28
-    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::26
-    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::27
-    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::25
-    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::24
-    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::21
-    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::5
+    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::a
+    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::8
+    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::9
+    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::7
+    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::6
+    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1  
+    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::3
+    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::4
 
 
 
@@ -94,7 +94,7 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::27
+    last allocated IP:   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -152,17 +152,17 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::26
-    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::27
-    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::25
-    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::24
-    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::23
-    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1   
-    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::21
-    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::8
+    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::9
+    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::7
+    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::6
+    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::5
+    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1  
+    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::3
+    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::4
 
 
 
@@ -170,7 +170,7 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::27
+    last allocated IP:   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -228,17 +228,17 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::26
-    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::27
-    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::21
-    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::8
+    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::9
+    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::7
+    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::6
+    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::5
+    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1  
+    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::3
+    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::4
 
 
  COCKROACHDB SETTINGS:
@@ -278,7 +278,7 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::28
+    last allocated IP:   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -338,18 +338,18 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::23
-    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::28
-    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::26
-    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::27
-    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::25
-    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::24
-    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::21
-    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::5
+    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::a
+    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::8
+    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::9
+    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::7
+    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::6
+    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1  
+    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::3
+    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::4
 
 
 
@@ -357,7 +357,7 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::27
+    last allocated IP:   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -415,17 +415,17 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::26
-    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::27
-    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::25
-    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::24
-    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::23
-    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1   
-    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::21
-    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::8
+    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::9
+    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::7
+    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::6
+    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::5
+    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1  
+    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::3
+    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::4
 
 
 
@@ -433,7 +433,7 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::27
+    last allocated IP:   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -491,17 +491,17 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::26
-    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::27
-    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::21
-    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::8
+    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::9
+    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::7
+    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::6
+    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::5
+    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1  
+    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::3
+    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::4
 
 
  COCKROACHDB SETTINGS:
@@ -623,7 +623,7 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::28
+    last allocated IP:   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -683,18 +683,18 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::23
-    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::28
-    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::26
-    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::27
-    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::25
-    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::24
-    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::21
-    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::5
+    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::a
+    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::8
+    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::9
+    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::7
+    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::6
+    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1  
+    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::3
+    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::4
 
 
 
@@ -702,7 +702,7 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::27
+    last allocated IP:   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -760,17 +760,17 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::26
-    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::27
-    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::25
-    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::24
-    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::23
-    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1   
-    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::21
-    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::8
+    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::9
+    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::7
+    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::6
+    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::5
+    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1  
+    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::3
+    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::4
 
 
 
@@ -778,7 +778,7 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::27
+    last allocated IP:   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -836,17 +836,17 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::26
-    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::27
-    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::21
-    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::8
+    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::9
+    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::7
+    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::6
+    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::5
+    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1  
+    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::3
+    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::4
 
 
  COCKROACHDB SETTINGS:
@@ -971,7 +971,7 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::28
+    last allocated IP:   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -1031,18 +1031,18 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::23
-    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::28
-    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::26
-    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::27
-    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::25
-    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::24
-    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::21
-    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::5
+    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::a
+    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::8
+    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::9
+    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::7
+    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::6
+    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1  
+    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::3
+    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::4
 
 
 
@@ -1050,7 +1050,7 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::27
+    last allocated IP:   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -1108,17 +1108,17 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::26
-    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::27
-    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::25
-    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::24
-    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::23
-    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1   
-    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::21
-    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::8
+    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::9
+    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::7
+    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::6
+    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::5
+    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1  
+    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::3
+    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::4
 
 
 
@@ -1126,7 +1126,7 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::27
+    last allocated IP:   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -1184,17 +1184,17 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::26
-    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::27
-    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::21
-    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::8
+    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::9
+    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::7
+    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::6
+    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::5
+    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1  
+    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::3
+    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::4
 
 
  COCKROACHDB SETTINGS:
@@ -1278,7 +1278,7 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::28
+    last allocated IP:   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -1338,18 +1338,18 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::23
-    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::28
-    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::26
-    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::27
-    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::25
-    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::24
-    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::21
-    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    clickhouse        45b67899-01e0-43fd-8b92-46db32cd2189   install dataset   in service    fd00:1122:3344:101::5
+    crucible          11e5e2a1-9883-4abf-97ec-1d0ab8eebf66   install dataset   in service    fd00:1122:3344:101::a
+    crucible          851c5a9c-c055-4dd0-aaf7-5739134e85b1   install dataset   in service    fd00:1122:3344:101::8
+    crucible          a59aa5b4-f6dd-4a52-8cb1-0f65f6c92d63   install dataset   in service    fd00:1122:3344:101::9
+    crucible_pantry   7ce8368d-16d2-4a6d-92be-cd9de74b25c4   install dataset   in service    fd00:1122:3344:101::7
+    external_dns      3dcfe737-743a-4cdc-a9a4-664dc9ca7b9f   install dataset   in service    fd00:1122:3344:101::6
+    internal_dns      8f14fca6-eadd-41ad-82c0-a896f779c17f   install dataset   in service    fd00:1122:3344:1::1  
+    internal_ntp      926701e8-01d7-4857-a898-720aab013bc7   install dataset   in service    fd00:1122:3344:101::3
+    nexus             68b1e69a-aede-48fe-b6b1-51966ca07074   install dataset   in service    fd00:1122:3344:101::4
 
 
 
@@ -1357,7 +1357,7 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::27
+    last allocated IP:   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -1415,17 +1415,17 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::26
-    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::27
-    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::25
-    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::24
-    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::23
-    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1   
-    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::21
-    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          08514090-6acd-4177-90ea-f6deb220fd88   install dataset   in service    fd00:1122:3344:102::8
+    crucible          2e1d5343-eaaf-42de-8e67-a67e54aea756   install dataset   in service    fd00:1122:3344:102::9
+    crucible          f7977095-53d3-45a0-ae60-94172e514b2c   install dataset   in service    fd00:1122:3344:102::7
+    crucible_pantry   ed1b15aa-7373-45bc-b2a2-50f49b5b4ada   install dataset   in service    fd00:1122:3344:102::6
+    external_dns      4d162d2a-bb09-47a3-85cf-c956f25e0522   install dataset   in service    fd00:1122:3344:102::5
+    internal_dns      c6193e9d-6fcb-4b89-bf0a-65ebd8f5010e   install dataset   in service    fd00:1122:3344:2::1  
+    internal_ntp      45d8d427-ca4d-4298-9bee-ad9741b90cb8   install dataset   in service    fd00:1122:3344:102::3
+    nexus             cc6cb457-ce9b-4885-b4af-b1fdb9ce3344   install dataset   in service    fd00:1122:3344:102::4
 
 
 
@@ -1433,7 +1433,7 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::27
+    last allocated IP:   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -1491,17 +1491,17 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::26
-    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::27
-    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::21
-    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::22
+    --------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP          
+    --------------------------------------------------------------------------------------------------------------
+    crucible          31591457-5a3c-4356-9dd0-61a6cf67d14a   install dataset   in service    fd00:1122:3344:103::8
+    crucible          93bd73ae-fd4f-4e2c-a239-4ebdebb78533   install dataset   in service    fd00:1122:3344:103::9
+    crucible          9777ed35-6781-4129-8204-9bd58176d6cc   install dataset   in service    fd00:1122:3344:103::7
+    crucible_pantry   8e939783-d692-4c5e-b133-6d285450f855   install dataset   in service    fd00:1122:3344:103::6
+    external_dns      a74bae55-d8ee-4dc1-819a-fe5251a5fdd9   install dataset   in service    fd00:1122:3344:103::5
+    internal_dns      b44bc8cb-a1a7-499c-bc87-8c65cbde4a80   install dataset   in service    fd00:1122:3344:3::1  
+    internal_ntp      620951c9-7ab4-4fea-a6f2-e8e73f1ffe01   install dataset   in service    fd00:1122:3344:103::3
+    nexus             a855bf91-f935-4d03-9f70-5620d31425bb   install dataset   in service    fd00:1122:3344:103::4
 
 
  COCKROACHDB SETTINGS:
@@ -1604,6 +1604,10 @@ Commands:
           debug commands that bypass normal checks
   bump-nexus-generation
           bumps the blueprint's Nexus generation
+  noop
+          make a new blueprint from an existing one without any changes
+  set-measurements
+          Set a sled's measurements to either `unknown` or `install-dataset`
   help
           Print this message or the help of the given subcommand(s)
 

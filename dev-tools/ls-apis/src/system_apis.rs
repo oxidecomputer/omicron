@@ -27,8 +27,10 @@ use cargo_metadata::Package;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
+use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -286,6 +288,51 @@ impl SystemApis {
             }
         }
 
+        // Validate that the IDU-only edges' components belong to the same
+        // deployment unit.
+        for edge in api_metadata.intra_deployment_unit_only_edges() {
+            let server = &edge.server;
+            let Some(server_unit) = server_component_units.get(server) else {
+                // This was validated earlier, but there's not an easy way to
+                // express this in the type system, so we just handle it
+                // gracefully.
+                bail!(
+                    "internal error: intra_deployment_unit_only specifies \
+                    server {:?} that does not exist in server components",
+                    server,
+                );
+            };
+
+            let client = &edge.client;
+            let Some(producers) = api_producers.get(client) else {
+                // This was validated earlier, but there's not an easy way to
+                // express this in the type system, so we just handle it
+                // gracefully.
+                bail!(
+                    "internal error: intra_deployment_unit_only specifies \
+                     client {:?} that does not correspond to a known API",
+                    client,
+                );
+            };
+
+            if !producers.iter().any(|(p, _)| {
+                server_component_units
+                    .get(p)
+                    .map(|producer_unit| producer_unit == server_unit)
+                    .unwrap_or(false)
+            }) {
+                bail!(
+                    "error: intra_deployment_unit_only specifies server \
+                     {:?} in deployment unit {:?}, but none of the producers \
+                     of client {:?} are in that deployment_unit: {}",
+                    server,
+                    server_unit,
+                    client,
+                    producers.keys().map(|p| p.as_str()).join(", "),
+                );
+            }
+        }
+
         Ok(SystemApis {
             server_component_units,
             unit_server_components,
@@ -328,6 +375,19 @@ impl SystemApis {
     /// Returns the developer-maintained API metadata
     pub fn api_metadata(&self) -> &AllApiMetadata {
         &self.api_metadata
+    }
+
+    /// Returns the note for a intra-deployment-unit-only edge, if one matches.
+    pub fn idu_only_edge_note(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> Option<&str> {
+        self.api_metadata
+            .intra_deployment_unit_only_edges()
+            .iter()
+            .find(|edge| edge.matches(server, client))
+            .map(|edge| edge.note.as_str())
     }
 
     /// Given a server component, return the APIs consumed by this component
@@ -474,7 +534,23 @@ impl SystemApis {
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
-        let mut graph = petgraph::graph::Graph::new();
+        let (graph, _) =
+            self.make_deployment_unit_graph(filter, EdgeFilter::All)?;
+        Ok(Dot::new(&graph).to_string())
+    }
+
+    // The complex type below is only used in this one place: the return value
+    // of this internal helper function.  A type alias doesn't seem better.
+    #[allow(clippy::type_complexity)]
+    fn make_deployment_unit_graph(
+        &self,
+        dependency_filter: ApiDependencyFilter,
+        edge_filter: EdgeFilter<'_>,
+    ) -> Result<(
+        Graph<&DeploymentUnitName, &ClientPackageName>,
+        BTreeMap<&DeploymentUnitName, NodeIndex>,
+    )> {
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .deployment_units()
             .map(|name| (name, graph.add_node(name)))
@@ -489,8 +565,34 @@ impl SystemApis {
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
                 for (client_pkg, _) in
-                    self.component_apis_consumed(server_pkg, filter)?
+                    self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
+                    if let EdgeFilter::DagOnly(idu_edges) = edge_filter {
+                        let api = self
+                            .api_metadata
+                            .client_pkgname_lookup(client_pkg)
+                            .unwrap();
+                        // Filtering DAG-only edges means ignoring everything
+                        // that's not server-side-versioned.
+                        if api.versioned_how != VersionedHow::Server {
+                            continue;
+                        }
+
+                        // When filtering DAG-only edges, also skip edges that
+                        // represent intra-deployment-unit-only communication
+                        // (communication within one instance of one deployment
+                        // unit).  That's because intra-deployment-unit edges
+                        // would look like a cycle in the dependency graph, but
+                        // aren't one that we care about since they're always
+                        // referring to the same *instance* of the same
+                        // deployment unit.
+                        if idu_edges
+                            .contains(&(server_pkg.clone(), client_pkg.clone()))
+                        {
+                            continue;
+                        }
+                    }
+
                     // Multiple server components may produce an API. However,
                     // if an API is produced by multiple server components
                     // within the same deployment unit, we would like to only
@@ -506,17 +608,13 @@ impl SystemApis {
                         .collect();
                     for other_unit in other_units {
                         let other_node = nodes.get(other_unit).unwrap();
-                        graph.update_edge(
-                            *my_node,
-                            *other_node,
-                            client_pkg.clone(),
-                        );
+                        graph.update_edge(*my_node, *other_node, client_pkg);
                     }
                 }
             }
         }
 
-        Ok(Dot::new(&graph).to_string())
+        Ok((graph, nodes))
     }
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
@@ -530,17 +628,17 @@ impl SystemApis {
     }
 
     // The complex type below is only used in this one place: the return value
-    // of an internal helper function.  A type alias doesn't seem better.
+    // of this internal helper function.  A type alias doesn't seem better.
     #[allow(clippy::type_complexity)]
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
         versioned_on_server_only: bool,
     ) -> Result<(
-        petgraph::graph::Graph<&ServerComponentName, &ClientPackageName>,
+        Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
     )> {
-        let mut graph = petgraph::graph::Graph::new();
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
             .keys()
@@ -575,6 +673,123 @@ impl SystemApis {
         }
 
         Ok((graph, nodes))
+    }
+
+    /// Computes the set of (server, client) edges for server-side-only-
+    /// versioned APIs where the server and client are in the same deployment
+    /// unit.
+    ///
+    /// See the caller for more on this.
+    fn compute_required_idu_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        let filter = ApiDependencyFilter::Default;
+        let mut required = BTreeSet::new();
+
+        for (server, server_unit) in &self.server_component_units {
+            for (client, _) in self.component_apis_consumed(server, filter)? {
+                // Only consider server-side-versioned APIs.
+                let api = self
+                    .api_metadata
+                    .client_pkgname_lookup(client)
+                    .expect("consumed API must have metadata");
+                if api.versioned_how != VersionedHow::Server {
+                    continue;
+                }
+
+                // Check if any producer is in the same deployment unit.
+                for producer in self.api_producers(client) {
+                    let producer_unit = self
+                        .server_component_units
+                        .get(producer)
+                        .expect("API producer must be in some deployment unit");
+
+                    if server_unit == producer_unit {
+                        // This edge would create an intra-unit dependency for
+                        // a server-versioned API, so it must be in the
+                        // intra-deployment-unit-only list.
+                        required.insert((server.clone(), client.clone()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(required)
+    }
+
+    /// Validates that these two sets of (server, client) edges match:
+    ///
+    /// - API dependencies found by this tool *within* a deployment unit for a
+    ///   server-side-versioned API
+    /// - API dependencies annotated in the metadata as being
+    ///   intra-deployment-unit
+    ///
+    /// Why?  Recall that a server-side-only-versioned API means that the server
+    /// is always updated before its clients.  Further, the update system does
+    /// not (and cannot) guarantee anything about the ordering of updates for a
+    /// particular kind of deployment unit.  (Example: for host OS, the update
+    /// system does not say that any particular sleds are updated before any
+    /// others.)  Thus, if you have a server-side-only-versioned API with a
+    /// client in the same deployment unit, that's only allowable if the client
+    /// is always talking to an instance of the server in the same *instance* of
+    /// the same deployment unit.  A dependency from Sled Agent to Propolis in
+    /// the *same* host OS is okay.  A dependency from Sled Agent to a Propolis
+    /// on a different sled is not.
+    ///
+    /// If we found a same-deployment-unit edge that's not labeled in the
+    /// manifest as intra-deployment-unit, that means we've identified either a
+    /// manifest bug or an update bug waiting to happen.
+    ///
+    /// Returns the validated set of edges for use by
+    /// make_deployment_unit_graph.
+    fn validate_idu_only_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        let required = self.compute_required_idu_edges()?;
+
+        // Build the configured set from the manifest.
+        let mut configured = BTreeSet::new();
+        for edge in self.api_metadata.intra_deployment_unit_only_edges() {
+            configured.insert((edge.server.clone(), edge.client.clone()));
+        }
+
+        // Compare the two sets.
+        let missing: BTreeSet<_> = required.difference(&configured).collect();
+        let extra: BTreeSet<_> = configured.difference(&required).collect();
+
+        if !missing.is_empty() || !extra.is_empty() {
+            let mut msg = String::new();
+            for (server, client) in missing {
+                msg.push_str(&format!(
+                    "The following API dependendency exists between two \
+                     components in the same deployment unit, but is not \
+                     present in `intra_deployment_unit_only_edges`: \
+                     server {:?} client {:?}\n\
+                     If this client only ever uses this API with a server \
+                     in the same *instance* of the same deployment unit, \
+                     then add it to `intra_deployment_unit_only_edges`. \
+                     Otherwise, this relationship is incompatible with \
+                     automated upgrade.\n",
+                    server, client,
+                ));
+            }
+
+            for (server, client) in extra {
+                msg.push_str(&format!(
+                    "`intra_deployment_unit_only_edges` contains an edge \
+                     between server {:?} and client {:?}, but either \
+                     this API dependency was not found, or the API is not \
+                     server-side-only-versioned, or this client and server \
+                     are not in the same deployment unit.\n",
+                    server, client,
+                ));
+            }
+
+            bail!("{}", msg);
+        }
+
+        Ok(required)
     }
 
     /// Verifies various important properties about the assignment of which APIs
@@ -631,6 +846,10 @@ impl SystemApis {
         // can't be part of a cycle.
         let filter = ApiDependencyFilter::Default;
 
+        // Validate that all configured intra_deployment_unit_only_edges are
+        // correct and match the required set exactly.
+        let idu_only_edges = self.validate_idu_only_edges()?;
+
         // Construct a graph where:
         //
         // - nodes are all the API producer and consumer components
@@ -643,8 +862,23 @@ impl SystemApis {
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
             bail!(
-                "graph of server-managed components has a cycle (includes \
-                 node: {:?})",
+                "graph of server-managed API dependencies between components \
+                 has a cycle (includes node: {:?})",
+                reverse_nodes.get(&error.node_id()).unwrap()
+            );
+        }
+
+        // Do the same with a graph of deployment units.
+        let (graph, nodes) = self.make_deployment_unit_graph(
+            filter,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
+        let reverse_nodes: BTreeMap<_, _> =
+            nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
+        if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            bail!(
+                "graph of server-managed API dependencies between deployment \
+                 units has a cycle (includes node: {:?})",
                 reverse_nodes.get(&error.node_id()).unwrap()
             );
         }
@@ -812,6 +1046,11 @@ impl SystemApis {
 
         Ok(dag_check)
     }
+}
+
+enum EdgeFilter<'a> {
+    All,
+    DagOnly(&'a BTreeSet<(ServerComponentName, ClientPackageName)>),
 }
 
 /// Describes proposals for assigning how APIs should be versioned, based on

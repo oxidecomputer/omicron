@@ -13,6 +13,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
 type CrdbApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -47,8 +48,11 @@ impl CockroachAdminApi for CockroachAdminImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ClusterNodeStatus>, HttpError> {
         let ctx = rqctx.context();
-        let all_nodes =
-            ctx.cockroach_cli().node_status().await.map_err(HttpError::from)?;
+        let all_nodes = ctx
+            .cockroach_cli()
+            .node_status(ctx.log())
+            .await
+            .map_err(HttpError::from)?;
         Ok(HttpResponseOk(ClusterNodeStatus { all_nodes }))
     }
 
@@ -86,7 +90,7 @@ impl CockroachAdminApi for CockroachAdminImpl {
         let response = client.get(&url).send().await.map_err(|e| {
             HttpError::for_internal_error(format!(
                 "Failed to proxy to CockroachDB: {}",
-                e
+                InlineErrorChain::new(&e),
             ))
         })?;
 
@@ -109,7 +113,7 @@ impl CockroachAdminApi for CockroachAdminImpl {
         let body = response.text().await.map_err(|e| {
             HttpError::for_internal_error(format!(
                 "Failed to read response body: {}",
-                e
+                InlineErrorChain::new(&e),
             ))
         })?;
 
@@ -128,7 +132,7 @@ impl CockroachAdminApi for CockroachAdminImpl {
         let response = client.get(&url).send().await.map_err(|e| {
             HttpError::for_internal_error(format!(
                 "Failed to proxy to CockroachDB: {}",
-                e
+                InlineErrorChain::new(&e),
             ))
         })?;
 
@@ -151,7 +155,7 @@ impl CockroachAdminApi for CockroachAdminImpl {
         let body = response.text().await.map_err(|e| {
             HttpError::for_internal_error(format!(
                 "Failed to read response body: {}",
-                e
+                InlineErrorChain::new(&e),
             ))
         })?;
 

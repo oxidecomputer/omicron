@@ -29,6 +29,7 @@ key-manager-types.workspace = true
 sled-agent-types-versions.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-debug-dropbox.workspace = true
 rand.workspace = true

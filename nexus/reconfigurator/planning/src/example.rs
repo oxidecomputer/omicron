@@ -27,9 +27,12 @@ use chrono::Utc;
 use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactMeasurements;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
@@ -946,6 +949,30 @@ impl ExampleSystemBuilder {
                         },
                     )
                     .expect("sled is present in blueprint");
+
+                // Right now we expect a single measurement artifact
+                let measurement_artifact = artifacts_by_kind
+                    .get(&ArtifactKind::MEASUREMENT_CORPUS)
+                    .unwrap();
+
+                let mut artifacts = BTreeSet::new();
+                artifacts.insert(BlueprintSingleMeasurement {
+                    version: BlueprintArtifactVersion::Available {
+                        version: measurement_artifact.id.version.clone(),
+                    },
+                    hash: measurement_artifact.hash,
+                });
+                builder
+                    .sled_set_measurements(
+                        sled_id,
+                        BlueprintMeasurements::Artifacts {
+                            artifacts: BlueprintArtifactMeasurements::new(
+                                artifacts,
+                            )
+                            .expect("should be non-empty"),
+                        },
+                    )
+                    .expect("sled is present in blueprint");
             };
         }
 
@@ -1262,6 +1289,7 @@ mod tests {
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
     use strum::IntoEnumIterator;
+    use transient_dns_server::TransientDnsServer;
 
     use super::*;
 
@@ -1624,7 +1652,7 @@ mod tests {
         };
 
         // Initialize a DNS server.
-        let dns = dns_server::TransientServer::new(&logctx.log)
+        let dns = TransientDnsServer::new(&logctx.log)
             .await
             .expect("created DNS server");
         dns.initialize_with_config(&logctx.log, &params)

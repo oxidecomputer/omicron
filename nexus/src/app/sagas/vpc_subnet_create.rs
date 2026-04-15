@@ -11,6 +11,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::external_api::vpc;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
@@ -187,7 +188,7 @@ async fn svsc_create_subnet(
         Some(Err(InsertVpcSubnetError::External(e))) => Err(e),
         Some(Ok(v)) => Ok(v),
     })
-    .map_err(ActionError::action_failed)
+    .map_err(saga_action_failed)
 }
 
 async fn svsc_create_subnet_undo(
@@ -251,10 +252,10 @@ async fn svsc_create_route(
                 .router_route_id(route_id)
                 .lookup_for(authz::Action::Read)
                 .await
-                .map_err(ActionError::action_failed)
+                .map_err(saga_action_failed)
                 .map(|(.., v)| v)
         }
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 
@@ -293,7 +294,7 @@ async fn svsc_link_custom(
             .datastore()
             .vpc_subnet_set_custom_router(&opctx, &authz_subnet, &custom_router)
             .await
-            .map_err(ActionError::action_failed)
+            .map_err(saga_action_failed)
     } else {
         Ok(db_subnet)
     }
@@ -335,7 +336,7 @@ async fn svsc_notify_rpw(
         .datastore()
         .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbSwitchSlot;
 use crate::{SqlU8, SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
@@ -13,7 +14,15 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
+use sled_agent_types::early_networking::RouterPeerIpAddrError;
+use sled_agent_types::early_networking::RouterPeerType;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -142,7 +151,7 @@ impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
 #[derive(Queryable, Selectable, Clone, Debug, Serialize, Deserialize)]
 #[diesel(table_name = bgp_peer_view)]
 pub struct BgpPeerView {
-    pub switch_location: String,
+    pub switch_slot: DbSwitchSlot,
     pub port_name: String,
     pub addr: Option<IpNetwork>,
     pub asn: SqlU32,
@@ -152,11 +161,87 @@ pub struct BgpPeerView {
     pub idle_hold_time: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
     pub md5_auth_key: Option<String>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BgpPeerConfigDataError {
+    #[error("database contains illegal router lifetime value")]
+    RouterLifetime(#[source] RouterLifetimeConfigError),
+    #[error("database contains illegal router peer address")]
+    Address(#[source] RouterPeerIpAddrError),
+}
+
+impl TryFrom<BgpPeerView> for BgpPeerConfig {
+    type Error = BgpPeerConfigDataError;
+
+    fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
+        // TODO-correctness We should have db constraints to ensure this can't
+        // fail.
+        let router_lifetime =
+            RouterLifetimeConfig::new(value.router_lifetime.0)
+                .map_err(BgpPeerConfigDataError::RouterLifetime)?;
+
+        // Convert weaker database representation IP address back to a
+        // strongly-typed `RouterPeerType`.
+        let addr = match value
+            .addr
+            .map(|addr| RouterPeerIpAddr::try_from(addr.ip()))
+        {
+            Some(Ok(ip)) => RouterPeerType::Numbered { ip },
+
+            // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
+            // `::`) to be converted to `RouterPeerType::Unnumbered`. Should we
+            // add db constraints to squish that down to one (probably NULL)?
+            Some(Err(RouterPeerIpAddrError {
+                err: InvalidIpAddrError::UnspecifiedAddress,
+                ..
+            }))
+            | None => RouterPeerType::Unnumbered { router_lifetime },
+
+            // We should never see any other kind of invalid address as a peer -
+            // those will fail if we try to send them to maghemite anyway. Bail
+            // out as early as we can.
+            Some(Err(
+                err @ RouterPeerIpAddrError {
+                    err:
+                        InvalidIpAddrError::LoopbackAddress
+                        | InvalidIpAddrError::MulticastAddress
+                        | InvalidIpAddrError::Ipv4Broadcast
+                        | InvalidIpAddrError::Ipv6UnicastLinkLocal
+                        | InvalidIpAddrError::Ipv4MappedIpv6,
+                    ..
+                },
+            )) => return Err(BgpPeerConfigDataError::Address(err)),
+        };
+
+        Ok(Self {
+            asn: *value.asn,
+            port: value.port_name,
+            addr,
+            hold_time: Some(value.hold_time.0.into()),
+            idle_hold_time: Some(value.idle_hold_time.0.into()),
+            delay_open: Some(value.delay_open.0.into()),
+            connect_retry: Some(value.connect_retry.0.into()),
+            keepalive: Some(value.keepalive.0.into()),
+            enforce_first_as: value.enforce_first_as,
+            local_pref: value.local_pref.map(|x| x.into()),
+            md5_auth_key: value.md5_auth_key,
+            min_ttl: value.min_ttl.map(|val| val.0),
+            multi_exit_discriminator: value
+                .multi_exit_discriminator
+                .map(|x| x.into()),
+            remote_asn: value.remote_asn.map(|x| x.into()),
+            communities: Vec::new(),
+            allowed_export: ImportExportPolicy::NoFiltering,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            vlan_id: value.vlan_id.map(|x| x.0),
+        })
+    }
 }

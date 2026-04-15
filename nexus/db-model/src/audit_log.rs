@@ -224,7 +224,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
 
 /// `audit_log_complete` is a view on `audit_log` filtering for rows with
 /// non-null `time_completed`, not its own table.
-#[derive(Queryable, Selectable, Clone, Debug)]
+#[derive(Queryable, Selectable, Clone, Debug, PartialEq)]
 #[diesel(table_name = audit_log_complete)]
 pub struct AuditLogEntry {
     pub id: Uuid,
@@ -276,15 +276,15 @@ pub enum AuditLogCompletion {
     /// error, and I don't think we even have API timeouts) but rather that the
     /// attempts to complete the log entry failed (or were never even attempted
     /// because, e.g., Nexus crashed during the operation), and this entry had
-    /// to be cleaned up later by a background job (which doesn't exist yet)
-    /// after a timeout. Note we represent this result status as "Unknown" in
-    /// the external API because timeout is an implementation detail and makes
-    /// it sound like the operation timed out.
+    /// to be cleaned up later by a background job after a timeout. Note we
+    /// represent this result status as "Unknown" in the external API because
+    /// timeout is an implementation detail and makes it sound like the
+    /// operation timed out.
     Timeout,
 }
 
 #[derive(AsChangeset, Clone)]
-#[diesel(table_name = audit_log)]
+#[diesel(table_name = audit_log, treat_none_as_null = true)]
 pub struct AuditLogCompletionUpdate {
     pub time_completed: DateTime<Utc>,
     pub result_kind: AuditLogResultKind,

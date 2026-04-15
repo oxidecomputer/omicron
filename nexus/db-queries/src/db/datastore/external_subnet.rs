@@ -32,8 +32,11 @@ use diesel::JoinOnDsl as _;
 use diesel::NullableExpressionMethods as _;
 use diesel::QueryDsl as _;
 use diesel::SelectableHelper as _;
+use diesel::define_sql_function;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use diesel::sql_types::Double;
+use diesel::sql_types::Nullable;
 use dropshot::PaginationOrder;
 use nexus_auth::authz;
 use nexus_auth::authz::SUBNET_POOL_LIST;
@@ -126,6 +129,8 @@ impl From<AttachedSubnetDetails> for AttachedSubnet {
     }
 }
 
+define_sql_function!(fn coalesce(x: Nullable<Double>, y: Double) -> Double);
+
 impl DataStore {
     /// Lookup a Subnet Pool by name or ID.
     pub fn lookup_subnet_pool<'a>(
@@ -207,6 +212,7 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::subnet_pool_member::dsl as member_dsl;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
 
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
@@ -244,6 +250,15 @@ impl DataStore {
                 "deletion failed due to concurrent modification",
             ));
         }
+
+        // As with IP pools, deleting the pool should also remove any silo
+        // links. Once the pool is deleted, these links are no longer useful.
+        diesel::delete(subnet_pool_silo_link::table)
+            .filter(subnet_pool_silo_link::subnet_pool_id.eq(pool_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -286,33 +301,41 @@ impl DataStore {
         )
         .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| match &e {
+        .map_err(|e| match e {
             DieselError::DatabaseError(
                 DatabaseErrorKind::UniqueViolation,
-                info,
+                ref info,
             ) if info.constraint_name() == Some("single_default_per_silo") => {
                 Error::invalid_request(
-                    "Can only have a single default Subnet Pool for a \
-                    Silo for each IP version.",
+                    "Silo already has a default subnet pool for this \
+                    IP version. Link the pool as non-default, then \
+                    make it the default, which will demote the \
+                    existing one.",
                 )
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::UniqueViolation,
-                info,
-            ) if info.constraint_name()
-                == Some("subnet_pool_silo_link_pkey") =>
-            {
-                Error::conflict("Subnet Pool is already linked to Silo")
-            }
+                _,
+            ) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::SubnetPoolSiloLink,
+                    &format!(
+                        "subnet_pool_id: {}, silo_id: {}",
+                        authz_pool.id(),
+                        authz_silo.id(),
+                    ),
+                ),
+            ),
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
-                info,
+                ref info,
             ) if info.message().contains("\"silo_id\"") => {
                 Error::not_found_by_id(ResourceType::Silo, &authz_silo.id())
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
-                info,
+                ref info,
             ) if info.message().contains("\"subnet_pool_id\"") => {
                 Error::not_found_by_id(
                     ResourceType::SubnetPool,
@@ -356,8 +379,8 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if has_children {
             return Err(Error::invalid_request(
-                "Cannot unlink Subnet Pool from Silo while there are \
-                External Subnets allocated from the pool. Delete the \
+                "Cannot unlink subnet pool from silo while there are \
+                external subnets allocated from the pool. Delete the \
                 subnets first, and try again.",
             ));
         }
@@ -374,6 +397,9 @@ impl DataStore {
     }
 
     /// Update the link between a Subnet Pool and Silo.
+    ///
+    /// When setting `is_default` to true, any existing default link for the
+    /// same silo and IP version is demoted first, matching IP pool behavior.
     pub async fn update_subnet_pool_silo_link(
         &self,
         opctx: &OpContext,
@@ -383,36 +409,101 @@ impl DataStore {
     ) -> UpdateResult<SubnetPoolSiloLink> {
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        use diesel::dsl::exists;
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
-        diesel::update(
-            dsl::subnet_pool_silo_link
-                .filter(
-                    dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
-                )
-                .filter(dsl::silo_id.eq(authz_silo.id())),
-        )
-        .set(dsl::is_default.eq(is_default))
-        .returning(SubnetPoolSiloLink::as_returning())
-        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            DieselError::NotFound => LookupType::ByCompositeId(format!(
-                "subnet_pool_id: {}, silo_id: {}",
-                authz_pool.id(),
-                authz_silo.id(),
-            ))
-            .into_not_found(ResourceType::SubnetPoolSiloLink),
-            DieselError::DatabaseError(
-                DatabaseErrorKind::UniqueViolation,
-                ref info,
-            ) if info.constraint_name() == Some("single_default_per_silo") => {
-                Error::invalid_request(
-                    "Can only have a single default Subnet Pool for a \
-                    Silo for each IP version.",
-                )
-            }
-            e => public_error_from_diesel(e, ErrorHandler::Server),
-        })
+        let pool_id = to_db_typed_uuid(authz_pool.id());
+        let silo_id = authz_silo.id();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        if !is_default {
+            // Simple case: just unset the default flag.
+            return diesel::update(
+                dsl::subnet_pool_silo_link
+                    .filter(dsl::subnet_pool_id.eq(pool_id))
+                    .filter(dsl::silo_id.eq(silo_id))
+                    .filter(exists(
+                        pool_dsl::subnet_pool
+                            .filter(pool_dsl::id.eq(pool_id))
+                            .filter(pool_dsl::time_deleted.is_null())
+                            .select(pool_dsl::id),
+                    )),
+            )
+            .set(dsl::is_default.eq(false))
+            .returning(SubnetPoolSiloLink::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "subnet_pool_id: {}, silo_id: {}",
+                    authz_pool.id(),
+                    silo_id,
+                ))
+                .into_not_found(ResourceType::SubnetPoolSiloLink),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            });
+        }
+
+        // Setting as default: demote any existing default for the same
+        // (silo, ip_version), then promote this one.
+        self.transaction_retry_wrapper("update_subnet_pool_silo_link")
+            .transaction(&conn, |conn| {
+                async move {
+                    // Read this link to get its ip_version, and revalidate
+                    // that the parent pool is still live. This is only
+                    // possible during the narrow window in a concurrent pool
+                    // delete after the pool has been soft-deleted but before
+                    // its link rows have been removed.
+                    let link = dsl::subnet_pool_silo_link
+                        .inner_join(
+                            pool_dsl::subnet_pool
+                                .on(pool_dsl::id.eq(dsl::subnet_pool_id)),
+                        )
+                        .filter(dsl::subnet_pool_id.eq(pool_id))
+                        .filter(dsl::silo_id.eq(silo_id))
+                        .filter(pool_dsl::time_deleted.is_null())
+                        .select(SubnetPoolSiloLink::as_select())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    // Already default — no-op.
+                    if link.is_default {
+                        return Ok(link);
+                    }
+
+                    // Demote any existing default for same (silo, version).
+                    diesel::update(
+                        dsl::subnet_pool_silo_link
+                            .filter(dsl::silo_id.eq(silo_id))
+                            .filter(dsl::ip_version.eq(link.ip_version))
+                            .filter(dsl::is_default.eq(true)),
+                    )
+                    .set(dsl::is_default.eq(false))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Promote this one.
+                    diesel::update(
+                        dsl::subnet_pool_silo_link
+                            .filter(dsl::subnet_pool_id.eq(pool_id))
+                            .filter(dsl::silo_id.eq(silo_id)),
+                    )
+                    .set(dsl::is_default.eq(true))
+                    .returning(SubnetPoolSiloLink::as_returning())
+                    .get_result_async(&conn)
+                    .await
+                }
+            })
+            .await
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "subnet_pool_id: {}, silo_id: {}",
+                    authz_pool.id(),
+                    silo_id,
+                ))
+                .into_not_found(ResourceType::SubnetPoolSiloLink),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// List silos linked to a subnet pool.
@@ -423,13 +514,26 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SubnetPoolSiloLink> {
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
-        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
-        paginated(dsl::subnet_pool_silo_link, dsl::silo_id, &pagparams)
-            .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())))
-            .select(SubnetPoolSiloLink::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        use nexus_db_schema::schema::silo;
+        use nexus_db_schema::schema::subnet_pool;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+        paginated(
+            subnet_pool_silo_link::table,
+            subnet_pool_silo_link::silo_id,
+            &pagparams,
+        )
+        .inner_join(subnet_pool::table)
+        .inner_join(silo::table)
+        .filter(
+            subnet_pool_silo_link::subnet_pool_id
+                .eq(to_db_typed_uuid(authz_pool.id())),
+        )
+        .filter(subnet_pool::time_deleted.is_null())
+        .filter(silo::time_deleted.is_null())
+        .select(SubnetPoolSiloLink::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List Subnet Pools linked to the given Silo.
@@ -532,7 +636,7 @@ impl DataStore {
         };
         if pool_version != member_version {
             return Err(Error::invalid_request(&format!(
-                "Cannot add IP{} members to IP{} Subnet Pool",
+                "Cannot add IP{} members to IP{} subnet pool",
                 member_version, pool_version,
             )));
         }
@@ -544,7 +648,7 @@ impl DataStore {
             .map_err(|e| match e {
                 DieselError::NotFound => Error::invalid_request(&format!(
                     "The IP subnet {} overlaps with an existing \
-                    Subnet Pool member or IP Pool range",
+                    subnet pool member or IP pool range",
                     params.subnet,
                 )),
                 e => public_error_from_diesel(e, ErrorHandler::Server),
@@ -597,7 +701,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 DieselError::NotFound => Error::invalid_request(format!(
-                    "A provided External Subnet Pool member with \
+                    "A provided subnet pool member with \
                         subnet {subnet} does not exist",
                 )),
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
@@ -636,6 +740,92 @@ impl DataStore {
             ));
         }
         Ok(())
+    }
+
+    // === Subnet Pool Utilization ===
+
+    /// Return (allocated, capacity) as f64 address counts for a subnet pool.
+    ///
+    /// Both values are computed entirely in SQL using
+    /// `SUM(pow(2, bits - prefix_len))` over the member and allocated subnet
+    /// tables. Because CockroachDB cannot do 128-bit integer arithmetic on
+    /// inet values, we use FLOAT8 (f64), which is also the type exposed in
+    /// the API response. For IPv6 subnets this loses precision in the low
+    /// bits, but the API already accepts that tradeoff.
+    pub async fn subnet_pool_utilization(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+    ) -> Result<(f64, f64), Error> {
+        use diesel::dsl::{sql, sum};
+        use diesel::sql_types::Double as SqlDouble;
+        use nexus_db_schema::schema::external_subnet;
+        use nexus_db_schema::schema::subnet_pool_member;
+
+        // SQL expression for the number of addresses in a subnet.
+        // Diesel has no native inet function support, so this stays as
+        // a raw SQL fragment; everything else uses the DSL.
+        const SUBNET_SIZE_SQL: &str = "pow(2::FLOAT8, \
+            (CASE WHEN family(subnet) = 4 THEN 32 ELSE 128 END \
+             - masklen(subnet))::FLOAT8)";
+
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let pool_id = to_db_typed_uuid(authz_pool.id());
+
+        let capacity_subq = subnet_pool_member::table
+            .filter(subnet_pool_member::subnet_pool_id.eq(pool_id))
+            .filter(subnet_pool_member::time_deleted.is_null())
+            .select(sum(sql::<SqlDouble>(SUBNET_SIZE_SQL)))
+            .single_value();
+
+        let allocated_subq = external_subnet::table
+            .filter(external_subnet::subnet_pool_id.eq(pool_id))
+            .filter(external_subnet::time_deleted.is_null())
+            .select(sum(sql::<SqlDouble>(SUBNET_SIZE_SQL)))
+            .single_value();
+
+        let (capacity, allocated) = diesel::select((
+            coalesce(capacity_subq, 0.0),
+            coalesce(allocated_subq, 0.0),
+        ))
+        .get_result_async::<(f64, f64)>(&*conn)
+        .await
+        .map_err(|e| match &e {
+            DieselError::NotFound => public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByResource(authz_pool),
+            ),
+            _ => public_error_from_diesel(e, ErrorHandler::Server),
+        })?;
+
+        Ok((allocated, capacity))
+    }
+
+    /// Return the total capacity (in addresses) of the provided Subnet Pool.
+    #[cfg(test)]
+    async fn subnet_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+    ) -> Result<f64, Error> {
+        let (_, capacity) =
+            self.subnet_pool_utilization(opctx, authz_pool).await?;
+        Ok(capacity)
+    }
+
+    /// Return the total number of allocated addresses in the provided Subnet
+    /// Pool.
+    #[cfg(test)]
+    async fn subnet_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+    ) -> Result<f64, Error> {
+        let (allocated, _) =
+            self.subnet_pool_utilization(opctx, authz_pool).await?;
+        Ok(allocated)
     }
 
     /// Create an External Subnet.
@@ -1089,7 +1279,7 @@ impl DataStore {
                     }
 
                     // Attempt during a migration.
-                    if collection.runtime_state.migration_id.is_some() {
+                    if collection.migration_id.is_some() {
                         return Err(Error::unavail(
                             "Cannot attach a subnet while instance is migrating"
                         ));
@@ -1097,11 +1287,11 @@ impl DataStore {
 
                     // Instance is in a transitory state, e.g., starting.
                     if !SAFE_TO_ATTACH_INSTANCE_STATES
-                        .contains(&collection.runtime_state.nexus_state)
+                        .contains(&collection.nexus_state)
                     {
                         return Err(Error::invalid_request(&format!(
                             "Cannot attach subnet to instance in {} state",
-                            collection.runtime_state.nexus_state,
+                            collection.nexus_state,
                         )));
                     }
 
@@ -1227,7 +1417,7 @@ impl DataStore {
                     }
 
                     // Attempt during a migration.
-                    if collection.runtime_state.migration_id.is_some() {
+                    if collection.migration_id.is_some() {
                         return Err(Error::unavail(
                             "Cannot detach a subnet while instance is migrating"
                         ));
@@ -1235,11 +1425,11 @@ impl DataStore {
 
                     // Instance is in a transitory state, e.g., starting.
                     if !SAFE_TO_ATTACH_INSTANCE_STATES
-                        .contains(&collection.runtime_state.nexus_state)
+                        .contains(&collection.nexus_state)
                     {
                         return Err(Error::invalid_request(&format!(
                             "Cannot detach subnet from instance in {} state",
-                            collection.runtime_state.nexus_state,
+                            collection.nexus_state,
                         )));
                     }
 
@@ -1390,10 +1580,12 @@ mod tests {
     use crate::db::queries::external_subnet::NO_LINKED_DEFAULT_POOL_ERR_MSG;
     use crate::db::queries::external_subnet::NO_LINKED_POOL_CONTAINS_SUBNET_ERR_MSG;
     use crate::db::queries::external_subnet::SUBNET_OVERLAPS_EXISTING_ERR_MSG;
+    use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl as _;
     use chrono::Utc;
     use diesel::ExpressionMethods as _;
     use diesel::QueryDsl as _;
+    use diesel::SelectableHelper as _;
     use dropshot::PaginationOrder;
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
@@ -1404,6 +1596,7 @@ mod tests {
     use nexus_db_model::Project;
     use nexus_db_model::SubnetPool;
     use nexus_db_model::SubnetPoolMember;
+    use nexus_db_model::SubnetPoolSiloLink;
     use nexus_db_model::SubnetPoolUpdate;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
@@ -1634,6 +1827,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleting_subnet_pool_removes_silo_links() {
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        let logctx =
+            dev::test_setup_log("deleting_subnet_pool_removes_silo_links");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let pool_id = NameOrId::Id(pool.identity.id.into_untyped_uuid());
+
+        let (authz_pool, _db_pool) = datastore
+            .lookup_subnet_pool(opctx, &pool_id)
+            .fetch()
+            .await
+            .expect("able to lookup subnet pool we just made");
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect("able to link pool to silo");
+
+        let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
+        let links: Vec<SubnetPoolSiloLink> = subnet_pool_silo_link::table
+            .filter(
+                subnet_pool_silo_link::subnet_pool_id
+                    .eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(&*conn)
+            .await
+            .expect("should list links for pool before deletion");
+        assert_eq!(links.len(), 1);
+
+        // Re-fetch the pool after linking because that increments its rcgen.
+        let (authz_pool, db_pool) = datastore
+            .lookup_subnet_pool(opctx, &pool_id)
+            .fetch()
+            .await
+            .expect("able to lookup subnet pool after linking");
+        datastore
+            .delete_subnet_pool(opctx, &authz_pool, &db_pool)
+            .await
+            .expect("able to delete subnet pool");
+
+        let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
+        let links: Vec<SubnetPoolSiloLink> = subnet_pool_silo_link::table
+            .filter(
+                subnet_pool_silo_link::subnet_pool_id
+                    .eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(&*conn)
+            .await
+            .expect("should query links after deletion");
+        assert!(links.is_empty(), "expected pool links to be deleted");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn cannot_insert_subnet_pool_member_with_overlapping_ip_subnet() {
         let logctx = dev::test_setup_log(
             "cannot_insert_subnet_pool_member_with_overlapping_ip_subnet",
@@ -1690,7 +1960,7 @@ mod tests {
         assert_eq!(
             message.external_message(),
             "The IP subnet 10.1.1.0/24 overlaps with an existing \
-            Subnet Pool member or IP Pool range"
+            subnet pool member or IP pool range"
         );
 
         db.terminate().await;
@@ -1739,15 +2009,9 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("able to link pool to silo");
-        let Error::Conflict { message } = &err else {
-            panic!("Expected invalid request, found: {err:#?}");
-        };
-        assert_eq!(
-            message.external_message(),
-            "Subnet Pool is already linked to Silo"
-        );
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
-        // We should not be able to link another default of the same IP version.
+        // Linking another default of the same IP version should fail.
         let params = SubnetPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-new-pool".parse().unwrap(),
@@ -1767,14 +2031,16 @@ mod tests {
         let err = datastore
             .link_subnet_pool_to_silo(opctx, &new_authz_pool, &authz_silo, true)
             .await
-            .expect_err("able to link pool to silo");
+            .expect_err("linking second default should fail");
         let Error::InvalidRequest { message } = &err else {
             panic!("Expected invalid request, found: {err:#?}");
         };
         assert_eq!(
             message.external_message(),
-            "Can only have a single default Subnet Pool for a Silo \
-            for each IP version."
+            "Silo already has a default subnet pool for this \
+            IP version. Link the pool as non-default, then \
+            make it the default, which will demote the \
+            existing one."
         );
 
         // Now unlink the first, and we should be able to link the second as a
@@ -1807,6 +2073,31 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
             .await
             .expect("able to link second non-defult pool to silo");
+
+        // We can also change the default via update, which demotes the
+        // current default. Right now new_authz_pool is default and
+        // authz_pool is non-default; promote authz_pool.
+        let link = datastore
+            .update_subnet_pool_silo_link(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("update to default should demote the other");
+        assert!(link.is_default);
+
+        // Verify the old default was actually demoted.
+        let demoted_links = datastore
+            .list_silos_linked_to_subnet_pool(
+                opctx,
+                &new_authz_pool,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: 100.try_into().unwrap(),
+                },
+            )
+            .await
+            .expect("should list links for demoted pool");
+        assert_eq!(demoted_links.len(), 1);
+        assert!(!demoted_links[0].is_default);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1926,6 +2217,87 @@ mod tests {
         else {
             panic!("Expected NotFound, found {err:#?}");
         };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn deleted_silo_does_not_appear_in_subnet_pool_silo_list() {
+        use nexus_db_schema::schema::silo::dsl as silo_dsl;
+
+        let logctx = dev::test_setup_log(
+            "deleted_silo_does_not_appear_in_subnet_pool_silo_list",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect("able to link pool to default silo");
+
+        let links = datastore
+            .list_silos_linked_to_subnet_pool(
+                opctx,
+                &authz_pool,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: 100.try_into().unwrap(),
+                },
+            )
+            .await
+            .expect("able to list silos for pool before silo delete");
+        assert_eq!(links.len(), 1);
+
+        let c = diesel::update(silo_dsl::silo.find(DEFAULT_SILO_ID))
+            .set(silo_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("should be able to soft-delete silo");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let links = datastore
+            .list_silos_linked_to_subnet_pool(
+                opctx,
+                &authz_pool,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: 100.try_into().unwrap(),
+                },
+            )
+            .await
+            .expect("able to list silos for pool after silo delete");
+        assert!(
+            links.is_empty(),
+            "deleted silo should not appear in subnet pool silo list"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2083,8 +2455,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "Cannot unlink Subnet Pool from Silo while there are \
-            External Subnets allocated from the pool. Delete the \
+            "Cannot unlink subnet pool from silo while there are \
+            external subnets allocated from the pool. Delete the \
             subnets first, and try again.",
         );
 
@@ -2212,7 +2584,7 @@ mod tests {
         assert_eq!(
             message.external_message(),
             "The requested IP subnet is not contained in any \
-            Subnet Pool available in the current Silo."
+            subnet pool available in the current silo."
         );
 
         context.db.terminate().await;
@@ -2304,7 +2676,7 @@ mod tests {
             "can_insert_external_subnet_from_explicit_pool_selection",
         )
         .await;
-        let prefix_len = 64;
+        let prefix_length = 64;
         let subnet = context
             .db
             .datastore()
@@ -2323,7 +2695,7 @@ mod tests {
                                 context.db_pool.id().into_untyped_uuid(),
                             ),
                         },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2335,7 +2707,7 @@ mod tests {
         // Should take the first /64 from any pool member.
         let expected_subnet = IpNet::new(
             oxnet::IpNet::from(context.members[0].subnet).addr(),
-            prefix_len,
+            prefix_length,
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
@@ -2350,7 +2722,7 @@ mod tests {
             "can_insert_external_subnet_from_ip_version",
         )
         .await;
-        let prefix_len = 64;
+        let prefix_length = 64;
         let subnet = context
             .db
             .datastore()
@@ -2367,7 +2739,7 @@ mod tests {
                         pool_selector: PoolSelector::Auto {
                             ip_version: Some(IpVersion::V6),
                         },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2379,7 +2751,7 @@ mod tests {
         // Should take the first /64 from any pool member.
         let expected_subnet = IpNet::new(
             oxnet::IpNet::from(context.members[0].subnet).addr(),
-            prefix_len,
+            prefix_length,
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
@@ -2394,7 +2766,7 @@ mod tests {
             "can_insert_external_subnet_using_default_pool",
         )
         .await;
-        let prefix_len = 64;
+        let prefix_length = 64;
         let subnet = context
             .db
             .datastore()
@@ -2409,7 +2781,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2421,7 +2793,7 @@ mod tests {
         // Should take the first /64 from any pool member.
         let expected_subnet = IpNet::new(
             oxnet::IpNet::from(context.members[0].subnet).addr(),
-            prefix_len,
+            prefix_length,
         )
         .unwrap();
         assert_eq!(oxnet::IpNet::from(subnet.subnet), expected_subnet);
@@ -2552,7 +2924,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len: 48,
+                            prefix_length: 48,
                         },
                     },
                 )
@@ -2577,7 +2949,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -2588,8 +2960,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "All subnets are used in the default Subnet Pool for \
-            the current Silo",
+            "Could not allocate a /48 subnet from the default \
+            subnet pool for the current silo",
         );
 
         // Also fail, but since we're requesting a pool by version, the error
@@ -2610,7 +2982,7 @@ mod tests {
                         pool_selector: PoolSelector::Auto {
                             ip_version: Some(IpVersion::V6),
                         },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -2621,8 +2993,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "All subnets are used in the default IPv6 Subnet Pool \
-            for the current Silo",
+            "Could not allocate a /48 subnet from the default \
+            IPv6 subnet pool for the current silo",
         );
 
         // Also fail, but since we're requesting a pool, the error message
@@ -2645,7 +3017,7 @@ mod tests {
                                 context.authz_pool.id().into_untyped_uuid(),
                             ),
                         },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -2657,7 +3029,8 @@ mod tests {
         assert_eq!(
             message.external_message(),
             format!(
-                "All subnets are used in the Subnet Pool with ID '{}'",
+                "Could not allocate a /48 subnet \
+                from the subnet pool with ID '{}'",
                 context.authz_pool.id().into_untyped_uuid(),
             ),
         );
@@ -2682,7 +3055,7 @@ mod tests {
                                 context.db_pool.name().clone(),
                             ),
                         },
-                        prefix_len: 56,
+                        prefix_length: 56,
                     },
                 },
             )
@@ -2694,7 +3067,8 @@ mod tests {
         assert_eq!(
             message.external_message(),
             format!(
-                "All subnets are used in the Subnet Pool with name '{}'",
+                "Could not allocate a /56 subnet \
+                from the subnet pool with name '{}'",
                 context.db_pool.name(),
             ),
         );
@@ -2744,7 +3118,7 @@ mod tests {
 
         // Now when we try to allocate by taking "the" default for our silo, we
         // should fail predictably.
-        let prefix_len = 64;
+        let prefix_length = 64;
         let err = context
             .db
             .datastore()
@@ -2759,7 +3133,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2799,7 +3173,7 @@ mod tests {
 
         // Now when we try to allocate by taking "the" default for our silo, we
         // should fail predictably.
-        let prefix_len = 64;
+        let prefix_length = 64;
         let err = context
             .db
             .datastore()
@@ -2814,7 +3188,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2830,6 +3204,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creating_subnet_ignores_deleted_default_pool() {
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
+
+        let context = setup_external_subnet_test(
+            "creating_subnet_ignores_deleted_default_pool",
+        )
+        .await;
+
+        let c = diesel::update(
+            pool_dsl::subnet_pool
+                .find(context.db_pool.id().into_untyped_uuid()),
+        )
+        .set(pool_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*context
+                .db
+                .datastore()
+                .pool_connection_authorized(context.db.opctx())
+                .await
+                .unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete subnet pool");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let prefix_length = 64;
+        let err = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-subnet".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Auto {
+                        pool_selector: PoolSelector::Auto {
+                            ip_version: Some(IpVersion::V6),
+                        },
+                        prefix_length,
+                    },
+                },
+            )
+            .await
+            .expect_err("deleted default pool should be ignored");
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(message.external_message(), NO_LINKED_DEFAULT_POOL_ERR_MSG);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn external_subnet_allocation_takes_smallest_gap_at_member_start() {
         let context = setup_external_subnet_test(
             "external_subnet_allocation_takes_smallest_gap_at_member_start",
@@ -2838,7 +3270,7 @@ mod tests {
 
         // Allocate 2 /56s.
         let mut subnets = Vec::with_capacity(2);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..subnets.capacity() {
             let subnet = context
                 .db
@@ -2856,7 +3288,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -2895,7 +3327,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2916,7 +3348,7 @@ mod tests {
 
         // Allocate 3 /56s.
         let mut subnets = Vec::with_capacity(3);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..subnets.capacity() {
             let subnet = context
                 .db
@@ -2934,7 +3366,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -2973,7 +3405,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len,
+                        prefix_length,
                     },
                 },
             )
@@ -2995,7 +3427,7 @@ mod tests {
 
         // Allocate 3 /56s.
         let mut minis = Vec::with_capacity(3);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..3 {
             let subnet = context
                 .db
@@ -3013,7 +3445,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -3055,7 +3487,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -3076,7 +3508,7 @@ mod tests {
 
         // Allocate 2 /56s.
         let mut minis = Vec::with_capacity(2);
-        let prefix_len = 56;
+        let prefix_length = 56;
         for i in 0..minis.capacity() {
             let subnet = context
                 .db
@@ -3094,7 +3526,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -3136,7 +3568,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 48,
+                        prefix_length: 48,
                     },
                 },
             )
@@ -3157,7 +3589,7 @@ mod tests {
 
         // Allocate 4 /57s.
         let mut minis = Vec::with_capacity(4);
-        let prefix_len = 57;
+        let prefix_length = 57;
         for i in 0..minis.capacity() {
             let subnet = context
                 .db
@@ -3175,7 +3607,7 @@ mod tests {
                             pool_selector: PoolSelector::Auto {
                                 ip_version: None,
                             },
-                            prefix_len,
+                            prefix_length,
                         },
                     },
                 )
@@ -3218,7 +3650,7 @@ mod tests {
                     },
                     allocator: ExternalSubnetAllocator::Auto {
                         pool_selector: PoolSelector::Auto { ip_version: None },
-                        prefix_len: 56,
+                        prefix_length: 56,
                     },
                 },
             )
@@ -3300,7 +3732,7 @@ mod tests {
         context: &Context,
     ) -> Option<(AllocationKind, ExternalName, ExternalSubnetAllocator)> {
         let mut rng = rng();
-        let prefix_len: u8 = rng.random_range(0..=64);
+        let prefix_length: u8 = rng.random_range(0..=64);
         let kind: AllocationKind = rng.random();
         let allocator = match kind {
             AllocationKind::ExplicitInvalidSubnet => {
@@ -3309,7 +3741,7 @@ mod tests {
                 // sure we don't loop forever though.
                 let mut i = 0;
                 let subnet = loop {
-                    let net = random_network(&mut rng, prefix_len);
+                    let net = random_network(&mut rng, prefix_length);
                     if context.members.iter().all(|member| {
                         let subnet = IpNet::from(member.subnet);
                         !subnet.overlaps(&net)
@@ -3337,17 +3769,17 @@ mod tests {
                         context.db_pool.id().into_untyped_uuid(),
                     ),
                 },
-                prefix_len,
+                prefix_length,
             },
             AllocationKind::AutoVersion => ExternalSubnetAllocator::Auto {
                 pool_selector: PoolSelector::Auto {
                     ip_version: Some(IpVersion::V6),
                 },
-                prefix_len,
+                prefix_length,
             },
             AllocationKind::AutoDefaultPool => ExternalSubnetAllocator::Auto {
                 pool_selector: PoolSelector::Auto { ip_version: None },
-                prefix_len,
+                prefix_length,
             },
         };
         Some((kind, random_name(&mut rng), allocator))
@@ -3523,6 +3955,13 @@ mod tests {
                                 allocated_subnets.insert(net, subnet.id());
                             }
                             Err(Error::InvalidRequest { message }) => {
+                                let ExternalSubnetAllocator::Auto {
+                                    prefix_length,
+                                    ..
+                                } = &allocator
+                                else {
+                                    unreachable!();
+                                };
                                 let expected_message = match kind {
                                     AllocationKind::ExplicitInvalidSubnet
                                     | AllocationKind::ExplicitValidSubnet => {
@@ -3530,23 +3969,23 @@ mod tests {
                                     }
                                     AllocationKind::ExplicitPool => {
                                         format!(
-                                            "All subnets are used in the \
-                                            Subnet Pool with ID '{}'",
+                                            "Could not allocate a /{prefix_length} subnet \
+                                            from the subnet pool with ID '{}'",
                                             context.authz_pool.id(),
                                         )
                                     }
                                     AllocationKind::AutoVersion => {
-                                        String::from(
-                                            "All subnets are used in the \
-                                            default IPv6 Subnet Pool for \
-                                            the current Silo",
+                                        format!(
+                                            "Could not allocate a /{prefix_length} subnet \
+                                            from the default IPv6 subnet pool \
+                                            for the current silo",
                                         )
                                     }
                                     AllocationKind::AutoDefaultPool => {
-                                        String::from(
-                                            "All subnets are used in the \
-                                            default Subnet Pool for \
-                                            the current Silo",
+                                        format!(
+                                            "Could not allocate a /{prefix_length} subnet \
+                                            from the default subnet pool \
+                                            for the current silo",
                                         )
                                     }
                                 };
@@ -3678,7 +4117,7 @@ mod tests {
                         description: String::new(),
                     },
                     allocator: ExternalSubnetAllocator::Auto {
-                        prefix_len: 26,
+                        prefix_length: 26,
                         pool_selector: PoolSelector::Auto { ip_version: None },
                     },
                 },
@@ -3771,8 +4210,8 @@ mod tests {
         };
         assert_eq!(
             message.external_message(),
-            "The IP subnet fd00::/48 overlaps with an existing Subnet Pool \
-            member or IP Pool range",
+            "The IP subnet fd00::/48 overlaps with an existing subnet pool \
+            member or IP pool range",
         );
 
         db.terminate().await;
@@ -3824,6 +4263,161 @@ mod tests {
         };
         assert!(id.contains(&authz_silo.id().to_string()));
         assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This is probably very hard to reproduce reliably in an integration test:
+    // the real delete path soft-deletes the pool and then removes link rows in
+    // the next statement, so the buggy behavior depends on hitting that narrow
+    // inter-statement window.
+    #[tokio::test]
+    async fn cannot_set_deleted_subnet_pool_as_default_even_if_link_exists() {
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl as link_dsl;
+
+        let logctx = dev::test_setup_log(
+            "cannot_set_deleted_subnet_pool_as_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect("should be able to link pool to default silo");
+
+        let c = diesel::update(
+            pool_dsl::subnet_pool.find(db_pool.id().into_untyped_uuid()),
+        )
+        .set(pool_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete subnet pool");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let links: Vec<SubnetPoolSiloLink> = link_dsl::subnet_pool_silo_link
+            .filter(
+                link_dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("should still have link rows for deleted subnet pool");
+        assert_eq!(links.len(), 1);
+
+        let err = datastore
+            .update_subnet_pool_silo_link(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err(
+                "should not be able to set default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unset_deleted_subnet_pool_default_even_if_link_exists() {
+        use nexus_db_schema::schema::subnet_pool::dsl as pool_dsl;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl as link_dsl;
+
+        let logctx = dev::test_setup_log(
+            "cannot_unset_deleted_subnet_pool_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("should be able to link pool to default silo");
+
+        let c = diesel::update(
+            pool_dsl::subnet_pool.find(db_pool.id().into_untyped_uuid()),
+        )
+        .set(pool_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete subnet pool");
+        assert_eq!(c, 1, "should have deleted something");
+
+        let links: Vec<SubnetPoolSiloLink> = link_dsl::subnet_pool_silo_link
+            .filter(
+                link_dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+            )
+            .select(SubnetPoolSiloLink::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("should still have link rows for deleted subnet pool");
+        assert_eq!(links.len(), 1);
+
+        let err = datastore
+            .update_subnet_pool_silo_link(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                false,
+            )
+            .await
+            .expect_err(
+                "should not be able to unset default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3925,9 +4519,280 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("Should fail linking the second time");
-        let Error::Conflict { .. } = &err else {
-            panic!("Expected Conflict, found {err:#?}");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ipv4_subnet_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ipv4_subnet_pool_utilization");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        let (authz_project, _db_project) = datastore
+            .project_create(
+                opctx,
+                Project::new(
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "my-project".parse().unwrap(),
+                            description: String::new(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .expect("able to create a project");
+
+        // Create a subnet pool.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
         };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        // Capacity is 0 because there are no members.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 0.0);
+
+        // Link the pool to the silo so we can allocate external subnets.
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("able to link pool to silo");
+
+        // Add a /24 member (256 addresses).
+        let member_subnet: oxnet::IpNet = "10.0.0.0/24".parse().unwrap();
+        datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: member_subnet,
+                    min_prefix_length: Some(24),
+                    max_prefix_length: Some(28),
+                },
+            )
+            .await
+            .expect("able to add member");
+
+        // Capacity is now 256.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 256.0);
+
+        // No subnets allocated yet.
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 0.0);
+
+        // Allocate a /28 (16 addresses).
+        datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-subnet".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: "10.0.0.0/28".parse().unwrap(),
+                    },
+                },
+            )
+            .await
+            .expect("able to create external subnet");
+
+        // Allocated is now 16.
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 16.0);
+
+        // Capacity is unchanged.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 256.0);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_subnet_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ipv6_subnet_pool_utilization");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        let (authz_project, _db_project) = datastore
+            .project_create(
+                opctx,
+                Project::new(
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "my-project".parse().unwrap(),
+                            description: String::new(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .expect("able to create a project");
+
+        // Create an IPv6 subnet pool.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        // Link the pool to the silo.
+        datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("able to link pool to silo");
+
+        // Capacity starts at 0.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, 0.0);
+
+        // Add a /48 member (2^80 addresses).
+        let member_subnet: oxnet::IpNet = "2001:db8:1::/48".parse().unwrap();
+        datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: member_subnet,
+                    min_prefix_length: Some(48),
+                    max_prefix_length: Some(64),
+                },
+            )
+            .await
+            .expect("able to add member");
+
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        // 2^80 is exactly representable as f64 (it's a power of 2)
+        assert_eq!(capacity, (1u128 << 80) as f64);
+
+        // No subnets allocated yet.
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, 0.0);
+
+        // Allocate a /64 (2^64 addresses).
+        datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "my-subnet".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: "2001:db8:1::/64".parse().unwrap(),
+                    },
+                },
+            )
+            .await
+            .expect("able to create external subnet");
+
+        let allocated = datastore
+            .subnet_pool_allocated_count(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(allocated, (1u128 << 64) as f64);
+
+        // Capacity is unchanged.
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(capacity, (1u128 << 80) as f64);
+
+        // Add a second, larger member.
+        let big_subnet: oxnet::IpNet = "2001:db9::/32".parse().unwrap();
+        datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: big_subnet,
+                    min_prefix_length: Some(32),
+                    max_prefix_length: Some(64),
+                },
+            )
+            .await
+            .expect("able to add second member");
+
+        let capacity = datastore
+            .subnet_pool_total_capacity(opctx, &authz_pool)
+            .await
+            .unwrap();
+        // /48 has 2^80, /32 has 2^96. Both are exact as f64; their sum
+        // is also exact because they differ by only 16 powers of 2.
+        assert_eq!(capacity, (1u128 << 80) as f64 + (1u128 << 96) as f64);
 
         db.terminate().await;
         logctx.cleanup_successful();

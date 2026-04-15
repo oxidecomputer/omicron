@@ -6,12 +6,9 @@
 
 use super::BootstrapError;
 use super::RssAccessError;
-use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use super::config::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use super::http_entrypoints;
 use super::http_entrypoints_lockstep;
 use super::views::SledAgentResponse;
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
@@ -24,6 +21,7 @@ use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
 use crate::long_running_tasks::LongRunningTaskHandles;
+use crate::rack_setup::service::RackInitializeRequestParams;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
@@ -37,19 +35,22 @@ use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
-use omicron_common::ledger;
-use omicron_common::ledger::Ledger;
+use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
+use omicron_ledger as ledger;
+use omicron_ledger::Ledger;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -157,8 +158,8 @@ pub enum StartError {
     #[error("Failed to bind sprocket server")]
     BindSprocketsServer(#[source] io::Error),
 
-    #[error("Failed to initialize lrtq node as learner: {0}")]
-    FailedLearnerInit(bootstore::NodeRequestError),
+    #[error("Failed to initialize lrtq node as learner")]
+    FailedLearnerInit(#[source] bootstore::NodeRequestError),
 }
 
 /// Server for the bootstrap agent.
@@ -347,7 +348,7 @@ pub enum SledAgentServerStartError {
     #[error("Failed to commit sled agent request to ledger")]
     CommitToLedger(#[from] ledger::Error),
 
-    #[error("Failed to initialize this lrtq node as a learner: {0}")]
+    #[error("Failed to initialize this lrtq node as a learner")]
     FailedLearnerInit(#[from] bootstore::NodeRequestError),
 }
 
@@ -643,8 +644,15 @@ impl Inner {
                     Err(err) => {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
-                        error!(log, "Failed to start sled agent: {err:#}");
-                        panic!("Failed to start sled agent: {err:#}");
+                        error!(
+                            log,
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err)
+                        );
+                        panic!(
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err)
+                        );
                     }
                 };
                 _ = response_tx.send(response);

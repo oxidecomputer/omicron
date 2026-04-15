@@ -80,7 +80,7 @@ pub trait NexusServer: Send + Sync + 'static {
         >,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
+        recovery_silo: bootstrap_agent_lockstep_types::RecoverySiloConfig,
         tls_certificates: Vec<
             omicron_common::api::internal::nexus::Certificate,
         >,

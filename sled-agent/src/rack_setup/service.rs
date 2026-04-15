@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
@@ -75,7 +74,11 @@ use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
-use camino::Utf8PathBuf;
+use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
+use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RssStep;
+use camino::{Utf8Path, Utf8PathBuf};
 use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
@@ -84,20 +87,24 @@ use nexus_lockstep_client::types::InitialTrustQuorumConfig;
 use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
-use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
+use nexus_types::deployment::{
+    Blueprint, BlueprintZoneType, blueprint_zone_type,
+};
 use nexus_types::internal_api::params::ExternalPortDiscovery;
 use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
+use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -107,17 +114,15 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
+    EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
-use sled_agent_types::rack_init::{
-    BootstrapAddressDiscovery, RackInitializeRequest as Config,
-    RackInitializeRequestParams,
-};
-use sled_agent_types::rack_ops::RssStep;
+use sled_agent_types::rack_init::rack_init_bootstore_generation;
+use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -231,6 +236,9 @@ pub enum SetupServiceError {
     #[error("Failed to convert setup plan to blueprint: {0:#}")]
     ConvertPlanToBlueprint(anyhow::Error),
 
+    #[error("Failed to construct valid set of service zone NAT entries")]
+    InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
+
     // We used transparent, because `EarlyNetworkSetupError` contains a subset
     // of error variants already in this type
     #[error(transparent)]
@@ -250,6 +258,21 @@ pub enum SetupServiceError {
 
     #[error("Trust quorum proxy commit incorrectly 'pending' from {0}")]
     TrustQuorumProxyCommitPending(BaseboardId),
+}
+
+#[derive(Debug, Clone)]
+pub struct RackInitializeRequestParams {
+    pub rack_initialize_request: RackInitializeRequest,
+    pub skip_timesync: bool,
+}
+
+impl RackInitializeRequestParams {
+    pub fn new(
+        rack_initialize_request: RackInitializeRequest,
+        skip_timesync: bool,
+    ) -> RackInitializeRequestParams {
+        RackInitializeRequestParams { rack_initialize_request, skip_timesync }
+    }
 }
 
 /// The interface to the Rack Setup Service.
@@ -765,8 +788,10 @@ impl ServiceInner {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handoff_to_nexus(
         &self,
+        blueprint: Blueprint,
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
@@ -775,23 +800,6 @@ impl ServiceInner {
         initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
-
-        // Convert `service_plan` into the initial blueprint for the system.
-        let blueprint = service_plan
-            .to_blueprint(
-                // This is a bit of a hack. We only construct a blueprint after
-                // completing RSS, so we need to know the final generation value
-                // sent to all sleds. Arguably, we should record this in
-                // `service_plan`; however, that doesn't match how we use it:
-                // `service_plan` contains the final set of configs on
-                // constructing, then as we run RSS we send sleds a filtered
-                // down config at earlier generations. We know that the final
-                // config sent to all sleds used `V5_EVERYTHING` (i.e., "don't
-                // filter anything out"), so use that as the generation for all
-                // sled configs in the blueprint, too.
-                DeployStepVersion::V5_EVERYTHING,
-            )
-            .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         info!(
             self.log,
@@ -888,14 +896,7 @@ impl ServiceInner {
                                 rib_priority: r.rib_priority,
                             })
                             .collect(),
-                        addresses: config
-                            .addresses
-                            .iter()
-                            .map(|a| NexusTypes::UplinkAddressConfig {
-                                address: a.address,
-                                vlan_id: a.vlan_id,
-                            })
-                            .collect(),
+                        addresses: config.addresses.clone(),
                         switch: config.switch,
                         uplink_port_speed: config.uplink_port_speed,
                         uplink_port_fec: config.uplink_port_fec,
@@ -923,10 +924,6 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
-                                router_lifetime:
-                                    NexusTypes::RouterLifetimeConfig(
-                                        b.router_lifetime.as_u16(),
-                                    ),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {
@@ -1315,17 +1312,24 @@ impl ServiceInner {
         // TODO: In future releases, we will get rid of the bootstore entirely,
         // and early_network_config will be replicated by the trust quorum
         // nodes.
-        let early_network_config = EarlyNetworkConfig {
-            generation: 1,
-            schema_version: 2,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: Some(config.rack_network_config.clone()),
-            },
+        let mut system_networking_config = SystemNetworkingConfig {
+            rack_network_config: config.rack_network_config.clone(),
+            // We can't populate this until we create a `ServicePlan` below.
+            // TODO-correctness could we wait to put this into the bootstore
+            // until after the service plan is created, once we've finished
+            // moving all system networking into scrimlet reconcilers?
+            service_zone_nat_entries: None,
         };
-        info!(self.log, "Writing Rack Network Configuration to bootstore");
-        rss_step.update(RssStep::NetworkConfigUpdate);
-        bootstore.update_network_config(early_network_config.into()).await?;
+        info!(self.log, "Writing initial network configuration to bootstore");
+        rss_step.update(RssStep::InitialNetworkConfigUpdate);
+        bootstore
+            .update_network_config(
+                EarlyNetworkConfigEnvelope::from(&system_networking_config)
+                    .serialize_to_bootstore_with_generation(
+                        rack_init_bootstore_generation::RSS_INITIAL,
+                    ),
+            )
+            .await?;
 
         rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.
@@ -1346,6 +1350,45 @@ impl ServiceInner {
         // a service allocation plan.
         let service_plan =
             ServicePlan::create(&self.log, &config, &sled_plan.sleds).await?;
+
+        // Convert `service_plan` into the initial blueprint for the system.
+        let blueprint = service_plan
+            .to_blueprint(
+                // This is a bit of a hack. We only make use of the sled config
+                // generations in the blueprint after completing RSS, so we need
+                // to know the final generation value sent to all sleds.
+                // Arguably, we should record this in `service_plan`; however,
+                // that doesn't match how we use it: `service_plan` contains the
+                // final set of configs on constructing, then as we run RSS we
+                // send sleds a filtered down config at earlier generations. We
+                // know that the final config sent to all sleds used
+                // `V5_EVERYTHING` (i.e., "don't filter anything out"), so use
+                // that as the generation for all sled configs in the blueprint,
+                // too.
+                DeployStepVersion::V5_EVERYTHING,
+            )
+            .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+
+        // Now that we have a service plan (and therefore a blueprint), we can
+        // fill in the service_zone_nat_entries in the bootstore.
+        system_networking_config.service_zone_nat_entries = Some(
+            blueprint
+                .to_service_zone_nat_entries()
+                .map_err(SetupServiceError::InvalidServiceZoneNatEntries)?,
+        );
+        info!(
+            self.log,
+            "Writing final system networking configuration to bootstore",
+        );
+        rss_step.update(RssStep::FinalNetworkConfigUpdate);
+        bootstore
+            .update_network_config(
+                EarlyNetworkConfigEnvelope::from(&system_networking_config)
+                    .serialize_to_bootstore_with_generation(
+                        rack_init_bootstore_generation::RSS_FINAL,
+                    ),
+            )
+            .await?;
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
@@ -1369,10 +1412,17 @@ impl ServiceInner {
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
+        //
+        // lookup_uplinked_switch_zone_underlay_addrs() is shared with
+        // sled-agent, which has the network config in a watch channel that
+        // changes as Nexus pushes updates in via the bootstore. We don't have
+        // that, but can stuff the (unchanging) config into a watch channel to
+        // fit this API.
+        let (_tx, network_config_rx) = watch::channel(system_networking_config);
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_uplinked_switch_zone_underlay_addrs(
                 &resolver,
-                &config.rack_network_config,
+                &network_config_rx,
                 // We willing to wait forever to find all the switches that have
                 // configured uplinks; if we attempt to proceed without doing
                 // so, we'll fail handing off to Nexus later. (Ideally we could
@@ -1493,6 +1543,7 @@ impl ServiceInner {
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
         self.handoff_to_nexus(
+            blueprint,
             &config,
             &sled_plan,
             &service_plan,
@@ -1732,25 +1783,124 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RackInitializeRequestParseError {
+    #[error("Failed to read config from {path}")]
+    Io {
+        path: Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+    #[error("Failed to deserialize config from {path}")]
+    Deserialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: anyhow::Error,
+    },
+    #[error("Loading certificate")]
+    Certificate(#[source] anyhow::Error),
+}
+
+/// Load a RackInitializeRequest from a file path.
+pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
+    path: P,
+) -> Result<RackInitializeRequest, RackInitializeRequestParseError> {
+    let path = path.as_ref();
+    let contents = std::fs::read_to_string(&path).map_err(|err| {
+        RackInitializeRequestParseError::Io { path: path.into(), err }
+    })?;
+    let mut raw_config = toml::from_str::<RackInitializeRequest>(&contents)
+        .map_err(|err| RackInitializeRequestParseError::Deserialize {
+            path: path.into(),
+            err: err.into(),
+        })?;
+
+    // In the same way that sled-agent itself (our caller) discovers the
+    // optional config-rss.toml in a well-known path relative to its config
+    // file, we look for a pair of well-known paths adjacent to
+    // config-rss.toml that specify an extra TLS certificate and private
+    // key.  This is used by the end-to-end tests.  Any developer can also
+    // use this to inject a TLS certificate into their setup.
+    // (config-rss.toml is only used for dev/test, not production
+    // deployments, which will always get their RSS configuration from
+    // Wicket.)
+    if let Some(parent) = path.parent() {
+        let cert_path = parent.join("initial-tls-cert.pem");
+        let key_path = parent.join("initial-tls-key.pem");
+        let cert_bytes = std::fs::read_to_string(&cert_path);
+        let key_bytes = std::fs::read_to_string(&key_path);
+        match (cert_bytes, key_bytes) {
+            (Ok(cert), Ok(key)) => {
+                raw_config
+                    .external_certificates
+                    .push(Certificate { key, cert });
+            }
+            (Err(cert_error), Err(key_error))
+                if cert_error.kind() == std::io::ErrorKind::NotFound
+                    && key_error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                // Fine.  No extra cert was provided.
+            }
+            (Err(cert_error), _) => {
+                return Err(RackInitializeRequestParseError::Certificate(
+                    anyhow::Error::new(cert_error).context(format!(
+                        "loading certificate from {:?}",
+                        cert_path
+                    )),
+                ));
+            }
+            (_, Err(key_error)) => {
+                return Err(RackInitializeRequestParseError::Certificate(
+                    anyhow::Error::new(key_error).context(format!(
+                        "loading private key from {:?}",
+                        key_path
+                    )),
+                ));
+            }
+        };
+    }
+
+    Ok(raw_config)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use anyhow::Context;
+    use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
-        address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
-        api::external::{ByteCount, Generation},
+        address::{
+            AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX,
+            get_sled_address,
+        },
+        api::external::{AllowedSourceIps, ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;
-    use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
-        SledRole,
+    use oxnet::Ipv6Net;
+    use sled_agent_types::{
+        early_networking::RackNetworkConfig,
+        inventory::{
+            Baseboard, ConfigReconcilerInventoryStatus, Inventory,
+            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
+            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+        },
     };
-    use sled_agent_types::rack_init::rack_initialize_request_test_config;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    fn rack_initialize_request_test_config() -> RackInitializeRequest {
+        // Use env! rather than std::env::var because this might be called from
+        // a dependent crate.
+        let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path =
+            manifest_dir.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
+    }
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1794,7 +1944,8 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
             },
             true,
@@ -1827,19 +1978,16 @@ mod test {
         ]
     }
 
-    fn make_test_service_plan() -> ServicePlan {
+    #[test]
+    fn test_omicron_zone_configs() {
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("make_test_service_plan");
+
         let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
         let service_plan =
-            ServicePlan::create_transient(&rss_config, fake_sleds)
+            ServicePlan::create_transient(&logctx.log, &rss_config, fake_sleds)
                 .expect("failed to create service plan");
-
-        service_plan
-    }
-
-    #[test]
-    fn test_omicron_zone_configs() {
-        let service_plan = make_test_service_plan();
 
         // Verify the initial state.
         let g1 = Generation::new();
@@ -1949,6 +2097,8 @@ mod test {
             );
         }
         assert!(v6_nfound > v5_nfound);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -1961,7 +2111,7 @@ mod test {
 
         let rss_config = rack_initialize_request_test_config();
         let service_plan =
-            ServicePlan::create_transient(&rss_config, fake_sleds)
+            ServicePlan::create_transient(&logctx.log, &rss_config, fake_sleds)
                 .expect("created service plan");
 
         let blueprint = service_plan
@@ -1977,5 +2127,200 @@ mod test {
         }
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn parse_rack_initialization() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cannot access manifest directory");
+        let manifest = Utf8PathBuf::from(manifest);
+
+        let path =
+            manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+
+        let path = manifest
+            .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+    }
+
+    #[test]
+    fn parse_rack_initialization_weak_hash() {
+        let config = r#"
+            bootstrap_discovery.type = "only_ours"
+            ntp_servers = [ "ntp.eng.oxide.computer" ]
+            dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            external_dns_zone_name = "oxide.test"
+
+            [[internal_services_ip_pool_ranges]]
+            first = "192.168.1.20"
+            last = "192.168.1.22"
+
+            [recovery_silo]
+            silo_name = "recovery"
+            user_name = "recovery"
+            user_password_hash = "$argon2i$v=19$m=16,t=2,p=1$NVR0a2QxVXNiQjlObFJXbA$iGFJWOlUqN20B8KR4Fsmrg"
+        "#;
+
+        let error = toml::from_str::<RackInitializeRequest>(config)
+            .expect_err("unexpectedly parsed with bad password hash");
+        println!("found error: {}", error);
+        assert!(error.to_string().contains(
+            "password hash: algorithm: expected argon2id, found argon2i"
+        ));
+    }
+
+    #[test]
+    fn test_subnets() {
+        let cfg = RackInitializeRequest {
+            trust_quorum_peers: None,
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
+            ntp_servers: vec![String::from("test.pool.example.com")],
+            dns_servers: vec!["1.1.1.1".parse().unwrap()],
+            external_dns_zone_name: String::from("oxide.test"),
+            internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
+                Ipv4Addr::new(129, 168, 1, 20),
+            ))],
+            external_dns_ips: vec![],
+            external_certificates: vec![],
+            recovery_silo: RecoverySiloConfig {
+                silo_name: "test-silo".parse().unwrap(),
+                user_name: "dummy".parse().unwrap(),
+                // This is a hash for the password "oxide".  It doesn't matter,
+                // though; it's not used.
+                user_password_hash:
+                    "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+                     ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                        .parse()
+                        .unwrap(),
+            },
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Net::new(
+                    "fd00:1122:3344:0100::".parse().unwrap(),
+                    RACK_PREFIX,
+                )
+                .unwrap(),
+                infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                ports: Vec::new(),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
+            },
+            allowed_source_ips: AllowedSourceIps::Any,
+        };
+
+        assert_eq!(
+            omicron_common::address::Ipv6Subnet::<AZ_PREFIX>::new(
+                //              Masked out in AZ Subnet
+                //              vv
+                "fd00:1122:3344:0000::".parse::<Ipv6Addr>().unwrap(),
+            ),
+            cfg.az_subnet()
+        );
+        assert_eq!(
+            omicron_common::address::Ipv6Subnet::<RACK_PREFIX>::new(
+                //              Shows up from Rack Subnet
+                //              vv
+                "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
+            ),
+            cfg.rack_subnet()
+        );
+        assert_eq!(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+                //                0th Sled Subnet
+                //                vv
+                "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
+            ),
+            cfg.sled_subnet(0)
+        );
+        assert_eq!(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+                //                1st Sled Subnet
+                //                vv
+                "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
+            ),
+            cfg.sled_subnet(1)
+        );
+        assert_eq!(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+                //                Last Sled Subnet
+                //                vv
+                "fd00:1122:3344:01ff::".parse::<Ipv6Addr>().unwrap(),
+            ),
+            cfg.sled_subnet(255)
+        );
+    }
+
+    #[test]
+    fn test_extra_certs() {
+        // The stock non-Gimlet config has no TLS certificates.
+        let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let cfg =
+            rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
+                panic!(
+                    "failed to parse {:?}: {}",
+                    &path,
+                    InlineErrorChain::new(&e)
+                )
+            });
+        assert!(cfg.external_certificates.is_empty());
+
+        // Now let's create a configuration that does have an adjacent
+        // certificate and key.
+        let tempdir =
+            camino_tempfile::tempdir().expect("creating temporary directory");
+        println!("using temp path: {:?}", tempdir);
+
+        // Generate the certificate.
+        let domain = format!(
+            "{}.sys.{}",
+            cfg.external_dns_zone_name,
+            cfg.recovery_silo.silo_name.as_str(),
+        );
+        let cert = rcgen::generate_simple_self_signed(vec![domain.clone()])
+            .unwrap_or_else(|error| {
+                panic!(
+                    "generating certificate for domain {:?}: {}",
+                    domain, error
+                )
+            });
+
+        // Write the configuration file.
+        let cfg_path = tempdir.path().join("config-rss.toml");
+        let _ = std::fs::copy(&path, &cfg_path)
+            .with_context(|| {
+                format!("failed to copy file {:?} to {:?}", &path, &cfg_path)
+            })
+            .unwrap();
+
+        // Write the certificate.
+        let cert_bytes = cert
+            .serialize_pem()
+            .expect("serializing generated certificate")
+            .into_bytes();
+        let cert_path = tempdir.path().join("initial-tls-cert.pem");
+        std::fs::write(&cert_path, &cert_bytes)
+            .with_context(|| format!("failed to write to {:?}", &cert_path))
+            .unwrap();
+
+        // Write the private key.
+        let key_path = tempdir.path().join("initial-tls-key.pem");
+        let key_bytes = cert.serialize_private_key_pem().into_bytes();
+        std::fs::write(&key_path, &key_bytes)
+            .with_context(|| format!("failed to write to {:?}", &key_path))
+            .unwrap();
+
+        // Now try to load it all.
+        let read_cfg = rack_initialize_request_from_file(&cfg_path)
+            .expect("failed to read generated config with certificate");
+        assert_eq!(read_cfg.external_certificates.len(), 1);
+        let cert = read_cfg.external_certificates.first().unwrap();
+        let _ = rcgen::KeyPair::from_pem(&cert.key)
+            .expect("generated PEM did not parse as KeyPair");
     }
 }

@@ -141,6 +141,7 @@ pub use init::BackgroundTasksInitializer;
 pub(crate) use init::BackgroundTasksInternal;
 pub use nexus_background_task_interface::Activator;
 pub(crate) use tasks::blueprint_load::LoadedTargetBlueprint;
+pub use tasks::fm_sitrep_load::CurrentSitrep;
 pub use tasks::saga_recovery::SagaRecoveryHelpers;
 
 use futures::future::BoxFuture;
