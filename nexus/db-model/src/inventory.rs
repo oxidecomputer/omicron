@@ -504,17 +504,6 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
-impl From<InvCollection> for nexus_types::inventory::CollectionMetadata {
-    fn from(inv: InvCollection) -> Self {
-        let InvCollection { id, time_started, time_done, collector: _ } = inv;
-        nexus_types::inventory::CollectionMetadata {
-            id: id.into(),
-            time_started,
-            time_done,
-        }
-    }
-}
-
 /// See [`sled_hardware_types::BaseboardId`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq, Eq)]
 #[diesel(table_name = hw_baseboard_id)]

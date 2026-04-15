@@ -4,7 +4,6 @@
 
 use crate::deployment::PlanningReport;
 use crate::external_api::alert;
-use crate::inventory::CollectionMetadata;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -922,11 +921,12 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
+    use crate::fm::analysis_reports;
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         pub errors: Vec<String>,
-        pub report: crate::fm::analysis_reports::InputReport,
+        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -936,12 +936,10 @@ pub mod fm_analysis {
         /// collection has been loaded.
         WaitingForInventory,
 
-        /// Fault management analysis was not performed because the loaded
-        /// inventory collection is not strictly newer than the collection
-        /// used to produce the parent sitrep.
-        InventoryStale {
-            parent_inv: CollectionMetadata,
-            loaded_inv: CollectionMetadata,
+        WaitingForNewerInventory {
+            parent_inv_id: CollectionUuid,
+            next_inv_min_time_started: DateTime<Utc>,
+            input_inv_time_started: DateTime<Utc>,
         },
 
         /// Preparing analysis input failed.

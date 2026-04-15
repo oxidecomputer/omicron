@@ -7123,6 +7123,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-error-chain",
+ "thiserror 2.0.18",
  "typed-rng",
 ]
 

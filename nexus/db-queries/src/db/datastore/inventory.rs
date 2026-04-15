@@ -93,7 +93,6 @@ use nexus_db_schema::enums::{
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::CollectionMetadata;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
@@ -2744,31 +2743,6 @@ impl DataStore {
         id: CollectionUuid,
     ) -> Result<Collection, Error> {
         self.inventory_collection_read_batched(opctx, id, SQL_BATCH_SIZE).await
-    }
-
-    /// Read only the metadata for the given collection ID, without loading the
-    /// complete inventory collection.
-    ///
-    /// Returns `Ok(None)` if no collection with the specified ID exists.
-    pub async fn inventory_collection_read_metadata(
-        &self,
-        opctx: &OpContext,
-        id: CollectionUuid,
-    ) -> Result<Option<CollectionMetadata>, Error> {
-        use nexus_db_schema::schema::inv_collection::dsl;
-
-        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        let metadata = dsl::inv_collection
-            .filter(dsl::id.eq(id.into_untyped_uuid()))
-            .select(InvCollection::as_select())
-            .first_async(&*conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .map(CollectionMetadata::from);
-        Ok(metadata)
     }
 
     /// Attempt to read the current collection with the provided batch size.

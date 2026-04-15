@@ -7,6 +7,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use anyhow::Context;
 use chrono::Utc;
+use fm::analysis_input::InvalidInputs;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -106,99 +107,51 @@ impl FmAnalysis {
             .collect(),
         );
 
-        // First, ensure that we are operating on an inventory collection which
-        // is newer than the inventory included in the parent sitrep. It is
-        // necessary to check for this because *this Nexus*'s `inventory_load`
-        // background task may be have loaded an older inventory collection than
-        // the Nexus that produced the parent sitrep, and we wish to avoid
-        // generating a sitrep with stale inventory data, since this could cause
-        // us to output a sitrep based on an earlier state of the system than
-        // the current one.
-        let parent_inv_id =
-            parent_sitrep.as_ref().map(|s| s.1.metadata.inv_collection_id);
-        if let Some(parent_inv_id) = parent_inv_id
-            && parent_inv_id != inv_collection_id
-        {
-            let loaded_inv = inv.metadata();
-            match self
-                .datastore
-                .inventory_collection_read_metadata(&opctx, parent_inv_id)
-                .await
-            {
-                // If the loaded inventory collection is not strictly newer than
-                // the parent sitrep's inventory collection (i.e. collecting it
-                // started after the parent collection finished), we must wait
-                // for a newer collection to be loaded before performing
-                // analysis.
-                Ok(Some(parent_inv))
-                    if !loaded_inv.is_strictly_newer_than(&parent_inv) =>
-                {
-                    slog::info!(
-                        opctx.log,
-                        "refusing to perform fault management analysis based \
-                         on an inventory collection that is older than the \
-                         collection in the parent sitrep";
-                        "inv_collection_time_started" =>
-                            %loaded_inv.time_started,
-                        "inv_collection_time_done" => %loaded_inv.time_done,
-                        "parent_inv_id" => %parent_inv.id,
-                        "parent_inv_time_started" =>  %parent_inv.time_started,
-                        "parent_inv_time_done" =>  %parent_inv.time_done,
-                    );
-                    // Activate the inventory loader so that it will
-                    // (hopefully) load a newer collection.
-                    self.activators.inventory_loader.activate();
-                    return FmAnalysisStatus {
-                        parent_sitrep_id,
-                        inv_collection_id: Some(inv_collection_id),
-                        outcome: status::Outcome::InventoryStale {
-                            parent_inv,
-                            loaded_inv,
-                        },
-                    };
-                }
-                // Otherwise, the loaded inventory collection is newer than the
-                // one in the parent sitrep. This is the case if
-                // `inventory_collection_read_metadata` returns `None`, since if
-                // the parent sitrep's inventory collection has been garbage
-                // collected, it is definitely older than the loaded one.
-                Ok(_) => {}
-                Err(error) => {
-                    let error = InlineErrorChain::new(&error);
-                    const MSG: &str = "failed to read parent sitrep's \
-                         inventory collection metadata";
-                    slog::error!(
-                        opctx.log,
-                        "{MSG}";
-                        "parent_inv_id" => %parent_inv_id,
-                        &error,
-                    );
-                    return FmAnalysisStatus {
-                        parent_sitrep_id,
-                        inv_collection_id: Some(inv_collection_id),
-                        outcome: status::Outcome::PreparationError(format!(
-                            "{MSG}: {error}"
-                        )),
-                    };
-                }
-            }
-        }
-
         // Prepare analysis inputs.
         let (inputs, prep_status) = match self
             .prepare_inputs(&opctx, parent_sitrep, inv)
             .await
         {
             Ok(inputs) => inputs,
-            Err(err) => {
+            Err(PreparationError::Other(err)) => {
                 let error = InlineErrorChain::new(&*err);
-                slog::error!(opctx.log, "preparing analysis inputs failed"; &error);
+                slog::error!(
+                    opctx.log,
+                    "fault management analysis preparation failed";
+                    &error,
+                );
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
                     outcome: status::Outcome::PreparationError(
                         error.to_string(),
                     ),
+                };
+            }
+            Err(PreparationError::InvalidInputs(
+                InvalidInputs::InventoryStale {
+                    parent_inv_id,
+                    next_inv_min_time_started,
+                    input_inv_time_started,
+                },
+            )) => {
+                slog::info!(
+                    opctx.log,
+                    "fault management analysis: waiting for a newer inventory \
+                     to be loaded";
+                    "parent_sitrep_inv_id" => %parent_inv_id,
+                    "next_inv_min_time_started" => %next_inv_min_time_started,
+                    "input_inv_time_started" => %input_inv_time_started,
+                );
+                self.activators.inventory_loader.activate();
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: Some(inv_collection_id),
+                    outcome: status::Outcome::WaitingForNewerInventory {
+                        parent_inv_id,
+                        next_inv_min_time_started,
+                        input_inv_time_started,
+                    },
                 };
             }
         };
@@ -221,10 +174,12 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
-    ) -> anyhow::Result<(fm::analysis_input::Input, status::PreparationStatus)>
-    {
+    ) -> Result<
+        (fm::analysis_input::Input, status::PreparationStatus),
+        PreparationError,
+    > {
         let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep, inv);
+            fm::analysis_input::Input::builder(parent_sitrep, inv)?;
         let mut errors = Vec::new();
         self.load_new_ereports(opctx, &mut builder, &mut errors)
             .await
@@ -374,6 +329,14 @@ impl FmAnalysis {
             }
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum PreparationError {
+    #[error(transparent)]
+    InvalidInputs(#[from] InvalidInputs),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 #[cfg(test)]
