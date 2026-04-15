@@ -4,6 +4,6 @@
 
 //! Version `ADD_HEALTHY_SYSTEM_TO_UPDATE_STATUS` of the Nexus external API.
 //!
-//! Adds a `healthy_system` boolean field to the `UpdateStatus` response type.
+//! Adds a `is_system_healthy` boolean field to the `UpdateStatus` response type.
 
 pub mod update;
