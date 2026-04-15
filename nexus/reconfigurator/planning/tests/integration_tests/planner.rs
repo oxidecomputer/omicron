@@ -5055,7 +5055,7 @@ fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitName {
         ZoneKind::Clickhouse
         | ZoneKind::ClickhouseKeeper
         | ZoneKind::ClickhouseServer => {
-            "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
+            "ClickHouse"
         }
         ZoneKind::CockroachDb => "Cockroach",
         ZoneKind::Crucible => "Crucible",

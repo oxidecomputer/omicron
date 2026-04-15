@@ -8,7 +8,7 @@ producer = "Host OS"
 
 [[edges]]
 consumer = "Nexus"
-producer = "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
+producer = "ClickHouse"
 
 [[edges]]
 consumer = "Nexus"

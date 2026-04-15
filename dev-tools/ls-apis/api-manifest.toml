@@ -100,11 +100,16 @@ packages = [ "crucible-pantry" ]
 name = "Cockroach"
 packages = [ "omicron-cockroach-admin" ]
 
-# These are really three distinct deployment units, but they behave the same for
-# our purposes, and the tooling doesn't support multiple deployment units
-# that each expose a particular service.
+# This is really three distinct deployment units:
+#
+# * single-node ClickHouse
+# * multi-node ClickHouse Server
+# * multi-node ClickHouse Keeper
+#
+# but they behave the same for our purposes, and the tooling doesn't support
+# multiple deployment units that each expose a particular service.
 [[deployment_units]]
-name = "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
+name = "ClickHouse"
 packages = [ "omicron-clickhouse-admin" ]
 
 [[deployment_units]]
