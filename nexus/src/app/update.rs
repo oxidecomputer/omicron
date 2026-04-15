@@ -239,6 +239,8 @@ impl super::Nexus {
             components_by_release_version,
             time_last_step_planned,
             suspended,
+            // TODO-K: Replace with real health check logic.
+            is_system_healthy: true,
         })
     }
 

@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_15_00, ADD_HEALTHY_SYSTEM_TO_UPDATE_STATUS),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
@@ -6971,10 +6972,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/update/status",
         tags = ["system/update"],
+        versions = VERSION_ADD_HEALTHY_SYSTEM_TO_UPDATE_STATUS..,
     }]
     async fn system_update_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::update::UpdateStatus>, HttpError>;
+
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
+    #[endpoint {
+        operation_id = "system_update_status",
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+        versions = ..VERSION_ADD_HEALTHY_SYSTEM_TO_UPDATE_STATUS,
+    }]
+    async fn system_update_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::update::UpdateStatus>, HttpError>
+    {
+        Ok(Self::system_update_status(rqctx)
+            .await?
+            .map(v2025_11_20_00::update::UpdateStatus::from))
+    }
 
     // Silo users
 
