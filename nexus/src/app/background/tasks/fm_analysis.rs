@@ -348,7 +348,6 @@ mod tests {
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::SitrepUuid;
 
     fn activators() -> Activators {
@@ -363,9 +362,9 @@ mod tests {
         a
     }
 
-    /// Create a [`CurrentSitrep`] whose metadata references the given
-    /// inventory collection ID.
-    fn make_current_sitrep(inv_collection_id: CollectionUuid) -> CurrentSitrep {
+    /// Create a `CurrentSitrep` as though it was produced from the given
+    /// inventory collection.
+    fn make_current_sitrep(inv: &inventory::Collection) -> CurrentSitrep {
         let id = SitrepUuid::new_v4();
         Arc::new((
             SitrepVersion { id, version: 1, time_made_current: Utc::now() },
@@ -373,7 +372,8 @@ mod tests {
                 metadata: SitrepMetadata {
                     id,
                     parent_sitrep_id: None,
-                    inv_collection_id,
+                    inv_collection_id: inv.id,
+                    next_inv_min_time_started: inv.time_done,
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
@@ -415,31 +415,16 @@ mod tests {
             newer.time_started + chrono::Duration::milliseconds(500);
         overlapping.time_done = newer.time_done + chrono::Duration::seconds(1);
 
-        // Insert all three into the database so that
-        // `inventory_collection_read_metadata` can find them.
-        datastore
-            .inventory_insert_collection(opctx, &older)
-            .await
-            .expect("inserted older collection");
-        datastore
-            .inventory_insert_collection(opctx, &newer)
-            .await
-            .expect("inserted newer collection");
-        datastore
-            .inventory_insert_collection(opctx, &overlapping)
-            .await
-            .expect("inserted overlapping collection");
-
         let older = Arc::new(older);
         let newer = Arc::new(newer);
         let overlapping = Arc::new(overlapping);
 
-        // If our "currently loaded" inventory was collected before the one in
-        // the parent sitrep, we should refuse to run analysis and return
-        // `InventoryStale`.
+        // If our "currently loaded" inventory started before the parent
+        // sitrep's `next_inv_min_time_started`, we should refuse to run
+        // analysis and return `WaitingForNewerInventory`.
         {
             let (_sitrep_tx, sitrep_rx) =
-                watch::channel(Some(make_current_sitrep(newer.id)));
+                watch::channel(Some(make_current_sitrep(&newer)));
             let (_inv_tx, inv_rx) = watch::channel(Some(older.clone()));
             let mut task = FmAnalysis::new(
                 datastore.clone(),
@@ -452,19 +437,26 @@ mod tests {
             let result = task.actually_activate(opctx).await;
             assert_eq!(result.inv_collection_id, Some(older.id));
             match &result.outcome {
-                status::Outcome::InventoryStale { parent_inv, loaded_inv } => {
-                    assert_eq!(parent_inv.id, newer.id);
-                    assert_eq!(loaded_inv.id, older.id);
+                status::Outcome::WaitingForNewerInventory {
+                    parent_inv_id,
+                    next_inv_min_time_started,
+                    input_inv_time_started,
+                } => {
+                    assert_eq!(*parent_inv_id, newer.id);
+                    assert_eq!(*next_inv_min_time_started, newer.time_done,);
+                    assert_eq!(*input_inv_time_started, older.time_started,);
                 }
-                other => panic!("expected InventoryStale, got {other:?}"),
+                other => {
+                    panic!("expected WaitingForNewerInventory, got {other:?}")
+                }
             }
         }
 
-        // If the parent sitrep's inventory collection is strictly newer than
-        // the one in the parent sitrep, analysis should proceed.
+        // If the loaded inventory collection started at or after the parent
+        // sitrep's `next_inv_min_time_started`, analysis should proceed.
         {
             let (_sitrep_tx, sitrep_rx) =
-                watch::channel(Some(make_current_sitrep(older.id)));
+                watch::channel(Some(make_current_sitrep(&older)));
             let (_inv_tx, inv_rx) = watch::channel(Some(newer.clone()));
             let mut task = FmAnalysis::new(
                 datastore.clone(),
@@ -479,38 +471,9 @@ mod tests {
             assert!(
                 !matches!(
                     &result.outcome,
-                    status::Outcome::InventoryStale { .. }
+                    status::Outcome::WaitingForNewerInventory { .. }
                 ),
                 "expected analysis to proceed, got: {:?}",
-                result.outcome,
-            );
-        }
-
-        // If the parent sitrep references an inventory collection ID that no
-        // longer exists in the database, we assume that it has been deleted and
-        // must therefore be older than ours.
-        {
-            let parent_inv_id = CollectionUuid::new_v4();
-            let (_sitrep_tx, sitrep_rx) =
-                watch::channel(Some(make_current_sitrep(parent_inv_id)));
-            let (_inv_tx, inv_rx) = watch::channel(Some(older.clone()));
-            let mut task = FmAnalysis::new(
-                datastore.clone(),
-                sitrep_rx,
-                inv_rx,
-                activators(),
-                OmicronZoneUuid::new_v4(),
-            );
-
-            let result = task.actually_activate(opctx).await;
-            assert_eq!(result.inv_collection_id, Some(older.id));
-            assert!(
-                !matches!(
-                    &result.outcome,
-                    status::Outcome::InventoryStale { .. }
-                ),
-                "expected analysis to proceed when parent sitrep's inventory \
-                 collection does not exist in CRDB, got: {:?}",
                 result.outcome,
             );
         }
@@ -533,7 +496,7 @@ mod tests {
             assert!(
                 !matches!(
                     &result.outcome,
-                    status::Outcome::InventoryStale { .. }
+                    status::Outcome::WaitingForNewerInventory { .. }
                 ),
                 "expected analysis to proceed with no parent sitrep, \
                  got: {:?}",
@@ -547,7 +510,7 @@ mod tests {
         // inventory change...)
         {
             let (_sitrep_tx, sitrep_rx) =
-                watch::channel(Some(make_current_sitrep(older.id)));
+                watch::channel(Some(make_current_sitrep(&older)));
             let (_inv_tx, inv_rx) = watch::channel(Some(older.clone()));
             let mut task = FmAnalysis::new(
                 datastore.clone(),
@@ -562,7 +525,7 @@ mod tests {
             assert!(
                 !matches!(
                     &result.outcome,
-                    status::Outcome::InventoryStale { .. }
+                    status::Outcome::WaitingForNewerInventory { .. }
                 ),
                 "expected analysis to proceed with same inventory \
                  collection ID, got: {:?}",
@@ -576,7 +539,7 @@ mod tests {
         // newer, so we should refuse to run analysis.
         {
             let (_sitrep_tx, sitrep_rx) =
-                watch::channel(Some(make_current_sitrep(newer.id)));
+                watch::channel(Some(make_current_sitrep(&newer)));
             let (_inv_tx, inv_rx) = watch::channel(Some(overlapping.clone()));
             let mut task = FmAnalysis::new(
                 datastore.clone(),
@@ -589,13 +552,21 @@ mod tests {
             let result = task.actually_activate(opctx).await;
             assert_eq!(result.inv_collection_id, Some(overlapping.id));
             match &result.outcome {
-                status::Outcome::InventoryStale { parent_inv, loaded_inv } => {
-                    assert_eq!(parent_inv.id, newer.id);
-                    assert_eq!(loaded_inv.id, overlapping.id);
+                status::Outcome::WaitingForNewerInventory {
+                    parent_inv_id,
+                    next_inv_min_time_started,
+                    input_inv_time_started,
+                } => {
+                    assert_eq!(*parent_inv_id, newer.id);
+                    assert_eq!(*next_inv_min_time_started, newer.time_done,);
+                    assert_eq!(
+                        *input_inv_time_started,
+                        overlapping.time_started,
+                    );
                 }
                 other => panic!(
-                    "expected InventoryStale for overlapping collections, \
-                     got {other:?}"
+                    "expected WaitingForNewerInventory for overlapping \
+                     collections, got {other:?}"
                 ),
             }
         }

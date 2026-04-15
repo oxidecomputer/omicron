@@ -1634,6 +1634,7 @@ mod tests {
                     id: sitrep_id,
                     inv_collection_id: CollectionUuid::new_v4(),
                     parent_sitrep_id: None,
+                    next_inv_min_time_started: Utc::now(),
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep no capacity".to_string(),
                     time_created: Utc::now(),
