@@ -112,7 +112,8 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client = Client::new_with_resolver(native_resolver, &log);
+        let client =
+            Client::new_with_resolver(native_resolver, "clickhouse", &log);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -173,8 +174,12 @@ impl OximeterAgent {
             ..Default::default()
         };
 
-        let cluster_client =
-            Client::new_with_pool_policy(cluster_resolver, claim_policy, &log);
+        let cluster_client = Client::new_with_pool_policy(
+            cluster_resolver,
+            "clickhouse-cluster",
+            claim_policy,
+            &log,
+        );
 
         // Spawn the task for aggregating and inserting all metrics to a
         // replicated cluster ClickHouse installation
