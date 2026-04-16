@@ -9953,6 +9953,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
+ "oximeter-producer-api",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -9963,6 +9964,16 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "oximeter-producer-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot 0.16.7",
+ "omicron-workspace-hack",
+ "oximeter-types 0.1.0",
+ "oximeter-types-versions 0.1.0",
 ]
 
 [[package]]
