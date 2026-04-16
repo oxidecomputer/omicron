@@ -78,7 +78,7 @@ pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
 /// the future.
 ///
 /// This is used in the releng build process (which appends build metadata to
-/// produce the full version string) and by the system version API endpoint.
+/// produce the full version string) and by the API version endpoint.
 pub const RELEASE_VERSION: semver::Version = semver::Version::new(19, 0, 0);
 
 pub const OMICRON_DPD_TAG: &str = "omicron";

@@ -2197,6 +2197,34 @@
         }
       }
     },
+    "/v1/api-version": {
+      "get": {
+        "tags": [
+          "system/status"
+        ],
+        "summary": "Fetch API version",
+        "description": "Returns the version of the Oxide API currently being served, corresponding to a numbered Oxide release.",
+        "operationId": "api_version",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiVersion"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/auth-settings": {
       "get": {
         "tags": [
@@ -13418,34 +13446,6 @@
         }
       }
     },
-    "/v1/system/version": {
-      "get": {
-        "tags": [
-          "system/status"
-        ],
-        "summary": "Fetch system version",
-        "description": "Returns the current version of the Oxide software running on this system.",
-        "operationId": "system_version",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemVersion"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/timeseries/query": {
       "post": {
         "tags": [
@@ -16563,6 +16563,20 @@
             ]
           }
         }
+      },
+      "ApiVersion": {
+        "description": "The version of the Oxide API currently being served.",
+        "type": "object",
+        "properties": {
+          "version": {
+            "description": "The current API version, corresponding to a numbered Oxide release (e.g., `19.0.0` for release 19).",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        },
+        "required": [
+          "version"
+        ]
       },
       "AuditLogEntry": {
         "description": "Audit log entry",
@@ -29387,20 +29401,6 @@
         "required": [
           "interface_config_id",
           "vlan_id"
-        ]
-      },
-      "SystemVersion": {
-        "description": "The version of the Oxide software running on this system.",
-        "type": "object",
-        "properties": {
-          "version": {
-            "description": "The current system software version",
-            "type": "string",
-            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-          }
-        },
-        "required": [
-          "version"
         ]
       },
       "TargetRelease": {

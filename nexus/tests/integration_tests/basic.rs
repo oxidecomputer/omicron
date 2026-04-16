@@ -559,11 +559,11 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
+async fn test_api_version(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let version = NexusRequest::object_get(client, "/v1/system/version")
-        .execute_and_parse_unwrap::<system::SystemVersion>()
+    let version = NexusRequest::object_get(client, "/v1/api-version")
+        .execute_and_parse_unwrap::<system::ApiVersion>()
         .await;
     assert_eq!(version.version, omicron_common::RELEASE_VERSION);
 }

@@ -388,7 +388,7 @@ pub mod system {
     pub use crate::v2025_11_20_00::system::AllowListUpdate;
     pub use crate::v2025_11_20_00::system::Ping;
     pub use crate::v2025_11_20_00::system::PingStatus;
-    pub use crate::v2026_04_05_00::system::SystemVersion;
+    pub use crate::v2026_04_08_00::system::ApiVersion;
 }
 
 pub mod timeseries {

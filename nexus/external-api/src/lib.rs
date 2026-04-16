@@ -79,7 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_04_08_00, SYSTEM_VERSION),
+    (2026_04_08_00, API_VERSION),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
@@ -400,20 +400,20 @@ pub trait NexusExternalApi {
 
     // No auth required: this only returns hard-coded values.
 
-    /// Fetch system version
+    /// Fetch API version
     ///
-    /// Returns the current version of the Oxide software running on this
-    /// system.
+    /// Returns the version of the Oxide API currently being served,
+    /// corresponding to a numbered Oxide release.
     #[endpoint {
         method = GET,
-        path = "/v1/system/version",
+        path = "/v1/api-version",
         tags = ["system/status"],
-        versions = VERSION_SYSTEM_VERSION..,
+        versions = VERSION_API_VERSION..,
     }]
-    async fn system_version(
+    async fn api_version(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::system::SystemVersion>, HttpError> {
-        Ok(HttpResponseOk(latest::system::SystemVersion {
+    ) -> Result<HttpResponseOk<latest::system::ApiVersion>, HttpError> {
+        Ok(HttpResponseOk(latest::system::ApiVersion {
             version: omicron_common::RELEASE_VERSION,
         }))
     }

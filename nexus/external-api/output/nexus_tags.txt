@@ -324,8 +324,8 @@ user_builtin_view                        GET      /v1/system/users-builtin/{user
 
 API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
+api_version                              GET      /v1/api-version
 ping                                     GET      /v1/ping
-system_version                           GET      /v1/system/version
 
 API operations found with tag "system/subnet-pools"
 OPERATION ID                             METHOD   URL PATH
