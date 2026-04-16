@@ -3276,27 +3276,12 @@ impl ServiceManager {
         };
 
         info!(self.inner.log, "ensuring scrimlet uplinks");
-        let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
         let lsmfh = SmfHelper::new(
             &zone,
             &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
         );
 
-        // We want to delete all the properties in the `uplinks` group, but we
-        // don't know their names, so instead we'll delete and recreate the
-        // group, then add all our properties.
-        let _ = usmfh.delpropgroup("uplinks");
-        usmfh.addpropgroup("uplinks", "application")?;
-
         for port_config in &our_ports {
-            for addr in &port_config.addrs {
-                usmfh.addpropvalue_type(
-                    format!("uplinks/{}_0", port_config.port),
-                    addr.to_uplinkd_smf_property(),
-                    "astring",
-                )?;
-            }
-
             if let Some(lldp_config) = &port_config.lldp {
                 let group_name = format!("port_{}", port_config.port);
                 info!(self.inner.log, "setting up {group_name}");
@@ -3345,7 +3330,6 @@ impl ServiceManager {
                 }
             }
         }
-        usmfh.refresh()?;
         lsmfh.refresh()?;
 
         Ok(())
