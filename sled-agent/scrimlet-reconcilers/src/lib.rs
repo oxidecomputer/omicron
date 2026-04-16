@@ -43,6 +43,7 @@ mod reconciler_task;
 mod status;
 mod switch_zone_slot;
 mod switch_zone_underlay_ip;
+mod uplinkd_reconciler;
 
 pub use dpd_reconciler::DpdNatReconcilerStatusNatEntry;
 pub use dpd_reconciler::DpdNatReconcilerStatusNatEntryFailure;
@@ -67,3 +68,4 @@ pub use status::ReconciliationCompletedStatus;
 pub use status::ScrimletReconcilersStatus;
 pub use status::ScrimletStatus;
 pub use switch_zone_underlay_ip::ThisSledSwitchZoneUnderlayIpAddr;
+pub use uplinkd_reconciler::UplinkdReconcilerStatus;
