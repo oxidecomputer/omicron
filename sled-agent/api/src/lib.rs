@@ -21,7 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v33,
+    v24, v25, v26, v28, v29, v30, v31, v33, v34,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (35, ADD_FMD_TO_INVENTORY),
     (34, MODIFY_SVCS_TYPES),
     (33, BOOTSTORE_SERVICE_NAT),
     (32, MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL),
@@ -1019,11 +1020,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_MODIFY_SVCS_TYPES..,
+        versions = VERSION_ADD_FMD_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVCS_TYPES..VERSION_ADD_FMD_TO_INVENTORY,
+    }]
+    async fn inventory_v34(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v34::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v34::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1035,7 +1051,7 @@ pub trait SledAgentApi {
     async fn inventory_v28(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v28::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v34(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v28::inventory::Inventory::from(inv))
         })
     }

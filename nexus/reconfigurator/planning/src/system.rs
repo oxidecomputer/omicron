@@ -1505,6 +1505,7 @@ impl Sled {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: iddqd::IdOrdMap::new(),
+                fmd: None,
             }
         };
 
@@ -1689,6 +1690,7 @@ impl Sled {
             reference_measurements: inv_sled_agent
                 .reference_measurements
                 .clone(),
+            fmd: None,
         };
 
         Sled {
