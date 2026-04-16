@@ -885,8 +885,6 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     )
     .await
     .map_err(|e| {
-        // Do not match on `e.is_gone` here: if the ensure fails due to the sled
-        // being expunged, then the saga should unwind.
         saga_action_failed(Error::internal_error(&format!(
             "failed to issue VMM disk snapshot request: {}",
             InlineErrorChain::new(&e)

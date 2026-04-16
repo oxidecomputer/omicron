@@ -739,9 +739,6 @@ async fn sis_ensure_local_storage(
     )
     .await
     .map_err(|e| {
-        // Do not match on `e.is_gone` here: If the ensure retry loop bailed out
-        // due to a disk or sled being expunged, then we have to unwind the
-        // saga.
         saga_action_failed(Error::internal_error(&format!(
             "failed to ensure local storage: {}",
             InlineErrorChain::new(&e)

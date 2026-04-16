@@ -139,10 +139,6 @@ pub(crate) async fn call_pantry_attach_for_volume(
     let gone_check =
         || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    // Do not match on `e.is_gone` here: if the Pantry is gone, then return an
-    // error. The attach may have succeeded for one of the previous calls but if
-    // the retry loop bails out after determining that the Pantry is gone, that
-    // attachment is now gone too.
     ProgenitorOperationRetry::new(attach_operation, gone_check)
         .run(log)
         .await
