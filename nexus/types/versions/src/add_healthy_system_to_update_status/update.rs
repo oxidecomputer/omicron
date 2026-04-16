@@ -51,11 +51,11 @@ pub struct UpdateStatus {
 
     /// Whether the system is healthy
     ///
-    /// This is a high-level indicator of overall system health. When true, all
-    /// components are operating normally. When false, one or more components
-    /// may be experiencing issues. During an update, it is normal for the
-    /// system to show as "unhealthy". If the system appears unhealthy before or
-    /// after an update has ocurred, please contact support.
+    /// This is a rough high-level indicator of overall system health. When true,
+    /// a subset of components are operating normally. When false, one or more
+    /// components from that subset may be experiencing issues. During an update,
+    /// it is normal for the system to show as "unhealthy". If the system appears
+    /// unhealthy before or after an update has ocurred, please contact support.
     pub is_system_healthy: bool,
 }
 

@@ -29750,7 +29750,7 @@
             }
           },
           "is_system_healthy": {
-            "description": "Whether the system is healthy\n\nThis is a high-level indicator of overall system health. When true, all components are operating normally. When false, one or more components may be experiencing issues. During an update, it is normal for the system to show as \"unhealthy\". If the system appears unhealthy before or after an update has ocurred, please contact support.",
+            "description": "Whether the system is healthy\n\nThis is a rough high-level indicator of overall system health. When true, a subset of components are operating normally. When false, one or more components from that subset may be experiencing issues. During an update, it is normal for the system to show as \"unhealthy\". If the system appears unhealthy before or after an update has ocurred, please contact support.",
             "type": "boolean"
           },
           "suspended": {
