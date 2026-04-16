@@ -432,6 +432,12 @@ impl PortManager {
                 nic.kind,
             );
 
+            // NOTE: We may add external IPs below, which can fail. If that
+            // does, we drop the `ticket` on the way out of this block. That
+            // attempts to acquire this lock, in order to remove itself on drop.
+            // We need to drop the lock before that, to avoid a deadlock.
+            drop(ports);
+
             // Ports for Probes/Services cannot have EIP<->IGW mappings filled
             // in dynamically today, so to keep use of their EIPs working we
             // leave them untagged at both the `nat` and `router` layer.
