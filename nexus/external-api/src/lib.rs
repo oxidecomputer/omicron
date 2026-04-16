@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_15_00, IP_POOL_LIST_FILTERS),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
@@ -1277,12 +1278,36 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_IP_POOL_LIST_FILTERS..,
     }]
     async fn system_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
+        filter_params: Query<latest::ip_pool::IpPoolListFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::ip_pool::IpPool>>, HttpError>;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "system_ip_pool_list",
+        method = GET,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_IP_POOL_LIST_FILTERS,
+    }]
+    async fn system_ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_list(
+            rqctx,
+            query_params,
+            latest::ip_pool::IpPoolListFilter::default().into(),
+        )
+        .await
+    }
 
     /// List IP pools
     #[endpoint {
@@ -1299,7 +1324,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
         HttpError,
     > {
-        Self::system_ip_pool_list(rqctx, query_params).await
+        Self::system_ip_pool_list_v2026_02_09_00(rqctx, query_params).await
     }
 
     /// Create IP pool

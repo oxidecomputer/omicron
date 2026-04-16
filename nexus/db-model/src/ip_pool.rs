@@ -16,6 +16,7 @@ use nexus_db_schema::schema::ip_pool;
 use nexus_db_schema::schema::ip_pool_range;
 use nexus_db_schema::schema::ip_pool_resource;
 use nexus_types::external_api::ip_pool as ip_pool_types;
+use nexus_types::external_api::ip_pool::IpPoolListFilter;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use std::net::IpAddr;
@@ -421,4 +422,19 @@ impl DatastoreCollectionConfig<IpPoolRange> for IpPool {
     type GenerationNumberColumn = ip_pool::dsl::rcgen;
     type CollectionTimeDeletedColumn = ip_pool::dsl::time_deleted;
     type CollectionIdColumn = ip_pool_range::dsl::ip_pool_id;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IpPoolListFilters {
+    pub ip_version: Option<IpVersion>,
+    pub delegated_for_internal_use: Option<bool>,
+}
+
+impl From<IpPoolListFilter> for IpPoolListFilters {
+    fn from(value: IpPoolListFilter) -> Self {
+        Self {
+            ip_version: value.ip_version.map(Into::into),
+            delegated_for_internal_use: value.delegated_for_internal_use,
+        }
+    }
 }
