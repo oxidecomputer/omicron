@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
@@ -15,6 +18,8 @@ colored.workspace = true
 daft.workspace = true
 iddqd.workspace = true
 omicron-repl-utils.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 reedline.workspace = true
 reconfigurator-cli.workspace = true
 serde_json.workspace = true

@@ -25,6 +25,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -131,6 +132,7 @@ pub struct CollectionBuilder {
     cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+    stale_sagas: IdOrdMap<InventoryStaleSaga>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -165,6 +167,7 @@ impl CollectionBuilder {
             cockroach_status: BTreeMap::new(),
             ntp_timesync: IdOrdMap::new(),
             internal_dns_generation_status: IdOrdMap::new(),
+            stale_sagas: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -192,6 +195,7 @@ impl CollectionBuilder {
             cockroach_status: self.cockroach_status,
             ntp_timesync: self.ntp_timesync,
             internal_dns_generation_status: self.internal_dns_generation_status,
+            stale_sagas: self.stale_sagas,
         }
     }
 
@@ -695,6 +699,17 @@ impl CollectionBuilder {
         membership: ClickhouseKeeperClusterMembership,
     ) {
         self.clickhouse_keeper_cluster_membership.insert(membership);
+    }
+
+    /// Record information about a long running saga
+    pub fn found_stale_saga(
+        &mut self,
+        saga: InventoryStaleSaga,
+    ) -> Result<(), anyhow::Error> {
+        self.stale_sagas
+            .insert_unique(saga)
+            .map_err(|err| err.into_owned())
+            .context("stale saga reported multiple times")
     }
 
     /// Record information about timesync

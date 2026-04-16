@@ -149,6 +149,54 @@ where
 }
 
 impl_enum_type!(
+    StaleSagaStateEnum:
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum StaleSagaState;
+
+    Running => b"running"
+    Unwinding => b"unwinding"
+);
+
+impl From<StaleSagaState> for SagaState {
+    fn from(value: StaleSagaState) -> Self {
+        match value {
+            StaleSagaState::Running => Self::Running,
+            StaleSagaState::Unwinding => Self::Unwinding,
+        }
+    }
+}
+
+impl From<nexus_types::inventory::StaleSagaState> for StaleSagaState {
+    fn from(value: nexus_types::inventory::StaleSagaState) -> Self {
+        match value {
+            nexus_types::inventory::StaleSagaState::Running => Self::Running,
+            nexus_types::inventory::StaleSagaState::Unwinding => {
+                Self::Unwinding
+            }
+        }
+    }
+}
+
+impl From<StaleSagaState> for nexus_types::inventory::StaleSagaState {
+    fn from(value: StaleSagaState) -> Self {
+        match value {
+            StaleSagaState::Running => Self::Running,
+            StaleSagaState::Unwinding => Self::Unwinding,
+        }
+    }
+}
+
+impl_enum_type!(
     SagaStateEnum:
 
     #[derive(
@@ -177,6 +225,21 @@ impl SagaState {
     /// Abandoned have been explicitly opted out of being recovered.
     pub const RECOVERY_CANDIDATE_STATES: &'static [Self] =
         &[Self::Running, Self::Unwinding];
+}
+
+impl TryFrom<SagaState> for nexus_types::inventory::StaleSagaState {
+    type Error = String;
+
+    fn try_from(value: SagaState) -> Result<Self, Self::Error> {
+        match value {
+            SagaState::Running => Ok(Self::Running),
+            SagaState::Unwinding => Ok(Self::Unwinding),
+            other => Err(format!(
+                "cannot convert SagaState::{other:?} to StaleSagaState \
+                 (only Running and Unwinding are valid)"
+            )),
+        }
+    }
 }
 
 impl From<steno::SagaCachedState> for SagaState {

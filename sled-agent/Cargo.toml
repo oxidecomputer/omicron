@@ -8,6 +8,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -76,6 +79,8 @@ oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
 oxnet.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 propolis-client.workspace = true
 propolis-mock-server.workspace = true # Only used by the simulated sled agent
 propolis_api_types.workspace = true

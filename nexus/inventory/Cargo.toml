@@ -7,13 +7,19 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
+async-bb8-diesel.workspace = true
 base64.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clickhouse-admin-keeper-client.workspace = true
+diesel.workspace = true
 dns-service-client.workspace = true
+dropshot.workspace = true
 clickhouse-admin-server-client.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-types.workspace = true
@@ -25,10 +31,15 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 itertools.workspace = true
 sled-agent-types-versions.workspace = true
+nexus-db-queries.workspace = true
+nexus-db-model.workspace = true
+nexus-db-schema.workspace = true
 nexus-types.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 reqwest.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
@@ -51,6 +62,7 @@ expectorate.workspace = true
 gateway-test-utils.workspace = true
 httpmock.workspace = true
 nexus-client.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
 omicron-sled-agent.workspace = true
 regex.workspace = true
 tokio.workspace = true

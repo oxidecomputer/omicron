@@ -39,7 +39,7 @@ use uuid::Uuid;
 
 use crate::inventory::{
     CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
+    InventoryStaleSaga, PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -52,6 +52,7 @@ pub struct CollectionDisplay<'a> {
     include_cockroach_status: bool,
     include_ntp_status: bool,
     include_internal_dns_status: bool,
+    include_stale_sagas: bool,
     long_string_formatter: LongStringFormatter,
 }
 
@@ -67,6 +68,7 @@ impl<'a> CollectionDisplay<'a> {
             include_cockroach_status: true,
             include_ntp_status: true,
             include_internal_dns_status: true,
+            include_stale_sagas: true,
             long_string_formatter: LongStringFormatter::new(),
         }
     }
@@ -134,6 +136,15 @@ impl<'a> CollectionDisplay<'a> {
         self
     }
 
+    /// Control display of stale saga information (defaults to true).
+    pub fn include_stale_sagas(
+        &mut self,
+        include_stale_sagas: bool,
+    ) -> &mut Self {
+        self.include_stale_sagas = include_stale_sagas;
+        self
+    }
+
     /// Show long strings (defaults to false).
     pub fn show_long_strings(&mut self, show_long_strings: bool) -> &mut Self {
         self.long_string_formatter.show_long_strings = show_long_strings;
@@ -154,6 +165,7 @@ impl<'a> CollectionDisplay<'a> {
             .include_cockroach_status(filter.include_cockroach_status())
             .include_ntp_status(filter.include_ntp_status())
             .include_internal_dns_status(filter.include_internal_dns_status())
+            .include_stale_sagas(filter.include_stale_sagas())
     }
 }
 
@@ -188,6 +200,9 @@ impl fmt::Display for CollectionDisplay<'_> {
                 &self.collection.internal_dns_generation_status,
                 f,
             )?;
+        }
+        if self.include_stale_sagas {
+            display_stale_sagas(&self.collection.stale_sagas, f)?;
         }
 
         if nerrors > 0 {
@@ -272,6 +287,14 @@ impl CollectionDisplayCliFilter {
     }
 
     fn include_internal_dns_status(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
+    }
+
+    fn include_stale_sagas(&self) -> bool {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
@@ -1049,6 +1072,58 @@ fn display_boot_partition_contents(
         Err(err) => {
             writeln!(f, "slot B details UNAVAILABLE: {err}")?;
         }
+    }
+
+    Ok(())
+}
+
+fn display_stale_sagas(
+    stale_sagas: &IdOrdMap<InventoryStaleSaga>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    writeln!(f, "\nSTALE SAGAS")?;
+    let mut f = IndentWriter::new("    ", f);
+
+    if stale_sagas.is_empty() {
+        writeln!(
+            f,
+            "No sagas have been running or unwinding for longer than 15 minutes"
+        )?;
+    } else {
+        writeln!(
+            f,
+            "Found {} running or unwinding for longer than 15 minutes",
+            stale_sagas.len()
+        )?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct StaleSagaRow {
+            name: String,
+            id: String,
+            state: String,
+            creator: String,
+            current_sec: String,
+            time_created: String,
+        }
+
+        let rows = stale_sagas.iter().map(|s| StaleSagaRow {
+            name: s.name.clone(),
+            id: s.saga_id.to_string(),
+            state: s.state.to_string(),
+            creator: s.creator.to_string(),
+            current_sec: s
+                .current_sec
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            time_created: s.time_created.to_string(),
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
+            .to_string();
+
+        writeln!(f, "{table}")?;
     }
 
     Ok(())

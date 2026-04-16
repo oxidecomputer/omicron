@@ -7,6 +7,7 @@
 use crate::ArtifactHash;
 use crate::Generation;
 use crate::PhysicalDiskKind;
+use crate::StaleSagaState;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::to_db_typed_uuid;
@@ -45,11 +46,13 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
-    inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
-    inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
-    inv_zpool, sw_caboose, sw_root_of_trust_page,
+    inv_stale_saga, inv_svc_enabled_not_online,
+    inv_svc_enabled_not_online_parse_error, inv_svc_enabled_not_online_service,
+    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
@@ -72,6 +75,9 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SagaCreatorKind;
+use omicron_uuid_kinds::SagaKind;
+use omicron_uuid_kinds::SagaSecKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
@@ -3484,6 +3490,51 @@ impl From<InvInternalDns> for InternalDnsGenerationStatus {
         Self {
             zone_id: value.zone_id.into(),
             generation: value.generation.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_stale_saga)]
+pub struct InvStaleSaga {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub creator: DbTypedUuid<SagaCreatorKind>,
+    pub current_sec: Option<DbTypedUuid<SagaSecKind>>,
+    pub name: String,
+    pub saga_id: DbTypedUuid<SagaKind>,
+    pub state: StaleSagaState,
+    pub time_created: DateTime<Utc>,
+    pub time_collected: DateTime<Utc>,
+}
+
+impl InvStaleSaga {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        saga: &InventoryStaleSaga,
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            creator: saga.creator.into(),
+            current_sec: saga.current_sec.map(Into::into),
+            name: saga.name.clone(),
+            saga_id: saga.saga_id.into(),
+            state: saga.state.clone().into(),
+            time_created: saga.time_created,
+            time_collected: saga.time_collected,
+        })
+    }
+}
+
+impl From<InvStaleSaga> for InventoryStaleSaga {
+    fn from(value: InvStaleSaga) -> Self {
+        Self {
+            creator: value.creator.into(),
+            current_sec: value.current_sec.map(Into::into),
+            name: value.name,
+            saga_id: value.saga_id.into(),
+            state: value.state.into(),
+            time_created: value.time_created,
+            time_collected: value.time_collected,
         }
     }
 }

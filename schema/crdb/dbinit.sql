@@ -2868,6 +2868,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_saga_by_sec ON omicron.public.saga (
 ) WHERE saga_state != 'done';
 
 /*
+ * For listing sagas by state (e.g., finding all running and unwinding sagas
+ * across all SECs).  We need to paginate this list by the id.
+ */
+CREATE INDEX IF NOT EXISTS lookup_saga_by_state ON omicron.public.saga (
+    saga_state, id
+);
+
+/*
  * TODO more indexes for Saga?
  * - Debugging and/or reporting: saga_name? creator?
  */
@@ -5083,6 +5091,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
     zone_id UUID NOT NULL,
     generation INT8 NOT NULL,
     PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.stale_saga_state AS ENUM (
+    'running',
+    'unwinding'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_stale_saga (
+    inv_collection_id UUID NOT NULL,
+    saga_id UUID NOT NULL,
+    creator UUID NOT NULL,
+    current_sec UUID,
+    name TEXT NOT NULL,
+    state omicron.public.stale_saga_state NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_collected TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, saga_id)
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
@@ -8456,7 +8482,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '250.0.0', NULL)
+    (TRUE, NOW(), NOW(), '251.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

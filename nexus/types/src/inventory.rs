@@ -30,6 +30,9 @@ pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SagaCreatorUuid;
+use omicron_uuid_kinds::SagaSecUuid;
+use omicron_uuid_kinds::SagaUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -52,6 +55,7 @@ use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
@@ -184,6 +188,9 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+
+    /// Sagas that have been active for an extended period, keyed by creator
+    pub stale_sagas: IdOrdMap<InventoryStaleSaga>,
 }
 
 impl Collection {
@@ -702,6 +709,41 @@ impl IdOrdItem for InternalDnsGenerationStatus {
     type Key<'a> = OmicronZoneUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zone_id
+    }
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub enum StaleSagaState {
+    Running,
+    Unwinding,
+}
+
+impl Display for StaleSagaState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            StaleSagaState::Running => "running",
+            StaleSagaState::Unwinding => "unwinding",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct InventoryStaleSaga {
+    pub creator: SagaCreatorUuid,
+    pub current_sec: Option<SagaSecUuid>,
+    pub name: String,
+    pub saga_id: SagaUuid,
+    pub state: StaleSagaState,
+    pub time_created: DateTime<Utc>,
+    pub time_collected: DateTime<Utc>,
+}
+
+impl IdOrdItem for InventoryStaleSaga {
+    type Key<'a> = SagaCreatorUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.creator
     }
     id_upcast!();
 }

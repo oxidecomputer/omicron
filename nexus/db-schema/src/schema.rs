@@ -2178,6 +2178,19 @@ table! {
     }
 }
 
+table! {
+    inv_stale_saga (inv_collection_id, saga_id) {
+        inv_collection_id -> Uuid,
+        saga_id -> Uuid,
+        creator -> Uuid,
+        current_sec -> Nullable<Uuid>,
+        name -> Text,
+        state -> crate::enums::StaleSagaStateEnum,
+        time_created -> Timestamptz,
+        time_collected -> Timestamptz,
+    }
+}
+
 /* blueprints */
 
 table! {

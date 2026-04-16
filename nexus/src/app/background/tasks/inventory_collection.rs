@@ -211,11 +211,12 @@ async fn inventory_activate(
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
         creator,
+        datastore,
+        opctx,
         mgs_clients,
         keeper_admin_clients,
         cockroach_admin_client,
         &sled_enum,
-        opctx.log.clone(),
     );
     let collection =
         inventory.collect_all().await.context("collecting inventory")?;

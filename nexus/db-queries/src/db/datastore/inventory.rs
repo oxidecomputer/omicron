@@ -31,7 +31,6 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::ArtifactHash;
-use nexus_db_model::HwM2Slot;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
@@ -78,6 +77,7 @@ use nexus_db_model::{
     HwBaseboardId, InvOmicronFileSourceResolver, InvZoneManifestMeasurement,
     InvZoneManifestZone,
 };
+use nexus_db_model::{HwM2Slot, InvStaleSaga};
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
 use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
@@ -94,6 +94,7 @@ use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::InventoryStaleSaga;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::TimeSync;
@@ -555,6 +556,13 @@ impl DataStore {
             .internal_dns_generation_status
             .iter()
             .map(|status| InvInternalDns::new(collection_id, status))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_stale_saga_records = collection
+            .stale_sagas
+            .iter()
+            .map(|saga| InvStaleSaga::new(collection_id, saga))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
@@ -1885,6 +1893,15 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the stale sagas we've observed
+            if !inv_stale_saga_records.is_empty() {
+                use nexus_db_schema::schema::inv_stale_saga::dsl;
+                diesel::insert_into(dsl::inv_stale_saga)
+                    .values(inv_stale_saga_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
             // Finally, insert the list of errors.
             {
                 use nexus_db_schema::schema::inv_collection_error::dsl as errors_dsl;
@@ -2185,6 +2202,7 @@ impl DataStore {
             ncockroach_status: usize,
             nntp_timesync: usize,
             ninternal_dns: usize,
+            nstale_sagas: usize,
         }
 
         let NumRowsDeleted {
@@ -2225,6 +2243,7 @@ impl DataStore {
             ncockroach_status,
             nntp_timesync,
             ninternal_dns,
+            nstale_sagas,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -2579,6 +2598,18 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows for stale sagas
+                    let nstale_sagas = {
+                        use nexus_db_schema::schema::inv_stale_saga::dsl;
+                        diesel::delete(
+                            dsl::inv_stale_saga.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
@@ -2617,6 +2648,7 @@ impl DataStore {
                         ncockroach_status,
                         nntp_timesync,
                         ninternal_dns,
+                        nstale_sagas,
                     })
                 })
                 .await
@@ -2668,6 +2700,7 @@ impl DataStore {
             "ncockroach_status" => ncockroach_status,
             "nntp_timesync" => nntp_timesync,
             "ninternal_dns" => ninternal_dns,
+            "nstale_sagas" => nstale_sagas,
         );
 
         Ok(())
@@ -4403,6 +4436,25 @@ impl DataStore {
                 .collect::<IdOrdMap<_>>()
         };
 
+        // Load stale saga information
+        let stale_sagas: IdOrdMap<InventoryStaleSaga> = {
+            use nexus_db_schema::schema::inv_stale_saga::dsl;
+
+            let records: Vec<InvStaleSaga> = dsl::inv_stale_saga
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvStaleSaga::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| InventoryStaleSaga::from(record))
+                .collect()
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -4767,6 +4819,7 @@ impl DataStore {
             cockroach_status,
             ntp_timesync,
             internal_dns_generation_status,
+            stale_sagas,
         })
     }
 
