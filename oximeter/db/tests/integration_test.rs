@@ -263,6 +263,23 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Ensure the samples are correct on this replica
     assert_input_and_output(&input, &samples, &oxql_res1);
 
+    // Assert that at least one query summary and at least one known profile
+    // type are present.
+    assert!(
+        !oxql_res1.query_summaries.is_empty(),
+        "expected at least one query summary"
+    );
+    let total_user_cpu: i64 = oxql_res1
+        .query_summaries
+        .iter()
+        .filter_map(|s| s.profile_summary.get("UserTimeMicroseconds"))
+        .sum();
+    assert!(
+        total_user_cpu > 0,
+        "expected non-zero UserTimeMicroseconds in profile summaries, got {}",
+        total_user_cpu,
+    );
+
     let start = tokio::time::Instant::now();
     wait_for_num_points(&log, &client2, samples.len())
         .await

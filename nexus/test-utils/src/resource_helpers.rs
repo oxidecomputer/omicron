@@ -14,7 +14,6 @@ use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::header;
-use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -93,6 +92,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -1353,6 +1353,28 @@ pub async fn assert_ip_pool_utilization(
     assert_eq!(
         capacity, utilization.capacity,
         "IP pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
+    );
+}
+
+pub async fn assert_subnet_pool_utilization(
+    client: &ClientTestContext,
+    pool_name: &str,
+    allocated: f64,
+    capacity: f64,
+) {
+    let url = format!("/v1/system/subnet-pools/{}/utilization", pool_name);
+    let utilization: subnet_pool::SubnetPoolUtilization =
+        object_get(client, &url).await;
+    let remaining = capacity - allocated;
+    assert_eq!(
+        remaining, utilization.remaining,
+        "Subnet pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
+    );
+    assert_eq!(
+        capacity, utilization.capacity,
+        "Subnet pool '{}': expected {} capacity, got {:?}",
         pool_name, capacity, utilization.capacity,
     );
 }

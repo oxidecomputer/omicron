@@ -192,7 +192,9 @@ pub use silo_user::SiloUserLookup;
 pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
+pub use support_bundle::SupportBundleCreateParams;
 pub use support_bundle::SupportBundleExpungementReport;
+pub use support_bundle::SupportBundleProvenance;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
@@ -680,7 +682,6 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::StreamExt;
     use futures::stream;
-    use illumos_utils::zpool::ZpoolHealth;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_lookup::LookupPath;
@@ -705,6 +706,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};

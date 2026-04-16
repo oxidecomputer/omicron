@@ -1,0 +1,9 @@
+nested example:
+  // shows nesting
+  * arr:
+    1. 10
+    2. 20
+  * flat_key: flat_value
+  * obj:
+    * inner_a: va
+    * inner_b: 2

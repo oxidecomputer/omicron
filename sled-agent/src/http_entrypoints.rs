@@ -78,7 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26, v30};
+use sled_agent_types_versions::{v1, v20, v25, v26, v30, v33};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -962,6 +962,7 @@ impl SledAgentApi for SledAgentImpl {
         // Use shorter names so rustfmt doesn't give up on this function.
         use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
         use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
+        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
         type LatestEnvelope = EarlyNetworkConfigEnvelope;
 
         let sa = rqctx.context();
@@ -969,13 +970,11 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&rqctx, async {
                 let bs = sa.bootstore();
 
-                let config = bs.get_network_config().await.map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "failed to get bootstore: {}",
-                        InlineErrorChain::new(&e)
-                    ))
-                })?;
-
+                // It's a little awkward to create a new subscription
+                // (i.e., a new `watch::Receiver`) any time we receive this
+                // dropshot request, but this request is deprecated anyway so we
+                // don't expect it to be called in practice.
+                let config = bs.network_config_subscribe().borrow().clone();
                 let config = match config {
                     Some(config) => {
                         let latest_version_body =
@@ -990,8 +989,9 @@ impl SledAgentApi for SledAgentImpl {
                                         InlineErrorChain::new(&err),
                                     ))
                                 })?;
-                        let body =
-                            BodyV20::from(BodyV26::from(latest_version_body));
+                        let body = BodyV20::from(BodyV26::from(BodyV30::from(
+                            latest_version_body,
+                        )));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,
                             schema_version: BodyV20::SCHEMA_VERSION,
@@ -1009,6 +1009,26 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(config))
             })
             .await
+    }
+
+    async fn write_network_bootstore_config_v33(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v30(
@@ -1500,10 +1520,8 @@ impl SledAgentApi for SledAgentImpl {
                 match policy {
                     OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
                     OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
-                        let our_switch_zone_ip =
-                            sa.switch_zone_underlay_info().ip;
                         if request_context.request.remote_addr().ip()
-                            == our_switch_zone_ip
+                            == sa.local_switch_zone_ip()
                         {
                             let message =
                                 "requests to disable the switch zone must \

@@ -720,23 +720,6 @@ impl InstalledZone {
     /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
     pub const ROOT_FS_PATH: &'static str = "root";
 
-    /// Returns the name of a zone, based on the base zone name plus any unique
-    /// identifying info.
-    ///
-    /// The zone name is based on:
-    /// - A unique Oxide prefix ("oxz_")
-    /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique UUID
-    ///
-    /// This results in a zone name which is distinct across different zpools,
-    /// but stable and predictable across reboots.
-    pub fn get_zone_name(
-        zone_type: &str,
-        unique_name: Option<OmicronZoneUuid>,
-    ) -> String {
-        crate::zone::zone_name(zone_type, unique_name)
-    }
-
     /// Get the name of the bootstrap VNIC in the zone, if any.
     pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
         self.bootstrap_vnic.as_ref().map(|link| link.name())
@@ -992,7 +975,7 @@ impl<'a> ZoneBuilder<'a> {
         let temp_dir = fake_cfg.temp_dir;
         (|| {
             let zone_type = self.zone_type?;
-            let full_zone_name = InstalledZone::get_zone_name(
+            let full_zone_name = crate::zone::zone_name(
                 zone_type,
                 self.unique_name,
             );
@@ -1058,8 +1041,7 @@ impl<'a> ZoneBuilder<'a> {
                 err,
             })?;
 
-        let full_zone_name =
-            InstalledZone::get_zone_name(zone_type, unique_name);
+        let full_zone_name = crate::zone::zone_name(zone_type, unique_name);
 
         // Look for the image within `file_source.search_paths`, in order.
         let zone_image_path = file_source
