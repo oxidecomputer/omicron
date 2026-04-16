@@ -6,6 +6,7 @@
 
 use crate::DpdReconcilerStatus;
 use crate::MgdReconcilerStatus;
+use crate::UplinkdReconcilerStatus;
 use chrono::DateTime;
 use chrono::Utc;
 use std::time::Duration;
@@ -91,4 +92,5 @@ pub struct ReconcilerStatus<T> {
 pub struct ScrimletReconcilersStatus {
     pub dpd_reconciler: ReconcilerStatus<DpdReconcilerStatus>,
     pub mgd_reconciler: ReconcilerStatus<MgdReconcilerStatus>,
+    pub uplinkd_reconciler: ReconcilerStatus<UplinkdReconcilerStatus>,
 }

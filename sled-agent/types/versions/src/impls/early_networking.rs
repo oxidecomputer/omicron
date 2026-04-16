@@ -32,6 +32,9 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
+#[cfg(any(test, feature = "testing"))]
+use proptest::prelude::*;
+
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
     pub const DEFAULT_HOLD_TIME: u64 = 6;
@@ -362,12 +365,42 @@ impl fmt::Display for PortFec {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl Arbitrary for UplinkIpNet {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        #[derive(Debug, Clone, Copy, test_strategy::Arbitrary)]
+        enum ArbIpNet {
+            V4(Ipv4Addr, #[strategy(0_u8..=32)] u8),
+            V6(Ipv6Addr, #[strategy(0_u8..=128)] u8),
+        }
+
+        any::<ArbIpNet>()
+            .prop_filter_map("invalid UplinkIpNet", |ipnet| {
+                use oxnet::Ipv4Net;
+
+                let ipnet = match ipnet {
+                    ArbIpNet::V4(ip, prefix) => {
+                        IpNet::V4(Ipv4Net::new(ip, prefix).unwrap())
+                    }
+                    ArbIpNet::V6(ip, prefix) => {
+                        IpNet::V6(Ipv6Net::new(ip, prefix).unwrap())
+                    }
+                };
+
+                UplinkIpNet::try_from(ipnet).ok()
+            })
+            .boxed()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::latest::early_networking::InvalidIpAddrError;
     use oxnet::Ipv4Net;
-    use proptest::prelude::*;
     use serde::{Deserialize, Serialize};
     use test_strategy::proptest;
 
