@@ -26,8 +26,6 @@ use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
-use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::iter;
@@ -247,7 +245,7 @@ impl super::Nexus {
             // There should always be an inventory collection before or after an
             // update
             None => false,
-            Some(inventory) => is_inventory_healthy(&inventory),
+            Some(collection) => collection.is_system_healthy(),
         };
 
         Ok(update::UpdateStatus {
@@ -401,189 +399,5 @@ impl super::Nexus {
             *counts.entry(version).or_insert(0) += 1;
         }
         Ok(counts)
-    }
-}
-
-/// Check whether the system is in a roughly healthy state based on inventory
-/// data.
-///
-/// The system is considered relatively healthy when:
-/// - All zpools are online.
-/// - All enabled SMF services are in an online state.
-fn is_inventory_healthy(
-    inventory: &nexus_types::inventory::Collection,
-) -> bool {
-    let all_zpools_healthy =
-        inventory.sled_agents.iter().all(|sled_agent| {
-            sled_agent.zpools.iter().all(|zpool| match zpool.health {
-                ZpoolHealth::Online => true,
-                ZpoolHealth::Degraded
-                | ZpoolHealth::Faulted
-                | ZpoolHealth::Offline
-                | ZpoolHealth::Removed
-                | ZpoolHealth::Unavailable => false,
-            })
-        });
-    let all_enabled_smf_services_online =
-        inventory.sled_agents.iter().all(|sled_agent| {
-            match &sled_agent.smf_services_enabled_not_online {
-                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
-                    svcs.services.is_empty()
-                }
-                // If there are any command errors or data is unavailable we
-                // assume the system is not in a healthy state
-                SvcsEnabledNotOnlineResult::SvcsCmdError(_)
-                | SvcsEnabledNotOnlineResult::DataUnavailable => false,
-            }
-        });
-    all_zpools_healthy && all_enabled_smf_services_online
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use chrono::Utc;
-    use nexus_inventory::CollectionBuilder;
-    use omicron_common::api::external::ByteCount;
-    use omicron_uuid_kinds::SledUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types::inventory::Baseboard;
-    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types::inventory::Inventory;
-    use sled_agent_types::inventory::InventoryZpool;
-    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
-    use sled_agent_types::inventory::SledCpuFamily;
-    use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::inventory::SvcEnabledNotOnline;
-    use sled_agent_types::inventory::SvcEnabledNotOnlineState;
-    use sled_agent_types::inventory::SvcsEnabledNotOnline;
-
-    /// Build a minimal sled `Inventory` for testing with the given zpools
-    /// and SMF service status.
-    fn test_sled_inventory(
-        zpools: Vec<InventoryZpool>,
-        smf_services: SvcsEnabledNotOnlineResult,
-    ) -> Inventory {
-        Inventory {
-            baseboard: Baseboard::Pc {
-                identifier: "test-pc".to_string(),
-                model: "test-model".to_string(),
-            },
-            reservoir_size: ByteCount::from(1024),
-            sled_role: SledRole::Gimlet,
-            sled_agent_address: "[::1]:56792".parse().unwrap(),
-            sled_id: SledUuid::new_v4(),
-            usable_hardware_threads: 10,
-            usable_physical_ram: ByteCount::from(1024 * 1024),
-            cpu_family: SledCpuFamily::AmdMilan,
-            disks: vec![],
-            zpools,
-            datasets: vec![],
-            ledgered_sled_config: None,
-            reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
-            last_reconciliation: None,
-            file_source_resolver:
-                OmicronFileSourceResolverInventory::new_fake(),
-            smf_services_enabled_not_online: smf_services,
-            reference_measurements: iddqd::IdOrdMap::new(),
-        }
-    }
-
-    fn healthy_zpools() -> Vec<InventoryZpool> {
-        vec![InventoryZpool {
-            id: ZpoolUuid::new_v4(),
-            total_size: ByteCount::from(1024 * 1024),
-            health: ZpoolHealth::Online,
-        }]
-    }
-
-    fn unhealthy_zpools() -> Vec<InventoryZpool> {
-        vec![
-            InventoryZpool {
-                id: ZpoolUuid::new_v4(),
-                total_size: ByteCount::from(1024 * 1024),
-                health: ZpoolHealth::Online,
-            },
-            InventoryZpool {
-                id: ZpoolUuid::new_v4(),
-                total_size: ByteCount::from(1024 * 1024),
-                health: ZpoolHealth::Degraded,
-            },
-        ]
-    }
-
-    fn healthy_services() -> SvcsEnabledNotOnlineResult {
-        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-            SvcsEnabledNotOnline {
-                services: vec![],
-                errors: vec![],
-                time_of_status: Utc::now(),
-            },
-        )
-    }
-
-    fn unhealthy_services() -> SvcsEnabledNotOnlineResult {
-        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-            SvcsEnabledNotOnline {
-                services: vec![SvcEnabledNotOnline {
-                    fmri: "svc:/system/test:default".to_string(),
-                    zone: "global".to_string(),
-                    state: SvcEnabledNotOnlineState::Maintenance,
-                }],
-                errors: vec![],
-                time_of_status: Utc::now(),
-            },
-        )
-    }
-
-    #[test]
-    fn test_healthy_system() {
-        let mut builder = CollectionBuilder::new("test");
-        builder
-            .found_sled_inventory(
-                "test",
-                test_sled_inventory(healthy_zpools(), healthy_services()),
-            )
-            .unwrap();
-        assert!(is_inventory_healthy(&builder.build()));
-    }
-
-    #[test]
-    fn test_unhealthy_zpools_healthy_services() {
-        let mut builder = CollectionBuilder::new("test");
-        builder
-            .found_sled_inventory(
-                "test",
-                test_sled_inventory(unhealthy_zpools(), healthy_services()),
-            )
-            .unwrap();
-        assert!(!is_inventory_healthy(&builder.build()));
-    }
-
-    #[test]
-    fn test_healthy_zpools_unhealthy_services() {
-        let mut builder = CollectionBuilder::new("test");
-        builder
-            .found_sled_inventory(
-                "test",
-                test_sled_inventory(healthy_zpools(), unhealthy_services()),
-            )
-            .unwrap();
-        assert!(!is_inventory_healthy(&builder.build()));
-    }
-
-    #[test]
-    fn test_unhealthy_zpools_and_services() {
-        let mut builder = CollectionBuilder::new("test");
-        builder
-            .found_sled_inventory(
-                "test",
-                test_sled_inventory(
-                    unhealthy_zpools(),
-                    unhealthy_services(),
-                ),
-            )
-            .unwrap();
-        assert!(!is_inventory_healthy(&builder.build()));
     }
 }
