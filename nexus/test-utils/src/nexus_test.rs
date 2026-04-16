@@ -114,6 +114,7 @@ pub struct ControlPlaneTestContext<N> {
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
+    pub lldpd: HashMap<SwitchSlot, dev::lldp::LldpdInstance>,
     /// Ports of stopped dendrite instances (for use by start_dendrite)
     pub stopped_dendrite_ports: RwLock<HashMap<SwitchSlot, u16>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
@@ -320,6 +321,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
         }
+        for (_, mut lldpd) in self.lldpd {
+            lldpd.cleanup().await.unwrap();
+        }
         self.logctx.cleanup_successful();
     }
 }
@@ -351,6 +355,49 @@ pub fn load_test_config() -> NexusConfig {
 /// should be done in the `crdb-seed` setup script.
 #[cfg(feature = "omicron-dev")]
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
+    config: &mut NexusConfig,
+    extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
+) -> Result<ControlPlaneTestContext<N>> {
+    let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+
+    let log = &starter.logctx.log;
+    slog::debug!(log, "Ensuring seed tarball exists");
+
+    // Start up a ControlPlaneTestContext, which tautologically sets up
+    // everything needed for a simulated control plane.
+    let why_invalidate =
+        omicron_test_utils::dev::seed::should_invalidate_seed();
+    let (seed_tar, status) =
+        omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
+            log,
+            why_invalidate,
+        )
+        .await
+        .context("error ensuring seed tarball exists")?;
+    status.log(log, &seed_tar);
+
+    Ok(setup_with_config_impl(
+        starter,
+        PopulateCrdb::FromSeed { input_tar: seed_tar },
+        sim::SimMode::Auto,
+        None,
+        extra_sled_agents,
+        gateway_config_file,
+        true,
+    )
+    .await)
+}
+
+/// Setup routine to use for `omicron-dev`. Use [`ControlPlaneBuilder`] for
+/// tests.
+///
+/// The main difference from tests is that this routine ensures the seed tarball
+/// exists (or creates a seed tarball if it doesn't exist). For tests, this
+/// should be done in the `crdb-seed` setup script. This function also creates
+/// peer `mgd` routers for testing router configuration.
+#[cfg(feature = "omicron-dev")]
+pub async fn omicron_dev_setup_with_config_and_peer_routers<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
