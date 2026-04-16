@@ -149,9 +149,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
      */
     initialized BOOL NOT NULL,
 
-    /* Used to configure the updates service URL */
-    tuf_base_url STRING(512),
-
     /* The IPv6 underlay /56 prefix for the rack */
     rack_subnet INET
 );
@@ -3156,7 +3153,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     -- and later managing its storage.
     assigned_nexus UUID,
 
-    user_comment TEXT
+    user_comment TEXT,
+
+    -- If this bundle was requested by an FM case, the case UUID.
+    fm_case_id UUID
 
 );
 
@@ -3173,6 +3173,41 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
     time_created
+);
+
+-- Child data selection tables owned by `support_bundle`. The flags table stores
+-- boolean columns for payload-less categories; the host_info and ereports tables
+-- use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
+    bundle_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (bundle_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_info (
+    bundle_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
 
 /*******************************************************************/
@@ -5129,6 +5164,50 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
     zone_id UUID NOT NULL,
     generation INT8 NOT NULL,
     PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
+    'uninitialized',
+    'offline',
+    'degraded',
+    'maintenance'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    -- This represents an error when calling the `svcs` command.
+    -- This column will always be NULL unless something went very wrong and we
+    -- were unable to retrieve any information from the state of the services
+    -- due to a command error.
+    svcs_cmd_error TEXT,
+    time_of_status TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS inv_svc_enabled_not_online_collection_by_sled
+    ON omicron.public.inv_svc_enabled_not_online (inv_collection_id, sled_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    fmri TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    state omicron.public.inv_svc_enabled_not_online_state NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    error_message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
 /*
@@ -7301,6 +7380,26 @@ ON omicron.public.user_data_export (state);
      */
     slot INT4,
 
+    /*
+     * if this is non-NULL, the ereport has *definitely* been seen by at least
+     * one committed sitrep at some point in time. if it is `NULL`, the
+     * ereport may or may not have been included in a sitrep, and you will
+     * have to actually check the sitrep to find out.
+     *
+     * when this is non-NULL, the value is the ID of the sitrep which the
+     `fm_rendezvous` task was executing when this ereport was marked as seen.
+     * because execution may lag arbitrarily behind the generation of new
+     * sitreps, this does *not* indicate that this was the *first* sitrep in
+     * which this ereport was seen (which is why this is called "marked seen
+     * in" rather than "first seen in" or similar) --- in general, this field
+     * should basically just be treated as a `bool` (`true` if non-NULL,
+     * `false` if NULL), and the actual value of the sitrep ID is included
+    * only to provide *some* record for human-readable debugging purposes.
+     *
+     * have fun!
+     */
+    marked_seen_in UUID,
+
     CONSTRAINT reporter_identity_validity CHECK (
         (
             -- ereports from SPs must have a SP type and slot, and must not
@@ -7359,6 +7458,14 @@ ON omicron.public.ereport (
 )
 WHERE
     time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_unseen_ereports
+ON omicron.public.ereport (
+    restart_id, ena
+)
+WHERE
+    marked_seen_in IS NULL
+    AND time_deleted IS NULL;
 
 /*
     * Fault management situation reports (and accessories)
@@ -7537,6 +7644,68 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
 CREATE INDEX IF NOT EXISTS
     lookup_fm_alert_requests_for_case
 ON omicron.public.fm_alert_request (sitrep_id, case_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
+    -- Requested support bundle UUID.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the bundle was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the bundle was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this request belongs.
+    case_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_requests_for_case
+ON omicron.public.fm_support_bundle_request (sitrep_id, case_id);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_request_by_id
+ON omicron.public.fm_support_bundle_request (id)
+STORING (requested_sitrep_id);
+
+-- Child data selection tables owned by `fm_support_bundle_request`. The flags
+-- table stores boolean columns for payload-less categories; the host_info and
+-- ereports tables use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_flags (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_host_info (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
 
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
@@ -8368,7 +8537,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '243.0.0', NULL)
+    (TRUE, NOW(), NOW(), '251.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

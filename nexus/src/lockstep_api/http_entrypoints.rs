@@ -38,7 +38,8 @@ use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::rack::RackMembershipConfigPathParams;
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle::{
-    self, SupportBundleFilePath, SupportBundlePath, SupportBundleUpdate,
+    SupportBundleCreate, SupportBundleFilePath, SupportBundlePath,
+    SupportBundleUpdate,
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
@@ -47,6 +48,7 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
@@ -618,10 +620,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ResultsPage<SupportBundleInfo>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -642,8 +641,11 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
-                &|_, bundle: &support_bundle::SupportBundleInfo| {
-                    (bundle.time_created, bundle.id.into_untyped_uuid())
+                &|_, bundle: &SupportBundleInfo| {
+                    (
+                        bundle.base.time_created,
+                        bundle.base.id.into_untyped_uuid(),
+                    )
                 },
             )?))
         };
@@ -657,8 +659,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -862,9 +863,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<support_bundle::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>
-    {
+        body: TypedBody<SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -921,8 +921,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
         body: TypedBody<SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

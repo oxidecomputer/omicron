@@ -7,10 +7,10 @@
 use crate::updates::ConfigUpdates;
 use camino::Utf8Path;
 use dropshot::ConfigDropshot;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::ZpoolHealth;
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use sp_sim::FAKE_GIMLET_MODEL;
 use std::net::Ipv6Addr;

@@ -22,19 +22,19 @@ pub async fn collect_bundle_id(
     Ok(CollectionStepOutput::None)
 }
 
-/// Writes the user-provided comment to the meta directory, if present
-pub async fn collect_user_comment(
+/// Writes the reason for creation to the meta directory
+pub async fn collect_reason_for_creation(
     collection: &BundleCollection,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let Some(comment) = &collection.bundle().user_comment else {
-        return Ok(CollectionStepOutput::Skipped);
-    };
-
     let meta_dir = dir.join("meta");
     tokio::fs::create_dir_all(&meta_dir).await?;
 
-    tokio::fs::write(meta_dir.join("user_comment.txt"), comment).await?;
+    tokio::fs::write(
+        meta_dir.join("reason_for_creation.txt"),
+        &collection.bundle().reason_for_creation,
+    )
+    .await?;
 
     Ok(CollectionStepOutput::None)
 }

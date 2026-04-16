@@ -25,7 +25,6 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
@@ -55,10 +54,8 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
-};
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -68,9 +65,10 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
     InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
-    SingleMeasurementInventory, SledRole,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -145,7 +143,7 @@ impl SledAgent {
         let storage_log = log.new(o!("kind" => "storage"));
 
         let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
                 rack_network_config: RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
@@ -155,6 +153,9 @@ impl SledAgent {
                     bgp: Vec::new(),
                     bfd: Vec::new(),
                 },
+                // TODO-correctness Can we fill this in for the simulated
+                // sled-agent?
+                service_zone_nat_entries: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );

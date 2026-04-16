@@ -16,7 +16,6 @@ camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
 iddqd.workspace = true
-illumos-utils.workspace = true
 indent_write.workspace = true
 ipnetwork.workspace = true
 omicron-common.workspace = true
@@ -45,10 +44,15 @@ uuid.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true
 toml.workspace = true
 
 [features]
-testing = ["dep:proptest", "dep:test-strategy"]
+testing = [
+    "dep:proptest",
+    "dep:test-strategy",
+    "omicron-common/testing",
+]

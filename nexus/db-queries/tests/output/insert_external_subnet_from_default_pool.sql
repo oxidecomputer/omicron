@@ -1,6 +1,13 @@
 WITH
   pool_id
-    AS (SELECT subnet_pool_id AS id FROM subnet_pool_silo_link WHERE silo_id = $1 AND is_default),
+    AS (
+      SELECT
+        l.subnet_pool_id AS id
+      FROM
+        subnet_pool_silo_link AS l INNER JOIN subnet_pool AS sp ON sp.id = l.subnet_pool_id
+      WHERE
+        l.silo_id = $1 AND l.is_default AND sp.time_deleted IS NULL
+    ),
   exactly_one_default_pool
     AS MATERIALIZED (
       SELECT

@@ -16,12 +16,15 @@ use crate::db::model::SqlU32;
 use crate::db::model::ereport as model;
 use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -36,6 +39,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
@@ -314,6 +318,115 @@ impl DataStore {
             })?;
         Ok((created, latest))
     }
+
+    /// Lists ereports which have not been marked as **definitely seen**
+    /// (included in a committed sitrep) in the database, paginated by the
+    /// reporter restart ID and ENA.
+    ///
+    /// Note that this filters based only on whether they have been marked in
+    /// the database. Because marking seen ereports occurs asynchronously from
+    /// committing sitreps as part of FM rendezvous, ereports returned by this
+    /// query may have already been seen. These ereports must be filtered out at
+    /// a higher level based on the contents of the current sitrep when
+    /// determining which ereports are *actually* new.
+    pub async fn ereports_list_unmarked(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> ListResultVec<Ereport> {
+        // TODO(eliza): ereports should probably have their own resource type someday...
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::ereports_list_unmarked_query(pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn ereports_list_unmarked_query(
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> impl RunnableQuery<Ereport> + use<> {
+        paginated_multicolumn(
+            dsl::ereport,
+            (dsl::restart_id, dsl::ena),
+            pagparams,
+        )
+        .filter(dsl::marked_seen_in.is_null())
+        .filter(dsl::time_deleted.is_null())
+        .select(Ereport::as_select())
+    }
+
+    /// Mark the ereports with the given ereport IDs as having definitely been
+    /// processed as of the provided sitrep ID.
+    ///
+    /// If any ereports have already been marked as seen with another sitrep ID,
+    /// they are unmodified. Otherwise, this query sets the `marked_seen_in`
+    /// column to the provided sitrep ID.
+    ///
+    /// Returns the number of rows updated, which may be less than the number of
+    /// ereport IDs provided if some were already marked as seen.
+    pub async fn ereports_mark_seen(
+        &self,
+        opctx: &OpContext,
+        sitrep_id: SitrepUuid,
+        ereport_ids: impl IntoIterator<Item = EreportId>,
+    ) -> Result<usize, Error> {
+        // TODO(eliza): ereprots should probably be an authz resource someday, i
+        // guess...
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        Self::ereports_mark_seen_query(sitrep_id, ereport_ids)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn ereports_mark_seen_query(
+        sitrep_id: SitrepUuid,
+        ereport_ids: impl IntoIterator<Item = EreportId>,
+    ) -> TypedSqlQuery<sql_types::BigInt> {
+        // Untuple the ereport IDs into separate vecs of `restart_id`s and
+        // `ena`s, which we will pass as separate bind parameters in the SQL
+        // query and then re-tuple back into one array of pairs using `unnest`
+        // when the query is executed.
+        //
+        // This bit is kindas screwy: unfortunately, Postgres serialization
+        // does not support bind parameters which are arrays of tuples, so
+        // we must bind two separate arrays. Trust me on this one.
+        let mut restart_ids = Vec::new();
+        let mut enas = Vec::new();
+        for EreportId { restart_id, ena } in ereport_ids {
+            restart_ids.push(restart_id.into_untyped_uuid());
+            enas.push(DbEna::from(ena));
+        }
+
+        // Raw SQL is necessary here as `diesel`'s `.eq_any` doesn't work with
+        // arrays of tuples (likely due to the weird `unnest` thing being
+        // required to serialize the bind parameter properly).
+        //
+        // The SQL generated here is output to
+        // `tests/output/ereports_mark_seen.sql`
+        let mut builder = QueryBuilder::new();
+        builder
+            .sql(
+                "UPDATE omicron.public.ereport \
+                 SET marked_seen_in = ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(
+                " WHERE (restart_id, ena) IN (\
+                    SELECT unnest (",
+            )
+            // Pretend it's just one array please?
+            .param()
+            .bind::<sql_types::Array<sql_types::Uuid>, _>(restart_ids)
+            .sql("), unnest (")
+            .param()
+            .bind::<sql_types::Array<sql_types::BigInt>, _>(enas)
+            // Idempotency bit...
+            .sql("))  AND marked_seen_in IS NULL");
+        builder.query::<sql_types::BigInt>()
+    }
 }
 
 #[cfg(test)]
@@ -321,6 +434,7 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use dropshot::PaginationOrder;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -485,6 +599,127 @@ mod tests {
             .expect("Failed to explain query - is it valid SQL?");
 
         eprintln!("--- explanation: {explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_ereports_mark_seen() {
+        let query = DataStore::ereports_mark_seen_query(
+            SitrepUuid::new_v4(),
+            vec![
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(2),
+                },
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(3),
+                },
+            ],
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereports_mark_seen.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_ereports_mark_seen_query() {
+        let logctx = dev::test_setup_log("explain_ereports_mark_seen_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::ereports_mark_seen_query(
+            SitrepUuid::new_v4(),
+            vec![
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(2),
+                },
+                EreportId {
+                    restart_id: EreporterRestartUuid::new_v4(),
+                    ena: fm::Ena(3),
+                },
+            ],
+        );
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        // Okay, what happens if we don't actually ask for any ereports to be
+        // marked?
+        eprintln!(" --- empty vec time ---");
+        let query =
+            DataStore::ereports_mark_seen_query(SitrepUuid::new_v4(), vec![]);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_ereports_list_unmarked() {
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::ereports_list_unmarked_query(&pagparams);
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereports_list_unmarked.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_ereports_list_unmarked_query() {
+        let logctx =
+            dev::test_setup_log("explain_ereports_list_unmarked_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::ereports_list_unmarked_query(&pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

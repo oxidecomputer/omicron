@@ -107,9 +107,11 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_analysis::{self, FmAnalysis};
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
+use super::tasks::fm_sitrep_load::CurrentSitrep;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
@@ -154,7 +156,7 @@ use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::fm;
+
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
@@ -266,6 +268,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
+            task_fm_analysis: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
             task_fm_rendezvous: Activator::new(),
@@ -358,6 +361,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator,
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
+            task_fm_analysis,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
             task_fm_rendezvous,
@@ -724,6 +728,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
                 resolver.clone(),
+                rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -1108,6 +1113,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
+                task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),
             opctx: opctx.child(BTreeMap::new()),
@@ -1132,13 +1138,43 @@ impl BackgroundTasksInitializer {
             activator: task_fm_sitrep_loader,
         });
 
+        let fm_analysis = FmAnalysis::new(
+            datastore.clone(),
+            sitrep_watcher.clone(),
+            inventory_load_watcher.clone(),
+            fm_analysis::Activators {
+                sitrep_loader: task_fm_sitrep_loader.clone(),
+                sitrep_gc: task_fm_sitrep_gc.clone(),
+            },
+            nexus_id,
+        );
+        driver.register(TaskDefinition {
+            name: "fm_analysis",
+            description:
+                "performs fault management analysis and updates the sitrep",
+            period: config.fm.analysis_period_secs,
+            task_impl: Box::new(fm_analysis),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![
+                Box::new(sitrep_watcher.clone()),
+                Box::new(inventory_load_watcher.clone()),
+            ],
+            activator: task_fm_analysis,
+        });
+
         driver.register(TaskDefinition {
             name: "fm_rendezvous",
             description:
                 "updates externally visible database tables to match the \
                  current fault management sitrep",
             period: config.fm.rendezvous_period_secs,
-            task_impl: Box::new(FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
+            task_impl: Box::new(FmRendezvous::new(
+                datastore.clone(),
+                sitrep_watcher.clone(),
+                task_alert_dispatcher.clone(),
+                task_support_bundle_collector.clone(),
+                nexus_id,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher.clone())],
             activator: task_fm_rendezvous,
@@ -1281,8 +1317,7 @@ pub struct BackgroundTasksData {
     /// handle for controlling Nexus quiesce
     pub nexus_quiesce: NexusQuiesceHandle,
     /// Channel for exposing the latest loaded fault-management sitrep.
-    pub sitrep_load_tx:
-        watch::Sender<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+    pub sitrep_load_tx: watch::Sender<Option<CurrentSitrep>>,
     /// Console session absolute timeout, from
     /// `pkg.console.session_absolute_timeout_minutes`.
     pub console_session_absolute_timeout: chrono::TimeDelta,

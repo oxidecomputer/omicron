@@ -4,9 +4,12 @@
 
 //! Helpers for running health checks from the sled agent
 
+use chrono::Utc;
 use illumos_utils::svcs::Svcs;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tokio::time::MissedTickBehavior;
@@ -37,7 +40,10 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             Err(e) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
                     *status =
-                        SvcsEnabledNotOnlineResult::SvcsCmdError(e.into());
+                        SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+                            error: InlineErrorChain::new(&e).to_string(),
+                            time_of_status: Utc::now(),
+                        })
                 })
             }
             Ok(svcs) => {

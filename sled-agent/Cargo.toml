@@ -17,6 +17,7 @@ bootstore.workspace = true
 bootstrap-agent-api.workspace = true
 bootstrap-agent-client.workspace = true
 bootstrap-agent-lockstep-api.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
@@ -31,7 +32,6 @@ crucible-agent-client.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
-dns-server.workspace = true
 dns-service-client.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
 # This is the R17 dpd client
@@ -124,6 +124,7 @@ tokio-util.workspace = true
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
+transient-dns-server.workspace = true
 trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-brand-metadata.workspace = true

@@ -29,8 +29,6 @@
 //! [detailed guide]: https://github.com/oxidecomputer/dropshot-api-manager/blob/main/guides/new-version.md
 //! [RFD 619]: https://rfd.shared.oxide.computer/rfd/619
 
-#[path = "bootstrap_initial/mod.rs"]
-pub mod bootstrap_v1;
 mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
@@ -75,6 +73,12 @@ pub mod v3;
 pub mod v30;
 #[path = "add_icmpv6_firewall_support/mod.rs"]
 pub mod v31;
+#[path = "make_all_external_ip_fields_optional/mod.rs"]
+pub mod v32;
+#[path = "bootstore_service_nat/mod.rs"]
+pub mod v33;
+#[path = "modify_svcs_types/mod.rs"]
+pub mod v34;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

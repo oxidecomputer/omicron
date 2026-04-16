@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::net::{IpAddr, Ipv6Addr};
+use std::str::FromStr;
 
 use camino::Utf8PathBuf;
 use chrono::Utc;
@@ -26,8 +27,8 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcsEnabledNotOnline, SvcsError,
-    ZoneArtifactInventory, ZoneKind,
+    SingleMeasurementInventory, SvcEnabledNotOnlineState, SvcState,
+    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -358,14 +359,6 @@ impl OmicronZoneConfig {
     /// currently true).
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
-    }
-
-    /// Returns the zone name for this zone configuration.
-    pub fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.kind().zone_prefix(),
-            Some(self.id),
-        )
     }
 
     /// If this kind of zone has an associated dataset, return the dataset's
@@ -873,37 +866,6 @@ impl HostPhase2DesiredSlots {
     }
 }
 
-impl From<illumos_utils::svcs::SvcsResult> for SvcsEnabledNotOnline {
-    fn from(value: illumos_utils::svcs::SvcsResult) -> Self {
-        let illumos_utils::svcs::SvcsResult {
-            services,
-            errors,
-            time_of_status,
-        } = value;
-        Self { services, errors, time_of_status }
-    }
-}
-
-impl From<illumos_utils::ExecutionError> for SvcsError {
-    fn from(e: illumos_utils::ExecutionError) -> Self {
-        match e {
-            illumos_utils::ExecutionError::ExecutionStart { command, err } => {
-                Self::ExecutionStart { command, err: err.to_string() }
-            }
-            illumos_utils::ExecutionError::CommandFailure(e) => {
-                Self::CommandFailure(e.to_string())
-            }
-            illumos_utils::ExecutionError::ContractFailure { msg, err } => {
-                Self::ContractFailure { msg, err: err.to_string() }
-            }
-            illumos_utils::ExecutionError::ParseFailure(e) => {
-                Self::ParseFailure(e)
-            }
-            illumos_utils::ExecutionError::NotRunning => Self::NotRunning,
-        }
-    }
-}
-
 impl Default for OmicronSledConfig {
     fn default() -> Self {
         Self {
@@ -942,5 +904,82 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("unrecognized zpool health value `{0}`")]
+pub struct ZpoolHealthParseError(pub String);
+
+// TODO-correctness `ZpoolHealth` implements both `FromStr` and `Display`, but
+// they aren't symmetric - we should replace one of these (probably `FromStr`?)
+// with an explicitly-named method.
+impl FromStr for ZpoolHealth {
+    type Err = ZpoolHealthParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ONLINE" => Ok(ZpoolHealth::Online),
+            "DEGRADED" => Ok(ZpoolHealth::Degraded),
+            "FAULTED" => Ok(ZpoolHealth::Faulted),
+            "OFFLINE" => Ok(ZpoolHealth::Offline),
+            "REMOVED" => Ok(ZpoolHealth::Removed),
+            "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
+            _ => Err(ZpoolHealthParseError(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ZpoolHealth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ZpoolHealth::Online => "online",
+            ZpoolHealth::Degraded => "degraded",
+            ZpoolHealth::Faulted => "faulted",
+            ZpoolHealth::Offline => "offline",
+            ZpoolHealth::Removed => "removed",
+            ZpoolHealth::Unavailable => "unavailable",
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl From<SvcEnabledNotOnlineState> for SvcState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
+        match value {
+            SvcEnabledNotOnlineState::Degraded => Self::Degraded,
+            SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
+            SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Uninitialized => Self::Uninitialized,
+        }
+    }
+}
+
+impl fmt::Display for SvcState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            SvcState::Uninitialized => "uninitialized",
+            SvcState::Offline => "offline",
+            SvcState::Online => "online",
+            SvcState::Degraded => "degraded",
+            SvcState::Maintenance => "maintenance",
+            SvcState::Disabled => "disabled",
+            SvcState::LegacyRun => "legacy_run",
+        };
+
+        write!(f, "{state}")
+    }
+}
+
+impl fmt::Display for SvcEnabledNotOnlineState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            SvcEnabledNotOnlineState::Uninitialized => "uninitialized",
+            SvcEnabledNotOnlineState::Offline => "offline",
+            SvcEnabledNotOnlineState::Degraded => "degraded",
+            SvcEnabledNotOnlineState::Maintenance => "maintenance",
+        };
+
+        write!(f, "{state}")
     }
 }

@@ -7,6 +7,7 @@
 use crate::deployment::Blueprint;
 use crate::external_api::hardware::Baseboard;
 use crate::external_api::physical_disk::PhysicalDiskKind;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -24,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types_versions::latest::inventory::{SledCpuFamily, SledRole};
-use sled_agent_types_versions::latest::rack_init::RecoverySiloConfig;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::collections::HashMap;

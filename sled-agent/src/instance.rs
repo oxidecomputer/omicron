@@ -28,10 +28,9 @@ use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
-use omicron_common::api::internal::shared::external_ip::ExternalIpsError;
 use omicron_common::api::internal::shared::{
-    DelegatedZvol, ExternalIpConfig, ExternalIpConfigBuilder, NetworkInterface,
-    ResolvedVpcFirewallRule, SledIdentifiers,
+    DelegatedZvol, ExternalIpConfig, NetworkInterface, ResolvedVpcFirewallRule,
+    SledIdentifiers,
 };
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -149,9 +148,6 @@ pub enum Error {
 
     #[error("The IP subnet {0} is already attached")]
     SubnetAlreadyAttached(IpNet),
-
-    #[error("Failed to create external IP config")]
-    ExternalIps(#[from] ExternalIpsError),
 }
 
 type PropolisClientError =
@@ -568,7 +564,7 @@ struct InstanceRunner {
 
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
-    external_ips: Option<ExternalIpConfig>,
+    external_ips: ExternalIpConfig,
 
     // Multicast groups to which this instance belongs.
     multicast_groups: Vec<InstanceMulticastMembership>,
@@ -1410,188 +1406,62 @@ impl InstanceRunner {
     }
 
     fn merge_existing_ip_stack_with_request(
-        config: Option<ExternalIpConfig>,
+        mut config: ExternalIpConfig,
         request: &InstanceExternalIpBody,
     ) -> Result<ExternalIpConfig, Error> {
-        // If we have no external IP config at all, create one that supports the
-        // address.
-        let Some(mut external_ips) = config else {
-            let new_config = match request {
-                InstanceExternalIpBody::Ephemeral(IpAddr::V4(ip)) => {
-                    ExternalIpConfigBuilder::new()
-                        .with_ephemeral_ip(*ip)
-                        .build()
-                        .map_err(Error::from)
-                        .map(Into::into)
-                }
-                InstanceExternalIpBody::Ephemeral(IpAddr::V6(ip)) => {
-                    ExternalIpConfigBuilder::new()
-                        .with_ephemeral_ip(*ip)
-                        .build()
-                        .map_err(Error::from)
-                        .map(Into::into)
-                }
-                InstanceExternalIpBody::Floating(IpAddr::V4(ip)) => {
-                    ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ip])
-                        .build()
-                        .map_err(Error::from)
-                        .map(Into::into)
-                }
-                InstanceExternalIpBody::Floating(IpAddr::V6(ip)) => {
-                    ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ip])
-                        .build()
-                        .map_err(Error::from)
-                        .map(Into::into)
-                }
-            };
-            return new_config;
-        };
-
-        // Validate the request against an existing config, possibly adding a
+        // Validate the request against the existing config, possibly adding a
         // new stack to support the requested address.
         match request {
             InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
-                let Some(cfg) = external_ips.ipv4_config_mut() else {
-                    // There was no IPv4 config at all before, which means we
-                    // had to be single-stack IPv6. Make a dual-stack config
-                    // now.
-                    let v4 = ExternalIpConfigBuilder::new()
-                        .with_ephemeral_ip(*ipv4)
-                        .build()?;
-                    let ExternalIpConfig::V6(v6) = external_ips else {
-                        // This _really_ should be unreachable, but it's the
-                        // sled-agent. Return an error message that will cause a
-                        // 500.
-                        let msg = format!(
-                            "expected a single-stack IPv6 config, found {external_ips:?}"
-                        );
+                let cfg = config.v4.get_or_insert_with(Default::default);
+
+                // We need to support idempotent attempts to set an ephemeral
+                // address, so we return successfully if the contained address
+                // is the same as our requested one, and fail otherwise.
+                match &cfg.ephemeral_ip {
+                    Some(eip) if eip == ipv4 => {}
+                    Some(eip) => {
                         return Err(Error::Opte(
-                            illumos_utils::opte::Error::InvalidPortIpConfig(
-                                msg,
+                            illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                                (*ipv4).into(),
+                                (*eip).into(),
                             ),
                         ));
-                    };
-                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
-                };
-
-                // We have an existing configuration. We need to support
-                // idempotent attempts to set an ephemeral address, so
-                // we return successfully if the contained address is
-                // the same as our requested one, and fail otherwise.
-                match cfg.ephemeral_ip_mut() {
-                    Some(eip) if eip == ipv4 => {}
-                    Some(eip) => return Err(Error::Opte(
-                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
-                            (*ipv4).into(),
-                            (*eip).into(),
-                        ),
-                    )),
-                    empty @ None => {
-                        let _ = empty.insert(*ipv4);
+                    }
+                    None => {
+                        cfg.ephemeral_ip = Some(*ipv4);
                     }
                 };
-                Ok(external_ips)
             }
             InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
-                let Some(cfg) = external_ips.ipv6_config_mut() else {
-                    // There was no IPv6 config at all before, which means we
-                    // had to be single-stack IPv4. Make a dual-stack config
-                    // now.
-                    let v6 = ExternalIpConfigBuilder::new()
-                        .with_ephemeral_ip(*ipv6)
-                        .build()?;
-                    let ExternalIpConfig::V4(v4) = external_ips else {
-                        // This _really_ should be unreachable, but it's the
-                        // sled-agent. Return an error message that will cause a
-                        // 500.
-                        let msg = format!(
-                            "expected a single-stack IPv4 config, found {external_ips:?}"
-                        );
+                let cfg = config.v6.get_or_insert_with(Default::default);
+
+                // We need to support idempotent attempts to set an ephemeral
+                // address, so we return successfully if the contained address
+                // is the same as our requested one, and fail otherwise.
+                match &cfg.ephemeral_ip {
+                    Some(eip) if eip == ipv6 => {}
+                    Some(eip) => {
                         return Err(Error::Opte(
-                            illumos_utils::opte::Error::InvalidPortIpConfig(
-                                msg,
+                            illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                                (*ipv6).into(),
+                                (*eip).into(),
                             ),
                         ));
-                    };
-                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
-                };
-                // We have an existing configuration. We need to support
-                // idempotent attempts to set an ephemeral address, so
-                // we return successfully if the contained address is
-                // the same as our requested one, and fail otherwise.
-                match cfg.ephemeral_ip_mut() {
-                    Some(eip) if eip == ipv6 => {}
-                    Some(eip) => return Err(Error::Opte(
-                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
-                            (*ipv6).into(),
-                            (*eip).into(),
-                        ),
-                    )),
-                    empty @ None => {
-                        let _ = empty.insert(*ipv6);
+                    }
+                    None => {
+                        cfg.ephemeral_ip = Some(*ipv6);
                     }
                 };
-                Ok(external_ips)
             }
             InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
-                let Some(cfg) = external_ips.ipv4_config_mut() else {
-                    // There was no IPv4 config at all before, which means we
-                    // had to be single-stack IPv6. Make a dual-stack config
-                    // now.
-                    let v4 = ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ipv4])
-                        .build()?;
-                    let ExternalIpConfig::V6(v6) = external_ips else {
-                        // This _really_ should be unreachable, but it's the
-                        // sled-agent. Return an error message that will cause a
-                        // 500.
-                        let msg = format!(
-                            "expected a single-stack IPv6 config, found {external_ips:?}"
-                        );
-                        return Err(Error::Opte(
-                            illumos_utils::opte::Error::InvalidPortIpConfig(
-                                msg,
-                            ),
-                        ));
-                    };
-                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
-                };
-                if !cfg.floating_ips().contains(ipv4) {
-                    cfg.floating_ips_mut().push(*ipv4);
-                }
-                Ok(external_ips)
+                config.v4.get_or_insert_default().floating_ips.insert(*ipv4);
             }
             InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
-                let Some(cfg) = external_ips.ipv6_config_mut() else {
-                    // There was no IPv6 config at all before, which means we
-                    // had to be single-stack IPv4. Make a dual-stack config
-                    // now.
-                    let v6 = ExternalIpConfigBuilder::new()
-                        .with_floating_ips(vec![*ipv6])
-                        .build()?;
-                    let ExternalIpConfig::V4(v4) = external_ips else {
-                        // This _really_ should be unreachable, but it's the
-                        // sled-agent. Return an error message that will cause a
-                        // 500.
-                        let msg = format!(
-                            "expected a single-stack IPv4 config, found {external_ips:?}"
-                        );
-                        return Err(Error::Opte(
-                            illumos_utils::opte::Error::InvalidPortIpConfig(
-                                msg,
-                            ),
-                        ));
-                    };
-                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
-                };
-                if !cfg.floating_ips().contains(ipv6) {
-                    cfg.floating_ips_mut().push(*ipv6);
-                }
-                Ok(external_ips)
+                config.v6.get_or_insert_default().floating_ips.insert(*ipv6);
             }
         }
+        Ok(config)
     }
 
     fn add_external_ip_inner(
@@ -1620,7 +1490,7 @@ impl InstanceRunner {
             request,
         )?;
         self.port_manager.external_ips_ensure(nic_id, nic_kind, &new_config)?;
-        self.external_ips = Some(new_config);
+        self.external_ips = new_config;
         Ok(())
     }
 
@@ -1629,15 +1499,11 @@ impl InstanceRunner {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
-        let Some(external_ips) = &self.external_ips else {
-            return Ok(());
-        };
-
         self.port_manager
             .external_ips_ensure(
                 primary_nic.id,
                 primary_nic.kind,
-                &external_ips,
+                &self.external_ips,
             )
             .map_err(Error::Opte)
     }
@@ -1648,38 +1514,26 @@ impl InstanceRunner {
     ) -> ExternalIpConfig {
         match request {
             InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
-                if let Some(cfg) = config.ipv4_config_mut() {
+                if let Some(cfg) = config.v4.as_mut() {
                     // Take out of the option only if it contains the requested
                     // address. If it doesn't, either it's None or has another
                     // address, both of which mean we've "succeeded".
-                    cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv4);
+                    cfg.ephemeral_ip.take_if(|eip| eip == ipv4);
                 }
             }
             InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
-                if let Some(cfg) = config.ipv6_config_mut() {
-                    cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv6);
+                if let Some(cfg) = config.v6.as_mut() {
+                    cfg.ephemeral_ip.take_if(|eip| eip == ipv6);
                 }
             }
             InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
-                if let Some(cfg) = config.ipv4_config_mut() {
-                    let fips = cfg.floating_ips_mut();
-                    let floating_index = fips.iter().position(|v| v == ipv4);
-                    if let Some(pos) = floating_index {
-                        // Swap remove is valid here, OPTE is not sensitive
-                        // to Floating Ip ordering.
-                        fips.swap_remove(pos);
-                    }
+                if let Some(cfg) = config.v4.as_mut() {
+                    cfg.floating_ips.remove(ipv4);
                 }
             }
             InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
-                if let Some(cfg) = config.ipv6_config_mut() {
-                    let fips = cfg.floating_ips_mut();
-                    let floating_index = fips.iter().position(|v| v == ipv6);
-                    if let Some(pos) = floating_index {
-                        // Swap remove is valid here, OPTE is not sensitive
-                        // to Floating Ip ordering.
-                        fips.swap_remove(pos);
-                    }
+                if let Some(cfg) = config.v6.as_mut() {
+                    cfg.floating_ips.remove(ipv6);
                 }
             }
         }
@@ -1697,18 +1551,12 @@ impl InstanceRunner {
         let nic_kind = primary_nic.kind;
 
         // See note at the top of `add_external_ip_inner()`.
-        //
-        // In addition, if we have no external IP config at all, there's nothing
-        // to delete.
-        let Some(external_ips) = &self.external_ips else {
-            return Ok(());
-        };
         let new_config = Self::prune_existing_ip_stack_with_request(
-            external_ips.clone(),
+            self.external_ips.clone(),
             request,
         );
         self.port_manager.external_ips_ensure(nic_id, nic_kind, &new_config)?;
-        self.external_ips = Some(new_config);
+        self.external_ips = new_config;
         Ok(())
     }
 
@@ -2917,14 +2765,14 @@ mod tests {
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use camino_tempfile::Utf8TempDir;
-    use dns_server::TransientServer;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_common::api::internal::shared::{
-        DhcpConfig, ExternalIpConfigBuilder, SledIdentifiers, SourceNatConfigV6,
+        DhcpConfig, ExternalIpv4Config, ExternalIpv6Config, SledIdentifiers,
+        SourceNatConfigV6,
     };
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
@@ -2939,12 +2787,14 @@ mod tests {
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::config::MountConfig;
+    use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
     use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
+    use transient_dns_server::TransientDnsServer;
 
     const TIMEOUT_DURATION: tokio::time::Duration =
         tokio::time::Duration::from_secs(30);
@@ -2985,7 +2835,7 @@ mod tests {
         nexus_client: NexusClient,
         _nexus_server: HttpServer<ServerContext>,
         state_rx: Receiver<ReceivedInstanceState>,
-        _dns_server: TransientServer,
+        _dns_server: TransientDnsServer,
     }
 
     impl FakeNexusParts {
@@ -3132,16 +2982,16 @@ mod tests {
             smbios: None,
         });
 
-        let external_ips = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(
+        let external_ips = ExternalIpConfig {
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(
                     SourceNatConfigV6::new(Ipv6Addr::UNSPECIFIED, 0, 16383)
                         .unwrap(),
-                )
-                .build()
-                .expect("Should be a valid External IP config")
-                .into(),
-        );
+                ),
+                ..Default::default()
+            }),
+            v4: None,
+        };
         let local_config = InstanceSledLocalConfig {
             hostname: Hostname::from_str("bert").unwrap(),
             nics: vec![],
@@ -3376,66 +3226,92 @@ mod tests {
     }
 
     // tests around dropshot request timeouts during the blocking propolis setup
-    #[tokio::test]
-    async fn test_instance_create_timeout_while_starting_propolis() {
+    #[test]
+    fn test_instance_create_timeout_while_starting_propolis() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_starting_propolis",
         );
         let log = logctx.log.new(o!(FileKv));
-
-        let FakeNexusParts {
-            nexus_client,
-            state_rx,
-            _dns_server,
-            _nexus_server,
-        } = FakeNexusParts::new(&log).await;
-
         let temp_guard = Utf8TempDir::new().unwrap();
 
-        let (inst, _) = timeout(
-            TIMEOUT_DURATION,
-            instance_struct(
-                &log,
-                // we want to test propolis not ever coming up
-                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
+        // Use a manual runtime so that `temp_guard` outlives it.
+        //
+        // The runner task's `setup_propolis_zone` calls `tokio::fs::write`
+        // (which uses `spawn_blocking`) to write zone config files. This
+        // test times out before the runner finishes, so the blocking write
+        // may still be in-flight when the test drops its locals. If
+        // `temp_guard` drops while the blocking thread is writing,
+        // `remove_dir_all` can race and fail silently, leaking files.
+        //
+        // Dropping the runtime first drains the blocking thread pool,
+        // ensuring the write completes before `temp_guard` cleans up.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/10063
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let FakeNexusParts {
                 nexus_client,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
+                state_rx,
+                _dns_server,
+                _nexus_server,
+            } = FakeNexusParts::new(&log).await;
+
+            let (inst, _) = timeout(
+                TIMEOUT_DURATION,
+                instance_struct(
+                    &log,
+                    // we want to test propolis not ever coming up
+                    SocketAddr::V6(SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        1,
+                        0,
+                        0,
+                    )),
+                    nexus_client,
+                    AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                        ZpoolOrRamdisk::Ramdisk,
+                    ),
+                    temp_guard.path().as_str(),
                 ),
-                temp_guard.path().as_str(),
-            ),
-        )
-        .await
-        .expect("timed out creating Instance struct");
-
-        let (put_tx, put_rx) = oneshot::channel();
-
-        tokio::time::pause();
-
-        // pretending we're InstanceManager::ensure_state, try in vain to start
-        // our "instance", but no propolis server is running
-        inst.put_state(put_tx, VmmStateRequested::Running)
-            .expect("failed to send Instance::put_state");
-
-        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
-
-        tokio::time::advance(TIMEOUT_DURATION).await;
-
-        tokio::time::resume();
-
-        timeout_fut
+            )
             .await
-            .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
+            .expect("timed out creating Instance struct");
 
-        if let ReceivedInstanceState::InstancePut(SledVmmState {
-            vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
-            ..
-        }) = state_rx.borrow().to_owned()
-        {
-            panic!(
-                "Nexus's InstanceState should never have reached running if zone creation timed out"
+            let (put_tx, put_rx) = oneshot::channel();
+
+            tokio::time::pause();
+
+            // pretending we're InstanceManager::ensure_state, try in vain
+            // to start our "instance", but no propolis server is running
+            inst.put_state(put_tx, VmmStateRequested::Running)
+                .expect("failed to send Instance::put_state");
+
+            let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
+
+            tokio::time::advance(TIMEOUT_DURATION).await;
+
+            tokio::time::resume();
+
+            timeout_fut.await.expect_err(
+                "*should've* timed out waiting for \
+                 Instance::put_state, but didn't?",
             );
-        }
+
+            if let ReceivedInstanceState::InstancePut(SledVmmState {
+                vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
+                ..
+            }) = state_rx.borrow().to_owned()
+            {
+                panic!(
+                    "Nexus's InstanceState should never have reached \
+                     running if zone creation timed out"
+                );
+            }
+        });
 
         logctx.cleanup_successful();
     }
@@ -3789,7 +3665,7 @@ mod tests {
         // up communicating with, even though the tests may not interact with
         // them directly.
         _nexus_server: HttpServer<ServerContext>,
-        _dns_server: TransientServer,
+        _dns_server: TransientDnsServer,
     }
 
     impl TestInstanceRunner {
@@ -3988,13 +3864,15 @@ mod tests {
 
     #[test]
     fn add_ephemeral_ip_with_no_ip_stack_at_all() {
-        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
-            .build()
-            .unwrap()
-            .into();
+        let expected_stack = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 1)),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            None,
+            ExternalIpConfig::default(),
             &InstanceExternalIpBody::Ephemeral(
                 Ipv4Addr::new(10, 0, 0, 1).into(),
             ),
@@ -4005,13 +3883,10 @@ mod tests {
 
     #[test]
     fn add_floating_ip_with_no_ip_stack_at_all() {
-        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
-            .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
-            .build()
-            .unwrap()
-            .into();
+        let expected_stack =
+            ExternalIpConfig::new_floating_ipv4(Ipv4Addr::new(10, 0, 0, 1));
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            None,
+            ExternalIpConfig::default(),
             &InstanceExternalIpBody::Floating(
                 Ipv4Addr::new(10, 0, 0, 1).into(),
             ),
@@ -4022,20 +3897,22 @@ mod tests {
 
     #[test]
     fn add_floating_ip_with_existing_ephemeral_ip() {
-        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 2))
-            .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
-            .build()
-            .unwrap()
-            .into();
+        let expected_stack = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 2)),
+                floating_ips: BTreeSet::from([Ipv4Addr::new(10, 0, 0, 1)]),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            Some(
-                ExternalIpConfigBuilder::new()
-                    .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 2))
-                    .build()
-                    .unwrap()
-                    .into(),
-            ),
+            ExternalIpConfig {
+                v4: Some(ExternalIpv4Config {
+                    ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 2)),
+                    ..Default::default()
+                }),
+                v6: None,
+            },
             &InstanceExternalIpBody::Floating(
                 Ipv4Addr::new(10, 0, 0, 1).into(),
             ),
@@ -4046,20 +3923,16 @@ mod tests {
 
     #[test]
     fn add_ephemeral_ip_with_existing_floating_ip() {
-        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 2))
-            .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
-            .build()
-            .unwrap()
-            .into();
+        let expected_stack = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 2)),
+                floating_ips: BTreeSet::from([Ipv4Addr::new(10, 0, 0, 1)]),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            Some(
-                ExternalIpConfigBuilder::new()
-                    .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
-                    .build()
-                    .unwrap()
-                    .into(),
-            ),
+            ExternalIpConfig::new_floating_ipv4(Ipv4Addr::new(10, 0, 0, 1)),
             &InstanceExternalIpBody::Ephemeral(
                 Ipv4Addr::new(10, 0, 0, 2).into(),
             ),
@@ -4070,17 +3943,24 @@ mod tests {
 
     #[test]
     fn add_ephemeral_ip_of_different_ip_version() {
-        let v4 = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
-            .build()
-            .unwrap();
-        let v6 = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1))
-            .build()
-            .unwrap();
-        let expected_stack = ExternalIpConfig::DualStack { v4: v4.clone(), v6 };
+        let expected_stack = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 1)),
+                ..Default::default()
+            }),
+            v6: Some(ExternalIpv6Config {
+                ephemeral_ip: Some(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)),
+                ..Default::default()
+            }),
+        };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            Some(v4.into()),
+            ExternalIpConfig {
+                v4: Some(ExternalIpv4Config {
+                    ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 1)),
+                    ..Default::default()
+                }),
+                v6: None,
+            },
             &InstanceExternalIpBody::Ephemeral(
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1).into(),
             ),
@@ -4091,17 +3971,26 @@ mod tests {
 
     #[test]
     fn add_floating_ip_of_different_ip_version() {
-        let v4 = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
-            .build()
-            .unwrap();
-        let v6 = ExternalIpConfigBuilder::new()
-            .with_floating_ips(vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)])
-            .build()
-            .unwrap();
-        let expected_stack = ExternalIpConfig::DualStack { v4: v4.clone(), v6 };
+        let expected_stack = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 1)),
+                ..Default::default()
+            }),
+            v6: Some(ExternalIpv6Config {
+                floating_ips: BTreeSet::from([Ipv6Addr::new(
+                    0xfd00, 0, 0, 0, 0, 0, 0, 1,
+                )]),
+                ..Default::default()
+            }),
+        };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            Some(v4.into()),
+            ExternalIpConfig {
+                v4: Some(ExternalIpv4Config {
+                    ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 1)),
+                    ..Default::default()
+                }),
+                v6: None,
+            },
             &InstanceExternalIpBody::Floating(
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1).into(),
             ),
@@ -4112,21 +4001,21 @@ mod tests {
 
     #[test]
     fn add_new_floating_ip() {
-        let v6 = ExternalIpConfigBuilder::new()
-            .with_floating_ips(vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)])
-            .build()
-            .unwrap()
-            .into();
-        let expected_stack = ExternalIpConfigBuilder::new()
-            .with_floating_ips(vec![
-                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
-                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
-            ])
-            .build()
-            .unwrap()
-            .into();
+        let existing = ExternalIpConfig::new_floating_ipv6(Ipv6Addr::new(
+            0xfd00, 0, 0, 0, 0, 0, 0, 1,
+        ));
+        let expected_stack = ExternalIpConfig {
+            v6: Some(ExternalIpv6Config {
+                floating_ips: BTreeSet::from([
+                    Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                    Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
+                ]),
+                ..Default::default()
+            }),
+            v4: None,
+        };
         let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
-            Some(v6),
+            existing,
             &InstanceExternalIpBody::Floating(
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2).into(),
             ),
@@ -4137,66 +4026,63 @@ mod tests {
 
     #[test]
     fn prune_existing_ephemeral_ipv4_address() {
-        let v4 = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
-            .build()
-            .unwrap()
-            .into();
+        let v4 = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 1)),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
             v4,
             &InstanceExternalIpBody::Ephemeral(
                 Ipv4Addr::new(10, 0, 0, 1).into(),
             ),
         );
-        let Some(new_v4) = new_stack.ipv4_config() else {
+        let Some(new_v4) = new_stack.v4.as_ref() else {
             panic!("Expected an IPv4 config, found: {new_stack:?}");
         };
         println!("{new_v4:?}");
-        assert!(new_v4.ephemeral_ip().is_none());
+        assert!(new_v4.ephemeral_ip.is_none());
     }
 
     #[test]
     fn prune_existing_ephemeral_ipv6_address() {
-        let v6 = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1))
-            .build()
-            .unwrap()
-            .into();
+        let v6 = ExternalIpConfig {
+            v6: Some(ExternalIpv6Config {
+                ephemeral_ip: Some(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)),
+                ..Default::default()
+            }),
+            v4: None,
+        };
         let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
             v6,
             &InstanceExternalIpBody::Ephemeral(
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1).into(),
             ),
         );
-
-        // This is an example of why we need to address
-        // https://github.com/oxidecomputer/omicron/issues/9839.
-        //
-        // It's possible to get an external IP configuration that you can't
-        // construct directly, by creating one with an Ephemeral address and
-        // then deleting it.
-        let Some(new_v6) = new_stack.ipv6_config() else {
+        let Some(new_v6) = new_stack.v6.as_ref() else {
             panic!("Expected an IPv6 config, found: {new_stack:?}");
         };
         println!("{new_v6:?}");
-        assert!(new_v6.ephemeral_ip().is_none());
+        assert!(new_v6.ephemeral_ip.is_none());
     }
 
     #[test]
     fn prune_existing_floating_ip() {
-        let v6 = ExternalIpConfigBuilder::new()
-            .with_floating_ips(vec![
-                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
-                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
-            ])
-            .build()
-            .unwrap()
-            .into();
-        let expected_stack = ExternalIpConfigBuilder::new()
-            .with_floating_ips(vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)])
-            .build()
-            .unwrap()
-            .into();
+        let v6 = ExternalIpConfig {
+            v6: Some(ExternalIpv6Config {
+                floating_ips: BTreeSet::from([
+                    Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                    Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
+                ]),
+                ..Default::default()
+            }),
+            v4: None,
+        };
+        let expected_stack = ExternalIpConfig::new_floating_ipv6(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+        );
         let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
             v6,
             &InstanceExternalIpBody::Floating(
