@@ -395,7 +395,12 @@ mod tests {
         // `CollectionBuilder` produces timestamps using `Utc::now()`.
         //
         // This is the oldest one:
-        let older = Arc::new(CollectionBuilder::new("test (old)").build());
+        let older = {
+            let mut older = CollectionBuilder::new("test (oldest)").build();
+            older.time_done += chrono::Duration::seconds(1);
+            Arc::new(older)
+        };
+
         // This one started after `older` finished:
         let newer = {
             let mut newer = CollectionBuilder::new("test (new)").build();
