@@ -54,7 +54,9 @@ use nexus_types::external_api::certificate::Certificate;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::identity_provider::IdentityProvider;
 use nexus_types::external_api::image::Image;
-use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
+use nexus_types::external_api::ip_pool::{
+    IpPool, IpPoolListFilter, IpPoolRange,
+};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::probe::ProbeInfo;
@@ -1289,18 +1291,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn system_ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
+        filter_params: Query<IpPoolListFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
+            let filter = filter_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let scan_params = ScanByNameOrId::from_query(&query)?;
             let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let pools = nexus
-                .ip_pools_list(&opctx, &paginated_by)
+                .ip_pools_list(&opctx, &paginated_by, &filter.into())
                 .await?
                 .into_iter()
                 .map(IpPool::from)

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026032500.0.0"
+    "version": "2026041500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -9236,6 +9236,23 @@
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delegated_for_internal_use",
+            "description": "Filter on pools delegated for internal Oxide use.\n\nDefaults to excluding internal pools when unset.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ip_version",
+            "description": "Restrict pools to a specific IP version.",
+            "schema": {
+              "$ref": "#/components/schemas/IpVersion"
             }
           }
         ],

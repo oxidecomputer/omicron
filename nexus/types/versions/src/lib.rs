@@ -77,3 +77,5 @@ pub mod v2026_03_14_00;
 pub mod v2026_03_23_00;
 #[path = "subnet_pool_utilization_remaining/mod.rs"]
 pub mod v2026_03_25_00;
+#[path = "ip_pool_list_filters/mod.rs"]
+pub mod v2026_04_15_00;

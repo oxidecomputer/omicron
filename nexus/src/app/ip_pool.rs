@@ -8,6 +8,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolListFilters;
 use nexus_db_model::IpPoolReservationType;
 use nexus_db_model::IpPoolType;
 use nexus_db_model::IpPoolUpdate;
@@ -387,8 +388,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
+        filters: &IpPoolListFilters,
     ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.ip_pools_list(opctx, pagparams).await
+        self.db_datastore.ip_pools_list(opctx, pagparams, filters).await
     }
 
     pub(crate) async fn ip_pool_delete(

@@ -46,6 +46,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpPool;
+use nexus_db_model::IpPoolListFilters;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Project;
 use nexus_db_model::Vpc;
@@ -188,16 +189,21 @@ impl DataStore {
 
     /// List IP Pools
     ///
-    /// This returns the pools available for external customer use.
+    /// This returns the pools available. Pools are filterable by IP Version and
+    /// whether the pool is delegated for external or internal usage.
     pub async fn ip_pools_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
+        filters: &IpPoolListFilters,
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolReservationType::ExternalSilos,
-            None,
+            match filters.delegated_for_internal_use {
+                Some(true) => IpPoolReservationType::OxideInternal,
+                _ => IpPoolReservationType::ExternalSilos,
+            },
+            filters.ip_version,
             None,
             pagparams,
         )
@@ -2536,7 +2542,7 @@ mod test {
         let pagbyid = PaginatedBy::Id(pagparams_id);
 
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(&opctx, &pagbyid, &Default::default())
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 0);
@@ -2571,7 +2577,7 @@ mod test {
 
         // shows up in full list but not silo list
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(&opctx, &pagbyid, &Default::default())
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
@@ -3188,7 +3194,7 @@ mod test {
 
         // Regular pool listing should also include it
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(&opctx, &pagbyid, &Default::default())
             .await
             .expect("Should list all IP pools");
         assert_eq!(all_pools.len(), 1);

@@ -211,6 +211,8 @@ pub mod ip_pool {
     pub use crate::v2026_01_05_00::ip_pool::IpPoolLinkSilo;
     pub use crate::v2026_01_05_00::ip_pool::IpPoolSiloUpdate;
     pub use crate::v2026_01_05_00::ip_pool::PoolSelector;
+
+    pub use crate::v2026_04_15_00::ip_pool::IpPoolListFilter;
 }
 
 pub mod metrics {
