@@ -535,7 +535,7 @@ impl From<BgpPeerConfig> for v20::BgpPeerConfig {
 }
 
 /// Initial network configuration
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RackNetworkConfig {
     pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks

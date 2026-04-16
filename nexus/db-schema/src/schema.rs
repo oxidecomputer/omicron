@@ -1048,7 +1048,6 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         initialized -> Bool,
-        tuf_base_url -> Nullable<Text>,
         rack_subnet -> Nullable<Inet>,
     }
 }
@@ -1590,8 +1589,46 @@ table! {
 
         assigned_nexus -> Nullable<Uuid>,
         user_comment -> Nullable<Text>,
+        fm_case_id -> Nullable<Uuid>,
     }
 }
+
+// Child data selection tables owned by `support_bundle`. Each table corresponds
+// to a `BundleData` variant. Row existence means "include this category in the
+// referenced bundle."
+
+table! {
+    support_bundle_data_selection_flags (bundle_id) {
+        bundle_id -> Uuid,
+        include_reconfigurator -> Bool,
+        include_sled_cubby_info -> Bool,
+        include_sp_dumps -> Bool,
+    }
+}
+
+table! {
+    support_bundle_data_selection_host_info (bundle_id) {
+        bundle_id -> Uuid,
+        all_sleds -> Bool,
+        sled_ids -> Array<Uuid>,
+    }
+}
+
+table! {
+    support_bundle_data_selection_ereports (bundle_id) {
+        bundle_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
+        only_serials -> Array<Text>,
+        only_classes -> Array<Text>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    support_bundle_data_selection_flags,
+    support_bundle_data_selection_host_info,
+    support_bundle_data_selection_ereports,
+);
 
 /* hardware inventory */
 
@@ -1721,6 +1758,36 @@ table! {
 
         which -> crate::enums::RotPageWhichEnum,
         sw_root_of_trust_page_id -> Uuid,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        svcs_cmd_error -> Nullable<Text>,
+        time_of_status -> Timestamptz,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online_service (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        fmri -> Text,
+        zone -> Text,
+        state -> crate::enums::InvSvcEnabledNotOnlineStateEnum,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online_parse_error (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        error_message -> Text,
     }
 }
 
@@ -3188,6 +3255,56 @@ table! {
         payload -> Jsonb,
     }
 }
+
+// FM support bundle requests, stored per-sitrep like alert requests.
+table! {
+    fm_support_bundle_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+    }
+}
+
+// Child data selection tables owned by `fm_support_bundle_request`. Each table
+// corresponds to a `BundleData` variant. Row existence means "include this
+// category in the referenced bundle."
+
+table! {
+    fm_support_bundle_request_data_selection_flags (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        include_reconfigurator -> Bool,
+        include_sled_cubby_info -> Bool,
+        include_sp_dumps -> Bool,
+    }
+}
+
+table! {
+    fm_support_bundle_request_data_selection_host_info (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        all_sleds -> Bool,
+        sled_ids -> Array<Uuid>,
+    }
+}
+
+table! {
+    fm_support_bundle_request_data_selection_ereports (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
+        only_serials -> Array<Text>,
+        only_classes -> Array<Text>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    fm_support_bundle_request_data_selection_flags,
+    fm_support_bundle_request_data_selection_host_info,
+    fm_support_bundle_request_data_selection_ereports,
+);
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

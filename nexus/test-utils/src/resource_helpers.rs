@@ -1380,6 +1380,28 @@ pub async fn assert_ip_pool_utilization(
     );
 }
 
+pub async fn assert_subnet_pool_utilization(
+    client: &ClientTestContext,
+    pool_name: &str,
+    allocated: f64,
+    capacity: f64,
+) {
+    let url = format!("/v1/system/subnet-pools/{}/utilization", pool_name);
+    let utilization: subnet_pool::SubnetPoolUtilization =
+        object_get(client, &url).await;
+    let remaining = capacity - allocated;
+    assert_eq!(
+        remaining, utilization.remaining,
+        "Subnet pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
+    );
+    assert_eq!(
+        capacity, utilization.capacity,
+        "Subnet pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
+    );
+}
+
 /// Grant a role on a resource to a user
 ///
 /// * `grant_resource_url`: URL of the resource we're granting the role on

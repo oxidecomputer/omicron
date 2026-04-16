@@ -90,6 +90,32 @@ pub struct SourceNatConfig<T: Ip> {
     last_port: u16,
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
+where
+    T: Ip + proptest::arbitrary::Arbitrary,
+    T::Strategy: 'static,
+{
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        let num_possible_first_ports = u16::MAX / NUM_SOURCE_NAT_PORTS + 1;
+        let first_port_strategy = (0u16..num_possible_first_ports)
+            .prop_map(|i| i * NUM_SOURCE_NAT_PORTS);
+
+        (T::arbitrary(), first_port_strategy)
+            .prop_map(|(ip, first_port)| {
+                let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+                Self::new(ip, first_port, last_port)
+                    .expect("Arbitrary impl produces aligned port pairs")
+            })
+            .boxed()
+    }
+}
+
 /// An IP address and port range used for source NAT, i.e., making
 /// outbound network connections from guests or services.
 // Private type only used for deriving the actual JSON schema object itself,
