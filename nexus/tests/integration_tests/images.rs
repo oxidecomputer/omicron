@@ -414,7 +414,7 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
 
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+            .expect_status(Some(StatusCode::CONFLICT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
