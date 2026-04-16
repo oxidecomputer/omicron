@@ -414,7 +414,6 @@ impl PortManager {
             hdl
         };
         let (port, ticket) = {
-            let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(PortData {
                 name: port_name.clone(),
@@ -424,19 +423,24 @@ impl PortManager {
                 vni,
                 gateway,
             });
-            let old = ports.insert((nic.id, nic.kind), port.clone());
+
+            // NOTE: We may add external IPs below, which can fail. If that
+            // does, we drop the `ticket` on the way out of this block. That
+            // attempts to acquire this lock, in order to remove itself on drop.
+            // We need to drop the lock before that, to avoid a deadlock, so
+            // let's do it right away, after inserting.
+            let old = self
+                .inner
+                .ports
+                .lock()
+                .unwrap()
+                .insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
                 nic.id,
                 nic.kind,
             );
-
-            // NOTE: We may add external IPs below, which can fail. If that
-            // does, we drop the `ticket` on the way out of this block. That
-            // attempts to acquire this lock, in order to remove itself on drop.
-            // We need to drop the lock before that, to avoid a deadlock.
-            drop(ports);
 
             // Ports for Probes/Services cannot have EIP<->IGW mappings filled
             // in dynamically today, so to keep use of their EIPs working we
