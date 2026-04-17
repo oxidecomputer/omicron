@@ -80,6 +80,7 @@ tough.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+nexus-inventory.workspace = true
 gateway-types = { workspace = true, features = ["testing"] }
 iddqd = { workspace = true, features = ["proptest"] }
 newtype-uuid = { workspace = true, features = ["proptest1"] }

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026032500.0.0"
+    "version": "2026041500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -29749,6 +29749,10 @@
               "minimum": 0
             }
           },
+          "is_system_healthy": {
+            "description": "Whether the system is healthy\n\nThis is a rough high-level indicator of overall system health. When true, a subset of components are operating normally. When false, one or more components from that subset may be experiencing issues. During an update, it is normal for the system to show as \"unhealthy\". If the system appears unhealthy before or after an update has ocurred, please contact support.",
+            "type": "boolean"
+          },
           "suspended": {
             "description": "Whether automatic update is suspended due to manual update activity\n\nAfter a manual support procedure that changes the system software, automatic update activity is suspended to avoid undoing the change. To resume automatic update, first upload the TUF repository matching the manually applied update, then set that as the target release.",
             "type": "boolean"
@@ -29770,6 +29774,7 @@
         },
         "required": [
           "components_by_release_version",
+          "is_system_healthy",
           "suspended",
           "target_release",
           "time_last_step_planned"
