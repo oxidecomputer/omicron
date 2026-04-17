@@ -91,7 +91,7 @@ const TUF_PACKAGES: [&PackageName; 12] = [
     &PackageName::new_const("probe"),
 ];
 
-const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
+const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/3/dev/";
 const HELIOS_REPO: &str = "https://github.com/oxidecomputer/helios.git";
 
 static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
@@ -158,7 +158,7 @@ struct Args {
     #[clap(long)]
     extra_manifest: Option<Utf8PathBuf>,
 
-    /// Extra helios-dev origin to be passed along to helios-build
+    /// Extra helios origin to be passed along to helios-build
     #[clap(long)]
     extra_origin: Option<String>,
 
@@ -672,7 +672,7 @@ async fn main() -> Result<()> {
         if !args.helios_local {
             image_cmd = image_cmd
                 .arg("-p") // use an external package repository
-                .arg(format!("helios-dev={HELIOS_PKGREPO}"))
+                .arg(format!("helios={HELIOS_PKGREPO}"))
         }
 
         // helios-build experiment-image
