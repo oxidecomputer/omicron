@@ -102,7 +102,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43d5b281e737544384e969a5ccad3f1cdd24b48086a0fc1b2a5262a26b8f4f4a"
 dependencies = [
  "anstyle",
- "anstyle-parse",
+ "anstyle-parse 0.2.7",
+ "anstyle-query",
+ "anstyle-wincon",
+ "colorchoice",
+ "is_terminal_polyfill",
+ "utf8parse",
+]
+
+[[package]]
+name = "anstream"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d"
+dependencies = [
+ "anstyle",
+ "anstyle-parse 1.0.0",
  "anstyle-query",
  "anstyle-wincon",
  "colorchoice",
@@ -112,15 +127,24 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anstyle-parse"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7644824f0aa2c7b9384579234ef10eb7efb6a0deb83f9630a49594dd9c15c2"
+dependencies = [
+ "utf8parse",
+]
+
+[[package]]
+name = "anstyle-parse"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e"
 dependencies = [
  "utf8parse",
 ]
@@ -623,7 +647,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -633,7 +657,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -1041,7 +1065,7 @@ version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8c236e531d024b1524669ee2a56eca09ab8a40f3395dc2728cde9defa9c60d8"
 dependencies = [
- "anstream",
+ "anstream 0.6.21",
  "anstyle",
  "camino",
  "camino-tempfile",
@@ -1402,9 +1426,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.60"
+version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2797f34da339ce31042b27d23607e051786132987f595b02ba4f6a6dffb7030a"
+checksum = "1ddb117e43bbf7dacf0a4190fef4d345b9bad68dfc649cb349e7d17d28428e51"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1412,11 +1436,11 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.60"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a241312cea5059b13574bb9b3861cabf758b879c15190b37b6d6fd63ab6876"
+checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
 dependencies = [
- "anstream",
+ "anstream 1.0.0",
  "anstyle",
  "clap_lex",
  "strsim",
@@ -1425,9 +1449,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.55"
+version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a92793da1a46a5f2a02a6f4c46c6496b28c43638adea8306fcb0caa1634f24e5"
+checksum = "f2ce8604710f6733aa641a2b3731eaa1e8b3d9973d5e3565da11800813f997a9"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -1703,7 +1727,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1740,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1#44a949c9bedf4fcd4d280337fa1965b4293c88d1"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e#abae2128f6e33a01cfb8dc2b75b362c48321bb9e"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2524,7 +2548,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a02f4ce9edb006648aec8810ba93056686b3ca63#a02f4ce9edb006648aec8810ba93056686b3ca63"
 dependencies = [
  "oxnet",
  "progenitor 0.13.0",
@@ -3107,11 +3131,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1#44a949c9bedf4fcd4d280337fa1965b4293c88d1"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e#abae2128f6e33a01cfb8dc2b75b362c48321bb9e"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e)",
  "crc8",
  "futures",
  "http",
@@ -3575,7 +3599,7 @@ version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2daee4ea451f429a58296525ddf28b45a3b64f1acf6587e2067437bb11e218d"
 dependencies = [
- "anstream",
+ "anstream 0.6.21",
  "anstyle",
  "env_filter",
  "log",
@@ -3627,7 +3651,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5752,7 +5776,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5829,7 +5853,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6202,7 +6226,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5297962ef19edda4ce33aaa484386e0a5b3d7f2f4e037cbeee00503ef6b29d33"
 dependencies = [
- "anstream",
+ "anstream 0.6.21",
  "anstyle",
  "clap",
  "escape8259",
@@ -6501,7 +6525,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a02f4ce9edb006648aec8810ba93056686b3ca63#a02f4ce9edb006648aec8810ba93056686b3ca63"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -7640,7 +7664,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e)",
  "dropshot 0.16.7",
  "futures",
  "gateway-messages",
@@ -7946,7 +7970,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8597,7 +8621,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e)",
  "dropshot 0.16.7",
  "ereport-types",
  "expectorate",
@@ -9267,6 +9291,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "aho-corasick",
+ "anstream 0.6.21",
  "anyhow",
  "aws-lc-rs",
  "base16ct",
@@ -11256,7 +11281,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11269,7 +11294,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11293,7 +11318,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "anyhow",
  "atty",
@@ -11326,7 +11351,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -11335,7 +11360,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc489ddf0f38f75e0c194b86cf6f0de377f68845#bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1c3ec553002f0f40c0a60018bbd18cafd1c156e7#1c3ec553002f0f40c0a60018bbd18cafd1c156e7"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -11487,14 +11512,14 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "quote"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
@@ -11749,7 +11774,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a02f4ce9edb006648aec8810ba93056686b3ca63#a02f4ce9edb006648aec8810ba93056686b3ca63"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -12388,7 +12413,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12491,7 +12516,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13941,7 +13966,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -14578,7 +14603,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14598,7 +14623,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16734,7 +16759,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e)",
  "dropshot 0.16.7",
  "gateway-client",
  "gateway-types",
@@ -16799,7 +16824,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=abae2128f6e33a01cfb8dc2b75b362c48321bb9e)",
  "dropshot 0.16.7",
  "either",
  "expectorate",
@@ -16947,7 +16972,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

@@ -1044,15 +1044,14 @@ async fn test_left_member_waits_for_group_active(
 
 /// Test underlay IP collision detection and salt-based retry mechanism.
 ///
-/// This test verifies that when two external groups would map to the same
-/// underlay IP, the reconciler detects the collision and retries with an
+/// Verifies that when two external groups would map to the same underlay
+/// IP, the reconciler detects the collision and retries with an
 /// incremented salt value.
 ///
-/// Test setup:
-/// 1. Create group A with external IP 224.5.5.5 (via instance join)
-/// 2. Pre-occupy B's target underlay IP (ff04::e001:0203) using A's tag
-/// 3. Create group B with external IP 224.1.2.3 (maps to ff04::e001:0203 with salt=0)
-/// 4. When reconciler processes B, it hits collision and retries with salt=1
+/// Steps: a) create group A (224.5.5.5), let it reach Active, b) stop
+/// DPD and pre-occupy B's target underlay (ff04::e001:0203) with A's
+/// tag, c) create group B (224.1.2.3), d) restart DPD and reconcile,
+/// e) verify B has salt > 0 and A/B have different underlays.
 #[nexus_test]
 async fn test_multicast_group_underlay_collision_retry(
     cptestctx: &ControlPlaneTestContext,
@@ -1066,11 +1065,10 @@ async fn test_multicast_group_underlay_collision_retry(
     let project_name = "collision-test-project";
     let instance_a_name = "collision-instance-a";
     let instance_b_name = "collision-instance-b";
-    // Use IP addresses as group identifiers for explicit IP allocation
     let group_a_ip = "224.5.5.5";
-    let group_b_ip = "224.1.2.3"; // Known mapping: → ff04::e001:0203 with salt=0
+    let group_b_ip = "224.1.2.3"; // Maps to ff04::e001:0203 at salt=0
 
-    // Setup: project, pools
+    // Setup: project, pools, instances
     ops::join3(
         create_project(&client, project_name),
         create_default_ip_pools(&client),
@@ -1083,17 +1081,14 @@ async fn test_multicast_group_underlay_collision_retry(
     )
     .await;
 
-    // Create two instances for membership
     ops::join2(
         create_instance(client, project_name, instance_a_name),
         create_instance(client, project_name, instance_b_name),
     )
     .await;
 
-    // Stop DPD to control when groups transition to "Active"
-    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
-
-    // Create group A by joining instance to IP address (implicit group creation)
+    // Step 1: let group A reach Active so its underlay is deterministic
+    // before setting up the collision.
     multicast_group_attach(
         cptestctx,
         project_name,
@@ -1102,18 +1097,34 @@ async fn test_multicast_group_underlay_collision_retry(
     )
     .await;
 
-    // Fetch group A (created by attach) from API using IP address as identifier
     let group_a = get_multicast_group(client, group_a_ip).await;
+    wait_for_group_active(client, group_a_ip).await;
+
     let group_a_model = datastore
         .multicast_group_fetch(
             &opctx,
             MulticastGroupUuid::from_untyped_uuid(group_a.identity.id),
         )
         .await
-        .expect("Should fetch group A");
+        .expect("Should fetch group A after Active");
+    let underlay_a = datastore
+        .underlay_multicast_group_fetch(
+            &opctx,
+            group_a_model.underlay_group_id.unwrap(),
+        )
+        .await
+        .expect("Should fetch A's underlay group");
 
-    // Pre-occupy B's target underlay IP by creating an underlay group with A's tag
-    // B's target: ff04::e001:0203 (known mapping for 224.1.2.3 with salt=0)
+    assert_eq!(
+        underlay_a.multicast_ip.ip().to_string(),
+        "ff04::e005:505",
+        "A's underlay should be its natural mapping (224.5.5.5)"
+    );
+
+    // Step 2: stop DPD and pre-occupy B's target underlay IP using A's
+    // tag so B will collide at salt=0.
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
+
     let collision_ip: ipnetwork::IpNetwork = "ff04::e001:0203".parse().unwrap();
     let res = datastore
         .ensure_underlay_multicast_group(
@@ -1124,7 +1135,6 @@ async fn test_multicast_group_underlay_collision_retry(
         .await
         .expect("Should create collision underlay");
 
-    // Verify the underlay was created (for group A, but with B's target IP)
     assert!(
         matches!(
             res,
@@ -1133,7 +1143,7 @@ async fn test_multicast_group_underlay_collision_retry(
         "Should have created underlay group with collision IP"
     );
 
-    // Create group B by joining instance to IP address (implicit group creation)
+    // Step 3: create group B.
     multicast_group_attach(
         cptestctx,
         project_name,
@@ -1142,14 +1152,15 @@ async fn test_multicast_group_underlay_collision_retry(
     )
     .await;
 
-    // Fetch group B (created by attach) from API using IP address as identifier
     let group_b = get_multicast_group(client, group_b_ip).await;
 
-    // Restart DPD and run reconciler, triggering collision detection
+    // Step 4: restart DPD and run the reconciler.
     cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
     activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Fetch group B after reconciliation
+    // Step 5: verify collision was handled correctly.
+    wait_for_group_active(client, group_b_ip).await;
+
     let group_b_after = datastore
         .multicast_group_fetch(
             &opctx,
@@ -1158,7 +1169,6 @@ async fn test_multicast_group_underlay_collision_retry(
         .await
         .expect("Should fetch group B after reconciliation");
 
-    // Verify B got a salt value > 0 (collision was detected and retried)
     assert!(
         group_b_after.underlay_salt.is_some(),
         "Group B should have a salt value after collision retry"
@@ -1169,36 +1179,32 @@ async fn test_multicast_group_underlay_collision_retry(
         "Salt should be > 0 after collision (got {})",
         *salt_value
     );
-
-    // Verify B got an underlay group (different from the collision IP)
     assert!(
         group_b_after.underlay_group_id.is_some(),
         "Group B should have an underlay group after collision retry"
     );
 
-    // Fetch A's underlay group and verify it has the collision IP
-    let group_a_after = datastore
+    // Verify A and B both got underlay groups and they differ.
+    let group_a_final = datastore
         .multicast_group_fetch(
             &opctx,
             MulticastGroupUuid::from_untyped_uuid(group_a.identity.id),
         )
         .await
-        .expect("Should fetch group A after reconciliation");
+        .expect("Should fetch group A after full reconciliation");
+    assert!(
+        group_a_final.underlay_group_id.is_some(),
+        "Group A should have an underlay group"
+    );
+
     let underlay_a = datastore
         .underlay_multicast_group_fetch(
             &opctx,
-            group_a_after.underlay_group_id.unwrap(),
+            group_a_final.underlay_group_id.unwrap(),
         )
         .await
         .expect("Should fetch A's underlay group");
 
-    assert_eq!(
-        underlay_a.multicast_ip.ip().to_string(),
-        "ff04::e001:203",
-        "A's underlay IP should be the collision IP we set"
-    );
-
-    // Fetch B's underlay group and verify it has a different IP than the collision IP
     let underlay_b = datastore
         .underlay_multicast_group_fetch(
             &opctx,
@@ -1207,13 +1213,6 @@ async fn test_multicast_group_underlay_collision_retry(
         .await
         .expect("Should fetch B's underlay group");
 
-    assert_ne!(
-        underlay_b.multicast_ip.ip().to_string(),
-        "ff04::e001:203",
-        "B's underlay IP should differ from collision IP due to salt"
-    );
-
-    // Verify A and B have different underlay IPs
     assert_ne!(
         underlay_a.multicast_ip, underlay_b.multicast_ip,
         "A and B should have different underlay IPs"

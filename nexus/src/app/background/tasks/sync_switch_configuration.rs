@@ -843,6 +843,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 }),
                                 deterministic_collision_resolution: false,
                                 idle_hold_jitter: None,
+                                src_addr: None,
+                                src_port: None,
                             };
 
                             // update the stored vec if it exists, create a new on if it doesn't exist
@@ -895,6 +897,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 deterministic_collision_resolution: false,
                                 idle_hold_jitter: None,
                                 router_lifetime: peer.router_lifetime,
+                                src_addr: None,
+                                src_port: None,
                             };
 
                             // update the stored vec if it exists, create a new on if it doesn't exist
@@ -993,7 +997,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
 
-                    if let Err(e) = client.update_rib_bestpath_fanout(fanout).await {
+                    if let Err(e) = client.update_bestpath_fanout(fanout).await {
                         error!(log, "error while updating bestpath fanout"; "error" => ?e);
                     }
                 }

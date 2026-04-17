@@ -245,7 +245,11 @@ impl<S: Simulatable + 'static> SimCollection<S> {
                 // particular, we want to finish this work before calling out to
                 // notify the nexus.
                 let mut objects = self.objects.lock().await;
-                let mut object = objects.remove(&id).unwrap();
+                let Some(mut object) = objects.remove(&id) else {
+                    // Instance was already removed (e.g., destroyed by a
+                    // concurrent transition). Nothing left to do.
+                    break;
+                };
                 object.transition_finish();
                 let after = object.object.current().clone();
 
