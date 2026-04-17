@@ -5379,7 +5379,7 @@
             "description": "Full fault event payload as JSON, if present. Contains the fault-list with classes, certainties, affected FMRIs, and other diagnostic detail."
           },
           "url": {
-            "description": "URL for human-readable information about this fault (e.g. \"http://illumos.org/msg/PCIEX-8000-DJ\").",
+            "description": "URL for human-readable information about this fault (e.g. `http://illumos.org/msg/PCIEX-8000-DJ`).",
             "type": "string"
           },
           "uuid": {
