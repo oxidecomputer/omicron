@@ -151,9 +151,8 @@ impl super::Nexus {
 
         // Assemble a Reconfigurator state file so that we have a record of the
         // new target blueprint.
-        let (blueprint, debug) = self
-            .assemble_state_for_new_target(opctx, new_target)
-            .await?;
+        let (blueprint, debug) =
+            self.assemble_state_for_new_target(opctx, new_target).await?;
 
         // Archive the Reconfigurator state file.
         // XXX-dap commonize filename construction with autoplanner
