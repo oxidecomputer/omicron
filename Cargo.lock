@@ -9689,6 +9689,7 @@ dependencies = [
 [[package]]
 name = "oxide-debug-dropbox"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/oxide-debug-dropbox?rev=5542e0c2d2805f3f9124dd2daea483a279ff43fa#5542e0c2d2805f3f9124dd2daea483a279ff43fa"
 dependencies = [
  "camino",
  "slog",
