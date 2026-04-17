@@ -117,6 +117,7 @@ mod tests {
                 comment: "test sitrep v1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -141,6 +142,7 @@ mod tests {
                 comment: "test sitrep v2".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -232,6 +234,7 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: format!("test sitrep v{i}; orphan {i}"),
                 time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
                 parent_sitrep_id,
             },
             // We could populate the orphan sitreps with cases and ereports

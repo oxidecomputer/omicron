@@ -1159,6 +1159,7 @@ impl BackgroundTasksInitializer {
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
             fm_analysis::Activators {
+                inventory_loader: task_inventory_loader.clone(),
                 sitrep_loader: task_fm_sitrep_loader.clone(),
                 sitrep_gc: task_fm_sitrep_gc.clone(),
             },

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::Result;
+//! Version `STRONGER_BGP_UNNUMBERED_TYPES` of the Nexus external API.
 
-fn main() -> Result<std::process::ExitCode> {
-    wicket::exec()
-}
+pub mod networking;

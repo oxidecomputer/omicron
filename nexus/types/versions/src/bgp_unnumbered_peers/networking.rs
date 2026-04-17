@@ -396,25 +396,6 @@ pub struct SwitchPortSettingsCreate {
     pub addresses: Vec<crate::v2025_11_20_00::networking::AddressConfig>,
 }
 
-impl SwitchPortSettingsCreate {
-    pub fn new(identity: IdentityMetadataCreateParams) -> Self {
-        Self {
-            identity,
-            port_config:
-                crate::v2025_11_20_00::networking::SwitchPortConfigCreate {
-                    geometry:
-                        crate::v2025_11_20_00::networking::SwitchPortGeometry::Qsfp28x1,
-                },
-            groups: Vec::new(),
-            links: Vec::new(),
-            interfaces: Vec::new(),
-            routes: Vec::new(),
-            bgp_peers: Vec::new(),
-            addresses: Vec::new(),
-        }
-    }
-}
-
 impl From<crate::v2025_11_20_00::networking::SwitchPortSettingsCreate>
     for SwitchPortSettingsCreate
 {
