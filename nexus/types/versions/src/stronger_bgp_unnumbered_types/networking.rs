@@ -187,16 +187,13 @@ impl TryFrom<crate::v2026_02_13_01::networking::BgpPeer> for BgpPeer {
 
 impl From<BgpPeer> for crate::v2026_02_13_01::networking::BgpPeer {
     fn from(value: BgpPeer) -> Self {
-        // TODO-correctness What should we backfill here? We've dropped this
-        // field because we weren't actually using it. We can't return an empty
-        // string because that's not a legal `Name`.
-        //
-        // The other option is to return an error to old API clients, but that
-        // seems worse than having placeholder data in a field that was never
-        // used...
-        let interface_name = "interface-name-unavailable"
-            .parse()
-            .expect("constant is a valid Name");
+        // We have to fill in some valid name for `interface_name` when
+        // converting back to the old BgpPeer version, but the field is gone
+        // because we were never actually using it. We'll use
+        // `deprecated-field`: this should stand out if any person looks at it
+        // and (hopefully!) convey that the field is no longer needed.
+        let interface_name =
+            "deprecated-field".parse().expect("constant is a valid Name");
 
         let (addr, router_lifetime) = match value.addr {
             RouterPeerType::Numbered { ip } => {
@@ -581,7 +578,7 @@ mod tests {
         );
 
         // interface_name gets the placeholder
-        assert_eq!(back.interface_name.as_str(), "interface-name-unavailable");
+        assert_eq!(back.interface_name.as_str(), "deprecated-field");
     }
 
     #[test]
