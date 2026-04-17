@@ -18,6 +18,8 @@ use crate::app::instance::{
 };
 use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::sled_out_of_service_gone_check;
+use crate::app::sagas::zpool_out_of_service_gone_check;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
@@ -30,7 +32,11 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::backoff::backon_retry_policy_internal_service;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use paste::paste;
 use progenitor_extras::retry::{
     GoneCheckResult, retry_operation_while_indefinitely,
@@ -658,9 +664,10 @@ async fn sis_ensure_local_storage(
 
     // Ensure that the local storage is created
 
-    let (sled_id, ensure_request) = match allocation {
+    let (sled_id, zpool_id, ensure_request) = match allocation {
         LocalStorageAllocation::Unencrypted(allocation) => {
             let sled_id = allocation.sled_id();
+            let pool_id: ZpoolUuid = allocation.pool_id().upcast();
 
             let ensure_request = LocalStorageDatasetEnsureRequest {
                 zpool_id: allocation.pool_id(),
@@ -670,7 +677,7 @@ async fn sis_ensure_local_storage(
                 encrypted_at_rest: false,
             };
 
-            (sled_id, ensure_request)
+            (sled_id, pool_id, ensure_request)
         }
 
         LocalStorageAllocation::Encrypted(_) => {
@@ -693,14 +700,27 @@ async fn sis_ensure_local_storage(
         sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
     };
 
-    // `check_sled_in_service` returns an error if the sled is no longer in
-    // service; if it succeeds, the sled is not gone.
+    // Bail out of the retry loop if either the disk or sled is no longer
+    // in-service.
     let gone_check = || async {
-        osagactx
-            .datastore()
-            .check_sled_in_service(&opctx, sled_id)
+        match sled_out_of_service_gone_check(
+            osagactx.datastore(),
+            &opctx,
+            sled_id,
+        )
+        .await?
+        {
+            GoneCheckResult::StillAvailable => {
+                // proceed to zpool check
+            }
+
+            GoneCheckResult::Gone => {
+                return Ok(GoneCheckResult::Gone);
+            }
+        }
+
+        zpool_out_of_service_gone_check(osagactx.datastore(), &opctx, zpool_id)
             .await
-            .map(|()| GoneCheckResult::StillAvailable)
     };
 
     let log = osagactx.log().clone();
@@ -719,6 +739,9 @@ async fn sis_ensure_local_storage(
     )
     .await
     .map_err(|e| {
+        // Do not match on `e.is_gone` here: If the ensure retry loop bailed out
+        // due to a disk or sled being expunged, then we have to unwind the
+        // saga.
         saga_action_failed(Error::internal_error(&format!(
             "failed to ensure local storage: {}",
             InlineErrorChain::new(&e)
