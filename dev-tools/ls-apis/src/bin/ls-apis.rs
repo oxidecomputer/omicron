@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use indent_write::indentable::Indentable;
+use omicron_deployment_graph::DagEdgesFile;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
     FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
@@ -38,6 +39,8 @@ enum Cmds {
     Apis(ShowDepsArgs),
     /// check the update DAG and propose changes
     Check,
+    /// print deployment unit DAG edges as TOML
+    DagEdges,
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
@@ -86,9 +89,25 @@ fn main() -> Result<()> {
         Cmds::Adoc => run_adoc(&apis),
         Cmds::Apis(args) => run_apis(&apis, args),
         Cmds::Check => run_check(&apis),
+        Cmds::DagEdges => run_dag_edges(&apis),
         Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
         Cmds::Servers(args) => run_servers(&apis, args),
     }
+}
+
+fn run_dag_edges(apis: &SystemApis) -> Result<()> {
+    let edges = apis.deployment_unit_dag_edges()?;
+    let output = DagEdgesFile { edges };
+    let toml_str = toml::to_string_pretty(&output)
+        .context("serializing DAG edges as TOML")?;
+    print!(
+        "# BEGIN @generated server-side deployment unit DAG edges.\n\
+         # To regenerate, run `EXPECTORATE=overwrite cargo nextest run -p omicron-ls-apis`.\n\
+         # YOU SHOULD STILL REVIEW CHANGES TO THIS FILE FOR CORRECTNESS.\n\
+         \n\
+         {toml_str}"
+    );
+    Ok(())
 }
 
 fn run_adoc(apis: &SystemApis) -> Result<()> {
@@ -212,9 +231,17 @@ fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
         OutputFormat::Dot => println!("{}", apis.dot_by_unit(args.filter)?),
         OutputFormat::Text => {
             let metadata = apis.api_metadata();
-            for unit in apis.deployment_units() {
-                let server_components = apis.deployment_unit_servers(unit)?;
-                println!("{}", unit);
+            for unit_id in apis.deployment_units() {
+                let info = metadata
+                    .deployment_unit_info(unit_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "deployment unit info for {unit_id:?} should exist"
+                        )
+                    });
+                let server_components =
+                    apis.deployment_unit_servers(unit_id)?;
+                println!("{}", info.name);
                 print_server_components(
                     apis,
                     metadata,

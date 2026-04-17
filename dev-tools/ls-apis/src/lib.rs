@@ -45,15 +45,6 @@ impl Borrow<str> for ClientPackageName {
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
-pub struct DeploymentUnitName(String);
-NewtypeDebug! { () pub struct DeploymentUnitName(String); }
-NewtypeDeref! { () pub struct DeploymentUnitName(String); }
-NewtypeDerefMut! { () pub struct DeploymentUnitName(String); }
-NewtypeDisplay! { () pub struct DeploymentUnitName(String); }
-NewtypeFrom! { () pub struct DeploymentUnitName(String); }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
 pub struct ServerPackageName(String);
 NewtypeDebug! { () pub struct ServerPackageName(String); }
 NewtypeDeref! { () pub struct ServerPackageName(String); }
