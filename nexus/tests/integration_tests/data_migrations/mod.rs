@@ -26,8 +26,8 @@ use std::collections::HashMap;
 
 mod audit_log_credential_id;
 mod bgp_config_max_paths_not_null;
-mod bgp_unnumbered_peers;
 mod bgp_unnumbered_peer_cleanup;
+mod bgp_unnumbered_peers;
 mod blueprint_sled_config_subnet;
 mod blueprint_sled_last_used_ip;
 mod boot_partitions_inventory;
