@@ -30,11 +30,19 @@ use crate::shamir::ValidThreshold;
 ///      allow an attacker to infer the values of those coefficients or that
 ///      some coefficients are zero.
 ///
-/// The highest degree coefficient must not be zero, or else the degree of the
-/// polynomial would not be `k-1`, and fewer than `k` shares would be able to
-/// reconstruct the polynomial. We therefore ensure that the coefficient of
-/// the `x^(k-1)` term is nonzero, while allowing a value of zero for all other
-/// terms.
+/// The high degree coefficient is sampled uniformly, inclusive of zero.
+/// While it seems intuitively that a zero leading coefficient would allow
+/// reconstruction of the secret value using only `k-1` shares, this is false.
+/// The attacker does not _know_ whether or not the leading coefficient is zero,
+/// meaning that the constant term derived from `k-1` points is only one of 256 possible
+/// values for the genuine secret.
+///
+/// On the other hand, when zeros are rejected in the leading term, the attacker learns
+/// non-negligible information about the contents of the secret: the secret cannot be the
+/// y-intercept of the degree `k-2` polynomial defined by the points which the attacker knows.
+/// This allows the attacker to narrow the set of possible secrets by one. If the same secret
+/// is re-shared many times, the attacker can recover the secret by process of elimination.
+///
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Polynomial(Box<[Gf256]>);
 
@@ -52,19 +60,7 @@ impl Polynomial {
 
         // Overwrite the constant term
         inner[0] = constant_term;
-
-        // Ensure the highest term coefficient is nonzero.
-        //
-        // This is not a sensitive operation. It is public information that this
-        // term must not be zero, and so looping for as long as it takes to get
-        // a nonzero byte doesn't provide the attacker with any new information.
-        //
-        // However, we still want our comparison to be constant time so we use
-        // `ct_eq`.
-        while inner[degree].ct_eq(&gf256::ZERO).into() {
-            inner[degree] = rng.random();
-        }
-
+        
         Polynomial(inner)
     }
 
