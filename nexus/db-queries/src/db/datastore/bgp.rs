@@ -8,13 +8,16 @@ use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::{
+    ExpressionMethods, PgExpressionMethods, QueryDsl, SelectableHelper,
+};
 use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
+    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
+    SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -27,7 +30,6 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use std::net::IpAddr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -843,14 +845,11 @@ impl DataStore {
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
             .filter(dsl::interface_name.eq(interface_name.to_string()))
-            .filter(dsl::addr.eq(db_addr))
+            // Use `is_not_distinct_from` instead of `eq` to compare NULL/None.
+            .filter(dsl::addr.is_not_distinct_from(addr.ip_db_repr()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -875,54 +874,46 @@ impl DataStore {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value for the
-        // allow_export table (which has non-nullable addr)
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_allow_export_for_peer")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Query the main peer config table. For unnumbered peers,
-                    // addr is NULL; for numbered peers, addr matches.
-                    let active = match addr {
-                        RouterPeerType::Numbered { ip } => {
-                            let addr = IpNetwork::from(IpAddr::from(ip));
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.eq(addr))
-                                .select(db_peer::allow_export_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                        RouterPeerType::Unnumbered { .. } => {
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.is_null())
-                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
-                                .select(db_peer::allow_export_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                    };
+                    // Query the main peer config table.
+                    let active = peer_dsl::switch_port_settings_bgp_peer_config
+                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::addr
+                                .is_not_distinct_from(addr.ip_db_repr()),
+                        )
+                        .filter(
+                            db_peer::interface_name
+                                .eq(interface_name.to_string()),
+                        )
+                        .select(db_peer::allow_export_list_active)
+                        .limit(1)
+                        .first_async::<bool>(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg =
+                                "failed to lookup export settings for peer";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
 
-                    let active = active.map_err(|e| {
-                        let msg = "failed to lookup export settings for peer";
-                        error!(opctx.log, "{msg}"; "error" => ?e);
-
-                        match e {
-                            diesel::result::Error::NotFound => {
-                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
-                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                            },
-                            _ => err.bail(Error::internal_error(msg)),
-                        }
-                    })?;
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    let not_found_msg = format!(
+                                        "peer with {:?} not found for port \
+                                         settings {port_settings_id}",
+                                        addr
+                                    );
+                                    err.bail(Error::non_resourcetype_not_found(
+                                        not_found_msg,
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
 
                     if !active {
                         return Ok(None);
@@ -930,16 +921,19 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_export
-                        .filter(
-                            db_allow::port_settings_id.eq(port_settings_id),
-                        )
-                        .filter(
-                            db_allow::interface_name
-                                .eq(interface_name.to_string()),
-                        )
-                        .filter(db_allow::addr.eq(db_addr))
-                        .load_async(&conn)
-                        .await?;
+                            .filter(
+                                db_allow::port_settings_id.eq(port_settings_id),
+                            )
+                            .filter(
+                                db_allow::interface_name
+                                    .eq(interface_name.to_string()),
+                            )
+                            .filter(
+                                db_allow::addr
+                                    .is_not_distinct_from(addr.ip_db_repr()),
+                            )
+                            .load_async(&conn)
+                            .await?;
 
                     Ok(Some(list))
                 }
@@ -970,55 +964,46 @@ impl DataStore {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value for the
-        // allow_import table (which has non-nullable addr)
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self
-            .transaction_retry_wrapper("bgp_allow_import_for_peer")
+        self.transaction_retry_wrapper("bgp_allow_import_for_peer")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Query the main peer config table. For unnumbered peers,
-                    // addr is NULL; for numbered peers, addr matches.
-                    let active = match addr {
-                        RouterPeerType::Numbered { ip } => {
-                            let addr = IpNetwork::from(IpAddr::from(ip));
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.eq(addr))
-                                .select(db_peer::allow_import_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                        RouterPeerType::Unnumbered { .. } => {
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.is_null())
-                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
-                                .select(db_peer::allow_import_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                    };
+                    // Query the main peer config table.
+                    let active = peer_dsl::switch_port_settings_bgp_peer_config
+                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::addr
+                                .is_not_distinct_from(addr.ip_db_repr()),
+                        )
+                        .filter(
+                            db_peer::interface_name
+                                .eq(interface_name.to_string()),
+                        )
+                        .select(db_peer::allow_import_list_active)
+                        .limit(1)
+                        .first_async::<bool>(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg =
+                                "failed to lookup import settings for peer";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
 
-                    let active = active.map_err(|e| {
-                        let msg = "failed to lookup import settings for peer";
-                        error!(opctx.log, "{msg}"; "error" => ?e);
-
-                        match e {
-                            diesel::result::Error::NotFound => {
-                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
-                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                            },
-                            _ => err.bail(Error::internal_error(msg)),
-                        }
-                    })?;
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    let not_found_msg = format!(
+                                        "peer with {:?} not found for port \
+                                         settings {port_settings_id}",
+                                        addr
+                                    );
+                                    err.bail(Error::non_resourcetype_not_found(
+                                        not_found_msg,
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
 
                     if !active {
                         return Ok(None);
@@ -1026,16 +1011,19 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_import
-                        .filter(
-                            db_allow::port_settings_id.eq(port_settings_id),
-                        )
-                        .filter(
-                            db_allow::interface_name
-                                .eq(interface_name.to_string()),
-                        )
-                        .filter(db_allow::addr.eq(db_addr))
-                        .load_async(&conn)
-                        .await?;
+                            .filter(
+                                db_allow::port_settings_id.eq(port_settings_id),
+                            )
+                            .filter(
+                                db_allow::interface_name
+                                    .eq(interface_name.to_string()),
+                            )
+                            .filter(
+                                db_allow::addr
+                                    .is_not_distinct_from(addr.ip_db_repr()),
+                            )
+                            .load_async(&conn)
+                            .await?;
 
                     Ok(Some(list))
                 }
@@ -1058,9 +1046,15 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_model::SwitchPortBgpPeerConfig;
+    use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
+    use oxnet::IpNet;
+    use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::RouterLifetimeConfig;
+    use std::net::IpAddr;
 
     #[tokio::test]
     async fn test_delete_bgp_config_and_announce_set_by_name() {
@@ -1125,6 +1119,453 @@ mod tests {
             )
             .await
             .expect("delete announce set by name");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_communities_for_peer() {
+        let logctx = dev::test_setup_log("test_communities_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: one numbered, one unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let rows = [
+            // insert communities 100, 200 for the numbered peer
+            (numbered, 100),
+            (numbered, 200),
+            // insert communities 300, 400 for the unnumbered peer
+            (unnumbered, 300),
+            (unnumbered, 400),
+        ]
+        .into_iter()
+        .map(|(peer, community)| {
+            SwitchPortBgpPeerConfigCommunity::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                community,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_communities,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert community rows");
+        }
+
+        // Look up communities for the numbered peer.
+        let numbered_communities = datastore
+            .communities_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer communities");
+
+        let mut numbered_vals: Vec<u32> =
+            numbered_communities.into_iter().map(|c| c.community.0).collect();
+        numbered_vals.sort_unstable();
+        assert_eq!(numbered_vals, &[100, 200]);
+
+        // Look up communities for the unnumbered peer.
+        let unnumbered_communities = datastore
+            .communities_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer communities");
+
+        let mut unnumbered_vals: Vec<u32> =
+            unnumbered_communities.into_iter().map(|c| c.community.0).collect();
+        unnumbered_vals.sort_unstable();
+        assert_eq!(unnumbered_vals, &[300, 400]);
+
+        // A different numbered IP returns nothing.
+        let other_ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let other =
+            RouterPeerType::Numbered { ip: other_ip.try_into().unwrap() };
+        let empty = datastore
+            .communities_for_peer(&opctx, port_settings_id, &iface_ext, other)
+            .await
+            .expect("lookup other peer communities");
+        assert!(empty.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Helper to construct a `BgpPeer` for allow import/export tests below
+    fn make_bgp_peer_for_allow_import_export_tests(
+        bgp_config_id: Uuid,
+        addr: RouterPeerType,
+        import_subnets: Vec<IpNet>,
+        export_subnets: Vec<IpNet>,
+    ) -> BgpPeer {
+        let allowed_import = if import_subnets.is_empty() {
+            ImportExportPolicy::NoFiltering
+        } else {
+            ImportExportPolicy::Allow(import_subnets)
+        };
+        let allowed_export = if export_subnets.is_empty() {
+            ImportExportPolicy::NoFiltering
+        } else {
+            ImportExportPolicy::Allow(export_subnets)
+        };
+        BgpPeer {
+            bgp_config: bgp_config_id.into(),
+            addr,
+            hold_time: 0,
+            idle_hold_time: 0,
+            delay_open: 0,
+            connect_retry: 0,
+            keepalive: 0,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: Vec::new(),
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_import,
+            allowed_export,
+            vlan_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_allow_import_for_peer() {
+        let logctx = dev::test_setup_log("test_allow_import_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: two numbered (one with imports, one without), one
+        // unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let numbered_no_filtering =
+            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let expected_numbered_prefixes: Vec<IpNet> = vec![
+            "192.168.1.0/24".parse().unwrap(),
+            "fd00:1234::/64".parse().unwrap(),
+        ];
+        let expected_unnumbered_prefixes: Vec<IpNet> = vec![
+            "192.168.2.0/24".parse().unwrap(),
+            "fd00:4567::/64".parse().unwrap(),
+        ];
+        let rows = [
+            // insert rows for the numbered peer
+            (numbered, expected_numbered_prefixes[0]),
+            (numbered, expected_numbered_prefixes[1]),
+            // insert rows for the unnumbered peer
+            (unnumbered, expected_unnumbered_prefixes[0]),
+            (unnumbered, expected_unnumbered_prefixes[1]),
+        ]
+        .into_iter()
+        .map(|(peer, prefix)| {
+            SwitchPortBgpPeerConfigAllowImport::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                prefix,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        // allow_import lookups only work if there's a parent BGP peer config
+        // with `allow_import_list_active` set to true; insert that first.
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            let bgp_config_id = Uuid::new_v4();
+            diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
+                .values(vec![
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered,
+                            expected_numbered_prefixes.clone(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered_no_filtering,
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            unnumbered,
+                            expected_unnumbered_prefixes.clone(),
+                            Vec::new(),
+                        ),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .expect("insert rows");
+        }
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_allow_import,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert rows");
+        }
+
+        // Look up prefixes for the numbered peer.
+        let mut numbered_prefixes = datastore
+            .allow_import_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer")
+            .expect("peer has allowed imports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        numbered_prefixes.sort_unstable();
+        assert_eq!(numbered_prefixes, expected_numbered_prefixes);
+
+        // Look up prefixes for the unnumbered peer.
+        let mut unnumbered_prefixes = datastore
+            .allow_import_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer")
+            .expect("peer has allowed imports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        unnumbered_prefixes.sort_unstable();
+        assert_eq!(unnumbered_prefixes, expected_unnumbered_prefixes);
+
+        // A peer without filter returns None.
+        let empty = datastore
+            .allow_import_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered_no_filtering,
+            )
+            .await
+            .expect("lookup other peer");
+        assert!(empty.is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_allow_export_for_peer() {
+        let logctx = dev::test_setup_log("test_allow_export_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: two numbered (one with exports, one without), one
+        // unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let numbered_no_filtering =
+            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let expected_numbered_prefixes: Vec<IpNet> = vec![
+            "192.168.1.0/24".parse().unwrap(),
+            "fd00:1234::/64".parse().unwrap(),
+        ];
+        let expected_unnumbered_prefixes: Vec<IpNet> = vec![
+            "192.168.2.0/24".parse().unwrap(),
+            "fd00:4567::/64".parse().unwrap(),
+        ];
+        let rows = [
+            // insert rows for the numbered peer
+            (numbered, expected_numbered_prefixes[0]),
+            (numbered, expected_numbered_prefixes[1]),
+            // insert rows for the unnumbered peer
+            (unnumbered, expected_unnumbered_prefixes[0]),
+            (unnumbered, expected_unnumbered_prefixes[1]),
+        ]
+        .into_iter()
+        .map(|(peer, prefix)| {
+            SwitchPortBgpPeerConfigAllowExport::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                prefix,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        // allow_export lookups only work if there's a parent BGP peer config
+        // with `allow_export_list_active` set to true; insert that first.
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            let bgp_config_id = Uuid::new_v4();
+            diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
+                .values(vec![
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered,
+                            Vec::new(),
+                            expected_numbered_prefixes.clone(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered_no_filtering,
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            unnumbered,
+                            Vec::new(),
+                            expected_unnumbered_prefixes.clone(),
+                        ),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .expect("insert rows");
+        }
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_allow_export,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert rows");
+        }
+
+        // Look up prefixes for the numbered peer.
+        let mut numbered_prefixes = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer")
+            .expect("peer has allowed exports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        numbered_prefixes.sort_unstable();
+        assert_eq!(numbered_prefixes, expected_numbered_prefixes);
+
+        // Look up prefixes for the unnumbered peer.
+        let mut unnumbered_prefixes = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer")
+            .expect("peer has allowed exports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        unnumbered_prefixes.sort_unstable();
+        assert_eq!(unnumbered_prefixes, expected_unnumbered_prefixes);
+
+        // A peer without filter returns None.
+        let empty = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered_no_filtering,
+            )
+            .await
+            .expect("lookup other peer");
+        assert!(empty.is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::typed_uuid::DbTypedUuid;
 use crate::{Name, SqlU8, SqlU16};
 use crate::{SqlU32, impl_enum_type};
 use chrono::{DateTime, Utc};
@@ -22,15 +23,69 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_uuid_kinds::BgpPeerConfigAllowExportKind;
+use omicron_uuid_kinds::BgpPeerConfigAllowImportKind;
+use omicron_uuid_kinds::BgpPeerConfigCommunityKind;
+use omicron_uuid_kinds::TypedUuid;
+use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
+use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Extension trait on [`RouterPeerType`] for converting it to and from the way
+/// we represent peer addresses in the database.
+///
+/// This trait should only be used by database model and query functions.
+pub trait RouterPeerTypeDbRepresentation: Sized {
+    /// Get the database representation of the address of this peer.
+    ///
+    /// For numbered peers, returns `Some(ip)` (corresponding to a non-NULL
+    /// `INET`); for unnumbered peers, returns `None` (corresponding to NULL).
+    fn ip_db_repr(&self) -> Option<IpNetwork>;
+
+    /// Convert the database representation of a peer back into a
+    /// [`RouterPeerType`].
+    ///
+    /// Unconditionally requires the caller to supply a `router_lifetime`, but
+    /// this argument is only used if `ip` is `None` (indicating an unnumbered
+    /// peer). This matches the database table's storage of a NULLable address
+    /// (the peer IP, where NULL means unnumbered) alongside a non-NULL
+    /// router_lifetime (left at 0 for numbered peers).
+    fn from_db_repr(
+        ip: Option<IpNetwork>,
+        router_lifetime: RouterLifetimeConfig,
+    ) -> Result<Self, RouterPeerIpAddrError>;
+}
+
+impl RouterPeerTypeDbRepresentation for RouterPeerType {
+    fn ip_db_repr(&self) -> Option<IpNetwork> {
+        match self {
+            Self::Unnumbered { .. } => None,
+            Self::Numbered { ip } => Some((*ip).into()),
+        }
+    }
+
+    fn from_db_repr(
+        ip: Option<IpNetwork>,
+        router_lifetime: RouterLifetimeConfig,
+    ) -> Result<Self, RouterPeerIpAddrError> {
+        match ip.map(|ip| ip.ip()) {
+            Some(ip) => {
+                let ip = RouterPeerIpAddr::try_from(ip)?;
+                Ok(Self::Numbered { ip })
+            }
+            None => Ok(Self::Unnumbered { router_lifetime }),
+        }
+    }
+}
 
 impl_enum_type!(
     SwitchPortGeometryEnum:
@@ -699,7 +754,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
-    pub addr: Option<IpNetwork>,
+    addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
     pub delay_open: SqlU32,
@@ -715,7 +770,76 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
-    pub router_lifetime: SqlU16,
+    router_lifetime: SqlU16,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SwitchPortBgpPeerConfigInvalidData {
+    #[error(
+        "database inconsistency: \
+        invalid peer address in BGP peer config {port_settings_id}"
+    )]
+    PeerAddress {
+        port_settings_id: Uuid,
+        #[source]
+        err: RouterPeerIpAddrError,
+    },
+    #[error(
+        "database inconsistency: \
+        invalid router lifetime in BGP peer config {port_settings_id}"
+    )]
+    RouterLifetime {
+        port_settings_id: Uuid,
+        #[source]
+        err: RouterLifetimeConfigError,
+    },
+}
+
+impl SwitchPortBgpPeerConfig {
+    /// Return the [`RouterPeerType`] (numbered or unnumbered, with additional
+    /// details specific to each type) of this peer.
+    ///
+    /// Only fails if invalid data has been stored in the database.
+    pub fn peer_type(
+        &self,
+    ) -> Result<RouterPeerType, SwitchPortBgpPeerConfigInvalidData> {
+        // We only expect NULL (corresponding to unnumbered, in which case we
+        // expect a valid `router_lifetime` too) or `Some(ip)` where `ip` is a
+        // valid router peer IP.
+        match self.addr {
+            Some(db_ip) => {
+                let ip =
+                    RouterPeerIpAddr::try_from(db_ip.ip()).map_err(|err| {
+                        SwitchPortBgpPeerConfigInvalidData::PeerAddress {
+                            port_settings_id: self.port_settings_id,
+                            err,
+                        }
+                    })?;
+                Ok(RouterPeerType::Numbered { ip })
+            }
+            None => {
+                let router_lifetime = RouterLifetimeConfig::new(
+                    *self.router_lifetime,
+                )
+                .map_err(|err| {
+                    SwitchPortBgpPeerConfigInvalidData::RouterLifetime {
+                        port_settings_id: self.port_settings_id,
+                        err,
+                    }
+                })?;
+                Ok(RouterPeerType::Unnumbered { router_lifetime })
+            }
+        }
+    }
+
+    /// Get the raw, database representation of this peer's IP address.
+    ///
+    /// This should only be used in database queries that need the database
+    /// representation. Other code (Nexus, etc.) should work with the
+    /// [`RouterPeerType`] returned by [`SwitchPortBgpPeerConfig::peer_type()`].
+    pub fn raw_ip_in_db_repr(&self) -> Option<IpNetwork> {
+        self.addr
+    }
 }
 
 #[derive(
@@ -732,8 +856,26 @@ pub struct SwitchPortBgpPeerConfig {
 pub struct SwitchPortBgpPeerConfigCommunity {
     pub port_settings_id: Uuid,
     pub interface_name: Name,
-    pub addr: IpNetwork,
+    addr: Option<IpNetwork>,
     pub community: SqlU32,
+    pub id: DbTypedUuid<BgpPeerConfigCommunityKind>,
+}
+
+impl SwitchPortBgpPeerConfigCommunity {
+    pub fn new(
+        port_settings_id: Uuid,
+        interface_name: Name,
+        addr: RouterPeerType,
+        community: u32,
+    ) -> Self {
+        Self {
+            port_settings_id,
+            interface_name,
+            addr: addr.ip_db_repr(),
+            community: community.into(),
+            id: TypedUuid::new_v4().into(),
+        }
+    }
 }
 
 #[derive(
@@ -753,9 +895,27 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
     /// Interface peer is reachable on
     pub interface_name: Name,
     /// Peer Address
-    pub addr: IpNetwork,
+    addr: Option<IpNetwork>,
     /// Allowed Prefix
     pub prefix: IpNetwork,
+    pub id: DbTypedUuid<BgpPeerConfigAllowExportKind>,
+}
+
+impl SwitchPortBgpPeerConfigAllowExport {
+    pub fn new(
+        port_settings_id: Uuid,
+        interface_name: Name,
+        addr: RouterPeerType,
+        prefix: IpNet,
+    ) -> Self {
+        Self {
+            port_settings_id,
+            interface_name,
+            addr: addr.ip_db_repr(),
+            prefix: prefix.into(),
+            id: TypedUuid::new_v4().into(),
+        }
+    }
 }
 
 #[derive(
@@ -775,9 +935,27 @@ pub struct SwitchPortBgpPeerConfigAllowImport {
     /// Interface peer is reachable on
     pub interface_name: Name,
     /// Peer Address
-    pub addr: IpNetwork,
+    addr: Option<IpNetwork>,
     /// Allowed Prefix
     pub prefix: IpNetwork,
+    pub id: DbTypedUuid<BgpPeerConfigAllowImportKind>,
+}
+
+impl SwitchPortBgpPeerConfigAllowImport {
+    pub fn new(
+        port_settings_id: Uuid,
+        interface_name: Name,
+        addr: RouterPeerType,
+        prefix: IpNet,
+    ) -> Self {
+        Self {
+            port_settings_id,
+            interface_name,
+            addr: addr.ip_db_repr(),
+            prefix: prefix.into(),
+            id: TypedUuid::new_v4().into(),
+        }
+    }
 }
 
 impl SwitchPortBgpPeerConfig {
@@ -787,23 +965,18 @@ impl SwitchPortBgpPeerConfig {
         interface_name: Name,
         p: &networking_types::BgpPeer,
     ) -> Self {
-        // Numbered peers are represented as a non-NULL `addr` and an arbitrary
-        // `router_lifetime` (we just use the default). Unnumbered are
-        // represented as a NULL `addr` and their desired `router_lifetime`.
-        let (addr, router_lifetime) = match p.addr {
-            RouterPeerType::Numbered { ip } => {
-                (Some(IpAddr::from(ip)), RouterLifetimeConfig::default())
-            }
-            RouterPeerType::Unnumbered { router_lifetime } => {
-                (None, router_lifetime)
-            }
+        // Unnumbered peers have a `router_lifetime`; for numbered peers, we
+        // must use the default (0). This is enforced by a CHECK constraint.
+        let router_lifetime = match p.addr {
+            RouterPeerType::Numbered { .. } => RouterLifetimeConfig::default(),
+            RouterPeerType::Unnumbered { router_lifetime } => router_lifetime,
         };
         Self {
             id: Uuid::new_v4(),
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr: addr.map(From::from),
+            addr: p.addr.ip_db_repr(),
             hold_time: p.hold_time.into(),
             idle_hold_time: p.idle_hold_time.into(),
             delay_open: p.delay_open.into(),
@@ -880,5 +1053,147 @@ impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
             interface_name: self.interface_name.into(),
             vlan_id: self.vlan_id.map(|x| x.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sled_agent_types::early_networking::InvalidIpAddrError;
+    use sled_agent_types::early_networking::RouterLifetimeConfig;
+    use sled_agent_types::early_networking::RouterPeerIpAddr;
+    use sled_agent_types::early_networking::RouterPeerType;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn router_peer_repr_round_trip_numbered_v4() {
+        let ip_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
+        let original = RouterPeerType::Numbered { ip };
+
+        let db_repr = original.ip_db_repr();
+        assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
+
+        let reconstructed = RouterPeerType::from_db_repr(
+            db_repr,
+            RouterLifetimeConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(original, reconstructed);
+    }
+
+    #[test]
+    fn router_peer_repr_round_trip_numbered_v6() {
+        let ip_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
+        let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
+        let original = RouterPeerType::Numbered { ip };
+
+        let db_repr = original.ip_db_repr();
+        assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
+
+        let reconstructed = RouterPeerType::from_db_repr(
+            db_repr,
+            RouterLifetimeConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(original, reconstructed);
+    }
+
+    #[test]
+    fn router_peer_repr_round_trip_unnumbered() {
+        let lifetime = RouterLifetimeConfig::new(1800).unwrap();
+        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
+
+        assert_eq!(original.ip_db_repr(), None);
+
+        let reconstructed =
+            RouterPeerType::from_db_repr(None, lifetime).unwrap();
+        assert_eq!(original, reconstructed);
+    }
+
+    #[test]
+    fn router_peer_from_db_repr_rejects_invalid_ips() {
+        let cases: &[(IpAddr, InvalidIpAddrError)] = &[
+            (
+                Ipv4Addr::UNSPECIFIED.into(),
+                InvalidIpAddrError::UnspecifiedAddress,
+            ),
+            (Ipv4Addr::LOCALHOST.into(), InvalidIpAddrError::LoopbackAddress),
+            (Ipv4Addr::BROADCAST.into(), InvalidIpAddrError::Ipv4Broadcast),
+            (
+                Ipv6Addr::UNSPECIFIED.into(),
+                InvalidIpAddrError::UnspecifiedAddress,
+            ),
+            (Ipv6Addr::LOCALHOST.into(), InvalidIpAddrError::LoopbackAddress),
+        ];
+        let lifetime = RouterLifetimeConfig::default();
+        for (ip, expected_err) in cases {
+            let err = RouterPeerType::from_db_repr(
+                Some(IpNetwork::from(*ip)),
+                lifetime,
+            )
+            .unwrap_err();
+            assert_eq!(err.ip, *ip);
+            assert_eq!(err.err, *expected_err, "wrong error for {ip}");
+        }
+    }
+
+    fn make_bgp_peer(addr: RouterPeerType) -> networking_types::BgpPeer {
+        networking_types::BgpPeer {
+            bgp_config: external::NameOrId::Name("test-bgp".parse().unwrap()),
+            addr,
+            hold_time: 6,
+            idle_hold_time: 6,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: vec![],
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            allowed_export: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        }
+    }
+
+    #[test]
+    fn peer_type_round_trip_numbered() {
+        let ip =
+            RouterPeerIpAddr::try_from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
+                .unwrap();
+        let original = RouterPeerType::Numbered { ip };
+        let db_peer = SwitchPortBgpPeerConfig::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "phy0".parse::<external::Name>().unwrap().into(),
+            &make_bgp_peer(original),
+        );
+        // Numbered peers store Some(ip) in the DB and router_lifetime = 0.
+        assert_eq!(
+            db_peer.raw_ip_in_db_repr(),
+            Some(IpNetwork::from(IpAddr::from(ip)))
+        );
+        assert_eq!(db_peer.router_lifetime, SqlU16(0));
+        assert_eq!(db_peer.peer_type().unwrap(), original);
+    }
+
+    #[test]
+    fn peer_type_round_trip_unnumbered() {
+        let lifetime = RouterLifetimeConfig::new(300).unwrap();
+        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
+        let db_peer = SwitchPortBgpPeerConfig::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "phy0".parse::<external::Name>().unwrap().into(),
+            &make_bgp_peer(original),
+        );
+        // Unnumbered peers store NULL addr in the DB.
+        assert_eq!(db_peer.raw_ip_in_db_repr(), None);
+        assert_eq!(db_peer.router_lifetime, SqlU16(lifetime.as_u16()));
+        assert_eq!(db_peer.peer_type().unwrap(), original);
     }
 }
