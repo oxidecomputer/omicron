@@ -3136,6 +3136,7 @@ table! {
         time_created -> Timestamptz,
         creator_id -> Uuid,
         comment -> Text,
+        next_inv_min_time_started -> Timestamptz,
     }
 }
 

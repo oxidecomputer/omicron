@@ -124,6 +124,11 @@ impl<'a> SitrepBuilder<'a> {
                 creator_id,
                 comment: self.comment,
                 time_created,
+                // When creating a new sitrep that is a child of this sitrep,
+                // the input inventory collection must either be the same
+                // inventory as this sitrep, or have started after this sitrep's
+                // inventory collection ended.
+                next_inv_min_time_started: self.inventory.time_done,
             },
             cases,
             ereports_by_id,
