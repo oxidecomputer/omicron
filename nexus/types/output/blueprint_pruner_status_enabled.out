@@ -1,5 +1,5 @@
     status: enabled
-    blueprints kept: 12
+    blueprints kept by policy: 12
     bp_target rows that can be deleted: 18
     bp_target rows deleted: 17
     blueprints deleted: 2

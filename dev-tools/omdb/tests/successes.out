@@ -299,6 +299,10 @@ task: "blueprint_planner"
     Updates the target blueprint
 
 
+task: "blueprint_pruner"
+    prunes old blueprints from the database
+
+
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
@@ -633,6 +637,12 @@ task: "blueprint_planner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
+
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1314,6 +1324,12 @@ task: "blueprint_planner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
+
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
