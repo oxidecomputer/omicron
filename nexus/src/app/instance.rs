@@ -1733,20 +1733,22 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstanceError,
+        error: &SledAgentInstanceError,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
         error!(self.log, "marking VMM failed due to sled agent API error";
                "instance_id" => %instance_id,
                "vmm_id" => %vmm_id,
-               "error" => ?reason);
+               "error" => ?error);
 
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
             generation: db::model::Generation(vmm.generation.next()),
-            failure_reason: Some(reason.to_string()),
+            failure_reason: Some(
+                "VMM no longer known to sled-agent".to_string(),
+            ),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
@@ -1755,7 +1757,7 @@ impl super::Nexus {
                 info!(self.log, "marked VMM as Failed, preparing update saga";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
-                    "reason" => ?reason,
+                    "error" => ?error,
                 );
                 let saga = instance_update::SagaInstanceUpdate::prepare(
                     &instance_update::Params {

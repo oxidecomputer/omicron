@@ -693,7 +693,7 @@ impl InstanceRunner {
                                 "instance request channel unexpectedly closed"
                             );
 
-                            self.fail_vmm_and_terminate().await;
+                            self.fail_vmm_and_terminate("instance request channel closed before final state was published (possible sled-agent bug?)").await;
                             break;
                         }
                     };
@@ -1021,7 +1021,7 @@ impl InstanceRunner {
         let InstanceMonitorMessage { update, tx } = request;
         let response = match update {
             InstanceMonitorUpdate::State(state) => {
-                self.observe_state(&ObservedPropolisState::new(&state));
+                self.observe_state(ObservedPropolisState::new(&state));
 
                 // If Propolis still has an active VM, just publish this state
                 // update and resume normal operation. Otherwise, go through the
@@ -1040,7 +1040,10 @@ impl InstanceRunner {
                 // There's no way to restore the zone at this point, so the
                 // runner is now the sole driver of the VMM state machine. Drive
                 // the VMM to Failed and go through the termination sequence.
-                self.fail_vmm_and_terminate().await;
+                self.fail_vmm_and_terminate(
+                    "propolis zone has gone away entirely",
+                )
+                .await;
                 ControlFlow::Break(())
             }
             InstanceMonitorUpdate::Error(PropolisErrorCode::NoInstance) => {
@@ -1053,7 +1056,10 @@ impl InstanceRunner {
                 // This error indicates that Propolis crashed and restarted and
                 // lost whatever VM was previously created there. Nothing to do
                 // but mark the VMM as failed and tear things down.
-                self.fail_vmm_and_terminate().await;
+                self.fail_vmm_and_terminate(
+                    "propolis unexpectedly reported no instance",
+                )
+                .await;
                 ControlFlow::Break(())
             }
             InstanceMonitorUpdate::Error(
@@ -1084,7 +1090,7 @@ impl InstanceRunner {
 
     /// Processes a Propolis state change observed by the Propolis monitoring
     /// task.
-    fn observe_state(&mut self, state: &ObservedPropolisState) {
+    fn observe_state(&mut self, state: ObservedPropolisState) {
         info!(self.log, "observed new Propolis state"; "state" => ?state);
 
         // This shouldn't happen: the monitor can't observe anything before a
@@ -2227,7 +2233,7 @@ impl InstanceRunner {
                     // just move to Failed so that the corresponding instance
                     // can be stopped.
                     if self.running_state.is_none() {
-                        self.fail_vmm_and_terminate().await;
+                        self.fail_vmm_and_terminate("instance_ensure failed (no Propolis zone installed)").await;
                         return Err(e);
                     }
                 }
@@ -2241,7 +2247,7 @@ impl InstanceRunner {
                     // this VMM should just move to Failed so that the
                     // corresponding instance can be stopped.
                     if self.running_state.is_none() {
-                        self.fail_vmm_and_terminate().await;
+                        self.fail_vmm_and_terminate("instance_ensure failed (no Propolis zone installed)").await;
                         return Err(e);
                     }
                 }
@@ -2303,7 +2309,10 @@ impl InstanceRunner {
                             "code" => ?code,
                         );
 
-                        self.fail_vmm_and_terminate().await;
+                        self.fail_vmm_and_terminate(
+                            "propolis denies knowledge of VM",
+                        )
+                        .await;
 
                         // Return the newly-installed Failed state here so it
                         // doesn't get clobbered by the published VMM state
@@ -2498,7 +2507,10 @@ impl InstanceRunner {
                     );
                 }
 
-                self.fail_vmm_and_terminate().await;
+                self.fail_vmm_and_terminate(
+                    "received request to terminate forcefully",
+                )
+                .await;
                 let result = tx
                     .send(Ok(VmmUnregisterResponse {
                         updated_runtime: Some(self.state.sled_instance_state()),
@@ -2545,7 +2557,10 @@ impl InstanceRunner {
                     );
                 }
 
-                self.fail_vmm_and_terminate().await;
+                self.fail_vmm_and_terminate(
+                    "termination channel closed unexpectedly (possible propolis bug?)",
+                )
+                .await;
                 VmmStateOwner::Runner
             }
         }
@@ -2553,8 +2568,8 @@ impl InstanceRunner {
 
     /// Forcibly moves this VMM to the Failed state, then goes through the
     /// runner termination sequence.
-    async fn fail_vmm_and_terminate(&mut self) {
-        self.state.force_state_to_failed();
+    async fn fail_vmm_and_terminate(&mut self, reason: impl ToString) {
+        self.state.force_state_to_failed(reason);
         self.terminate().await;
     }
 

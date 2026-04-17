@@ -1599,6 +1599,8 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_stopped(
         instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
 
+    panic!("lmao");
+
     // Now, the Stopped nstance should be deleteable..
     expect_instance_delete_ok(client, instance_name).await;
 }

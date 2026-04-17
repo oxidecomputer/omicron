@@ -94,7 +94,7 @@ pub enum ObservedMigrationStatus {
 }
 
 /// The information observed by the instance's Propolis state monitor.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ObservedPropolisState {
     /// The state reported by Propolis's instance state monitor API.
     pub vmm_state: PropolisInstanceState,
@@ -104,6 +104,7 @@ pub(crate) struct ObservedPropolisState {
 
     /// The approximate time at which this observation was made.
     pub time: DateTime<Utc>,
+    pub failure_reason: Option<String>,
 }
 
 impl ObservedPropolisState {
@@ -111,6 +112,12 @@ impl ObservedPropolisState {
     /// state and an instance state monitor response received from
     /// Propolis.
     pub fn new(propolis_state: &InstanceStateMonitorResponse) -> Self {
+        let failure_reason = if propolis_state.state == PropolisApiState::Failed
+        {
+            Some("propolis reported the VM failed".to_string())
+        } else {
+            None
+        };
         Self {
             vmm_state: PropolisInstanceState(propolis_state.state),
             migration_in: propolis_state
@@ -124,6 +131,7 @@ impl ObservedPropolisState {
                 .as_ref()
                 .map(ObservedMigrationState::from),
             time: Utc::now(),
+            failure_reason,
         }
     }
 }
@@ -215,7 +223,7 @@ impl InstanceStates {
     /// Propolis.
     pub(crate) fn apply_propolis_observation(
         &mut self,
-        observed: &ObservedPropolisState,
+        observed: ObservedPropolisState,
     ) {
         fn transition_migration(
             current: &mut Option<MigrationRuntimeState>,
@@ -262,10 +270,10 @@ impl InstanceStates {
                 migration.state = MigrationState::Failed;
             }
         }
-
         self.vmm.state = observed.vmm_state.into();
         self.vmm.generation = self.vmm.generation.next();
         self.vmm.time_updated = observed.time;
+        self.vmm.failure_reason = observed.failure_reason;
 
         // Update the instance record to reflect the result of any completed
         // migration.
@@ -304,18 +312,22 @@ impl InstanceStates {
     /// may use this to force a VMM to reach this state when it knows no
     /// more state updates are forthcoming from Propolis (or when there might be
     /// updates, but the monitor has decided it no longer cares).
-    pub(crate) fn force_state_to_failed(&mut self) {
-        self.force_state_to(PropolisApiState::Failed);
+    pub(crate) fn force_state_to_failed(&mut self, reason: impl ToString) {
+        self.force_state_to(PropolisApiState::Failed, Some(reason.to_string()));
     }
 
     /// Forcibly transitions this VMM to the Destroyed state. This allows the
     /// instance runner to force the VMM to reach a terminal state if a client
     /// asks to stop that VMM before actually asking to start it.
     pub(crate) fn force_state_to_destroyed(&mut self) {
-        self.force_state_to(PropolisApiState::Destroyed);
+        self.force_state_to(PropolisApiState::Destroyed, None);
     }
 
-    fn force_state_to(&mut self, state: PropolisApiState) {
+    fn force_state_to(
+        &mut self,
+        state: PropolisApiState,
+        failure_reason: Option<String>,
+    ) {
         // The callee interprets the `None` values in the migration state fields
         // as "no update," so this won't replace any in-progress migration data
         // (unless the supplied state is a terminal state, in which case any
@@ -325,9 +337,10 @@ impl InstanceStates {
             migration_in: None,
             migration_out: None,
             time: Utc::now(),
+            failure_reason,
         };
 
-        self.apply_propolis_observation(&fake_observed);
+        self.apply_propolis_observation(fake_observed);
     }
 }
 
@@ -385,11 +398,17 @@ mod test {
     fn make_observed_state(
         propolis_state: PropolisInstanceState,
     ) -> ObservedPropolisState {
+        let failure_reason = if propolis_state.0 == PropolisApiState::Failed {
+            Some("(fake) propolis reported the VM failed".to_string())
+        } else {
+            None
+        };
         ObservedPropolisState {
             vmm_state: propolis_state,
             migration_in: None,
             migration_out: None,
             time: Utc::now(),
+            failure_reason,
         }
     }
 
@@ -413,7 +432,7 @@ mod test {
         for state in [Observed::Destroyed, Observed::Failed] {
             let mut instance_state = make_instance();
             instance_state
-                .apply_propolis_observation(&make_observed_state(state.into()));
+                .apply_propolis_observation(make_observed_state(state.into()));
             assert!(instance_state.vmm_is_halted())
         }
     }
@@ -425,7 +444,7 @@ mod test {
             let original_migration =
                 instance_state.clone().migration_out.unwrap();
             instance_state
-                .apply_propolis_observation(&make_observed_state(state.into()));
+                .apply_propolis_observation(make_observed_state(state.into()));
 
             let migration = instance_state
                 .migration_out
@@ -442,7 +461,7 @@ mod test {
             let original_migration =
                 instance_state.clone().migration_in.unwrap();
             instance_state
-                .apply_propolis_observation(&make_observed_state(state.into()));
+                .apply_propolis_observation(make_observed_state(state.into()));
 
             let migration = instance_state
                 .migration_in
@@ -467,13 +486,14 @@ mod test {
             }),
             migration_in: None,
             time: Utc::now(),
+            failure_reason: None,
         };
 
         // This transition should transfer control to the target VMM without
         // actually marking the migration as completed. This advances the
         // instance's state generation.
         let prev = state.clone();
-        state.apply_propolis_observation(&observed);
+        state.apply_propolis_observation(observed.clone());
         assert!(!state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
 
@@ -493,7 +513,7 @@ mod test {
         // anymore.
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Stopped);
-        state.apply_propolis_observation(&observed);
+        state.apply_propolis_observation(observed.clone());
         assert!(!state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
 
@@ -514,7 +534,7 @@ mod test {
 
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Destroyed);
-        state.apply_propolis_observation(&observed);
+        state.apply_propolis_observation(observed);
         assert!(state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Destroyed);
@@ -551,10 +571,13 @@ mod test {
             }),
             migration_out: None,
             time: Utc::now(),
+            failure_reason: Some(
+                "(fake) propolis reported the VM failed".to_string(),
+            ),
         };
 
         let prev = state.clone();
-        state.apply_propolis_observation(&observed);
+        state.apply_propolis_observation(observed);
         assert!(state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Failed);
@@ -576,7 +599,7 @@ mod test {
         let mut state = make_migration_target_instance();
 
         let prev = state.clone();
-        state.force_state_to_failed();
+        state.force_state_to_failed("forcefully terminated");
 
         assert_state_change_has_gen_change(&prev, &state);
 
