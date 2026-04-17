@@ -3728,6 +3728,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
     id UUID NOT NULL,
+    -- TODO-correctness This should have a CHECK constraint that enforces the
+    -- upper bound we enforce on the Rust side.
     router_lifetime INT4 NOT NULL DEFAULT 0,
 
     PRIMARY KEY (id)
