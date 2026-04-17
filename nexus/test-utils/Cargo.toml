@@ -66,5 +66,9 @@ tokio-util.workspace = true
 transient-dns-server.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [features]
 omicron-dev = ["omicron-test-utils/seed-gen"]

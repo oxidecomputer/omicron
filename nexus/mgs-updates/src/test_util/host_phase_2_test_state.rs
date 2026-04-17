@@ -376,6 +376,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
+                fmd: None,
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),

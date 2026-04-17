@@ -164,6 +164,10 @@ omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [dev-dependencies]
 async-bb8-diesel.workspace = true
 camino-tempfile.workspace = true

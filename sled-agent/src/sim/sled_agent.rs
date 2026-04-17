@@ -995,6 +995,7 @@ impl SledAgent {
             ),
             smf_services_enabled_not_online,
             reference_measurements,
+            fmd: None,
         })
     }
 

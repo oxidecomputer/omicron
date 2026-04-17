@@ -1947,6 +1947,7 @@ mod test {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: None,
             },
             true,
         )

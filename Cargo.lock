@@ -3510,6 +3510,7 @@ dependencies = [
  "clap",
  "colored 2.2.0",
  "dhcproto",
+ "fmd-adm-sys",
  "futures",
  "hickory-resolver 0.25.2",
  "http",
@@ -3520,6 +3521,7 @@ dependencies = [
  "ispf",
  "macaddr",
  "nexus-lockstep-client",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -3809,6 +3811,23 @@ dependencies = [
  "nanorand",
  "spin",
 ]
+
+[[package]]
+name = "fmd-adm"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/fmd-adm?rev=fffb52212fb1e073e9f1b16761b3614af8b38063#fffb52212fb1e073e9f1b16761b3614af8b38063"
+dependencies = [
+ "fmd-adm-sys",
+ "illumos-nvpair",
+ "libc",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "fmd-adm-sys"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/fmd-adm?rev=fffb52212fb1e073e9f1b16761b3614af8b38063#fffb52212fb1e073e9f1b16761b3614af8b38063"
 
 [[package]]
 name = "fnv"
@@ -5277,6 +5296,21 @@ dependencies = [
  "libc",
  "num_enum 0.5.11",
 ]
+
+[[package]]
+name = "illumos-nvpair"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66fe4718e52c3654c4e6c6501ce8387d334acd0910b7b7bb3a554aad0262d09f"
+dependencies = [
+ "illumos-nvpair-sys",
+]
+
+[[package]]
+name = "illumos-nvpair-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 
 [[package]]
 name = "illumos-sys-hdrs"
@@ -6967,6 +7001,7 @@ dependencies = [
  "dropshot 0.16.7",
  "ereport-types",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-types",
@@ -7158,6 +7193,7 @@ dependencies = [
  "cockroach-admin-types",
  "dns-service-client",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -7172,6 +7208,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7256,6 +7293,7 @@ dependencies = [
  "async-bb8-diesel",
  "chrono",
  "diesel",
+ "fmd-adm-sys",
  "futures",
  "httptest",
  "ipnetwork",
@@ -7370,6 +7408,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap",
+ "fmd-adm-sys",
  "nexus-db-queries",
  "nexus-lockstep-client",
  "nexus-reconfigurator-preparation",
@@ -7406,6 +7445,7 @@ dependencies = [
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
+ "fmd-adm-sys",
  "futures",
  "httptest",
  "iddqd",
@@ -7588,6 +7628,7 @@ name = "nexus-saga-recovery"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "fmd-adm-sys",
  "futures",
  "nexus-auth",
  "nexus-db-model",
@@ -7644,6 +7685,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
  "dropshot 0.16.7",
+ "fmd-adm-sys",
  "futures",
  "gateway-messages",
  "gateway-test-utils",
@@ -8246,6 +8288,7 @@ dependencies = [
  "csv",
  "dropshot 0.16.7",
  "expectorate",
+ "fmd-adm-sys",
  "http",
  "illumos-utils",
  "nexus-test-utils",
@@ -8378,6 +8421,7 @@ dependencies = [
  "clap",
  "dropshot 0.16.7",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-test-utils",
@@ -8605,6 +8649,7 @@ dependencies = [
  "ereport-types",
  "expectorate",
  "fatfs",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -8763,6 +8808,7 @@ dependencies = [
  "clap",
  "dropshot 0.16.7",
  "expectorate",
+ "fmd-adm-sys",
  "http",
  "nexus-test-utils",
  "ntp-admin-api",
@@ -8818,6 +8864,7 @@ dependencies = [
  "dyn-clone",
  "ereport-types",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -9100,6 +9147,8 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
+ "fmd-adm",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "glob",
@@ -9132,6 +9181,7 @@ dependencies = [
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-ledger",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

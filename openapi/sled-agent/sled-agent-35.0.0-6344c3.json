@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "34.0.0"
+    "version": "35.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -5366,6 +5366,143 @@
         ],
         "additionalProperties": false
       },
+      "FmdCase": {
+        "description": "A diagnosed fault case from the illumos Fault Management Daemon.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "Diagnostic code (e.g. \"PCIEX-8000-DJ\").",
+            "type": "string"
+          },
+          "event": {
+            "nullable": true,
+            "description": "Full fault event payload as JSON, if present. Contains the fault-list with classes, certainties, affected FMRIs, and other diagnostic detail."
+          },
+          "url": {
+            "description": "URL for human-readable information about this fault (e.g. `http://illumos.org/msg/PCIEX-8000-DJ`).",
+            "type": "string"
+          },
+          "uuid": {
+            "description": "Unique identifier for this case.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "code",
+          "url",
+          "uuid"
+        ]
+      },
+      "FmdInventory": {
+        "description": "Result of querying FMD for fault information.",
+        "oneOf": [
+          {
+            "description": "FMD data was successfully collected.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/FmdCase"
+                    }
+                  },
+                  "resources": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/FmdResource"
+                    }
+                  }
+                },
+                "required": [
+                  "cases",
+                  "resources"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "FMD data collection failed.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "FmdResource": {
+        "description": "A resource affected by a diagnosed fault.",
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "description": "UUID of the case that diagnosed this fault.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "faulty": {
+            "description": "Whether the resource is marked faulty.",
+            "type": "boolean"
+          },
+          "fmri": {
+            "description": "Fault Management Resource Identifier (e.g. \"dev:////pci@af,0/pci1022,1483@3,5\").",
+            "type": "string"
+          },
+          "invisible": {
+            "description": "Whether the resource is marked invisible.",
+            "type": "boolean"
+          },
+          "unusable": {
+            "description": "Whether the resource is marked unusable.",
+            "type": "boolean"
+          },
+          "uuid": {
+            "description": "Unique identifier for this resource entry.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "case_id",
+          "faulty",
+          "fmri",
+          "invisible",
+          "unusable",
+          "uuid"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -6001,6 +6138,14 @@
           },
           "file_source_resolver": {
             "$ref": "#/components/schemas/OmicronFileSourceResolverInventory"
+          },
+          "fmd": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmdInventory"
+              }
+            ]
           },
           "last_reconciliation": {
             "nullable": true,
