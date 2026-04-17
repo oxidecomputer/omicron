@@ -1273,7 +1273,7 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
-        let fmd = crate::fmd::collect_fmd_inventory();
+        let fmd = crate::fmd::collect_fmd_inventory().await;
 
         let ReconcilerInventory {
             disks,

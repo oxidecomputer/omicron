@@ -110,10 +110,17 @@ mod illumos {
     }
 }
 
-pub(crate) fn collect_fmd_inventory() -> Option<FmdInventory> {
+pub(crate) async fn collect_fmd_inventory() -> Option<FmdInventory> {
     #[cfg(target_os = "illumos")]
     {
-        Some(illumos::collect())
+        // FMD queries go through door calls to fmd(1M) and can block, so run
+        // them on a blocking-friendly thread rather than stalling the runtime.
+        match tokio::task::spawn_blocking(illumos::collect).await {
+            Ok(inv) => Some(inv),
+            Err(e) => Some(FmdInventory::Error {
+                error: format!("fmd collection task failed: {e}"),
+            }),
+        }
     }
     #[cfg(not(target_os = "illumos"))]
     {
