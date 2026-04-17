@@ -114,7 +114,7 @@ mod probes {
     fn insert__samples__done() {}
 
     /// Fires just after failing to insert a batch of samples into the database,
-    /// with, the error details.
+    /// with the error details.
     fn insert__samples__failed(msg: &str) {}
 }
 

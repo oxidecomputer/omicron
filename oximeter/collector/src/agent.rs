@@ -141,7 +141,7 @@ impl OximeterAgent {
         // Spawn the task for aggregating and inserting all metrics to a
         // single node ClickHouse installation.
         tokio::spawn(async move {
-            crate::results_sink::database_inserter(
+            crate::results_sink::database_batcher(
                 insertion_log,
                 client,
                 db_config.batch_size,
@@ -184,7 +184,7 @@ impl OximeterAgent {
         // Spawn the task for aggregating and inserting all metrics to a
         // replicated cluster ClickHouse installation
         tokio::spawn(async move {
-            results_sink::database_inserter(
+            results_sink::database_batcher(
                 instertion_log_cluster,
                 cluster_client,
                 db_config.batch_size,
@@ -270,7 +270,7 @@ impl OximeterAgent {
 
             // Spawn the task for aggregating and inserting all metrics
             tokio::spawn(async move {
-                results_sink::database_inserter(
+                results_sink::database_batcher(
                     insertion_log,
                     client,
                     db_config.batch_size,

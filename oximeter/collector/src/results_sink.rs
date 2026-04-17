@@ -31,12 +31,12 @@ use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 use tokio::time::interval;
 
-/// A sink that inserts all results into the ClickHouse database.
+/// A sink that batches and inserts all results into the ClickHouse database.
 ///
 /// This sink is used in production, when running the `oximeter` collector
 /// normally. It aggregates all results, from all collection tasks, and inserts
 /// them into ClickHouse in batches.
-pub async fn database_inserter(
+pub async fn database_batcher(
     log: Logger,
     client: Client,
     batch_size: usize,
@@ -55,9 +55,10 @@ pub async fn database_inserter(
 
     // Spawn a task for doing the actual insertion into the database.
     //
-    // This outer task is responsible only for taking results from the
-    // individual collection tasks and batching them up for insertion.
-    let inserter = tokio::spawn(database_inserter_impl(
+    // Our task is only responsible for taking results from individual
+    // collection tasks and batching them for insertion. `database_inserter` is
+    // responsible for the actual insertion.
+    let inserter = tokio::spawn(database_inserter(
         log.new(slog::o!("component" => "database-inserter")),
         client,
         batch_rx,
@@ -87,8 +88,8 @@ pub async fn database_inserter(
                         // NOTE: We could call `batch_tx.send_and_notify()` here
                         // in the loop. I'm avoiding that for now because it
                         // takes a lock on the shared buffer of samples, so
-                        // there's a lot of locking / unlocking in this loop.
-                        // Instead, do it once at the end.
+                        // that would cause a lot of locking / unlocking in this
+                        // loop. Instead, do it once at the end.
                         let mut n_samples = 0;
                         let mut batch = Vec::with_capacity(results.len());
                         for inner_batch in results.into_iter() {
@@ -148,12 +149,12 @@ const MAX_BUFFER_SIZE_MULTIPLIER: usize = 100;
 // The other side is then notified if the existing batch is at least the
 // insertion batch size.
 #[derive(Clone)]
-struct BatchHandoff {
+struct BatchHandoff<T> {
     notify: Arc<Notify>,
-    batch: Arc<Mutex<VecDeque<Sample>>>,
+    batch: Arc<Mutex<VecDeque<T>>>,
 }
 
-impl BatchHandoff {
+impl<T> BatchHandoff<T> {
     fn new(batch_size: usize) -> Self {
         Self {
             notify: Arc::new(Notify::new()),
@@ -162,9 +163,9 @@ impl BatchHandoff {
     }
 }
 
-struct BatchSender {
+struct BatchSender<T> {
     // Handoff point between the sender and database inserter.
-    handoff: BatchHandoff,
+    handoff: BatchHandoff<T>,
     // Minimum size of the buffer before inserting into the database.
     batch_size: usize,
     // Maximum size we let the ring buffer grow before starting to drop older
@@ -173,8 +174,8 @@ struct BatchSender {
     max_buffer_size: usize,
 }
 
-impl BatchSender {
-    fn new(handoff: BatchHandoff, batch_size: usize) -> Self {
+impl<T> BatchSender<T> {
+    fn new(handoff: BatchHandoff<T>, batch_size: usize) -> Self {
         Self {
             handoff,
             batch_size,
@@ -199,19 +200,51 @@ impl BatchSender {
     // attempt.
     fn send_and_notify(
         &self,
-        samples: Vec<Sample>,
+        samples: Vec<T>,
         was_forced_collection: bool,
     ) -> usize {
         let mut batch = self.handoff.batch.lock().unwrap();
-        batch.extend(samples);
 
-        // Drop the oldest samples from the front if we've exceeded the limit.
-        // VecDeque makes front-removal O(1) per element.
-        let n_dropped = batch.len().saturating_sub(self.max_buffer_size);
-        if n_dropped > 0 {
-            drop(batch.drain(..n_dropped));
-        }
+        // Append the new samples, ensuring we never exceed the maximum buffer
+        // size.
+        let n_current_samples = batch.len();
+        let n_new_samples = samples.len();
+        let n_total_samples = n_current_samples + n_new_samples;
 
+        // The easy case is when all the samples fit. Just append them and
+        // return 0, since we've not dropped anything.
+        let n_dropped = if n_total_samples <= self.max_buffer_size {
+            batch.extend(samples);
+            0
+        } else {
+            // Now, drop samples first from the existing batch, then the new set of
+            // samples, until we're under our limit. Start by computing the total
+            // number to be dropped.
+            //
+            // NOTE: This can't underflow, we're in the branch where
+            // `n_total_samples > self.max_buffer size`.
+            let n_dropped = n_total_samples - self.max_buffer_size;
+
+            // We want to drop from the existing batch first. We can drop the
+            // minimum of the number to be dropped and the batch length. If
+            // we're only dropping part of the batch, we'll take `n_dropped` off
+            // the front. If we need to drop the whole batch and then some,
+            // we'll take the batch length and drop the whole thing.
+            let n_to_drop_from_batch = n_dropped.min(batch.len());
+            drop(batch.drain(..n_to_drop_from_batch));
+
+            // At this point, we've dropped something (potentially everything)
+            // from the existing batch. We need to figure out how many, if any,
+            // to drop from the _incoming_ set of samples. Subtract whatever we
+            // dropped immediately above to compute the number left to drop.
+            let n_left_to_drop = n_dropped - n_to_drop_from_batch;
+
+            // Append whatever we don't want to drop.
+            batch.extend(samples.into_iter().skip(n_left_to_drop));
+            n_dropped
+        };
+
+        // Notify the insertion task if needed.
         if was_forced_collection || batch.len() >= self.batch_size {
             self.notify_inserter();
         }
@@ -219,26 +252,28 @@ impl BatchSender {
     }
 }
 
-struct BatchReceiver {
-    handoff: BatchHandoff,
+struct BatchReceiver<T> {
+    handoff: BatchHandoff<T>,
     batch_size: usize,
 }
 
-impl BatchReceiver {
+impl<T> BatchReceiver<T> {
     // Wait for a notification and atomically swap out the entire buffer.
     //
     // Returns a `VecDeque` so the caller can use `make_contiguous()` to obtain
     // a contiguous `&[Sample]` without an additional heap allocation.
-    async fn wait_for_batch(&self) -> VecDeque<Sample> {
+    async fn wait_for_batch(&self) -> VecDeque<T> {
         self.handoff.notify.notified().await;
-        let mut empty = VecDeque::with_capacity(self.batch_size);
+        let mut stolen = VecDeque::with_capacity(self.batch_size);
         let mut batch = self.handoff.batch.lock().unwrap();
-        std::mem::swap(&mut empty, &mut *batch);
-        empty
+        std::mem::swap(&mut stolen, &mut *batch);
+        stolen
     }
 }
 
-fn batch_handoff(batch_size: usize) -> (BatchSender, BatchReceiver) {
+fn batch_handoff<T: Clone>(
+    batch_size: usize,
+) -> (BatchSender<T>, BatchReceiver<T>) {
     let handoff = BatchHandoff::new(batch_size);
     let sender = BatchSender::new(handoff.clone(), batch_size);
     let receiver = BatchReceiver { handoff, batch_size };
@@ -246,10 +281,10 @@ fn batch_handoff(batch_size: usize) -> (BatchSender, BatchReceiver) {
 }
 
 // The task that actually inserts results into the database.
-async fn database_inserter_impl(
+async fn database_inserter(
     log: Logger,
     client: Client,
-    batch_rx: BatchReceiver,
+    batch_rx: BatchReceiver<Sample>,
 ) {
     loop {
         // Wait for a notification that there are samples to insert, and consume
@@ -318,5 +353,142 @@ pub async fn logger(log: Logger, mut rx: mpsc::Receiver<CollectionTaskOutput>) {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::time::timeout;
+
+    use super::*;
+
+    const BATCH_SIZE: usize = 10;
+
+    #[tokio::test]
+    async fn batch_handoff_notifies_receiver_when_forced() {
+        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
+        let n_samples = 3;
+        let samples = vec![(); n_samples];
+        let n_dropped = batch_tx.send_and_notify(samples, true);
+        assert_eq!(n_dropped, 0);
+        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
+
+        let batch =
+            timeout(Duration::from_millis(10), batch_rx.wait_for_batch())
+                .await
+                .expect("Should be notified with force collection");
+        assert_eq!(batch.len(), n_samples);
+        assert!(batch_tx.handoff.batch.lock().unwrap().is_empty());
+    }
+
+    // Basic test that we append new samples and don't drop anything.
+    #[tokio::test]
+    async fn batch_handoff_handles_new_samples_when_empty() {
+        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
+        let n_samples = 3;
+        let samples = vec![(); n_samples];
+        let n_dropped = batch_tx.send_and_notify(samples, false);
+        assert_eq!(n_dropped, 0);
+        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
+        let _ = timeout(
+            Duration::from_millis(10),
+            batch_rx.handoff.notify.notified(),
+        )
+        .await
+        .expect_err("Should not be notified in this case");
+    }
+
+    #[tokio::test]
+    async fn batch_handoff_drops_old_batched_samples() {
+        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
+
+        // Push enough samples to get us just near the end of the maximum buffer
+        // size.
+        let n_samples = MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE - 1;
+        let samples = vec![(); n_samples];
+        let n_dropped = batch_tx.send_and_notify(samples, false);
+
+        // We still should not drop anything.
+        assert_eq!(n_dropped, 0);
+        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
+
+        // But we _should_ be notified since this is larger than the batch.
+        let _ = timeout(
+            Duration::from_millis(10),
+            batch_rx.handoff.notify.notified(),
+        )
+        .await
+        .expect("Should have notified receiver now");
+
+        // Now, push just a measly 2 samples. We should drop one, since we had
+        // space for just one left.
+        let n_dropped = batch_tx.send_and_notify(vec![(); 2], false);
+        assert_eq!(n_dropped, 1);
+
+        // The batch should be completely full now
+        assert_eq!(
+            batch_tx.handoff.batch.lock().unwrap().len(),
+            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
+        );
+        assert_eq!(
+            batch_rx.handoff.batch.lock().unwrap().len(),
+            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
+        );
+
+        // And we should have notified the receiver.
+        let _ = timeout(
+            Duration::from_millis(10),
+            batch_rx.handoff.notify.notified(),
+        )
+        .await
+        .expect("Should have notified receiver now");
+    }
+
+    #[tokio::test]
+    async fn batch_handoff_drops_old_and_new_samples_if_needed() {
+        // Push a few samples
+        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
+        let n_samples = 3;
+        let samples = vec![(); n_samples];
+        let n_dropped = batch_tx.send_and_notify(samples, false);
+        assert_eq!(n_dropped, 0);
+        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
+        let _ = timeout(
+            Duration::from_millis(10),
+            batch_rx.handoff.notify.notified(),
+        )
+        .await
+        .expect_err("Should not be notified in this case");
+
+        // Now push enough to get us all the way past the max size and then
+        // some. We should drop the contents of the existing batch, plus some of
+        // the new samples.
+        let n_current_samples = n_samples;
+        let n_samples = MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE + BATCH_SIZE;
+        let samples = vec![(); n_samples];
+
+        // We've appended a full extra batch, and we also have the contents of
+        // the existing buffer. All of those should be dropped.
+        let expected_n_dropped = BATCH_SIZE + n_current_samples;
+        let n_dropped = batch_tx.send_and_notify(samples, false);
+        assert_eq!(n_dropped, expected_n_dropped);
+
+        // The batch should be completely full now.
+        assert_eq!(
+            batch_tx.handoff.batch.lock().unwrap().len(),
+            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
+        );
+        assert_eq!(
+            batch_rx.handoff.batch.lock().unwrap().len(),
+            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
+        );
+
+        // And the receiver should now have everything.
+        let _ = timeout(
+            Duration::from_millis(10),
+            batch_rx.handoff.notify.notified(),
+        )
+        .await
+        .expect("Should be notified in this case");
     }
 }
