@@ -1656,7 +1656,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
 
     // Wait for the instance to transition to Failed.
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
-
+    panic!("lol");
     // Now, the instance should be deleteable.
     expect_instance_delete_ok(&client, instance_name).await;
 }

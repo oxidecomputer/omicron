@@ -1971,6 +1971,7 @@ mod test {
                     time_state_updated: Utc::now(),
                     generation: Generation(vmm.generation.0.next()),
                     state: VmmState::Destroyed,
+                    failure_reason: None,
                 },
             )
             .await
@@ -2631,6 +2632,7 @@ mod test {
                 time_state_updated: Utc::now(),
                 generation: Generation(src_vmm.generation.0.next()),
                 state: vmm_state,
+                failure_reason: None,
             };
 
             let migration = self
@@ -2688,6 +2690,7 @@ mod test {
                 time_state_updated: Utc::now(),
                 generation: Generation(target_vmm.generation.0.next()),
                 state: vmm_state,
+                failure_reason: None,
             };
 
             let migration = self

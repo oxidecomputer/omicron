@@ -1746,6 +1746,7 @@ impl super::Nexus {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
             generation: db::model::Generation(vmm.generation.next()),
+            failure_reason: Some(reason.to_string()),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await

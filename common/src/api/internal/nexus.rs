@@ -103,6 +103,8 @@ pub struct VmmRuntimeState {
     pub generation: Generation,
     /// Timestamp for the VMM's state.
     pub time_updated: DateTime<Utc>,
+    /// A human-readable description of why this VMM is in the 'failed' state.
+    pub failure_reason: Option<String>,
 }
 
 /// A wrapper type containing a sled's total knowledge of the state of a VMM.

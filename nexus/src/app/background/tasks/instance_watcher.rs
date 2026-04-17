@@ -134,6 +134,7 @@ impl InstanceWatcher {
                         generation: vmm.generation.0.next(),
                         state: nexus::VmmState::Failed,
                         time_updated: chrono::Utc::now(),
+                        failure_reason: Some("sled expunged".to_string()),
                     },
                     // It's fine to synthesize `None`s here because a `None`
                     // just means "don't update the migration state", not
@@ -173,6 +174,10 @@ impl InstanceWatcher {
                                 generation: vmm.generation.0.next(),
                                 state: nexus::VmmState::Failed,
                                 time_updated: chrono::Utc::now(),
+                                failure_reason: Some(
+                                    "VMM no longer known to sled-agent"
+                                        .to_string(),
+                                ),
                             },
                             // It's fine to synthesize `None`s here because a `None`
                             // just means "don't update the migration state", not

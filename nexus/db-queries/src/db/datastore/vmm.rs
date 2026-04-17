@@ -476,6 +476,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -496,6 +497,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -531,6 +533,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation(vmm1.generation.0.next()),
                     state: VmmState::Stopping,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: None,
@@ -553,6 +556,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation(vmm2.generation.0.next()),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
@@ -605,6 +609,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -639,6 +644,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation(vmm2.generation.0.next()),
                     state: VmmState::Destroyed,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
@@ -663,6 +669,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation(vmm3.generation.0.next()),
                     state: VmmState::Destroyed,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: Some(&vmm3_migration_in),

@@ -5933,7 +5933,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
     state omicron.public.vmm_state NOT NULL,
-    cpu_platform omicron.public.vmm_cpu_platform NOT NULL
+    cpu_platform omicron.public.vmm_cpu_platform NOT NULL,
+    -- A human-readable description of why this VMM is in the 'failed' state.
+    --
+    -- This is not stable and is intended for debugging purposes only. The
+    -- `failure_reason_iff_failed` CHECK constraint ensures that this field is
+    -- only set when the VMM's state is set to 'failed'.
+    failure_reason TEXT,
+
+    CONSTRAINT failure_reason_iff_failed CHECK (
+        (failure_reason IS NOT NULL AND state = 'failed')
+            OR (failure_reason IS NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
