@@ -3029,6 +3029,7 @@ mod tests {
                 state: VmmState::Starting,
                 generation: Generation::new(),
                 time_updated: Default::default(),
+                failure_reason: None,
             },
             propolis_addr,
             migration_id: None,
