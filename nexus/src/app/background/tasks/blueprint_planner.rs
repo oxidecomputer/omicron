@@ -304,7 +304,7 @@ impl BlueprintPlanner {
             input,
             vec![(*collection).clone()],
             vec![(*parent).clone(), blueprint.clone()],
-            target.clone(),
+            target,
         )
         .await
         .and_then(|s| {

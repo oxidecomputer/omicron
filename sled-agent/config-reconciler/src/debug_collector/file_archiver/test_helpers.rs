@@ -360,6 +360,42 @@ impl FileLister for TestLister<'_> {
             .collect()
     }
 
+    fn list_directories(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>> {
+        // Keep track of the last path that was listed.
+        *self.last_listed.lock().unwrap() = Some(path.to_owned());
+
+        // Inject any errors we've been configured to inject.
+        if let Some(fail_path) = self.injected_error {
+            if path == fail_path {
+                return vec![Err(anyhow!("injected error for {fail_path:?}"))];
+            }
+        }
+
+        // Return the set of immediate subdirectory names under `path`.
+        let mut seen = BTreeSet::new();
+        self.files
+            .iter()
+            .filter_map(|file_path| {
+                // Strip the query path prefix.  The remainder should be at
+                // least two components: a subdirectory name and a filename.
+                let rest = file_path.strip_prefix(path).ok()?;
+                let mut components = rest.components();
+                let subdir = components.next()?.as_str().to_owned();
+                // Only include paths that go deeper than one component.
+                components.next()?;
+                if seen.insert(subdir.clone()) {
+                    Some(Ok(Filename::try_from(subdir)
+                        .expect("subdir name is a valid Filename")))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn file_mtime(
         &self,
         path: &Utf8Path,

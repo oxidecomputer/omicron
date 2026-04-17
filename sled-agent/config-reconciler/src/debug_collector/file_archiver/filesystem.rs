@@ -8,6 +8,7 @@ use camino::Utf8Path;
 use chrono::DateTime;
 use chrono::Utc;
 use derive_more::AsRef;
+use std::fs::FileType;
 use thiserror::Error;
 
 /// Describes the final component of a path name (that has no `/` in it)
@@ -40,6 +41,15 @@ pub(crate) trait FileLister {
         path: &Utf8Path,
     ) -> Vec<Result<Filename, anyhow::Error>>;
 
+    /// List the immediate subdirectories within a directory
+    ///
+    /// This should return an empty vec when the directory does not exist,
+    /// rather than an error.
+    fn list_directories(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>>;
+
     /// Return the modification time of a file
     fn file_mtime(
         &self,
@@ -57,63 +67,14 @@ impl FileLister for FilesystemLister {
         &self,
         path: &Utf8Path,
     ) -> Vec<Result<Filename, anyhow::Error>> {
-        let entry_iter = match path.read_dir_utf8() {
-            Ok(iter) => iter,
-            Err(error) => {
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    // This interface is more useful if we swallow ENOTFOUND
-                    // rather than propagate it since the caller will treat
-                    // this the same as an empty directory.
-                    return vec![];
-                } else {
-                    return vec![Err(
-                        anyhow!(error).context("readdir {path:?}")
-                    )];
-                }
-            }
-        };
+        list_files(path, &|filetype| filetype.is_file())
+    }
 
-        entry_iter
-            .filter_map(|entry| {
-                // entry: a Result<directory entry>
-                entry
-                    .context("reading directory entry")
-                    .and_then(|entry| {
-                        // entry: directory entry
-                        // Assemble both the filename and file type.
-                        let filename = entry.file_name().to_owned();
-                        entry
-                            .file_type()
-                            .map(|filetype| (filename, filetype))
-                            .with_context(|| {
-                                format!(
-                                    "determining file type of {:?}",
-                                    entry.file_name(),
-                                )
-                            })
-                    })
-                    // now a Result<(filename, filetype)>
-                    .map(|(filename, filetype)| {
-                        // Skip anything other than a regular file.
-                        if filetype.is_file() { Some(filename) } else { None }
-                    })
-                    // now a Result<Option<filename>>
-                    .transpose()
-                    // now an Option<Result<filename>>
-                    .map(|maybe_filename| {
-                        // maybe_filename: Result<filename>
-                        maybe_filename.and_then(|filename| {
-                            // It should be impossible for this `try_from()` to
-                            // fail, but it's easy enough to handle gracefully.
-                            Filename::try_from(filename)
-                                .context("processing file name")
-                        })
-                        // now a Result<Filename>
-                    })
-                // now an Option<Result<Filename>>
-                // We'll filter only the Some values.
-            })
-            .collect()
+    fn list_directories(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>> {
+        list_files(path, &|filetype| filetype.is_dir())
     }
 
     fn file_mtime(
@@ -137,6 +98,66 @@ impl FileLister for FilesystemLister {
         path.try_exists()
             .with_context(|| format!("checking existence of {path:?}"))
     }
+}
+
+fn list_files(
+    path: &Utf8Path,
+    filter: &dyn Fn(&FileType) -> bool,
+) -> Vec<Result<Filename, anyhow::Error>> {
+    let entry_iter = match path.read_dir_utf8() {
+        Ok(iter) => iter,
+        Err(error) => {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                // This interface is more useful if we swallow ENOTFOUND
+                // rather than propagate it since the caller will treat
+                // this the same as an empty directory.
+                return vec![];
+            } else {
+                return vec![Err(anyhow!(error).context("readdir {path:?}"))];
+            }
+        }
+    };
+
+    entry_iter
+        .filter_map(|entry| {
+            // entry: a Result<directory entry>
+            entry
+                .context("reading directory entry")
+                .and_then(|entry| {
+                    // entry: directory entry
+                    // Assemble both the filename and file type.
+                    let filename = entry.file_name().to_owned();
+                    entry
+                        .file_type()
+                        .map(|filetype| (filename, filetype))
+                        .with_context(|| {
+                            format!(
+                                "determining file type of {:?}",
+                                entry.file_name(),
+                            )
+                        })
+                })
+                // now a Result<(filename, filetype)>
+                .map(|(filename, filetype)| {
+                    filter(&filetype).then_some(filename)
+                })
+                // now a Result<Option<filename>>
+                .transpose()
+                // now an Option<Result<filename>>
+                .map(|maybe_filename| {
+                    // maybe_filename: Result<filename>
+                    maybe_filename.and_then(|filename| {
+                        // It should be impossible for this `try_from()` to
+                        // fail, but it's easy enough to handle gracefully.
+                        Filename::try_from(filename)
+                            .context("processing file name")
+                    })
+                    // now a Result<Filename>
+                })
+            // now an Option<Result<Filename>>
+            // We'll filter only the Some values.
+        })
+        .collect()
 }
 
 #[cfg(test)]

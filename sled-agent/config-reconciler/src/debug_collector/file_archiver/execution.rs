@@ -139,13 +139,21 @@ mod test {
         let file3_rotated = logdir.join("svc2.log.0");
         let coredir = tempdir.path().join("crash");
         let file4_core = coredir.join("core.123");
+        let producer_dir =
+            zone_root.join("var/debug_dropbox").join("test-producer");
+        let file5_dropbox = producer_dir.join("test-file.dat");
 
         let populate_input = |contents: &str| {
             std::fs::create_dir_all(&logdir).unwrap();
             std::fs::create_dir_all(&coredir).unwrap();
-            for file in
-                [&file1_live, &file2_rotated, &file3_rotated, &file4_core]
-            {
+            std::fs::create_dir_all(&producer_dir).unwrap();
+            for file in [
+                &file1_live,
+                &file2_rotated,
+                &file3_rotated,
+                &file4_core,
+                &file5_dropbox,
+            ] {
                 let contents =
                     format!("{}-{contents}", file.file_name().unwrap());
                 std::fs::write(&file, contents).unwrap();
@@ -156,14 +164,21 @@ mod test {
 
         // Compute the expected filenames.  These depend on the mtimes that the
         // files wound up with.
-        let expected_filename = |base: &str, input: &Utf8Path| {
+        let expected_log_filename = |base: &str, input: &Utf8Path| {
             let found_mtime = input.metadata().unwrap().modified().unwrap();
             let mtime: DateTime<Utc> = DateTime::from(found_mtime);
             format!("{base}{}", mtime.timestamp())
         };
-        let file1_expected = expected_filename("svc1.", &file1_live);
-        let file2_expected = expected_filename("svc1.log.", &file2_rotated);
-        let file3_expected = expected_filename("svc2.log.", &file3_rotated);
+        let file1_expected = expected_log_filename("svc1.", &file1_live);
+        let file2_expected = expected_log_filename("svc1.log.", &file2_rotated);
+        let file3_expected = expected_log_filename("svc2.log.", &file3_rotated);
+
+        let expected_dropbox_filename = |input: &Utf8Path, counter: u16| {
+            let found_mtime = input.metadata().unwrap().modified().unwrap();
+            let mtime: DateTime<Utc> = DateTime::from(found_mtime);
+            format!("test-file.dat.{}.{counter}", mtime.timestamp())
+        };
+        let file5_expected = expected_dropbox_filename(&file5_dropbox, 0);
 
         // Run a complete archive.
         std::fs::create_dir(&outdir).unwrap();
@@ -172,9 +187,7 @@ mod test {
         planner.include_zone(zone_name, &zone_root);
         let () = planner.execute().await.expect("successful execution");
 
-        // Check each of the output log files.  This is a little annoying
-        // because we don't necessarily know what names they were given, since
-        // it depends on the mtime on the input file.
+        // Check each of the output log files.
         let verify_logs = |unchanged| {
             for (input_path, expected_filename, deleted_original) in [
                 (&file1_live, &file1_expected, false),
@@ -210,7 +223,25 @@ mod test {
             }
         };
 
+        // Check the dropbox file at the expected nested output path.
+        let verify_dropbox = |expected_name: &str, expected_contents: &str| {
+            let expected_path = outdir
+                .join(zone_name)
+                .join("debug_dropbox")
+                .join("test-producer")
+                .join(expected_name);
+            let contents = std::fs::read_to_string(&expected_path)
+                .with_context(|| {
+                    format!("read expected output file {expected_path:?}")
+                })
+                .unwrap();
+            assert_eq!(contents, expected_contents);
+            // The original input file should be gone (delete_original: true).
+            assert!(!file5_dropbox.exists());
+        };
+
         verify_logs(true);
+        verify_dropbox(&file5_expected, "test-file.dat-first");
 
         // Check the output core file, too.
         let file4_output = outdir.join("core.123");
@@ -227,6 +258,8 @@ mod test {
         // First, re-populate the input tree, but with new data so that we can
         // tell when things have been clobbered.
         populate_input("second");
+        let file5_expected_second =
+            expected_dropbox_filename(&file5_dropbox, 1);
 
         // Run another archive.
         let mut planner = ArchivePlanner::new(log, ArchiveKind::Final, &outdir);
@@ -237,11 +270,17 @@ mod test {
         // The previously archived log file should still exist, still have the
         // same (original) contents, and the input files should be gone again.
         verify_logs(false);
+        verify_dropbox(&file5_expected_second, "test-file.dat-second");
 
         // There should now be new versions of the three log files that contain
-        // the new contents.
+        // the new contents.  Directories (e.g., "debug_dropbox") are skipped.
         for result in outdir.join(zone_name).read_dir_utf8().unwrap() {
             let entry = result.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                // There are directories here (like `debug_dropbox`), but we're
+                // only interested in files.
+                continue;
+            }
             let contents = std::fs::read_to_string(&entry.path())
                 .with_context(|| {
                     format!("read expected intput file {:?}", entry.path())

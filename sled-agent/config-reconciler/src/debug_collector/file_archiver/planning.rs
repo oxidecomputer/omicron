@@ -17,6 +17,7 @@ use super::filesystem::FilesystemLister;
 use super::rules::ALL_RULES;
 use super::rules::ArchiveGroup;
 use super::rules::NamingRule;
+use super::rules::RuleScanning;
 use super::rules::RuleScope;
 use super::rules::Source;
 use anyhow::Context;
@@ -25,6 +26,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
+use regex::Regex;
 use slog::Logger;
 use slog::debug;
 use slog::info;
@@ -200,22 +202,18 @@ impl ArchivePlan<'_> {
     }
 
     pub(crate) fn to_steps_generic<'a>(
-        log: &Logger,
+        log: &'a Logger,
         groups: &'a [ArchiveGroup<'static>],
         debug_dir: &'a Utf8Path,
         lister: &'a (dyn FileLister + Send + Sync),
     ) -> impl Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> {
-        // This gigantic combinator iterates the list of archive steps, which
-        // consist of:
+        // This iterates the list of archive steps:
         //
         // - an `ArchiveStep::Mkdir` for each output directory we need to create
         // - an `ArchiveStep::ArchiveFile` for each file that we need to archive
-        //   (all files matching all the rules that have been applied to the
-        //   input sources).
         //
-        // In fact, each item that we iterate is a `Result`: it's either one of
-        // these archive steps or its an error that was encountered along the
-        // way.
+        // Each item is a `Result`: either an archive step or an error
+        // encountered along the way.
         //
         // Being one big expression makes this annoying to read and modify, but
         // it has the useful property that it operates in a streaming way: at no
@@ -223,7 +221,8 @@ impl ArchivePlan<'_> {
         // into memory at once.
         groups
             .iter()
-            // Start with a `mkdir` for each of the output directories.
+            // Start with a `mkdir` for each of the top-level output
+            // directories.
             .filter_map(move |group| {
                 let output_directory = group.output_directory(debug_dir);
                 if output_directory != debug_dir {
@@ -233,102 +232,29 @@ impl ArchivePlan<'_> {
                 }
             })
             // Chain this with a list of all the files we need to archive.
-            .chain(
-                groups
-                    .iter()
-                    .flat_map(move |group| {
-                        // Each group essentially identifies one directory that
-                        // we need to scan for files to archive.  For each of
-                        // these, list the files in the directory.
-                        let input_directory = group.input_directory();
-
-                        debug!(
+            .chain(groups.iter().flat_map(move |group| {
+                match &group.rule.scanning {
+                    RuleScanning::Flat { include_files_matching } => {
+                        flat_file_steps(
                             log,
-                            "listing directory";
-                            "input_directory" => %input_directory
-                        );
-                        lister.list_files(&input_directory).into_iter().map(
-                            move |item| item.map(|filename| (group, filename)),
+                            group,
+                            debug_dir,
+                            lister,
+                            include_files_matching,
                         )
-                    })
-                    .filter(move |entry| match entry {
-                        // Errors are passed to the end of this pipeline.
-                        Err(_) => true,
-
-                        // Files that we found in an input directory are checked
-                        // against the corresponding rule to see if we should
-                        // include them.
-                        Ok((group, filename)) => {
-                            debug!(
-                                log,
-                                "checking file";
-                                "file" => %filename.as_ref(),
-                            );
-                            group.rule.include_file(&filename)
-                        }
-                    })
-                    .map(|entry| match entry {
-                        // Errors are passed to the end of this pipeline.
-                        Err(error) => Err(error),
-
-                        // If we found a matching file, fetch its metadata and
-                        // grab the mtime.  This is used for naming the archived
-                        // file.
-                        Ok((group, filename)) => {
-                            let input_path =
-                                group.input_directory().join(filename.as_ref());
-                            lister
-                                .file_mtime(&input_path)
-                                .map(|mtime| (group, input_path, mtime))
-                        }
-                    })
-                    .flat_map(|entry| match entry {
-                        // Errors are passed to the end of this pipeline.
-                        Err(error) => vec![Err(error)],
-
-                        // If we succeeded so far, we have a matching input
-                        // file, its mtime and the associated group.  Construct
-                        // archive steps describing that we need to archive this
-                        // file.
-                        //
-                        // If the file is in a subdirectory of the rule's output
-                        // directory, we'll need to create a Mkdir step as well.
-                        Ok((group, input_path, mtime)) => {
-                            let rule_output_directory =
-                                group.output_directory(debug_dir);
-                            let (output_directory, mkdir_step) =
-                                match group.rule.naming.archived_subdir() {
-                                    Some(subdir) => {
-                                        let output_directory =
-                                            rule_output_directory
-                                                .join(subdir.as_ref());
-                                        (
-                                            output_directory.clone(),
-                                            Some(ArchiveStep::Mkdir {
-                                                output_directory,
-                                            }),
-                                        )
-                                    }
-                                    None => (rule_output_directory, None),
-                                };
-                            let file_step =
-                                ArchiveStep::ArchiveFile(ArchiveFile {
-                                    input_path,
-                                    mtime,
-                                    output_directory,
-                                    namer: group.rule.naming,
-                                    delete_original: group.rule.delete_original,
-                                    #[cfg(test)]
-                                    rule: group.rule.label,
-                                });
-                            if let Some(mkdir) = mkdir_step {
-                                vec![Ok(mkdir), Ok(file_step)]
-                            } else {
-                                vec![Ok(file_step)]
-                            }
-                        }
-                    }),
-            )
+                    }
+                    RuleScanning::Nested { output_subdir, exclude_subdirs } => {
+                        nested_file_steps(
+                            log,
+                            group,
+                            debug_dir,
+                            lister,
+                            output_subdir,
+                            exclude_subdirs,
+                        )
+                    }
+                }
+            }))
     }
 
     pub(crate) async fn execute(self) -> Vec<anyhow::Error> {
@@ -355,6 +281,172 @@ impl ArchivePlan<'_> {
 
         errors
     }
+}
+
+/// Produces archive steps for a `RuleScanning::Flat` group: lists files
+/// directly in the group's input directory, filters by the rule's regex, and
+/// emits one `ArchiveFile` step per match.
+fn flat_file_steps<'a>(
+    log: &'a Logger,
+    group: &'a ArchiveGroup<'static>,
+    debug_dir: &'a Utf8Path,
+    lister: &'a (dyn FileLister + Send + Sync),
+    include_files_matching: &'a Regex,
+) -> Box<dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> + Send + 'a>
+{
+    let input_directory = group.input_directory();
+    debug!(
+        log,
+        "listing directory";
+        "input_directory" => %input_directory
+    );
+    // This is expressed as a big combinator so that we only need to process one
+    // item at a time.  (These directories could be large.)
+    let steps = lister
+        .list_files(&input_directory)
+        .into_iter()
+        // Filter out non-matching files.
+        .filter(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(_) => true,
+            Ok(filename) => {
+                debug!(log, "checking file"; "file" => %filename.as_ref());
+                include_files_matching.is_match(filename.as_ref())
+            }
+        })
+        // Grab the input files' mtimes.
+        .map(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(error) => Err(error),
+            Ok(filename) => {
+                let input_path =
+                    group.input_directory().join(filename.as_ref());
+                lister.file_mtime(&input_path).map(|mtime| (input_path, mtime))
+            }
+        })
+        // Produce the final `ArchiveFile` struct.
+        .map(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(error) => Err(error),
+            Ok((input_path, mtime)) => {
+                Ok(ArchiveStep::ArchiveFile(ArchiveFile {
+                    input_path,
+                    mtime,
+                    output_directory: group.output_directory(debug_dir),
+                    namer: group.rule.naming,
+                    delete_original: group.rule.delete_original,
+                    #[cfg(test)]
+                    rule: group.rule.label,
+                }))
+            }
+        });
+    Box::new(steps)
+}
+
+/// Produces archive steps for a `RuleScanning::Nested` group: lists immediate
+/// subdirectories of the group's input directory, skips those matching
+/// `exclude_subdirs`, then for each retained subdirectory emits two `Mkdir`
+/// steps (for the top-level container and the subdir) followed by one
+/// `ArchiveFile` step per file in that subdirectory.
+///
+/// Non-regular-file entries within subdirectories are warned about and skipped
+/// (they do not appear as `ArchiveFile` steps).
+fn nested_file_steps<'a>(
+    log: &'a Logger,
+    group: &'a ArchiveGroup<'static>,
+    debug_dir: &'a Utf8Path,
+    lister: &'a (dyn FileLister + Send + Sync),
+    output_subdir: &'a Filename,
+    exclude_subdirs: &'a Regex,
+) -> Box<dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> + Send + 'a>
+{
+    let input_directory = group.input_directory();
+    let zone_output_dir = group.output_directory(debug_dir);
+
+    debug!(
+        log,
+        "listing subdirectories";
+        "input_directory" => %input_directory
+    );
+
+    // Emit the top-level directory for this rule's outputs first.
+    let rule_output_dir = zone_output_dir.join(output_subdir.as_ref());
+    let top_mkdir_step = std::iter::once(Ok(ArchiveStep::Mkdir {
+        output_directory: rule_output_dir.clone(),
+    }));
+
+    // This is a large combinator in order to avoid loading the whole directory
+    // tree into memory at once.
+    let steps = lister
+        .list_directories(&input_directory)
+        .into_iter()
+        .filter(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(_) => true,
+            Ok(subdir) => !exclude_subdirs.is_match(subdir.as_ref()),
+        })
+        .flat_map(
+            move |item| -> Box<
+                dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>>
+                    + Send
+                    + 'a,
+            > {
+                match item {
+                    // Pass errors through to the end of the pipeline.
+                    Err(error) => Box::new(std::iter::once(Err(error))),
+                    Ok(subdir) => {
+                        let input_subdir =
+                            input_directory.join(subdir.as_ref());
+                        let output_subdir =
+                            rule_output_dir.join(subdir.as_ref());
+
+                        debug!(
+                            log,
+                            "listing subdirectory";
+                            "subdirectory" => %input_subdir,
+                        );
+
+                        let mkdir_step =
+                            std::iter::once(Ok(ArchiveStep::Mkdir {
+                                output_directory: output_subdir.clone(),
+                            }));
+
+                        let file_steps = lister
+                            .list_files(&input_subdir)
+                            .into_iter()
+                            .map(move |item| match item {
+                                // Pass errors through to the end of the
+                                // pipeline.
+                                Err(error) => Err(error),
+                                Ok(filename) => {
+                                    let input_file =
+                                        input_subdir.join(filename.as_ref());
+                                    let mtime =
+                                        match lister.file_mtime(&input_file) {
+                                            Err(error) => return Err(error),
+                                            Ok(m) => m,
+                                        };
+                                    Ok(ArchiveStep::ArchiveFile(ArchiveFile {
+                                        input_path: input_file,
+                                        mtime,
+                                        output_directory: output_subdir.clone(),
+                                        namer: group.rule.naming,
+                                        delete_original: group
+                                            .rule
+                                            .delete_original,
+                                        #[cfg(test)]
+                                        rule: group.rule.label,
+                                    }))
+                                }
+                            });
+
+                        Box::new(mkdir_step.chain(file_steps))
+                    }
+                }
+            },
+        );
+
+    Box::new(top_mkdir_step.chain(steps))
 }
 
 pub(crate) enum ArchiveStep<'a> {
@@ -392,15 +484,11 @@ impl ArchiveFile<'_> {
             .to_owned()
             .try_into()
             .context("file_name() returned a non-Filename")?;
-        let output_directory = match self.namer.archived_subdir() {
-            Some(subdir) => &self.output_directory.join(subdir.as_ref()),
-            None => &self.output_directory,
-        };
         self.namer.archived_file_name(
             &file_name,
             self.mtime,
             lister,
-            output_directory,
+            &self.output_directory,
         )
     }
 }

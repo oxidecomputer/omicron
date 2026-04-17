@@ -1500,7 +1500,7 @@ mod test {
         // blueprints in the gap were going to be kept.
         assert_eq!(
             details.deleted.len(),
-            nblueprints - usize::from(gapsize) - usize::from(nkeep)
+            nblueprints - usize::from(gapsize) - nkeep
         );
         blueprints.verify_database_matches(opctx, datastore).await;
         assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
@@ -1567,7 +1567,7 @@ mod test {
         //   times after creating it)
         // - we will have removed 20 bp_target rows (similarly, each pruned
         //   blueprint has 4 associated rows)
-        let ndeleted = nblueprints - usize::from(nkeep);
+        let ndeleted = nblueprints - nkeep;
         assert_eq!(details.nkept_by_policy, nkeep);
         assert_eq!(details.deleted.len(), ndeleted);
         assert_eq!(details.ntargets_deleted, 4 * ndeleted);
