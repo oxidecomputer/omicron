@@ -304,7 +304,7 @@ impl SimInstanceInner {
                 }
             }
 
-            self.state.apply_propolis_observation(&ObservedPropolisState::new(
+            self.state.apply_propolis_observation(ObservedPropolisState::new(
                 &self.last_response,
             ));
 
@@ -389,7 +389,7 @@ impl SimInstanceInner {
     /// Simulates rude termination by moving the instance to the Failed state
     /// immediately and clearing the queue of pending state transitions.
     fn terminate(&mut self) -> SledVmmState {
-        self.state.force_state_to_failed();
+        self.state.force_state_to_failed("forcefully terminated");
         self.queue.clear();
         self.destroyed = true;
         self.state.sled_instance_state()

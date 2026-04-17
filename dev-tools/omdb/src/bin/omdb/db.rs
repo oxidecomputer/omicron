@@ -5061,7 +5061,7 @@ async fn cmd_db_instance_info(
         let ctx = || "listing past VMMs";
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct VmmRow {
+        struct VmmRow<'a> {
             #[tabled(inline)]
             state: VmmStateRow,
             sled_id: SledUuid,
@@ -5069,6 +5069,8 @@ async fn cmd_db_instance_info(
             time_created: chrono::DateTime<Utc>,
             #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             time_deleted: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            failure_reason: Option<&'a str>,
         }
         let vmms = vmm_dsl::vmm
             .filter(vmm_dsl::instance_id.eq(id.into_untyped_uuid()))
@@ -5097,6 +5099,7 @@ async fn cmd_db_instance_info(
                     time_state_updated: _,
                     generation,
                     state,
+                    ref failure_reason,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow {
@@ -5107,6 +5110,7 @@ async fn cmd_db_instance_info(
                     sled_id: sled_id.into(),
                     time_created,
                     time_deleted,
+                    failure_reason: failure_reason.as_deref(),
                 }
             }))
             .with(tabled::settings::Style::empty())
@@ -7699,13 +7703,14 @@ fn prettyprint_vmm(
     const ID: &'static str = "ID";
     const CREATED: &'static str = "created at";
     const DELETED: &'static str = "deleted at";
-    const UPDATED: &'static str = "updated at";
+    const UPDATED: &'static str = "  updated at";
     const INSTANCE_ID: &'static str = "instance ID";
     const SLED_ID: &'static str = "sled ID";
     const SLED_SERIAL: &'static str = "sled serial";
     const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
+    const FAILURE_REASON: &'static str = "  failed because:";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -7717,6 +7722,7 @@ fn prettyprint_vmm(
         CPU_PLATFORM,
         STATE,
         ADDRESS,
+        FAILURE_REASON,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -7732,6 +7738,7 @@ fn prettyprint_vmm(
         state,
         generation,
         time_state_updated,
+        failure_reason,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7743,6 +7750,9 @@ fn prettyprint_vmm(
         println!("{indent}{DELETED:width$}: {deleted}");
     }
     println!("{indent}{STATE:>width$}: {state}");
+    if let Some(reason) = failure_reason {
+        println!("{indent}{FAILURE_REASON:>width$}: {reason}");
+    }
     let g = u64::from(generation.0);
     println!(
         "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
@@ -7821,6 +7831,8 @@ async fn cmd_db_vmm_list(
         #[tabled(inline)]
         state: VmmStateRow,
         sled: &'a str,
+        #[tabled(display_with = "display_option_blank")]
+        failure_reason: Option<&'a str>,
     }
 
     impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
@@ -7837,6 +7849,7 @@ async fn cmd_db_vmm_list(
                 time_state_updated: _,
                 generation,
                 state,
+                ref failure_reason,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7853,6 +7866,7 @@ async fn cmd_db_vmm_list(
                     generation: generation.0.into(),
                 },
                 sled,
+                failure_reason: failure_reason.as_deref(),
             }
         }
     }
