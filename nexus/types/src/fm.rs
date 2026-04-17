@@ -123,6 +123,14 @@ pub struct SitrepMetadata {
     /// sitrep's inventory collection.
     pub inv_collection_id: CollectionUuid,
 
+    /// The minimum start time for an inventory collection to be considered
+    /// "newer" than the one included in this sitrep.
+    ///
+    /// This is used when beginning FM analysis in order to ensure that a
+    /// potential input inventory collection is not older than the one used in
+    /// the analysis step that produced this sitrep.
+    pub next_inv_min_time_started: DateTime<Utc>,
+
     /// The Omicron zone UUID of the Nexus that generated this sitrep.
     ///
     /// This is intended for debugging purposes.
