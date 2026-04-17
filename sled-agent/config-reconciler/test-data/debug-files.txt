@@ -67,7 +67,7 @@
 /pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/adm/messages.0
 
 # Debug dropbox files
-/pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/debug_dropbox/nexus-reconfigurator/blueprint-20251212T235100Z.json
+/pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/reconfigurator/dap-test.txt
 
 # Global zone: live syslog
 /var/adm/messages
