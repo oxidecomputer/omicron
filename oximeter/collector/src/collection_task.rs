@@ -31,6 +31,7 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio::time::Interval;
+use tokio::time::MissedTickBehavior;
 use tokio::time::interval;
 use uuid::Uuid;
 
@@ -99,10 +100,20 @@ async fn perform_collection(
             if res.status().is_success() {
                 match res.json::<ProducerResults>().await {
                     Ok(results) => {
+                        let n_samples: usize = results
+                            .iter()
+                            .map(|r| match r {
+                                ProducerResultsItem::Ok(samples) => {
+                                    samples.len()
+                                }
+                                ProducerResultsItem::Err(_) => 0,
+                            })
+                            .sum();
                         debug!(
                             log,
                             "collected results from producer";
-                            "n_results" => results.len()
+                            "n_results" => results.len(),
+                            "n_samples" => n_samples,
                         );
                         Ok(results)
                     }
@@ -613,9 +624,17 @@ impl CollectionTask {
         };
 
         // Construct self-collection statistics and our collection times.
+        //
+        // If we miss a tick, say because the results sink is full when we try
+        // to pass off our collection result, we'll delay the next tick rather
+        // than burst to catch up.
         let stats = self_stats::CollectionTaskStats::new(collector, &producer);
-        let collection_timer = interval(producer.interval);
-        let self_collection_timer = interval(self_stats::COLLECTION_INTERVAL);
+        let mut collection_timer = interval(producer.interval);
+        collection_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut self_collection_timer =
+            interval(self_stats::COLLECTION_INTERVAL);
+        self_collection_timer
+            .set_missed_tick_behavior(MissedTickBehavior::Delay);
         let self_ = Self {
             log,
             producer_details_tx,
@@ -828,6 +847,11 @@ impl CollectionTask {
                 };
                 self.producer_details_tx
                     .send_modify(|details| details.on_success(success));
+                probes::results__sink__send__start!(|| {
+                    let producer_id =
+                        self.producer_info_rx.borrow().id.to_string();
+                    (producer_id, n_samples)
+                });
                 if self
                     .outbox
                     .send(
@@ -844,6 +868,9 @@ impl CollectionTask {
                     );
                     return TaskAction::Break(());
                 }
+                probes::results__sink__send__done!(|| {
+                    self.producer_info_rx.borrow().id.to_string()
+                });
             }
             Err(reason) => {
                 let failure = FailedCollection {
