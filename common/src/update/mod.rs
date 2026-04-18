@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod artifact_id;
 mod install_manifest;
 mod mupdate_override;
+mod tuf_repo;
 
-pub use artifact_id::*;
 pub use install_manifest::*;
 pub use mupdate_override::*;
+pub use tuf_repo::*;

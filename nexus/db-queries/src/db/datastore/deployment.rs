@@ -21,7 +21,6 @@ use clickhouse_admin_types::keeper::KeeperId;
 use clickhouse_admin_types::server::ServerId;
 use core::future::Future;
 use core::pin::Pin;
-use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
@@ -72,7 +71,7 @@ use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
-use nexus_db_model::TufArtifact;
+use nexus_db_model::TufArtifactFile;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
@@ -119,8 +118,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 mod external_networking;
@@ -735,11 +732,13 @@ impl DataStore {
             Option<DbArtifactVersion>,
         )> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
             let (tuf1, tuf2) = diesel::alias!(
-                nexus_db_schema::schema::tuf_artifact as tuf_artifact_1,
-                nexus_db_schema::schema::tuf_artifact as tuf_artifact_2,
+                nexus_db_schema::schema::tuf_artifact_file
+                    as tuf_artifact_file_1,
+                nexus_db_schema::schema::tuf_artifact_file
+                    as tuf_artifact_file_2,
             );
 
             let mut rows = Vec::new();
@@ -759,28 +758,20 @@ impl DataStore {
                 // which is non-fatal.
                 .left_join(
                     tuf1.on(tuf1
-                        .field(tuf_artifact_dsl::kind)
-                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
-                        .and(
-                            tuf1.field(tuf_artifact_dsl::sha256)
-                                .nullable()
-                                .eq(dsl::host_phase_2_desired_slot_a),
-                        )),
+                        .field(tuf_artifact_file_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_a)),
                 )
                 .left_join(
                     tuf2.on(tuf2
-                        .field(tuf_artifact_dsl::kind)
-                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
-                        .and(
-                            tuf2.field(tuf_artifact_dsl::sha256)
-                                .nullable()
-                                .eq(dsl::host_phase_2_desired_slot_b),
-                        )),
+                        .field(tuf_artifact_file_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_b)),
                 )
                 .select((
                     BpSledMetadata::as_select(),
-                    tuf1.fields(tuf_artifact_dsl::version).nullable(),
-                    tuf2.fields(tuf_artifact_dsl::version).nullable(),
+                    tuf1.fields(tuf_artifact_file_dsl::version).nullable(),
+                    tuf2.fields(tuf_artifact_file_dsl::version).nullable(),
                 ))
                 .load_async::<(
                     BpSledMetadata,
@@ -828,9 +819,9 @@ impl DataStore {
         };
 
         // Load zone rows
-        let raw_zones: Vec<(BpOmicronZone, Option<TufArtifact>)> = {
+        let raw_zones: Vec<(BpOmicronZone, Option<TufArtifactFile>)> = {
             use nexus_db_schema::schema::bp_omicron_zone::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
@@ -847,21 +838,19 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 // Left join in case the artifact is missing from the
-                // tuf_artifact table, which is non-fatal.
+                // tuf_artifact_file table, which is non-fatal.
                 .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(KnownArtifactKind::Zone.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .nullable()
-                                .eq(dsl::image_artifact_sha256),
-                        )),
+                    tuf_artifact_file_dsl::tuf_artifact_file.on(
+                        tuf_artifact_file_dsl::sha256
+                            .nullable()
+                            .eq(dsl::image_artifact_sha256),
+                    ),
                 )
                 .select((
                     BpOmicronZone::as_select(),
-                    Option::<TufArtifact>::as_select(),
+                    Option::<TufArtifactFile>::as_select(),
                 ))
-                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(&*conn)
+                .load_async::<(BpOmicronZone, Option<TufArtifactFile>)>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -1195,9 +1184,12 @@ impl DataStore {
             bbs
         };
 
-        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
+        let raw_measurements: Vec<(
+            BpSingleMeasurement,
+            Option<TufArtifactFile>,
+        )> = {
             use nexus_db_schema::schema::bp_single_measurements::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
@@ -1214,18 +1206,15 @@ impl DataStore {
                 // Left join in case the artifact is missing from the
                 // tuf_artifact table, which is non-fatal.
                 .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .eq(dsl::image_artifact_sha256),
-                        )),
+                    tuf_artifact_file_dsl::tuf_artifact_file
+                        .on(tuf_artifact_file_dsl::sha256
+                            .eq(dsl::image_artifact_sha256)),
                 )
                 .select((
                     BpSingleMeasurement::as_select(),
-                    Option::<TufArtifact>::as_select(),
+                    Option::<TufArtifactFile>::as_select(),
                 ))
-                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
+                .load_async::<(BpSingleMeasurement, Option<TufArtifactFile>)>(
                     &*conn,
                 )
                 .await
@@ -3202,12 +3191,9 @@ mod tests {
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::TufArtifactMeta;
-    use omicron_common::api::external::TufRepoDescription;
-    use omicron_common::api::external::TufRepoMeta;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
-    use omicron_common::update::ArtifactId;
+    use omicron_common::update::TufRepoDescription;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
@@ -3224,8 +3210,14 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tufaceous_artifact::Artifact;
     use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactSet;
     use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact::KnownArtifactTags;
+    use tufaceous_artifact::OsPhase2Tags;
+    use tufaceous_artifact::OsVariant;
+    use tufaceous_artifact::ZoneTags;
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -3412,51 +3404,34 @@ mod tests {
         const MEASUREMENT_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
 
         const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
-        const SYSTEM_HASH: ArtifactHash = ArtifactHash([6; 32]);
 
         let tuf_repo = TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: SYSTEM_HASH,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: SYSTEM_VERSION,
-                file_name: String::new(),
-            },
-            artifacts: vec![
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: "measurement1".into(),
-                        version: ARTIFACT_VERSION_1,
-                        kind: ArtifactKind::MEASUREMENT_CORPUS,
-                    },
+            system_version: SYSTEM_VERSION,
+            hash: None,
+            file_name: None,
+            artifacts: ArtifactSet::from([
+                Artifact {
+                    target_name: String::new(),
+                    version: ARTIFACT_VERSION_1,
+                    tags: KnownArtifactTags::MeasurementCorpus.to_tags(),
                     hash: MEASUREMENT_ARTIFACT_HASH_1,
-                    size: 0,
-                    board: None,
-                    sign: None,
+                    length: 0,
                 },
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: "measurement2".into(),
-                        version: ARTIFACT_VERSION_1,
-                        kind: ArtifactKind::MEASUREMENT_CORPUS,
-                    },
+                Artifact {
+                    target_name: String::new(),
+                    version: ARTIFACT_VERSION_1,
+                    tags: KnownArtifactTags::MeasurementCorpus.to_tags(),
                     hash: MEASUREMENT_ARTIFACT_HASH_2,
-                    size: 0,
-                    board: None,
-                    sign: None,
+                    length: 0,
                 },
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: "measurement3".into(),
-                        version: ARTIFACT_VERSION_2,
-                        kind: ArtifactKind::MEASUREMENT_CORPUS,
-                    },
+                Artifact {
+                    target_name: String::new(),
+                    version: ARTIFACT_VERSION_2,
+                    tags: KnownArtifactTags::MeasurementCorpus.to_tags(),
                     hash: MEASUREMENT_ARTIFACT_HASH_3,
-                    size: 0,
-                    board: None,
-                    sign: None,
+                    length: 0,
                 },
-            ],
+            ]),
         };
 
         // Add rows to the tuf_artifact table to test version lookups.
@@ -3476,18 +3451,17 @@ mod tests {
         )
         .expect("failed to create builder");
 
-        let mut measurements = BTreeSet::new();
-
-        for artifact in &tuf_repo.artifacts {
-            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
-                measurements.insert(BlueprintSingleMeasurement {
-                    version: BlueprintArtifactVersion::Available {
-                        version: artifact.id.version.clone(),
-                    },
-                    hash: artifact.hash,
-                });
-            }
-        }
+        let measurements = tuf_repo
+            .artifacts
+            .get_all(&KnownArtifactTags::MeasurementCorpus)
+            .iter()
+            .map(|artifact| BlueprintSingleMeasurement {
+                version: BlueprintArtifactVersion::Available {
+                    version: artifact.version.clone(),
+                },
+                hash: artifact.hash,
+            })
+            .collect::<BTreeSet<_>>();
 
         assert_eq!(measurements.len(), 3);
 
@@ -3715,48 +3689,45 @@ mod tests {
                 .tuf_repo_insert(
                     opctx,
                     &TufRepoDescription {
-                        repo: TufRepoMeta {
-                            hash: SYSTEM_HASH,
-                            targets_role_version: 0,
-                            valid_until: Utc::now(),
-                            system_version: SYSTEM_VERSION,
-                            file_name: String::new(),
-                        },
-                        artifacts: vec![
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: String::new(),
-                                    version: ARTIFACT_VERSION_1,
-                                    kind: KnownArtifactKind::Zone.into(),
-                                },
+                        artifacts: ArtifactSet::from([
+                            Artifact {
+                                target_name: String::new(),
+                                version: ARTIFACT_VERSION_1,
+                                tags: KnownArtifactTags::Zone(ZoneTags {
+                                    zone_name: String::new(),
+                                })
+                                .to_tags(),
                                 hash: ZONE_ARTIFACT_HASH_1,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: "host-1".into(),
-                                    version: ARTIFACT_VERSION_2,
-                                    kind: ArtifactKind::HOST_PHASE_2,
-                                },
+                            Artifact {
+                                target_name: String::new(),
+                                version: ARTIFACT_VERSION_2,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags(),
                                 hash: HOST_ARTIFACT_HASH_1,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: "host-2".into(),
-                                    version: ARTIFACT_VERSION_3,
-                                    kind: ArtifactKind::HOST_PHASE_2,
-                                },
+                            Artifact {
+                                target_name: String::new(),
+                                version: ARTIFACT_VERSION_3,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags(),
                                 hash: HOST_ARTIFACT_HASH_2,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                        ],
+                        ]),
+                        system_version: SYSTEM_VERSION,
+                        hash: Some(SYSTEM_HASH),
+                        file_name: None,
                     },
                 )
                 .await

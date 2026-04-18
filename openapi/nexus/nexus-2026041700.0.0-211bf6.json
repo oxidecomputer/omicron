@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026041600.0.0"
+    "version": "2026041700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -29556,10 +29556,12 @@
         "type": "object",
         "properties": {
           "file_name": {
+            "nullable": true,
             "description": "The file name of the repository, as reported by the client that uploaded it\n\nThis is intended for debugging. The file name may not match any particular pattern, and even if it does, it may not be accurate since it's just what the client reported.",
             "type": "string"
           },
           "hash": {
+            "nullable": true,
             "description": "The hash of the repository",
             "type": "string",
             "format": "hex string (32 bytes)"
@@ -29576,8 +29578,6 @@
           }
         },
         "required": [
-          "file_name",
-          "hash",
           "system_version",
           "time_created"
         ]

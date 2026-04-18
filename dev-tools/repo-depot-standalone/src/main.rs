@@ -27,13 +27,13 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::AsyncRead;
-use tokio_util::io::ReaderStream;
+use tufaceous::ExpirationEnforcement;
+use tufaceous::Repository;
+use tufaceous::RepositoryLoader;
+use tufaceous::TargetStream;
+use tufaceous::TrustStoreBehavior;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
+use update_common::ErrorExt;
 
 fn main() -> Result<(), anyhow::Error> {
     oxide_tokio_rt::run(async {
@@ -91,25 +91,14 @@ impl RepoDepotStandalone {
 
         let mut ctx = RepoMetadata::new();
         for repo_path in &self.zip_files {
-            let file = std::fs::File::open(repo_path)
-                .with_context(|| format!("open {:?}", repo_path))?;
-            let buf = std::io::BufReader::new(file);
-            info!(
-                &log,
-                "extracting Omicron TUF repository";
-                "path" => %repo_path
-            );
-            let plan = ArtifactsWithPlan::from_zip(
-                buf,
-                None,
-                ArtifactHash([0; 32]),
-                ControlPlaneZonesMode::Split,
-                VerificationMode::BlindlyTrustAnything,
-                &log,
-            )
-            .await
-            .with_context(|| format!("load {:?}", repo_path))?;
-            ctx.load_repo(plan)
+            let repo = RepositoryLoader::new()
+                .expiration_enforcement(ExpirationEnforcement::Unsafe)
+                .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+                .v1_compatibility(true)
+                .load_zip_path(repo_path.clone(), &log)
+                .await
+                .with_context(|| format!("load {:?}", repo_path))?;
+            ctx.load_repo(repo)
                 .context("loading artifacts from repository at {repo_path}")?;
             info!(&log, "loaded Omicron TUF repository"; "path" => %repo_path);
         }
@@ -154,8 +143,8 @@ impl RepoDepotStandalone {
 /// Keeps metadata that allows us to fetch a target from any of the TUF repos
 /// based on its hash.
 struct RepoMetadata {
-    repos: Vec<ArtifactsWithPlan>,
-    targets_by_hash: BTreeMap<ArtifactHash, (usize, ArtifactHashId)>,
+    repos: Vec<Repository>,
+    targets_by_hash: BTreeMap<ArtifactHash, (usize, String)>,
 }
 
 impl RepoMetadata {
@@ -163,46 +152,34 @@ impl RepoMetadata {
         RepoMetadata { repos: Vec::new(), targets_by_hash: BTreeMap::new() }
     }
 
-    pub fn load_repo(&mut self, plan: ArtifactsWithPlan) -> anyhow::Result<()> {
+    pub fn load_repo(&mut self, repo: Repository) -> anyhow::Result<()> {
         let repo_index = self.repos.len();
 
-        for artifact_meta in &plan.description().artifacts {
-            let artifact_hash = artifact_meta.hash;
-            let artifact_id = &artifact_meta.id;
-            let artifact_hash_id = ArtifactHashId {
-                kind: artifact_id.kind.clone(),
-                hash: artifact_hash,
-            };
-
+        for artifact in repo.artifacts() {
             // Some hashes appear multiple times, whether in the same repo or
             // different repos.  That's fine.  They all have the same contents
             // so we can serve any of them when this hash is requested.
-            self.targets_by_hash
-                .insert(artifact_meta.hash, (repo_index, artifact_hash_id));
+            self.targets_by_hash.insert(
+                artifact.hash,
+                (repo_index, artifact.target_name.clone()),
+            );
         }
 
-        self.repos.push(plan);
+        self.repos.push(repo);
         Ok(())
     }
 
     pub async fn data_for_hash(
         &self,
         requested_sha: &ArtifactHash,
-    ) -> Option<anyhow::Result<ReaderStream<impl AsyncRead + use<>>>> {
-        let (repo_index, artifact_hash_id) =
-            self.targets_by_hash.get(requested_sha)?;
+    ) -> Result<Option<TargetStream>, tufaceous::error::Error> {
+        let Some((repo_index, target_name)) =
+            self.targets_by_hash.get(requested_sha)
+        else {
+            return Ok(None);
+        };
         let repo = &self.repos[*repo_index];
-        Some(
-            repo.get_by_hash(artifact_hash_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "artifact hash unexpectedly missing from the repo that \
-                         we recorded having found it in"
-                    )
-                })
-                .reader_stream()
-                .await,
-        )
+        Ok(Some(repo.read_target(target_name).await?))
     }
 }
 
@@ -220,17 +197,12 @@ impl RepoDepotApi for StandaloneApiImpl {
         let reader = repo_metadata
             .data_for_hash(requested_sha)
             .await
+            .map_err(|error| error.to_http_error())?
             .ok_or_else(|| {
                 HttpError::for_not_found(
                     None,
                     String::from("found no target with this hash"),
                 )
-            })?
-            .map_err(|error| {
-                HttpError::for_internal_error(format!(
-                    "loading file from TUF repo: {}",
-                    InlineErrorChain::new(&*error),
-                ))
             })?;
         let mut buf_list =
             reader.try_collect::<BufList>().await.map_err(|error| {

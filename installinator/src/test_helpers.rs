@@ -3,18 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use futures::Future;
-use tufaceous_artifact::{ArtifactHash, ArtifactHashId, KnownArtifactKind};
-
-pub(crate) fn dummy_artifact_hash_id(
-    kind: KnownArtifactKind,
-) -> ArtifactHashId {
-    ArtifactHashId {
-        kind: kind.into(),
-        hash: ArtifactHash(
-            hex_literal::hex!("b5bb9d8014a0f9b1d61e21e796d78dcc" "df1352f23cd32812f4850b878ae4944c"),
-        ),
-    }
-}
 
 pub(crate) fn with_test_runtime<Fut, T>(fut: Fut) -> T
 where

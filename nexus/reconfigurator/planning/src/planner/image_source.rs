@@ -19,14 +19,13 @@ use nexus_types::{
     },
     inventory::Collection,
 };
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use sled_agent_types::inventory::{
     BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
     ZoneKind,
 };
 use slog::{debug, info, o, warn};
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{Artifact, ArtifactHash};
 
 use crate::blueprint_builder::{BlueprintBuilder, Error};
 
@@ -522,7 +521,7 @@ impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
         zone_manifest: &ManifestBootInventory,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();
 
@@ -690,7 +689,7 @@ impl NoopConvertHostPhase2Slots {
     fn new(
         current: BlueprintHostPhase2DesiredSlots,
         contents: Option<&BootPartitionContents>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         Self {
             slot_a: NoopConvertHostPhase2Contents::new(
@@ -734,7 +733,7 @@ impl NoopConvertHostPhase2Contents {
     fn new(
         current: BlueprintHostPhase2DesiredContents,
         details: Option<&Result<BootPartitionDetails, String>>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         match current {
             BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
@@ -754,7 +753,7 @@ impl NoopConvertHostPhase2Contents {
                             artifacts_by_hash.get(&details.artifact_hash)
                         {
                             let version = BlueprintArtifactVersion::Available {
-                                version: meta.id.version.clone(),
+                                version: meta.version.clone(),
                             };
                             let desired =
                                 BlueprintHostPhase2DesiredContents::Artifact {
@@ -897,7 +896,7 @@ impl NoopConvertMeasurements {
     fn new(
         current: BlueprintMeasurements,
         measurement_manifest: Result<&ManifestBootInventory, &String>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         use NoopConvertMeasurementsIneligibleReason as IneligibleReason;
 
@@ -920,7 +919,7 @@ impl NoopConvertMeasurements {
                     {
                         artifacts.insert(BlueprintSingleMeasurement {
                             version: BlueprintArtifactVersion::Available {
-                                version: meta.id.version.clone(),
+                                version: meta.version.clone(),
                             },
                             hash: meta.hash,
                         });
