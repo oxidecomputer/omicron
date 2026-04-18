@@ -5091,7 +5091,7 @@ mod tests {
         };
         let new_client = Client::new_with_pool_policy(
             resolver,
-            "clickhouse",
+            "oximeter-test",
             policy,
             &logctx.log,
         );

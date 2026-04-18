@@ -451,7 +451,7 @@ impl Nexus {
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(
                     native_resolver,
-                    "clickhouse",
+                    "nexus-oximeter-reader",
                     &log,
                 )
             }
