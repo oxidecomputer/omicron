@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026041600.0.0"
+    "version": "2026041900.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26505,10 +26505,6 @@
         "minimum": 0,
         "maximum": 9000
       },
-      "RouterPeerIpAddr": {
-        "type": "string",
-        "format": "ip"
-      },
       "RouterPeerType": {
         "oneOf": [
           {
@@ -26539,11 +26535,8 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RouterPeerIpAddr"
-                  }
-                ]
+                "type": "string",
+                "format": "ip"
               },
               "type": {
                 "type": "string",
