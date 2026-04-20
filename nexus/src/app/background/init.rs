@@ -107,7 +107,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
-use super::tasks::fm_analysis::FmAnalysis;
+use super::tasks::fm_analysis::{self, FmAnalysis};
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
@@ -728,6 +728,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
                 resolver.clone(),
+                rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -1141,7 +1142,12 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
-            task_fm_sitrep_loader.clone(),
+            fm_analysis::Activators {
+                inventory_loader: task_inventory_loader.clone(),
+                sitrep_loader: task_fm_sitrep_loader.clone(),
+                sitrep_gc: task_fm_sitrep_gc.clone(),
+            },
+            nexus_id,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",
@@ -1163,7 +1169,13 @@ impl BackgroundTasksInitializer {
                 "updates externally visible database tables to match the \
                  current fault management sitrep",
             period: config.fm.rendezvous_period_secs,
-            task_impl: Box::new(FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
+            task_impl: Box::new(FmRendezvous::new(
+                datastore.clone(),
+                sitrep_watcher.clone(),
+                task_alert_dispatcher.clone(),
+                task_support_bundle_collector.clone(),
+                nexus_id,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher.clone())],
             activator: task_fm_rendezvous,

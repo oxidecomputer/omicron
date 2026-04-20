@@ -301,7 +301,7 @@ impl SupportBundleCollectionStep {
     ///
     /// These are used both when creating steps and when validating in tests.
     pub const STEP_BUNDLE_ID: &'static str = "bundle id";
-    pub const STEP_USER_COMMENT: &'static str = "user comment";
+    pub const STEP_REASON_FOR_CREATION: &'static str = "reason for creation";
     pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
     pub const STEP_EREPORTS: &'static str = "ereports";
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
@@ -852,6 +852,7 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
 
@@ -859,6 +860,7 @@ pub struct SpEreportIngesterStatus {
 pub struct SpEreporterStatus {
     pub sp_type: SpType,
     pub slot: u16,
+    pub ignition_type: gateway_types::ignition::SpIgnitionSystemType,
     #[serde(flatten)]
     pub status: EreporterStatus,
 }
@@ -919,25 +921,46 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
+    use crate::fm::analysis_reports;
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         pub errors: Vec<String>,
-        pub report: crate::fm::AnalysisInputReport,
+        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
-        /// Fault management analysis was not performed as no inventory
+        /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,
+
+        /// Fault management analysis was not performed, as the currently-loaded
+        /// inventory collection was collected prior to the earliest newer start
+        /// time indicated by the current sitrep.
+        WaitingForNewerInventory {
+            parent_inv_id: CollectionUuid,
+            next_inv_min_time_started: DateTime<Utc>,
+            input_inv_time_started: DateTime<Utc>,
+        },
 
         /// Preparing analysis input failed.
         PreparationError(String),
 
         /// Preparation succeeded and analysis was performed.
-        RanAnalysis { prep_status: PreparationStatus, outcome: AnalysisOutcome },
+        RanAnalysis {
+            prep_status: PreparationStatus,
+            analysis_status: AnalysisStatus,
+        },
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct AnalysisStatus {
+        pub start_time: DateTime<Utc>,
+        pub end_time: DateTime<Utc>,
+        pub report: crate::fm::analysis_reports::AnalysisReport,
+        pub outcome: AnalysisOutcome,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -951,7 +974,11 @@ pub mod fm_analysis {
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.
-        NotCommitted { sitrep_id: SitrepUuid, error: String },
+        CommitFailed { sitrep_id: SitrepUuid, error: String },
+
+        /// Analysis produced a new sitrep, but the parent sitrep was out of
+        /// date, so it was not committed.
+        NotCommitted { sitrep_id: SitrepUuid },
 
         /// Analysis produced a new sitrep, which was saved and made the current
         /// sitrep.
@@ -964,6 +991,8 @@ pub mod fm_analysis {
 pub struct FmRendezvousStatus {
     pub sitrep_id: Option<SitrepUuid>,
     pub alerts: fm_rendezvous::OpStatus<fm_rendezvous::AlertCreationStatus>,
+    pub support_bundles:
+        fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
 }
@@ -995,6 +1024,19 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SupportBundleCreationStatus {
+        /// The total number of support bundles requested by the current sitrep.
+        pub total_bundles_requested: usize,
+        /// The total number of support bundles which were *first* requested in the
+        /// current sitrep.
+        pub current_sitrep_bundles_requested: usize,
+        /// The number of support bundles created by this activation.
+        pub bundles_created: usize,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }

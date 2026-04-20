@@ -129,6 +129,7 @@ members = [
     "oximeter/oximeter",
     "oximeter/oxql-types",
     "oximeter/producer",
+    "oximeter/producer-api",
     "oximeter/schema",
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
@@ -143,6 +144,7 @@ members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/bootstrap-agent-lockstep-api",
+    "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
@@ -311,6 +313,7 @@ default-members = [
     "oximeter/oximeter",
     "oximeter/oxql-types",
     "oximeter/producer",
+    "oximeter/producer-api",
     "oximeter/schema",
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
@@ -325,6 +328,7 @@ default-members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/bootstrap-agent-lockstep-api",
+    "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
@@ -424,9 +428,10 @@ bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
 bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
-bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
+bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api" }
 bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
+bootstrap-agent-lockstep-types = { path = "sled-agent/bootstrap-agent-lockstep-types" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }
@@ -656,7 +661,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
-oxide-tokio-rt = "0.1.2"
+oxide-tokio-rt = "0.1.4"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "e547d07b08c3f3d6c821c9eb7a958adcffce6e56", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.4"
@@ -677,6 +682,7 @@ oximeter-collector = { path = "oximeter/collector" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
+oximeter-producer-api = { path = "oximeter/producer-api" }
 oximeter-schema = { path = "oximeter/schema" }
 oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
@@ -710,11 +716,11 @@ progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2c9d7052cc12b3feca1c5a0e09d10b724b8e7cb4" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "2c9d7052cc12b3feca1c5a0e09d10b724b8e7cb4" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2c9d7052cc12b3feca1c5a0e09d10b724b8e7cb4" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2c9d7052cc12b3feca1c5a0e09d10b724b8e7cb4" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2c9d7052cc12b3feca1c5a0e09d10b724b8e7cb4" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "bc489ddf0f38f75e0c194b86cf6f0de377f68845" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "bc489ddf0f38f75e0c194b86cf6f0de377f68845" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "bc489ddf0f38f75e0c194b86cf6f0de377f68845" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc489ddf0f38f75e0c194b86cf6f0de377f68845" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc489ddf0f38f75e0c194b86cf6f0de377f68845" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -826,7 +832,7 @@ textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.3"
 thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino" }
-tokio = "1.47.0"
+tokio = "1.52.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-test = "0.4.5"

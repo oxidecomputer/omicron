@@ -4,14 +4,17 @@
 
 //! Inputs to fault management analysis.
 
+use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
-use nexus_types::fm::{self, ClosedCaseReport, Sitrep, SitrepVersion};
+use nexus_types::fm::analysis_reports::ClosedCaseReport;
+use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::inventory;
+use omicron_uuid_kinds::CollectionUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-pub use nexus_types::fm::AnalysisInputReport as Report;
+pub use nexus_types::fm::analysis_reports::InputReport as Report;
 
 /// A complete set of inputs to a fault management analysis phase.
 ///
@@ -64,14 +67,47 @@ impl Input {
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
-    ) -> Builder {
-        Builder {
+    ) -> Result<Builder, InvalidInputs> {
+        // Before preparing analysis inputs, check that the proposed input
+        // inventory collection is at least as new as the parent sitrep's
+        // inventory collection.
+        if let Some((_, ref parent)) = parent_sitrep.as_deref() {
+            let parent = &parent.metadata;
+            // It is always okay to produce a new sitrep based on the same
+            // inventory collection as the parent sitrep...
+            if parent.inv_collection_id != inv.id
+            // ...but if they are not equal, the new inventory collection must
+            // have started after the minimum start time to be considered
+            // newer than the parent's.
+                && inv.time_started < parent.next_inv_min_time_started
+            {
+                return Err(InvalidInputs::InventoryStale {
+                    parent_inv_id: parent.inv_collection_id,
+                    next_inv_min_time_started: parent.next_inv_min_time_started,
+                    input_inv_time_started: inv.time_started,
+                });
+            }
+        }
+        Ok(Builder {
             parent_sitrep,
             inv,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
-        }
+        })
     }
+}
+
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
+pub enum InvalidInputs {
+    #[error(
+        "inventory collection from {input_inv_time_started} is not new \
+         enough: must have started at {next_inv_min_time_started} or later"
+    )]
+    InventoryStale {
+        parent_inv_id: CollectionUuid,
+        next_inv_min_time_started: DateTime<Utc>,
+        input_inv_time_started: DateTime<Utc>,
+    },
 }
 
 #[must_use]
@@ -212,7 +248,7 @@ mod tests {
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
     use omicron_uuid_kinds::{
-        CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
+        CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
     };
     use std::sync::Arc;
 
@@ -263,7 +299,9 @@ mod tests {
         let mut reporter = fm_test
             .reporters
             .reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 0 });
-        let ereport_in_open_case =
+        let ereport_in_open_case1 =
+            Arc::new(reporter.mk_ereport(now, Default::default()));
+        let ereport_in_open_case2 =
             Arc::new(reporter.mk_ereport(now, Default::default()));
         let ereport_in_closed_unmarked =
             Arc::new(reporter.mk_ereport(now, Default::default()));
@@ -272,33 +310,55 @@ mod tests {
         let ereport_new =
             Arc::new(reporter.mk_ereport(now, Default::default()));
 
-        // Make a parent sitrep, with three cases:
+        // Make a parent sitrep, with four cases:
         //
         // 1. an open case
-        let open_case_id = CaseUuid::new_v4();
-        // 2. a closed case with an unmarked ereport in it,
+        let open_case1_id = CaseUuid::new_v4();
+        // 2. another open case
+        let open_case2_id = CaseUuid::new_v4();
+        // 3. a closed case with an unmarked ereport in it,
         let closed_case_with_unmarked_id = CaseUuid::new_v4();
-        // 3. a closed case with only marked ereports.
+        // 4. a closed case with only marked ereports.
         let closed_case_without_unmarked_id = CaseUuid::new_v4();
         let parent_sitrep_id = SitrepUuid::new_v4();
         let parent_sitrep = {
-            let open_case = {
+            let open_case1 = {
                 let created_sitrep_id = parent_sitrep_id;
                 fm::Case {
-                    id: open_case_id,
+                    id: open_case1_id,
                     metadata: fm::case::Metadata {
                         created_sitrep_id,
                         closed_sitrep_id: None,
                         de: DiagnosisEngineKind::PowerShelf,
-                        comment: "open case".to_string(),
+                        comment: "open case one".to_string(),
                     },
                     ereports: [
-                        case_ereport(&ereport_in_open_case, parent_sitrep_id),
+                        case_ereport(&ereport_in_open_case1, parent_sitrep_id),
                         case_ereport(
                             &ereport_in_closed_unmarked,
                             created_sitrep_id,
                         ),
                     ]
+                    .into_iter()
+                    .collect(),
+                    alerts_requested: Default::default(),
+                    support_bundles_requested: Default::default(),
+                }
+            };
+            let open_case2 = {
+                let created_sitrep_id = parent_sitrep_id;
+                fm::Case {
+                    id: open_case2_id,
+                    metadata: fm::case::Metadata {
+                        created_sitrep_id,
+                        closed_sitrep_id: None,
+                        de: DiagnosisEngineKind::PowerShelf,
+                        comment: "open case two".to_string(),
+                    },
+                    ereports: [case_ereport(
+                        &ereport_in_open_case2,
+                        parent_sitrep_id,
+                    )]
                     .into_iter()
                     .collect(),
                     alerts_requested: Default::default(),
@@ -355,7 +415,8 @@ mod tests {
             };
 
             let cases = [
-                open_case,
+                open_case1,
+                open_case2,
                 closed_case_with_unmarked,
                 closed_case_without_unmarked,
             ]
@@ -366,7 +427,8 @@ mod tests {
             // sitrep — add_unmarked_ereports uses this map to detect which ereports
             // have already appeared in the parent sitrep.
             let ereports_by_id = [
-                ereport_in_open_case.clone(),
+                ereport_in_open_case1.clone(),
+                ereport_in_open_case2.clone(),
                 ereport_in_closed_unmarked.clone(),
                 ereport_in_closed_marked.clone(),
             ]
@@ -377,10 +439,11 @@ mod tests {
                 metadata: fm::SitrepMetadata {
                     id: parent_sitrep_id,
                     parent_sitrep_id: Some(SitrepUuid::new_v4()),
-                    inv_collection_id: CollectionUuid::new_v4(),
+                    inv_collection_id: inv.id,
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "parent sitrep for test".to_string(),
                     time_created: chrono::Utc::now(),
+                    next_inv_min_time_started: inv.time_done,
                 },
                 cases,
                 ereports_by_id,
@@ -397,22 +460,24 @@ mod tests {
 
         // Build analysis input
         let (input, report) = {
-            let mut builder = Input::builder(Some(parent_sitrep), inv);
-            // Pass in three ereports:
-            //  - one that is in the open case of the parent sitrep
+            let mut builder = Input::builder(Some(parent_sitrep), inv)
+                .expect("collection start time check should always pass");
+            // Pass in four ereports:
+            //  - two that are in the open cases of the parent sitrep
             //  - one that is in the (to-be-copied-forward) closed case
             //  - one that is brand-new
             //
             // Notably, `ereport_in_closed_marked` is NOT passed here,
             // simulating that it was already marked seen in the database.
             builder.add_unmarked_ereports([
-                (*ereport_in_open_case).clone(),
+                (*ereport_in_open_case1).clone(),
+                (*ereport_in_open_case2).clone(),
                 (*ereport_in_closed_unmarked).clone(),
                 (*ereport_new).clone(),
             ]);
             builder.build()
         };
-        dbg!(report);
+        eprintln!("{}", report.display_multiline(0));
 
         // Check the "new ereports" in the constructed input.
         assert!(
@@ -421,8 +486,13 @@ mod tests {
              sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_open_case.id()),
-            "ereport_in_open_case should NOT be in new_ereports (it is \
+            !input.new_ereports().contains_key(ereport_in_open_case1.id()),
+            "ereport_in_open_case1 should NOT be in new_ereports (it is \
+             already associated with an open case in the parent sitrep)"
+        );
+        assert!(
+            !input.new_ereports().contains_key(ereport_in_open_case2.id()),
+            "ereport_in_open_case2 should NOT be in new_ereports (it is \
              already associated with an open case in the parent sitrep)"
         );
         assert!(
@@ -461,20 +531,28 @@ mod tests {
 
         // Check the contents of open cases.
         assert!(
-            input.cases().contains_key(&open_case_id),
-            "the open case from the parent sitrep should be in input.cases()"
+            input.cases().contains_key(&open_case1_id),
+            "open case 1 from the parent sitrep should be in input.cases()"
         );
-        assert_eq!(input.cases().len(), 1, "exactly one case should be open");
+        assert!(
+            input.cases().contains_key(&open_case2_id),
+            "open case 2 from the parent sitrep should be in input.cases()"
+        );
+        assert_eq!(input.cases().len(), 2, "exactly two cases should be open");
 
         // Start building a sitrep...
         let mut sitrep_builder =
             SitrepBuilder::new_with_rng(log, &input, fm_test.sitrep_rng);
 
-        // The open case from the parent sitrep must be accessible via
-        // case_mut() so that the diagnosis engine can update it.
+        // The open cases from the parent sitrep must be accessible via
+        // case_mut() so that the diagnosis engines can update it.
         assert!(
-            sitrep_builder.cases.case_mut(&open_case_id).is_some(),
-            "the open case should be accessible via case_mut()"
+            sitrep_builder.cases.case_mut(&open_case1_id).is_some(),
+            "open case 1 should be accessible via case_mut()"
+        );
+        assert!(
+            sitrep_builder.cases.case_mut(&open_case2_id).is_some(),
+            "open case 2 should be accessible via case_mut()"
         );
         assert!(
             sitrep_builder
@@ -492,16 +570,64 @@ mod tests {
             "the closed_case_without_unmarked should NOT be accessible via \
              case_mut() (closed cases are not open for modification)"
         );
+        sitrep_builder.comment_mut().push_str("my cool sitrep");
+
+        let new_case_id = {
+            let mut new_case =
+                sitrep_builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
+            new_case.add_ereport(
+                &ereport_new,
+                "this ereport is important to the case somehow",
+            );
+            new_case
+                .request_alert(
+                    nexus_types::alert::AlertClass::TestFooBar,
+                    &serde_json::json!({"alert": true}),
+                    "requesting an alert to tell someone about something",
+                )
+                .unwrap();
+            *new_case.id()
+        };
+
+        // Close open case 2
+        sitrep_builder
+            .cases
+            .case_mut(&open_case2_id)
+            .unwrap()
+            .close("i'm closing it because i want to");
 
         // Build the final sitrep
-        let output_sitrep = dbg!(
-            sitrep_builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now())
+        let (output_sitrep, report) =
+            sitrep_builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now());
+        eprintln!("{}", report.display_multiline(0));
+
+        let open_case1 = output_sitrep
+            .cases
+            .get(&open_case1_id)
+            .expect("open case 1 should be in the output sitrep's cases");
+        assert!(
+            open_case1.is_open(),
+            "open case 1 should be open in the output sitrep"
         );
 
+        let open_case2 = output_sitrep
+            .cases
+            .get(&open_case2_id)
+            .expect("open case 2 should be in the output sitrep's cases");
         assert!(
-            output_sitrep.cases.contains_key(&open_case_id),
-            "open case should be in the output sitrep's cases"
+            !open_case2.is_open(),
+            "open case 2 should be closed in the output sitrep"
         );
+
+        let new_case = output_sitrep
+            .cases
+            .get(&new_case_id)
+            .expect("new case should be in the output sitrep's cases");
+        assert!(
+            new_case.is_open(),
+            "new case should be open in the output sitrep"
+        );
+
         assert!(
             output_sitrep.cases.contains_key(&closed_case_with_unmarked_id),
             "closed cases with unmarked ereports should be copied forward \
@@ -514,9 +640,10 @@ mod tests {
         );
         assert_eq!(
             output_sitrep.cases.len(),
-            2,
-            "the output sitrep should have exactly 2 cases: the open case and \
-             the closed-but-copied-forward case"
+            4,
+            "the output sitrep should have exactly 4 cases: the open case, \
+             the newly-closed case, the closed-but-copied-forward case, and \
+             the new case"
         );
 
         logctx.cleanup_successful();

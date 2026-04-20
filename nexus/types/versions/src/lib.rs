@@ -77,5 +77,7 @@ pub mod v2026_03_14_00;
 pub mod v2026_03_23_00;
 #[path = "subnet_pool_utilization_remaining/mod.rs"]
 pub mod v2026_03_25_00;
+#[path = "stronger_bgp_unnumbered_types/mod.rs"]
+pub mod v2026_04_16_00;
 #[path = "manual_disk_adoption/mod.rs"]
-pub mod v2026_04_02_00;
+pub mod v2026_04_21_00;

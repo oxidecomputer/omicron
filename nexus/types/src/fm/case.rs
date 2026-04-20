@@ -108,6 +108,10 @@ impl Metadata {
                 const OPENED_IN: &str = "opened in sitrep:";
                 const CLOSED_IN: &str = "closed in sitrep:";
                 const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
+
+                if !comment.is_empty() {
+                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                }
                 writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
                 writeln!(
                     f,
@@ -123,8 +127,6 @@ impl Metadata {
                         this_sitrep(closed_id)
                     )?;
                 }
-
-                writeln!(f, "{:>indent$}comment: {comment}", "")?;
 
                 Ok(())
             }
@@ -163,6 +165,7 @@ pub struct AlertRequest {
     pub class: AlertClass,
     pub payload: serde_json::Value,
     pub requested_sitrep_id: SitrepUuid,
+    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for AlertRequest {
@@ -184,6 +187,7 @@ pub struct SupportBundleRequest {
     /// Which data to include in the support bundle. Use
     /// [`BundleDataSelection::all()`] to request all data.
     pub data_selection: BundleDataSelection,
+    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for SupportBundleRequest {
@@ -287,22 +291,30 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}-----------------", "")?;
 
             let indent = indent + 2;
-            for AlertRequest { id, class, payload: _, requested_sitrep_id } in
-                alerts_requested.iter()
+            for AlertRequest {
+                id,
+                class,
+                payload: _,
+                requested_sitrep_id,
+                comment,
+            } in alerts_requested.iter()
             {
                 const CLASS: &str = "class:";
                 const REQUESTED_IN: &str = "requested in:";
+                const COMMENT: &str = "comment:";
 
-                const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
+                const WIDTH: usize =
+                    const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
                 writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
                 writeln!(
                     f,
-                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
+                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -315,11 +327,14 @@ impl fmt::Display for DisplayCase<'_> {
                 id,
                 requested_sitrep_id,
                 data_selection,
+                comment,
             } in support_bundles_requested.iter()
             {
                 const REQUESTED_IN: &str = "requested in:";
                 const DATA: &str = "data:";
-                const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
+                const COMMENT: &str = "comment:";
+                const WIDTH: usize =
+                    const_max_len(&[REQUESTED_IN, DATA, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
                 writeln!(
@@ -329,7 +344,8 @@ impl fmt::Display for DisplayCase<'_> {
                     this_sitrep(*requested_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}{DATA}", "")?;
-                writeln!(f, "{}\n", data_selection.display(indent + 2))?;
+                writeln!(f, "{}", data_selection.display(indent + 2))?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -461,6 +477,7 @@ mod tests {
                 class: AlertClass::TestFoo,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: created_sitrep_id,
+                comment: "power shelf rectifier removed".to_string(),
             })
             .unwrap();
         alerts_requested
@@ -469,6 +486,7 @@ mod tests {
                 class: AlertClass::TestFooBar,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: closed_sitrep_id,
+                comment: String::new(),
             })
             .unwrap();
 
@@ -484,6 +502,7 @@ mod tests {
                 id: bundle1_id,
                 requested_sitrep_id: created_sitrep_id,
                 data_selection: bundle1_data,
+                comment: "test support bundle".to_string(),
             })
             .unwrap();
         support_bundles_requested
@@ -491,6 +510,7 @@ mod tests {
                 id: bundle2_id,
                 requested_sitrep_id: closed_sitrep_id,
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 

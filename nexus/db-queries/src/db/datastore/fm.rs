@@ -558,6 +558,7 @@ impl DataStore {
                     id: req_id,
                     requested_sitrep_id: sb_req.requested_sitrep_id.into(),
                     data_selection,
+                    comment: sb_req.comment,
                 })
                 .expect("req_id is unique in requests_by_id");
         }
@@ -694,19 +695,20 @@ impl DataStore {
 
         // Create the sitrep metadata record.
         //
-        // NOTE: we must insert this record before anything else, for two
-        // reasons:
+        // NOTE: we must insert this record before anything else. The GC's
+        // "deeply orphaned" cleanup deletes child rows whose sitrep_id
+        // has no corresponding fm_sitrep row. If we inserted children
+        // *before* metadata, a concurrent GC run could incorrectly delete
+        // those in-progress children. Inserting metadata first ensures
+        // the children's sitrep_id exists in fm_sitrep, protecting them.
         //
-        // 1. It's how orphaned sitreps are found when performing garbage
-        //    collection. Were we to first insert some other records and
-        //    insert the metadata record *last*, we could die when we have
-        //    inserted some sitrep data but have yet to create the metadata
-        //    record.
-        //
-        // 2. The GC task's "deeply orphaned" cleanup deletes child rows
-        //    whose sitrep_id has no corresponding fm_sitrep row. If we
-        //    inserted children *before* metadata, a concurrent GC run
-        //    could incorrectly delete those in-progress children.
+        // This protection is temporary: if our parent becomes stale
+        // before we finish inserting (e.g. another writer supersedes it),
+        // the GC may delete our metadata row — and subsequently our
+        // children — while we're still inserting them. This is harmless:
+        // the insert will fail with ParentNotCurrent at the end, and
+        // any rows GC didn't already clean up will be collected on the
+        // next pass.
         //
         // See https://github.com/oxidecomputer/omicron/issues/10131 for
         // details.
@@ -818,6 +820,12 @@ impl DataStore {
                 ) if info.message()
                     == Self::PARENT_NOT_CURRENT_ERROR_MESSAGE =>
                 {
+                    // Note: if our parent became stale during insertion,
+                    // a concurrent GC pass may have already deleted the
+                    // metadata and child rows we inserted above (since
+                    // they appear orphaned). This is harmless — if GC
+                    // hasn't run yet, the rows will be cleaned up on the
+                    // next pass.
                     InsertSitrepError::ParentNotCurrent(sitrep_id)
                 }
                 err => {
@@ -1227,20 +1235,24 @@ impl DataStore {
         Ok(sitreps_deleted)
     }
 
-    /// Garbage-collects all orphaned sitrep data in a single transaction:
+    /// Garbage-collects orphaned sitrep data in two phases:
     ///
     /// 1. Deletes orphaned `fm_sitrep` metadata rows (not in history,
     ///    stale parent).
     /// 2. Deletes child rows from each child table that are not referenced
     ///    by sitreps (their `sitrep_id` doesn't exist in `fm_sitrep`).
-    ///    This catches children of sitreps deleted in step 1 (within
-    ///    this transaction) AND children leaked by the race in
+    ///    This catches children of sitreps deleted in step 1 AND children
+    ///    leaked by the race in
     ///    <https://github.com/oxidecomputer/omicron/issues/10131>.
     ///
-    /// The transaction prevents torn reads (see
-    /// <https://github.com/oxidecomputer/omicron/issues/9594>).
-    /// Child table cleanup is paginated by `sitrep_id` to avoid full
-    /// table scans.
+    /// Each phase runs as a series of individual paginated queries (no
+    /// wrapping transaction). This is safe because readers
+    /// ([`DataStore::fm_sitrep_read_on_conn`]) load children first and metadata
+    /// **last**: once a metadata row is deleted and committed in step 1,
+    /// any concurrent reader gets `NotFound` rather than a torn sitrep.
+    /// See <https://github.com/oxidecomputer/omicron/issues/9594>.
+    ///
+    /// Both phases are paginated by `sitrep_id` to avoid full table scans.
     pub async fn fm_sitrep_gc_orphans(
         &self,
         opctx: &OpContext,
@@ -1250,81 +1262,78 @@ impl DataStore {
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // TODO(sean): This should probably be paginated.
-        //
-        // We need to be careful about separating "delete sitrep" from "delete
-        // sitrep child tables" to avoid having torn reads - but we could delete
-        // a bounded number of sitreps, and all their tables, and repeatedly
-        // issue transactions until no additional orphaned sitreps exist.
-        let result = self
-            .transaction_retry_wrapper("fm_sitrep_gc_orphans")
-            .transaction(&conn, |conn| {
-                async move {
-                    // Step 1: Delete orphaned fm_sitrep metadata rows.
-                    let mut sitreps_deleted = 0usize;
-                    let mut sitrep_metadata_batches = 0usize;
-                    {
-                        let mut marker = SitrepUuid::nil();
-                        loop {
-                            sitrep_metadata_batches += 1;
-                            let (deleted, next_marker) =
-                                Self::delete_orphaned_sitrep_metadata_query(
-                                    marker,
-                                    SQL_BATCH_SIZE,
-                                )
-                                .get_result_async::<(i64, Option<Uuid>)>(&conn)
-                                .await?;
-                            sitreps_deleted += deleted as usize;
+        // Step 1: Delete orphaned fm_sitrep metadata rows.
+        let mut sitreps_deleted = 0usize;
+        let mut sitrep_metadata_batches = 0usize;
+        {
+            let mut marker = SitrepUuid::nil();
+            loop {
+                sitrep_metadata_batches += 1;
+                let (deleted, next_marker) =
+                    Self::delete_orphaned_sitrep_metadata_query(
+                        marker,
+                        SQL_BATCH_SIZE,
+                    )
+                    .get_result_async::<(i64, Option<Uuid>)>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(
+                                "deleting orphaned sitrep metadata rows",
+                            )
+                    })?;
+                sitreps_deleted += deleted as usize;
 
-                            match next_marker {
-                                Some(m) => {
-                                    marker = SitrepUuid::from_untyped_uuid(m)
-                                }
-                                None => break,
-                            }
-                        }
-                    }
-
-                    // Step 2: For each child table, paginate through and
-                    // delete rows whose sitrep_id no longer exists in
-                    // fm_sitrep.
-                    let mut child_tables = BTreeMap::new();
-                    for &table in SitrepChildTable::ALL {
-                        let stats = child_tables
-                            .entry(table)
-                            .or_insert(ChildTableGcStats::default());
-                        let mut marker = SitrepUuid::nil();
-                        loop {
-                            stats.batches += 1;
-                            let (rows_deleted, next_marker) =
-                                Self::deeply_orphaned_batch_query(
-                                    table,
-                                    marker,
-                                    SQL_BATCH_SIZE,
-                                )
-                                .get_result_async::<(i64, Option<Uuid>)>(&conn)
-                                .await?;
-                            stats.rows_deleted += rows_deleted as usize;
-
-                            match next_marker {
-                                Some(m) => {
-                                    marker = SitrepUuid::from_untyped_uuid(m);
-                                }
-                                None => break,
-                            }
-                        }
-                    }
-
-                    Ok(GcOrphansResult {
-                        sitreps_deleted,
-                        sitrep_metadata_batches,
-                        batch_size: SQL_BATCH_SIZE.get(),
-                        child_tables,
-                    })
+                match next_marker {
+                    Some(m) => marker = SitrepUuid::from_untyped_uuid(m),
+                    None => break,
                 }
-            })
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            }
+        }
+
+        // Step 2: For each child table, paginate through and
+        // delete rows whose sitrep_id no longer exists in
+        // fm_sitrep.
+        let mut child_tables = BTreeMap::new();
+        for &table in SitrepChildTable::ALL {
+            let stats = child_tables
+                .entry(table)
+                .or_insert(ChildTableGcStats::default());
+            let mut marker = SitrepUuid::nil();
+            loop {
+                stats.batches += 1;
+                let (rows_deleted, next_marker) =
+                    Self::deeply_orphaned_batch_query(
+                        table,
+                        marker,
+                        SQL_BATCH_SIZE,
+                    )
+                    .get_result_async::<(i64, Option<Uuid>)>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "deleting orphaned rows from child table \
+                                 {table:?}",
+                            ))
+                    })?;
+                stats.rows_deleted += rows_deleted as usize;
+
+                match next_marker {
+                    Some(m) => {
+                        marker = SitrepUuid::from_untyped_uuid(m);
+                    }
+                    None => break,
+                }
+            }
+        }
+
+        let result = GcOrphansResult {
+            sitreps_deleted,
+            sitrep_metadata_batches,
+            batch_size: SQL_BATCH_SIZE.get(),
+            child_tables,
+        };
 
         slog::info!(
             &opctx.log,
@@ -1771,6 +1780,7 @@ mod tests {
                 comment: "TEST SITREP PLEASE IGNORE".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1821,6 +1831,7 @@ mod tests {
                 comment: "TEST SITREP 1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1836,6 +1847,7 @@ mod tests {
                 comment: "TEST SITREP 2".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1878,6 +1890,7 @@ mod tests {
                 comment: "TEST SITREP 1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1894,6 +1907,7 @@ mod tests {
                 comment: "TEST SITREP WITH BAD PARENT".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1930,6 +1944,7 @@ mod tests {
                 comment: "TEST SITREP 1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1945,6 +1960,7 @@ mod tests {
                 comment: "TEST SITREP 2".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1961,6 +1977,7 @@ mod tests {
                 comment: "TEST SITREP 3 WITH OUTDATED PARENT".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2000,7 +2017,10 @@ mod tests {
         assert_eq!(this.id(), that.id());
         assert_eq!(this.metadata.creator_id, that.metadata.creator_id);
         assert_eq!(this.metadata.comment, that.metadata.comment);
-        assert_eq!(this.metadata.parent_sitrep_id, None);
+        assert_eq!(
+            this.metadata.parent_sitrep_id,
+            that.metadata.parent_sitrep_id
+        );
 
         // Verify all the expected cases exist in both sitreps
         assert_eq!(this.cases.len(), that.cases.len());
@@ -2170,6 +2190,7 @@ mod tests {
                     class: AlertClass::TestFoo,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
             alerts_requested
@@ -2178,6 +2199,7 @@ mod tests {
                     class: AlertClass::TestFooBar,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
 
@@ -2186,8 +2208,8 @@ mod tests {
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),
                     requested_sitrep_id: sitrep_id,
-
                     data_selection: BundleDataSelection::all(),
+                    comment: String::new(),
                 })
                 .unwrap();
             // A request with a nontrivial data_selection, including
@@ -2213,8 +2235,8 @@ mod tests {
                     .insert_unique(fm::case::SupportBundleRequest {
                         id: SupportBundleUuid::new_v4(),
                         requested_sitrep_id: sitrep_id,
-
                         data_selection: sel,
+                        comment: String::new(),
                     })
                     .unwrap();
             }
@@ -2251,6 +2273,7 @@ mod tests {
                     class: AlertClass::TestQuuxBar,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
 
@@ -2285,6 +2308,7 @@ mod tests {
                     .to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases,
             ereports_by_id,
@@ -2337,8 +2361,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: SupportBundleUuid::new_v4(),
                 requested_sitrep_id: sitrep_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
         // A request with HostInfo(Specific) and Ereports with time-range
@@ -2365,8 +2389,8 @@ mod tests {
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),
                     requested_sitrep_id: sitrep_id,
-
                     data_selection: sel,
+                    comment: String::new(),
                 })
                 .unwrap();
         }
@@ -2394,6 +2418,7 @@ mod tests {
                 comment: "sitrep with support bundle requests".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -2445,6 +2470,7 @@ mod tests {
                         creator_id: OmicronZoneUuid::new_v4(),
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
+                        next_inv_min_time_started: Utc::now(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -2601,6 +2627,7 @@ mod tests {
                         creator_id: OmicronZoneUuid::new_v4(),
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
+                        next_inv_min_time_started: Utc::now(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -2734,6 +2761,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2773,6 +2801,7 @@ mod tests {
                 case_id: ghost_case_id.into(),
                 class: AlertClass::Probe.into(),
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .execute_async(&*conn)
             .await
@@ -2793,6 +2822,7 @@ mod tests {
                 sitrep_id: ghost_sitrep_id.into(),
                 requested_sitrep_id: ghost_sitrep_id.into(),
                 case_id: ghost_case_id.into(),
+                comment: String::new(),
             })
             .execute_async(&*conn)
             .await
@@ -2968,6 +2998,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3094,6 +3125,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3388,6 +3420,7 @@ mod tests {
                         creator_id: OmicronZoneUuid::new_v4(),
                         comment: "child sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
+                        next_inv_min_time_started: Utc::now(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -3405,6 +3438,276 @@ mod tests {
 
         // Verify all child rows are gone.
         ensure_sitrep_children_fully_deleted(&datastore, sitrep_id).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Stress test that concurrently inserts, reads, and garbage-collects
+    /// sitreps. The key invariant: a successful read must always return a
+    /// *complete* sitrep (no torn reads). Errors (e.g. `NotFound`) are
+    /// expected and fine — partial data is not.
+    ///
+    /// Writers race with each other, causing `ParentNotCurrent` failures.
+    /// Those failed inserts leave orphaned metadata + child rows (not in
+    /// history, stale parent) that the GC tasks find and delete. Readers
+    /// concurrently read sitreps that may be mid-GC.
+    #[tokio::test]
+    async fn test_concurrent_sitrep_insert_read_gc() {
+        use rand::Rng;
+        use rand::SeedableRng;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use tokio::sync::Mutex;
+
+        const TEST_NAME: &str = "test_concurrent_sitrep_insert_read_gc";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Shared state: sitreps available for reading.
+        let live_sitreps: Arc<Mutex<Vec<fm::Sitrep>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+
+        // Shared counters for all tasks, with Display for panic messages.
+        struct Stats {
+            reads_ok: AtomicUsize,
+            reads_err: AtomicUsize,
+            inserts: AtomicUsize,
+            gc_runs: AtomicUsize,
+        }
+
+        impl std::fmt::Display for Stats {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let Self { reads_ok, reads_err, inserts, gc_runs } = self;
+                write!(
+                    f,
+                    "reads_ok={}, reads_err={}, inserts={}, \
+                     gc_runs={}",
+                    reads_ok.load(Ordering::Relaxed),
+                    reads_err.load(Ordering::Relaxed),
+                    inserts.load(Ordering::Relaxed),
+                    gc_runs.load(Ordering::Relaxed),
+                )
+            }
+        }
+
+        let stats = Arc::new(Stats {
+            reads_ok: AtomicUsize::new(0),
+            reads_err: AtomicUsize::new(0),
+            inserts: AtomicUsize::new(0),
+            gc_runs: AtomicUsize::new(0),
+        });
+
+        const NUM_WRITERS: usize = 3;
+        const NUM_READERS: usize = 10;
+        const NUM_GC: usize = 2;
+
+        let mut handles = Vec::new();
+
+        // --- Writer tasks ---
+        for n in 0..NUM_WRITERS {
+            let task_name = format!("writer-{n}");
+            let datastore = datastore.clone();
+            let opctx = opctx.child(
+                std::iter::once(("task".to_string(), task_name.clone()))
+                    .collect(),
+            );
+            let log = opctx.log.clone();
+            let live_sitreps = live_sitreps.clone();
+            let stop = stop.clone();
+            let stats = stats.clone();
+            handles.push(tokio::spawn(async move {
+                // Track the most recent child ID so we can chain
+                // sitreps correctly (each new sitrep's parent must
+                // be the current sitrep). Multiple writers will race
+                // on this — losers reset and retry.
+                let mut last_child_id: Option<SitrepUuid> = None;
+                while !stop.load(Ordering::Relaxed) {
+                    let mut sitrep =
+                        make_sitrep_with_cases(&opctx, &datastore).await;
+                    sitrep.metadata.parent_sitrep_id = last_child_id;
+                    let sitrep_id = sitrep.id();
+                    match datastore
+                        .fm_sitrep_insert(&opctx, sitrep.clone())
+                        .await
+                    {
+                        Ok(()) => {}
+                        Err(InsertSitrepError::ParentNotCurrent(_)) => {
+                            slog::info!(
+                                &log,
+                                "parent not current, resetting chain";
+                                "sitrep_id" => %sitrep_id,
+                                "parent" => ?last_child_id,
+                            );
+                            last_child_id = None;
+                            continue;
+                        }
+                        Err(other) => {
+                            panic!(
+                                "[{task_name}] unexpected insert error \
+                                 for sitrep {sitrep_id}: {other} ({stats})"
+                            );
+                        }
+                    }
+
+                    // Insert a child so the original isn't current
+                    // and can be deleted.
+                    let mut child =
+                        make_sitrep_with_cases(&opctx, &datastore).await;
+                    child.metadata.parent_sitrep_id = Some(sitrep_id);
+                    let child_id = child.id();
+                    match datastore.fm_sitrep_insert(&opctx, child).await {
+                        Ok(()) => {}
+                        Err(InsertSitrepError::ParentNotCurrent(_)) => {
+                            slog::info!(
+                                &log,
+                                "child insert: parent not current, \
+                                 resetting chain";
+                                "sitrep_id" => %sitrep_id,
+                                "child_id" => %child_id,
+                            );
+                            last_child_id = None;
+                            continue;
+                        }
+                        Err(other) => {
+                            panic!(
+                                "[{task_name}] unexpected child insert \
+                                 error for sitrep {sitrep_id}, child \
+                                 {child_id}: {other} ({stats})"
+                            );
+                        }
+                    }
+
+                    slog::info!(
+                        &log,
+                        "inserted sitrep pair";
+                        "sitrep_id" => %sitrep_id,
+                        "child_id" => %child_id,
+                    );
+                    last_child_id = Some(child_id);
+                    live_sitreps.lock().await.push(sitrep);
+                    stats.inserts.fetch_add(1, Ordering::Relaxed);
+                }
+            }));
+        }
+
+        // --- Reader tasks ---
+        for n in 0..NUM_READERS {
+            let task_name = format!("reader-{n}");
+            let datastore = datastore.clone();
+            let opctx = opctx.child(
+                std::iter::once(("task".to_string(), task_name.clone()))
+                    .collect(),
+            );
+            let log = opctx.log.clone();
+            let live_sitreps = live_sitreps.clone();
+            let stop = stop.clone();
+            let stats = stats.clone();
+            handles.push(tokio::spawn(async move {
+                let mut rng = rand::rngs::StdRng::from_os_rng();
+                while !stop.load(Ordering::Relaxed) {
+                    // Pick a random sitrep to read.
+                    let entry = {
+                        let guard = live_sitreps.lock().await;
+                        if guard.is_empty() {
+                            drop(guard);
+                            // No sitreps to read yet — yield to let
+                            // writer tasks make progress.
+                            tokio::task::yield_now().await;
+                            continue;
+                        }
+                        let idx = rng.random_range(0..guard.len());
+                        guard[idx].clone()
+                    };
+                    let sitrep_id = entry.id();
+                    match datastore.fm_sitrep_read(&opctx, sitrep_id).await {
+                        Ok(read_sitrep) => {
+                            slog::debug!(
+                                &log,
+                                "read ok";
+                                "sitrep_id" => %sitrep_id,
+                            );
+                            // If this doesn't match, we have a torn read!
+                            assert_sitreps_eq(&entry, &read_sitrep);
+                            stats.reads_ok.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(Error::ObjectNotFound { .. }) => {
+                            slog::debug!(
+                                &log,
+                                "read not found (expected)";
+                                "sitrep_id" => %sitrep_id,
+                            );
+                            stats.reads_err.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(other) => {
+                            panic!(
+                                "[{task_name}] unexpected read error for \
+                                 sitrep {sitrep_id}: {other} ({stats})"
+                            );
+                        }
+                    }
+                }
+            }));
+        }
+
+        // --- GC tasks ---
+        for n in 0..NUM_GC {
+            let task_name = format!("gc-{n}");
+            let datastore = datastore.clone();
+            let opctx = opctx.child(
+                std::iter::once(("task".to_string(), task_name.clone()))
+                    .collect(),
+            );
+            let log = opctx.log.clone();
+            let stop = stop.clone();
+            let stats = stats.clone();
+            handles.push(tokio::spawn(async move {
+                while !stop.load(Ordering::Relaxed) {
+                    let result = datastore
+                        .fm_sitrep_gc_orphans(&opctx)
+                        .await
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "[{task_name}] unexpected GC error: \
+                                 {e} ({stats})"
+                            )
+                        });
+                    slog::info!(
+                        &log,
+                        "GC pass complete";
+                        "sitreps_deleted" => result.sitreps_deleted,
+                        "child_tables" => ?result.child_tables,
+                    );
+                    stats.gc_runs.fetch_add(1, Ordering::Relaxed);
+                }
+            }));
+        }
+
+        // Wait until we've exercised enough of each operation, then stop.
+        const MIN_READS: usize = 200;
+        const MIN_INSERTS: usize = 20;
+        const MIN_GC_RUNS: usize = 10;
+        loop {
+            let r = stats.reads_ok.load(Ordering::Relaxed);
+            let i = stats.inserts.load(Ordering::Relaxed);
+            let g = stats.gc_runs.load(Ordering::Relaxed);
+            if r >= MIN_READS && i >= MIN_INSERTS && g >= MIN_GC_RUNS {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        stop.store(true, Ordering::Relaxed);
+
+        // Join all tasks — a panic in any task (from assert_sitreps_eq)
+        // means we detected a torn read.
+        for handle in handles {
+            handle.await.expect("task panicked");
+        }
+
+        eprintln!("Stress test results: {stats}");
 
         db.terminate().await;
         logctx.cleanup_successful();
