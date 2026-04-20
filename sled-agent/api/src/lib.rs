@@ -38,7 +38,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (35, ADD_FMD_TO_INVENTORY),
+    (36, ADD_FMD_TO_INVENTORY),
+    (35, INLINE_ROUTER_PEER_IP_ADDR),
     (34, MODIFY_SVCS_TYPES),
     (33, BOOTSTORE_SERVICE_NAT),
     (32, MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL),

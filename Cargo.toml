@@ -129,6 +129,7 @@ members = [
     "oximeter/oximeter",
     "oximeter/oxql-types",
     "oximeter/producer",
+    "oximeter/producer-api",
     "oximeter/schema",
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
@@ -312,6 +313,7 @@ default-members = [
     "oximeter/oximeter",
     "oximeter/oxql-types",
     "oximeter/producer",
+    "oximeter/producer-api",
     "oximeter/schema",
     "oximeter/test-utils",
     "oximeter/timeseries-macro",
@@ -682,6 +684,7 @@ oximeter-collector = { path = "oximeter/collector" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
+oximeter-producer-api = { path = "oximeter/producer-api" }
 oximeter-schema = { path = "oximeter/schema" }
 oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
@@ -831,7 +834,7 @@ textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.3"
 thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino" }
-tokio = "1.47.0"
+tokio = "1.52.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-test = "0.4.5"

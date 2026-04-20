@@ -7135,6 +7135,7 @@ dependencies = [
  "scim2-rs",
  "serde",
  "serde_json",
+ "slog-error-chain",
  "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
@@ -7158,6 +7159,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-error-chain",
+ "thiserror 2.0.18",
  "typed-rng",
 ]
 
@@ -7844,6 +7846,7 @@ dependencies = [
  "sled-hardware-types",
  "slog-error-chain",
  "strum 0.27.2",
+ "thiserror 2.0.18",
  "tough",
  "tufaceous-artifact",
  "url",
@@ -10003,6 +10006,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
+ "oximeter-producer-api",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -10013,6 +10017,16 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "oximeter-producer-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot 0.16.7",
+ "omicron-workspace-hack",
+ "oximeter-types 0.1.0",
+ "oximeter-types-versions 0.1.0",
 ]
 
 [[package]]
@@ -14959,9 +14973,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.52.0"
+version = "1.52.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a91135f59b1cbf38c91e73cf3386fca9bb77915c45ce2771460c9d92f0f3d776"
+checksum = "b67dee974fe86fd92cc45b7a95fdd2f99a36a6d7b0d431a231178d3d670bbcc6"
 dependencies = [
  "bytes",
  "libc",

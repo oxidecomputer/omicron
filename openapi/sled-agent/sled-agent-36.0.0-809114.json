@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "35.0.0"
+    "version": "36.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -8952,10 +8952,6 @@
         "minimum": 0,
         "maximum": 9000
       },
-      "RouterPeerIpAddr": {
-        "type": "string",
-        "format": "ip"
-      },
       "RouterPeerType": {
         "oneOf": [
           {
@@ -8986,11 +8982,8 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RouterPeerIpAddr"
-                  }
-                ]
+                "type": "string",
+                "format": "ip"
               },
               "type": {
                 "type": "string",
@@ -10023,7 +10016,7 @@
             "type": "object",
             "properties": {
               "ip_net": {
-                "$ref": "#/components/schemas/UplinkIpNet"
+                "$ref": "#/components/schemas/IpNet"
               },
               "type": {
                 "type": "string",
@@ -10062,9 +10055,6 @@
         "required": [
           "address"
         ]
-      },
-      "UplinkIpNet": {
-        "$ref": "#/components/schemas/IpNet"
       },
       "VirtioDisk": {
         "description": "A disk that presents a virtio-block interface to the guest.",

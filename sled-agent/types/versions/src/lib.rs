@@ -80,7 +80,7 @@ pub mod v33;
 #[path = "modify_svcs_types/mod.rs"]
 pub mod v34;
 #[path = "add_fmd_to_inventory/mod.rs"]
-pub mod v35;
+pub mod v36;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]
