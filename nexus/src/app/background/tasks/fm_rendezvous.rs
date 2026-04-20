@@ -1517,8 +1517,7 @@ mod tests {
         assert_eq!(db_bundle.state, db::model::SupportBundleState::Collecting,);
         assert_eq!(db_bundle.fm_case_id.map(|id| id.into()), Some(case1_id),);
         assert_eq!(
-            db_bundle.reason_for_creation,
-            "test support bundle",
+            db_bundle.reason_for_creation, "test support bundle",
             "DE-provided comment should be used as reason_for_creation",
         );
 
