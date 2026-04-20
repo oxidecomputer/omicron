@@ -756,7 +756,7 @@ struct SledInstancesArgs {
 }
 
 /// A comma-separated list of sled numbers with range support
-/// (e.g. "0,3,14-16" → [0, 3, 14, 15, 16]).
+/// (e.g. "0,3,14-16" -> [0, 3, 14, 15, 16]).
 #[derive(Debug, Clone)]
 struct SledNumbers(Vec<u16>);
 
@@ -4694,26 +4694,22 @@ async fn cmd_db_sled_instances(
     use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
     // Step 1: Fetch the latest inventory collection to get
-    // sled → (MGS slot, serial) mappings.
+    // sled -> (MGS slot, serial) mappings.
     let collection =
         CollectionIdOrLatest::Latest.to_collection(opctx, datastore).await?;
 
-    // Build a map: sled_id → (sp_type, sp_slot, serial).
-    // We store the sp_type and sp_slot as their original types so
-    // we can sort numerically (Sled 2 before Sled 10).
+    // Build a map: sled_id -> (sp_slot, serial). We only care
+    // about SpType::Sled SPs since instances only run on sleds.
     struct SledInfo {
-        sp_type: Option<nexus_types::inventory::SpType>,
         sp_slot: Option<u16>,
         serial: String,
     }
 
     impl SledInfo {
         fn slot_label(&self) -> String {
-            match (self.sp_type, self.sp_slot) {
-                (Some(sp_type), Some(sp_slot)) => {
-                    format!("{:?} {}", sp_type, sp_slot)
-                }
-                _ => "???".to_string(),
+            match self.sp_slot {
+                Some(sp_slot) => format!("Sled {}", sp_slot),
+                None => "Sled ???".to_string(),
             }
         }
     }
@@ -4725,18 +4721,20 @@ async fn cmd_db_sled_instances(
             Some(baseboard_id) => {
                 let serial = baseboard_id.serial_number.clone();
                 match collection.sps.get(baseboard_id) {
-                    Some(sp) => SledInfo {
-                        sp_type: Some(sp.sp_type),
-                        sp_slot: Some(sp.sp_slot),
-                        serial,
-                    },
+                    Some(sp)
+                        if sp.sp_type
+                            == nexus_types::inventory::SpType::Sled =>
+                    {
+                        SledInfo { sp_slot: Some(sp.sp_slot), serial }
+                    }
+                    Some(_) => continue, // not a sled, skip
                     None => {
                         eprintln!(
                             "WARN: no SP found for baseboard \
                                  {} (sled {})",
                             baseboard_id.serial_number, sled_agent.sled_id,
                         );
-                        SledInfo { sp_type: None, sp_slot: None, serial }
+                        SledInfo { sp_slot: None, serial }
                     }
                 }
             }
@@ -4746,11 +4744,7 @@ async fn cmd_db_sled_instances(
                      inventory",
                     sled_agent.sled_id,
                 );
-                SledInfo {
-                    sp_type: None,
-                    sp_slot: None,
-                    serial: "unknown".to_string(),
-                }
+                SledInfo { sp_slot: None, serial: "unknown".to_string() }
             }
         };
         sled_info.insert(sled_agent.sled_id, info);
@@ -4832,9 +4826,7 @@ async fn cmd_db_sled_instances(
             sled_info.get(sled_id).map(|info| (info, *sled_id, insts))
         })
         .collect();
-    sorted_sleds.sort_by(|(a, _, _), (b, _, _)| {
-        a.sp_type.cmp(&b.sp_type).then(a.sp_slot.cmp(&b.sp_slot))
-    });
+    sorted_sleds.sort_by(|(a, _, _), (b, _, _)| a.sp_slot.cmp(&b.sp_slot));
 
     for (info, sled_id, insts) in &sorted_sleds {
         println!(
