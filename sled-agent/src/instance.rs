@@ -2769,10 +2769,7 @@ mod tests {
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
     use omicron_common::api::internal::nexus::VmmState;
-    use omicron_common::api::internal::shared::{
-        DhcpConfig, ExternalIpv4Config, ExternalIpv6Config, SledIdentifiers,
-        SourceNatConfigV6,
-    };
+    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::ClientInfo;
@@ -2783,7 +2780,10 @@ mod tests {
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
