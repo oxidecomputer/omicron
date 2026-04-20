@@ -61,7 +61,6 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
@@ -69,6 +68,7 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_hardware_types::BaseboardId;

@@ -12,10 +12,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::{
     address::{Ip, NUM_SOURCE_NAT_PORTS},
-    api::{
-        external::{ByteCount, Generation},
-        internal::shared::NetworkInterface,
-    },
+    api::external::{ByteCount, Generation},
     disk::{DatasetConfig, OmicronPhysicalDiskConfig},
     zpool_name::ZpoolName,
 };
@@ -34,6 +31,7 @@ use crate::v1::inventory::{
     RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
 use crate::v10;
+use crate::v10::inventory::NetworkInterface;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 
 /// Identity and basic status information about this sled agent

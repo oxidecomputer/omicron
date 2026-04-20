@@ -678,8 +678,6 @@ pub mod test {
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::inventory::NetworkInterface;
-    use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv4Range;
     use omicron_common::api::external::Vni;
@@ -687,6 +685,8 @@ pub mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
     use sled_agent_types::inventory::OmicronZoneDataset;
     use slog_error_chain::InlineErrorChain;
     use std::net::SocketAddr;

@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Shared network-interface types.
+// NOTE: If you need to change these types in a new API version, please move
+// them to one of the `sled-agent-types-versions` crate first, then version it
+// from there.
+
+//! Shared private IP config types.
 
 use crate::address::MAX_VPC_IPV4_SUBNET_PREFIX;
 use crate::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use crate::address::VPC_SUBNET_IPV6_PREFIX_LENGTH;
 use crate::api::external;
-use crate::api::external::Name;
-use crate::api::external::Vni;
 use daft::Diffable;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
@@ -20,170 +22,6 @@ use serde::Serialize;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use uuid::Uuid;
-
-pub mod v1;
-
-/// The type of network interface
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    Hash,
-    Diffable,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum NetworkInterfaceKind {
-    /// A vNIC attached to a guest instance
-    Instance { id: Uuid },
-    /// A vNIC associated with an internal service
-    Service { id: Uuid },
-    /// A vNIC associated with a probe
-    Probe { id: Uuid },
-}
-
-/// Information required to construct a virtual network interface
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Diffable,
-)]
-pub struct NetworkInterface {
-    pub id: Uuid,
-    pub kind: NetworkInterfaceKind,
-    pub name: Name,
-    pub ip_config: PrivateIpConfig,
-    pub mac: external::MacAddr,
-    pub vni: Vni,
-    pub primary: bool,
-    pub slot: u8,
-}
-
-impl TryFrom<super::v1::NetworkInterface> for NetworkInterface {
-    type Error = external::Error;
-
-    fn try_from(
-        value: super::v1::NetworkInterface,
-    ) -> Result<Self, Self::Error> {
-        let super::v1::NetworkInterface {
-            id,
-            kind,
-            name,
-            ip,
-            mac,
-            subnet,
-            vni,
-            primary,
-            slot,
-            transit_ips,
-        } = value;
-        let ip_config = match (ip, subnet) {
-            (IpAddr::V4(ip), IpNet::V4(subnet)) => {
-                let transit_ips = transit_ips
-                    .into_iter()
-                    .map(|net| {
-                        let IpNet::V4(subnet) = net else {
-                            return Err(external::Error::invalid_request(
-                                "Expected an IPv4 transit IP subnet, but found IPv6",
-                            ));
-                        };
-                        Ok(subnet)
-                    })
-                    .collect::<Result<_, _>>()?;
-                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
-                    ip,
-                    subnet,
-                    transit_ips,
-                )?)
-            }
-            (IpAddr::V6(ip), IpNet::V6(subnet)) => {
-                let transit_ips = transit_ips
-                    .into_iter()
-                    .map(|net| {
-                        let IpNet::V6(subnet) = net else {
-                            return Err(external::Error::invalid_request(
-                                "Expected an IPv6 transit IP subnet, but found IPv4",
-                            ));
-                        };
-                        Ok(subnet)
-                    })
-                    .collect::<Result<_, _>>()?;
-                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
-                    ip,
-                    subnet,
-                    transit_ips,
-                )?)
-            }
-            (IpAddr::V4(_), IpNet::V6(_)) | (IpAddr::V6(_), IpNet::V4(_)) => {
-                return Err(external::Error::invalid_request(
-                    "IP address and subnet must have the same IP version",
-                ));
-            }
-        };
-        Ok(Self { id, kind, name, ip_config, mac, vni, primary, slot })
-    }
-}
-
-impl TryFrom<NetworkInterface> for super::v1::NetworkInterface {
-    type Error = external::Error;
-
-    fn try_from(value: NetworkInterface) -> Result<Self, Self::Error> {
-        let NetworkInterface {
-            id,
-            kind,
-            name,
-            ip_config: ip,
-            mac,
-            vni,
-            primary,
-            slot,
-        } = value;
-        let (ip, subnet, transit_ips) = match ip {
-            PrivateIpConfig::V4(v4) => (
-                IpAddr::V4(v4.ip),
-                IpNet::V4(v4.subnet),
-                v4.transit_ips.into_iter().map(IpNet::V4).collect(),
-            ),
-            PrivateIpConfig::V6(v6) => (
-                IpAddr::V6(v6.ip),
-                IpNet::V6(v6.subnet),
-                v6.transit_ips.into_iter().map(IpNet::V6).collect(),
-            ),
-            PrivateIpConfig::DualStack { .. } => {
-                return Err(external::Error::invalid_request(
-                    "Cannot convert dual-stack v2 NetworkInterface to v1",
-                ));
-            }
-        };
-        Ok(Self {
-            id,
-            kind,
-            name,
-            ip,
-            mac,
-            subnet,
-            vni,
-            primary,
-            slot,
-            transit_ips,
-        })
-    }
-}
 
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum PrivateIpConfigError {
