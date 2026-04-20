@@ -165,6 +165,7 @@ pub struct AlertRequest {
     pub class: AlertClass,
     pub payload: serde_json::Value,
     pub requested_sitrep_id: SitrepUuid,
+    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for AlertRequest {
@@ -186,13 +187,6 @@ pub struct SupportBundleRequest {
     /// Which data to include in the support bundle. Use
     /// [`BundleDataSelection::all()`] to request all data.
     pub data_selection: BundleDataSelection,
-    /// A human-readable comment added by the diagnosis engine to explain why
-    /// it is requesting this support bundle.
-    ///
-    /// Sitrep comments are generally intended for debugging purposes only,
-    /// visible to Oxide support via OMDB. This comment, however, is also
-    /// propagated to the support bundle's `reason_for_creation` which is
-    /// visible to the operator.
     pub comment: String,
 }
 
@@ -297,22 +291,30 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}-----------------", "")?;
 
             let indent = indent + 2;
-            for AlertRequest { id, class, payload: _, requested_sitrep_id } in
-                alerts_requested.iter()
+            for AlertRequest {
+                id,
+                class,
+                payload: _,
+                requested_sitrep_id,
+                comment,
+            } in alerts_requested.iter()
             {
                 const CLASS: &str = "class:";
                 const REQUESTED_IN: &str = "requested in:";
+                const COMMENT: &str = "comment:";
 
-                const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
+                const WIDTH: usize =
+                    const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
                 writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
                 writeln!(
                     f,
-                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
+                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -475,6 +477,7 @@ mod tests {
                 class: AlertClass::TestFoo,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: created_sitrep_id,
+                comment: "power shelf rectifier removed".to_string(),
             })
             .unwrap();
         alerts_requested
@@ -483,6 +486,7 @@ mod tests {
                 class: AlertClass::TestFooBar,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: closed_sitrep_id,
+                comment: String::new(),
             })
             .unwrap();
 

@@ -2190,6 +2190,7 @@ mod tests {
                     class: AlertClass::TestFoo,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
             alerts_requested
@@ -2198,6 +2199,7 @@ mod tests {
                     class: AlertClass::TestFooBar,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
 
@@ -2271,6 +2273,7 @@ mod tests {
                     class: AlertClass::TestQuuxBar,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
 
@@ -2798,6 +2801,7 @@ mod tests {
                 case_id: ghost_case_id.into(),
                 class: AlertClass::Probe.into(),
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .execute_async(&*conn)
             .await

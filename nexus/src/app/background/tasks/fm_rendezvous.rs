@@ -556,6 +556,7 @@ mod tests {
                 class: AlertClass::TestFoo,
                 requested_sitrep_id: sitrep1_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         let sitrep1 = {
@@ -634,6 +635,7 @@ mod tests {
                 class: AlertClass::TestFooBar,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         // Also, add a second alert request to the existing case.
@@ -644,6 +646,7 @@ mod tests {
                 class: AlertClass::TestFooBaz,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         let sitrep2 = {

@@ -7569,6 +7569,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     alert_class omicron.public.alert_class NOT NULL,
     -- Actual alert data. The structure of this depends on the alert class.
     payload JSONB NOT NULL,
+    -- A human-readable comment from the diagnosis engine explaining why it
+    -- requested this alert.
+    comment TEXT NOT NULL DEFAULT '',
 
     PRIMARY KEY (sitrep_id, id)
 );

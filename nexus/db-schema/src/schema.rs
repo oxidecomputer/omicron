@@ -3250,6 +3250,7 @@ table! {
         case_id -> Uuid,
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
+        comment -> Text,
     }
 }
 

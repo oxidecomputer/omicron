@@ -137,6 +137,7 @@ impl CaseBuilder {
             payload: serde_json::to_value(&alert).with_context(|| {
                 format!("failed to serialize payload for {class:?} alert")
             })?,
+            comment: comment.to_string(),
         };
         self.case.alerts_requested.insert_unique(req).map_err(|_| {
             anyhow::anyhow!("an alert with ID {id:?} already exists")
