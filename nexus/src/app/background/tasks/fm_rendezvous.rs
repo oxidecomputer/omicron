@@ -1468,7 +1468,7 @@ mod tests {
                 id: bundle1_id,
                 requested_sitrep_id: sitrep1_id,
                 data_selection: BundleDataSelection::all(),
-                comment: "PSU removed — collecting diagnostics".to_string(),
+                comment: "test support bundle".to_string(),
             })
             .unwrap();
 
@@ -1518,7 +1518,7 @@ mod tests {
         assert_eq!(db_bundle.fm_case_id.map(|id| id.into()), Some(case1_id),);
         assert_eq!(
             db_bundle.reason_for_creation,
-            "PSU removed — collecting diagnostics",
+            "test support bundle",
             "DE-provided comment should be used as reason_for_creation",
         );
 

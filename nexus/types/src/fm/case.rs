@@ -502,7 +502,7 @@ mod tests {
                 id: bundle1_id,
                 requested_sitrep_id: created_sitrep_id,
                 data_selection: bundle1_data,
-                comment: "PSU removed — collecting diagnostics".to_string(),
+                comment: "test support bundle".to_string(),
             })
             .unwrap();
         support_bundles_requested
