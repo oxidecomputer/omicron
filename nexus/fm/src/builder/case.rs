@@ -137,13 +137,12 @@ impl CaseBuilder {
             payload: serde_json::to_value(&alert).with_context(|| {
                 format!("failed to serialize payload for {class:?} alert")
             })?,
+            comment: comment.to_string(),
         };
         self.case.alerts_requested.insert_unique(req).map_err(|_| {
             anyhow::anyhow!("an alert with ID {id:?} already exists")
         })?;
 
-        // TODO(eliza): add a comment field to the alert request record in the
-        // DB, as well...
         let comment = comment.to_string();
         slog::info!(
             &self.log,
