@@ -135,7 +135,7 @@ impl DataStore {
         let conn = &*self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::<TransactionError<Error>>::new();
         let txn_res = self
-            .transaction_retry_wrapper("physical_disk_adopt")
+            .transaction_retry_wrapper("physical_disk_enable_adoption")
             .transaction(&conn, |conn| {
                 let vendor = disk_id.vendor.clone();
                 let serial = disk_id.serial.clone();
@@ -308,6 +308,155 @@ impl DataStore {
         .await
         .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
         Ok(())
+    }
+
+    /// Enable adoption for any physical disks whose vendor/model/serial has not
+    /// been seen before.
+    ///
+    /// We only want to mandate that expunged disks get manually re-adopted by
+    /// operators. For newly discovered disks we want to auto-adopt them. We
+    /// are doing this to maintain our current operational simplicity, such that
+    /// when a user adds a new sled to a rack with new disks they don't have to
+    /// manually add individual disks. This allows us to safely re-add expunged
+    /// disks without changing unrelated operator behavior at the same time.
+    ///
+    /// This still leaves a security hole such that arbitrary disks can be
+    /// inserted and automatically adopted. Eventually we want to make it so
+    /// that all new physical disks are manually adopted, but this is a more
+    /// complicated change.
+    pub async fn physical_disk_enable_adoption_for_all_new_disks_in_inventory(
+        &self,
+        opctx: &OpContext,
+        inventory_collection_id: CollectionUuid,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::<TransactionError<Error>>::new();
+
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl as adoption_dsl;
+
+        self.transaction_retry_wrapper(
+            "physical_disk_enable_adoption_all_new_disks",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+
+            async move {
+                // Find all new disks
+                let new_inv_disks = self
+                    .physical_disk_list_new_inventory_on_collection(
+                        &conn,
+                        inventory_collection_id,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                // Enable adoption for each disk.
+                for disk in new_inv_disks {
+                    // Insert the adoption request.
+                    diesel::insert_into(
+                        adoption_dsl::physical_disk_adoption_request,
+                    )
+                    .values((
+                        adoption_dsl::id.eq(Uuid::new_v4()),
+                        adoption_dsl::vendor.eq(disk.vendor),
+                        adoption_dsl::serial.eq(disk.serial),
+                        adoption_dsl::model.eq(disk.model),
+                        adoption_dsl::time_created.eq(Utc::now()),
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+                }
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| {
+            match err.take() {
+                // A called function performed its own error propagation.
+                Some(txn_error) => txn_error.into_public_ignore_retries(),
+                // The transaction setup/teardown itself encountered a diesel error.
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            }
+        })?;
+        Ok(())
+    }
+
+    /// Returns all physical disks in inventory that are inserted in
+    /// active sleds and do not yet have a record in `physical_disk` or
+    /// `physical_disk_adoption_request` tables.
+    pub async fn physical_disk_list_new_inventory_on_collection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        inventory_collection_id: CollectionUuid,
+    ) -> Result<Vec<InvPhysicalDisk>, TransactionError<Error>> {
+        use nexus_db_schema::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk_adoption_request::dsl as adoption_request_dsl;
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+
+        let disks = sled_dsl::sled
+            // If the sled is not in-service, drop the list immediately.
+            .filter(sled_dsl::time_deleted.is_null())
+            .sled_filter(SledFilter::InService)
+            // Look up all inventory physical disks that could match this sled
+            .inner_join(
+                inv_physical_disk_dsl::inv_physical_disk.on(
+                    inv_physical_disk_dsl::inv_collection_id
+                        .eq(inventory_collection_id.into_untyped_uuid())
+                        .and(inv_physical_disk_dsl::sled_id.eq(sled_dsl::id))
+                        .and(
+                            inv_physical_disk_dsl::variant
+                                .eq(PhysicalDiskKind::U2),
+                        ),
+                ),
+            )
+            // Filter out any disks in the inventory for which we have ever had
+            // a control plane disk.
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                physical_disk_dsl::physical_disk
+                    .select(0.into_sql::<diesel::sql_types::Integer>())
+                    .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2))
+                    .filter(physical_disk_dsl::sled_id.eq(sled_dsl::id))
+                    .filter(
+                        physical_disk_dsl::vendor
+                            .eq(inv_physical_disk_dsl::vendor),
+                    )
+                    .filter(
+                        physical_disk_dsl::model
+                            .eq(inv_physical_disk_dsl::model),
+                    )
+                    .filter(
+                        physical_disk_dsl::serial
+                            .eq(inv_physical_disk_dsl::serial),
+                    ),
+            )))
+            // Filter out physical disks that exist in
+            // `physical_disk_adoption_request`. This means they are in the
+            // process of being adopted already.
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                adoption_request_dsl::physical_disk_adoption_request
+                    .select(0.into_sql::<diesel::sql_types::Integer>())
+                    .filter(adoption_request_dsl::time_deleted.is_null())
+                    .filter(
+                        adoption_request_dsl::vendor
+                            .eq(inv_physical_disk_dsl::vendor),
+                    )
+                    .filter(
+                        adoption_request_dsl::model
+                            .eq(inv_physical_disk_dsl::model),
+                    )
+                    .filter(
+                        adoption_request_dsl::serial
+                            .eq(inv_physical_disk_dsl::serial),
+                    ),
+            )))
+            .select(InvPhysicalDisk::as_select())
+            .get_results_async(conn)
+            .await?;
+
+        Ok(disks)
     }
 
     /// Returns all physical disks which are eligible for adoption.
@@ -1541,6 +1690,110 @@ mod test {
             .physical_disk_and_zpool_insert(&opctx, disk, zpool)
             .await
             .expect_err("insertion fails without an adoption request");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn physical_disk_list_new_inventory_on_connection() {
+        let logctx = dev::test_setup_log(
+            "physical_disk_list_new_inventory_on_connection",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let sled = create_test_sled(&datastore).await;
+
+        // No inventory -> No new disks
+        let new = datastore
+            .physical_disk_list_new_inventory_on_collection(
+                &conn,
+                CollectionUuid::new_v4(),
+            )
+            .await
+            .expect("failed to list new disks");
+
+        assert!(new.is_empty());
+
+        // Create an inventory disk
+        let mut builder = nexus_inventory::CollectionBuilder::new("test");
+        let inv_disk = create_inv_disk("serial-001".to_string(), 1);
+        add_sled_to_inventory(&mut builder, &sled, vec![inv_disk.clone()]);
+        let collection = builder.build();
+        let collection_id = collection.id;
+
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // We should get this disk returned as brand new
+        let new = datastore
+            .physical_disk_list_new_inventory_on_collection(
+                &conn,
+                collection_id,
+            )
+            .await
+            .expect("failed to list new disks");
+
+        assert_eq!(new.len(), 1);
+
+        // Enabling adoption for all new disks should ensure this disk is
+        // adopted
+        datastore
+            .physical_disk_enable_adoption_for_all_new_disks_in_inventory(
+                &opctx,
+                collection_id,
+            )
+            .await
+            .expect("enabling adoption should succeed");
+
+        // We should no longer treat this disk as new since it has an
+        // adoption request.
+        let new = datastore
+            .physical_disk_list_new_inventory_on_collection(
+                &conn,
+                CollectionUuid::new_v4(),
+            )
+            .await
+            .expect("failed to list new disks");
+        assert!(new.is_empty());
+
+        // Adopting the disk should also continue to not return it as an new disk
+        let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk.clone(), zpool)
+            .await
+            .unwrap();
+        let new = datastore
+            .physical_disk_list_new_inventory_on_collection(
+                &conn,
+                CollectionUuid::new_v4(),
+            )
+            .await
+            .expect("failed to list new disks");
+        assert!(new.is_empty());
+
+        // Expunging the disk should also continue to not return it as an new disk
+        use nexus_db_schema::schema::physical_disk::dsl;
+        diesel::update(dsl::physical_disk)
+            .filter(dsl::id.eq(to_db_typed_uuid(disk.id())))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+            .execute_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
+            .await
+            .unwrap();
+        let new = datastore
+            .physical_disk_list_new_inventory_on_collection(
+                &conn,
+                CollectionUuid::new_v4(),
+            )
+            .await
+            .expect("failed to list new disks");
+        assert!(new.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
