@@ -9803,6 +9803,7 @@ dependencies = [
  "oximeter-client",
  "oximeter-db",
  "oximeter-types 0.1.0",
+ "proptest",
  "qorb",
  "rand 0.9.2",
  "reqwest 0.13.2",
