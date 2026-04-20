@@ -50,3 +50,12 @@ binary_allow_list = [
   "sled-agent",
   "sled-agent-sim",
 ]
+
+# libfmd_adm is the illumos Fault Management Daemon admin library, used by
+# sled-agent to collect FMD case/resource information for inventory.
+[libraries."libfmd_adm.so.1"]
+binary_allow_list = [
+  "omicron-dev",
+  "sled-agent",
+  "sled-agent-sim",
+]

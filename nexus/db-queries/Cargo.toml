@@ -84,6 +84,10 @@ omicron-workspace-hack.workspace = true
 # only enabled during tests or via the `testing` feature
 omicron-test-utils = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [features]
 # Enable to export `TestDatabase`
 testing = ["omicron-test-utils"]

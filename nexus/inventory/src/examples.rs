@@ -1115,5 +1115,6 @@ pub fn sled_agent(
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,
+        fmd: None,
     }
 }

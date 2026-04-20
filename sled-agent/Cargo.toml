@@ -4,9 +4,13 @@ description = "Services for managing sled-local resources"
 version = "0.1.0"
 edition.workspace = true
 license = "MPL-2.0"
+build = "build.rs"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -137,6 +141,10 @@ zip.workspace = true
 zone.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
+fmd-adm.workspace = true
+# Direct dep on fmd-adm-sys so this crate sees DEP_FMD_ADM_LIBDIRS in build.rs
+# and can configure RPATH via omicron-rpaths.
+fmd-adm-sys.workspace = true
 opte-ioctl.workspace = true
 
 [dev-dependencies]
