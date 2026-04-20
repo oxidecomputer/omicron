@@ -162,6 +162,7 @@ impl From<types::VmmRuntimeState>
             state: s.state.into(),
             generation: s.gen_,
             time_updated: s.time_updated,
+            failure_reason: None, // TODO(eliza)
         }
     }
 }

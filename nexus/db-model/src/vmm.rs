@@ -17,6 +17,7 @@ use crate::typed_uuid::DbTypedUuid;
 use crate::{SqlU16, VmmCpuPlatform};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
+use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -72,6 +73,12 @@ pub struct Vmm {
     /// control plane if this VMM's instance didn't specify a required platform
     /// when it was started.
     pub cpu_platform: VmmCpuPlatform,
+
+    /// A human-readable reason describing why this VMM is in the `Failed` state.
+    ///
+    /// This is not stable and is intended for debugging purposes only. It
+    /// should only be `Some` if the VMM's `state` is `Failed`.
+    pub failure_reason: Option<String>,
 }
 
 impl Vmm {
@@ -101,17 +108,18 @@ impl Vmm {
             propolis_port: SqlU16(propolis_port),
             state: VmmState::Creating,
             cpu_platform,
+            failure_reason: None,
         }
     }
 
-    /// Returns the runtime state of this VMM.
-    pub fn runtime(&self) -> VmmRuntimeState {
-        VmmRuntimeState {
-            time_state_updated: self.time_state_updated,
-            generation: self.generation,
-            state: self.state,
-        }
-    }
+    // /// Returns the runtime state of this VMM.
+    // pub fn runtime(&self) -> VmmRuntimeState {
+    //     VmmRuntimeState {
+    //         time_state_updated: self.time_state_updated,
+    //         generation: self.generation,
+    //         state: self.state,
+    //     }
+    // }
 
     pub fn sled_id(&self) -> SledUuid {
         self.sled_id.into()
@@ -143,18 +151,27 @@ pub struct VmmRuntimeState {
     /// The state of this VMM. If this VMM is the active VMM for a given
     /// instance, this state is the instance's logical state.
     pub state: VmmState,
+
+    /// A human-readable reason describing why this VMM is in the `Failed` state.
+    ///
+    /// This is not stable and is intended for debugging purposes only. It
+    /// should only be `Some` if the VMM's `state` is `Failed`.
+    pub failure_reason: Option<String>,
 }
 
-impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
-    for VmmRuntimeState
-{
-    fn from(
-        value: omicron_common::api::internal::nexus::VmmRuntimeState,
-    ) -> Self {
+impl From<nexus::VmmRuntimeState> for VmmRuntimeState {
+    fn from(value: nexus::VmmRuntimeState) -> Self {
+        let nexus::VmmRuntimeState {
+            state,
+            time_updated,
+            generation,
+            failure_reason,
+        } = value;
         Self {
-            state: value.state.into(),
-            time_state_updated: value.time_updated,
-            generation: value.generation.into(),
+            state: state.into(),
+            time_state_updated: time_updated,
+            generation: generation.into(),
+            failure_reason,
         }
     }
 }
