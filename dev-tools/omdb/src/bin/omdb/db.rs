@@ -760,6 +760,8 @@ struct SledInstancesArgs {
 #[derive(Debug, Clone)]
 struct SledNumbers(Vec<u16>);
 
+const MAX_SLED_NUMBER: u16 = 31;
+
 impl FromStr for SledNumbers {
     type Err = String;
 
@@ -778,11 +780,23 @@ impl FromStr for SledNumbers {
                 if end < start {
                     return Err(format!("invalid range '{part}': end < start"));
                 }
+                if end > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {end} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
                 result.extend(start..=end);
             } else {
                 let n: u16 = part.parse().map_err(|e| {
                     format!("invalid sled number '{part}': {e}")
                 })?;
+                if n > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {n} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
                 result.push(n);
             }
         }
@@ -4818,8 +4832,8 @@ async fn cmd_db_sled_instances(
         }
     }
 
-    // Step 4: Sort sleds by (sp_type, sp_slot) numerically so
-    // that Sled 2 comes before Sled 10.
+    // Step 4: Sort sleds by slot number so that Sled 2 comes
+    // before Sled 10.
     let mut sorted_sleds: Vec<_> = instances_by_sled
         .iter()
         .filter_map(|(sled_id, insts)| {
