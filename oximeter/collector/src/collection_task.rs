@@ -722,6 +722,8 @@ impl CollectionTask {
             .send_modify(|details| details.update(&new_info));
         self.stats.update(&new_info);
         self.collection_timer = interval(new_info.interval);
+        self.collection_timer
+            .set_missed_tick_behavior(MissedTickBehavior::Delay);
     }
 
     /// Handle a single message from the task handle.

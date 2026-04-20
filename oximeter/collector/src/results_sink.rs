@@ -358,11 +358,12 @@ pub async fn logger(log: Logger, mut rx: mpsc::Receiver<CollectionTaskOutput>) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use proptest::prelude::*;
     use tokio::time::timeout;
 
-    use super::*;
-
     const BATCH_SIZE: usize = 10;
+    const MAX_BUFFER_SIZE: usize = BATCH_SIZE * MAX_BUFFER_SIZE_MULTIPLIER;
 
     #[tokio::test]
     async fn batch_handoff_notifies_receiver_when_forced() {
@@ -381,114 +382,92 @@ mod tests {
         assert!(batch_tx.handoff.batch.lock().unwrap().is_empty());
     }
 
-    // Basic test that we append new samples and don't drop anything.
-    #[tokio::test]
-    async fn batch_handoff_handles_new_samples_when_empty() {
-        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
-        let n_samples = 3;
-        let samples = vec![(); n_samples];
-        let n_dropped = batch_tx.send_and_notify(samples, false);
-        assert_eq!(n_dropped, 0);
-        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
-        let _ = timeout(
-            Duration::from_millis(10),
-            batch_rx.handoff.notify.notified(),
-        )
-        .await
-        .expect_err("Should not be notified in this case");
-    }
+    proptest! {
+        #[test]
+        fn test_batch_handoff_overflow(
+            current_size in 0..=2*MAX_BUFFER_SIZE,
+            new_size in 0..=2*MAX_BUFFER_SIZE,
+        ) {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
 
-    #[tokio::test]
-    async fn batch_handoff_drops_old_batched_samples() {
-        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
+            // Insert the first batch of samples.
+            let (batch_tx, batch_rx) = batch_handoff::<usize>(BATCH_SIZE);
+            let samples = (0..current_size).collect();
+            let n_dropped = batch_tx.send_and_notify(samples, false);
+            let expected_n_dropped = current_size.saturating_sub(MAX_BUFFER_SIZE);
+            let expected_n_samples = current_size.min(MAX_BUFFER_SIZE);
+            assert_eq!(n_dropped, expected_n_dropped);
 
-        // Push enough samples to get us just near the end of the maximum buffer
-        // size.
-        let n_samples = MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE - 1;
-        let samples = vec![(); n_samples];
-        let n_dropped = batch_tx.send_and_notify(samples, false);
+            // Assert that we've retained only the tail of the samples.
+            let tail = (current_size.saturating_sub(MAX_BUFFER_SIZE)..current_size)
+                .collect::<VecDeque<_>>();
+            {
+                let buf = batch_tx.handoff.batch.lock().unwrap();
+                assert_eq!(buf.len(), expected_n_samples);
+                assert_eq!(*buf, tail);
+            }
 
-        // We still should not drop anything.
-        assert_eq!(n_dropped, 0);
-        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
+            // Check that we're either notified, or not, if the current batch is
+            // large enough.
+            //
+            // NOTE: We're not calling `wait_for_batch()` here, but using the
+            // shared buffer directly. That's so that we don't swap it out
+            // during this part of the test. We do use that method later.
+            const TIMEOUT: Duration = Duration::from_millis(1);
+            let fut = batch_rx.handoff.notify.notified();
+            if current_size >= BATCH_SIZE {
+                rt.block_on(async {
+                    timeout(TIMEOUT, fut).await
+                }).expect("Should be notified");
+                assert_eq!(*batch_rx.handoff.batch.lock().unwrap(), tail);
+            } else {
+                rt.block_on(async {
+                    timeout(TIMEOUT, fut).await
+                }).expect_err("Should not be notified");
+            }
 
-        // But we _should_ be notified since this is larger than the batch.
-        let _ = timeout(
-            Duration::from_millis(10),
-            batch_rx.handoff.notify.notified(),
-        )
-        .await
-        .expect("Should have notified receiver now");
+            // Push the new set of samples, which start at the end of the first
+            // batch, even if we've dropped some.
+            let new_samples = (current_size..(current_size + new_size)).collect();
+            let n_dropped = batch_tx.send_and_notify(new_samples, false);
 
-        // Now, push just a measly 2 samples. We should drop one, since we had
-        // space for just one left.
-        let n_dropped = batch_tx.send_and_notify(vec![(); 2], false);
-        assert_eq!(n_dropped, 1);
+            // We expect to drop all the samples beyond the maximum buffer size.
+            // We need to include what we have in the buffer already (some of
+            // which we could have dropped) and what we add in this next step.
+            let expected_n_dropped = (expected_n_samples + new_size)
+                .saturating_sub(MAX_BUFFER_SIZE);
 
-        // The batch should be completely full now
-        assert_eq!(
-            batch_tx.handoff.batch.lock().unwrap().len(),
-            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
-        );
-        assert_eq!(
-            batch_rx.handoff.batch.lock().unwrap().len(),
-            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
-        );
+            // We expect to retain the minimum of what we (had already plus what
+            // we add) and the maximum buffer size.
+            let expected_n_samples = (expected_n_samples + new_size)
+                .min(MAX_BUFFER_SIZE);
+            assert_eq!(n_dropped, expected_n_dropped);
 
-        // And we should have notified the receiver.
-        let _ = timeout(
-            Duration::from_millis(10),
-            batch_rx.handoff.notify.notified(),
-        )
-        .await
-        .expect("Should have notified receiver now");
-    }
+            // Again, check that we retain the tail of _all_ the samples we've
+            // added thus far, including the first and second batch.
+            let total_size = current_size + new_size;
+            let tail = (total_size.saturating_sub(MAX_BUFFER_SIZE)..total_size).collect::<VecDeque<_>>();
+            {
+                let buf = batch_tx.handoff.batch.lock().unwrap();
+                assert_eq!(buf.len(), expected_n_samples);
+                assert_eq!(*buf, tail);
+            }
 
-    #[tokio::test]
-    async fn batch_handoff_drops_old_and_new_samples_if_needed() {
-        // Push a few samples
-        let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
-        let n_samples = 3;
-        let samples = vec![(); n_samples];
-        let n_dropped = batch_tx.send_and_notify(samples, false);
-        assert_eq!(n_dropped, 0);
-        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
-        let _ = timeout(
-            Duration::from_millis(10),
-            batch_rx.handoff.notify.notified(),
-        )
-        .await
-        .expect_err("Should not be notified in this case");
-
-        // Now push enough to get us all the way past the max size and then
-        // some. We should drop the contents of the existing batch, plus some of
-        // the new samples.
-        let n_current_samples = n_samples;
-        let n_samples = MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE + BATCH_SIZE;
-        let samples = vec![(); n_samples];
-
-        // We've appended a full extra batch, and we also have the contents of
-        // the existing buffer. All of those should be dropped.
-        let expected_n_dropped = BATCH_SIZE + n_current_samples;
-        let n_dropped = batch_tx.send_and_notify(samples, false);
-        assert_eq!(n_dropped, expected_n_dropped);
-
-        // The batch should be completely full now.
-        assert_eq!(
-            batch_tx.handoff.batch.lock().unwrap().len(),
-            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
-        );
-        assert_eq!(
-            batch_rx.handoff.batch.lock().unwrap().len(),
-            MAX_BUFFER_SIZE_MULTIPLIER * BATCH_SIZE
-        );
-
-        // And the receiver should now have everything.
-        let _ = timeout(
-            Duration::from_millis(10),
-            batch_rx.handoff.notify.notified(),
-        )
-        .await
-        .expect("Should be notified in this case");
+            // And check we've notified the receiver again.
+            let fut = batch_rx.wait_for_batch();
+            if expected_n_samples >= BATCH_SIZE {
+                let received = rt.block_on(async {
+                    timeout(TIMEOUT, fut).await
+                }).expect("Should be notified");
+                assert_eq!(received, tail);
+            } else {
+                rt.block_on(async {
+                    timeout(TIMEOUT, fut).await
+                }).expect_err("Should not be notified");
+            }
+        }
     }
 }
