@@ -403,6 +403,8 @@ enum DbCommands {
     Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
+    /// Show instances grouped by the sled they are running on
+    SledInstances(SledInstancesArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
     /// Alias to `omdb instance list`.
@@ -734,6 +736,58 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct SledInstancesArgs {
+    /// Filter by sled number(s). Comma-separated, ranges allowed
+    /// (e.g. "0,3,14-16")
+    #[clap(long = "sled")]
+    sled_numbers: Option<SledNumbers>,
+
+    /// Filter by sled serial number(s). Comma-separated
+    /// (e.g. "BRM44220010,BRM44220022")
+    #[clap(long = "serial", use_value_delimiter = true)]
+    serials: Option<Vec<String>>,
+
+    /// Filter by sled UUID(s). Comma-separated
+    #[clap(long = "sled-id", use_value_delimiter = true)]
+    sled_ids: Option<Vec<SledUuid>>,
+}
+
+/// A comma-separated list of sled numbers with range support
+/// (e.g. "0,3,14-16" → [0, 3, 14, 15, 16]).
+#[derive(Debug, Clone)]
+struct SledNumbers(Vec<u16>);
+
+impl FromStr for SledNumbers {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut result = Vec::new();
+        for part in s.split(',') {
+            let part = part.trim();
+            if let Some((start, end)) = part.split_once('-') {
+                let start: u16 = start.trim().parse().map_err(|e| {
+                    format!("invalid sled number '{start}': {e}")
+                })?;
+                let end: u16 = end
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("invalid sled number '{end}': {e}"))?;
+                if end < start {
+                    return Err(format!("invalid range '{part}': end < start"));
+                }
+                result.extend(start..=end);
+            } else {
+                let n: u16 = part.parse().map_err(|e| {
+                    format!("invalid sled number '{part}': {e}")
+                })?;
+                result.push(n);
+            }
+        }
+        Ok(SledNumbers(result))
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1376,6 +1430,15 @@ impl DbArgs {
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::SledInstances(args) => {
+                        cmd_db_sled_instances(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
+                            args,
+                        )
+                        .await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
@@ -4618,6 +4681,228 @@ async fn cmd_db_sleds(
     println!("{}", table);
 
     Ok(())
+}
+
+/// Run `omdb db sled-instances`: show instances grouped by sled.
+async fn cmd_db_sled_instances(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &SledInstancesArgs,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_schema::schema::instance::dsl;
+    use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+    // Step 1: Fetch the latest inventory collection to get
+    // sled → (MGS slot, serial) mappings.
+    let collection =
+        CollectionIdOrLatest::Latest.to_collection(opctx, datastore).await?;
+
+    // Build a map: sled_id → (sp_type, sp_slot, serial).
+    // We store the sp_type and sp_slot as their original types so
+    // we can sort numerically (Sled 2 before Sled 10).
+    struct SledInfo {
+        sp_type: Option<nexus_types::inventory::SpType>,
+        sp_slot: Option<u16>,
+        serial: String,
+    }
+
+    impl SledInfo {
+        fn slot_label(&self) -> String {
+            match (self.sp_type, self.sp_slot) {
+                (Some(sp_type), Some(sp_slot)) => {
+                    format!("{:?} {}", sp_type, sp_slot)
+                }
+                _ => "???".to_string(),
+            }
+        }
+    }
+
+    let mut sled_info: BTreeMap<SledUuid, SledInfo> = BTreeMap::new();
+
+    for sled_agent in &collection.sled_agents {
+        let info = match &sled_agent.baseboard_id {
+            Some(baseboard_id) => {
+                let serial = baseboard_id.serial_number.clone();
+                match collection.sps.get(baseboard_id) {
+                    Some(sp) => SledInfo {
+                        sp_type: Some(sp.sp_type),
+                        sp_slot: Some(sp.sp_slot),
+                        serial,
+                    },
+                    None => {
+                        eprintln!(
+                            "WARN: no SP found for baseboard \
+                                 {} (sled {})",
+                            baseboard_id.serial_number, sled_agent.sled_id,
+                        );
+                        SledInfo { sp_type: None, sp_slot: None, serial }
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "WARN: sled {} has no baseboard ID in \
+                     inventory",
+                    sled_agent.sled_id,
+                );
+                SledInfo {
+                    sp_type: None,
+                    sp_slot: None,
+                    serial: "unknown".to_string(),
+                }
+            }
+        };
+        sled_info.insert(sled_agent.sled_id, info);
+    }
+
+    // Apply filters: keep only sleds matching the requested
+    // --sled, --serial, or --sled-id criteria.
+    if args.sled_numbers.is_some()
+        || args.serials.is_some()
+        || args.sled_ids.is_some()
+    {
+        sled_info.retain(|sled_id, info| {
+            if let Some(ref nums) = args.sled_numbers {
+                if let Some(sp_slot) = info.sp_slot {
+                    if nums.0.contains(&sp_slot) {
+                        return true;
+                    }
+                }
+            }
+            if let Some(ref serials) = args.serials {
+                if serials.iter().any(|s| s == &info.serial) {
+                    return true;
+                }
+            }
+            if let Some(ref ids) = args.sled_ids {
+                if ids.contains(sled_id) {
+                    return true;
+                }
+            }
+            false
+        });
+    }
+
+    // Step 2: Fetch all non-deleted instances joined with their
+    // active VMMs.
+    let limit = fetch_opts.fetch_limit;
+    let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+        .filter(dsl::time_deleted.is_null())
+        .left_join(
+            vmm_dsl::vmm.on(vmm_dsl::id
+                .nullable()
+                .eq(dsl::active_propolis_id)
+                .and(vmm_dsl::time_deleted.is_null())),
+        )
+        .limit(i64::from(u32::from(limit)))
+        .select((Instance::as_select(), Option::<Vmm>::as_select()))
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading instances")?
+        .into_iter()
+        .map(|i: (Instance, Option<Vmm>)| i.into())
+        .collect();
+
+    check_limit(&instances, limit, || "listing instances".to_string());
+
+    // Step 3: Group instances by sled_id (skip those with no
+    // active VMM / no sled).
+    let mut instances_by_sled: BTreeMap<SledUuid, Vec<&InstanceAndActiveVmm>> =
+        BTreeMap::new();
+    let mut unmatched: Vec<&InstanceAndActiveVmm> = Vec::new();
+
+    for inst in &instances {
+        let sled_id = match inst.sled_id() {
+            Some(id) => id,
+            None => continue, // no active VMM, skip
+        };
+        if sled_info.contains_key(&sled_id) {
+            instances_by_sled.entry(sled_id).or_default().push(inst);
+        } else {
+            unmatched.push(inst);
+        }
+    }
+
+    // Step 4: Sort sleds by (sp_type, sp_slot) numerically so
+    // that Sled 2 comes before Sled 10.
+    let mut sorted_sleds: Vec<_> = instances_by_sled
+        .iter()
+        .filter_map(|(sled_id, insts)| {
+            sled_info.get(sled_id).map(|info| (info, *sled_id, insts))
+        })
+        .collect();
+    sorted_sleds.sort_by(|(a, _, _), (b, _, _)| {
+        a.sp_type.cmp(&b.sp_type).then(a.sp_slot.cmp(&b.sp_slot))
+    });
+
+    for (info, sled_id, insts) in &sorted_sleds {
+        println!(
+            "{} (serial: {})  sled_id: {}",
+            info.slot_label(),
+            info.serial,
+            sled_id,
+        );
+        print_instance_table(insts);
+        println!();
+    }
+
+    // Step 5: Show instances on sleds not in inventory, but only
+    // when no filters are active (if the user asked for specific
+    // sleds, everything else is irrelevant, not "unknown").
+    let has_filter = args.sled_numbers.is_some()
+        || args.serials.is_some()
+        || args.sled_ids.is_some();
+    if !has_filter && !unmatched.is_empty() {
+        // Group unmatched by sled_id.
+        let mut unmatched_by_sled: BTreeMap<
+            SledUuid,
+            Vec<&InstanceAndActiveVmm>,
+        > = BTreeMap::new();
+        for inst in &unmatched {
+            if let Some(sled_id) = inst.sled_id() {
+                unmatched_by_sled.entry(sled_id).or_default().push(inst);
+            }
+        }
+        for (sled_id, insts) in &unmatched_by_sled {
+            println!("??? (serial: unknown)  sled_id: {}", sled_id,);
+            eprintln!(
+                "  NOTE: sled {} not found in latest \
+                 inventory collection",
+                sled_id,
+            );
+            print_instance_table(insts);
+            println!();
+        }
+    }
+
+    Ok(())
+}
+
+fn print_instance_table(instances: &[&InstanceAndActiveVmm]) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SledInstanceRow {
+        instance_id: String,
+        state: String,
+        name: String,
+    }
+
+    let rows: Vec<SledInstanceRow> = instances
+        .iter()
+        .map(|inst| SledInstanceRow {
+            instance_id: inst.instance().id().to_string(),
+            state: inst.effective_state().to_string(),
+            name: inst.instance().name().to_string(),
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 }
 
 // INSTANCES
