@@ -21,8 +21,7 @@ use omicron_common::api::external::{
     VpcFirewallRuleStatus,
 };
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIpv4Config, ExternalIpv6Config, NetworkInterface,
-    ResolvedVpcFirewallRule,
+    NetworkInterface, ResolvedVpcFirewallRule,
 };
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, ProbeUuid};
 use rand::SeedableRng;
@@ -32,6 +31,9 @@ use sled_agent_config_reconciler::{
     CurrentlyManagedZpoolsReceiver,
 };
 use sled_agent_resolvable_files::ramdisk_file_source;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIpv4Config;
+use sled_agent_types::instance::ExternalIpv6Config;
 use sled_agent_types::probes::ExternalIp;
 use sled_agent_types::probes::ProbeCreate;
 use slog::{Logger, error, warn};

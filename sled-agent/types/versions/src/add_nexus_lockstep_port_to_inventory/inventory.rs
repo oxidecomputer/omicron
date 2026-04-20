@@ -12,7 +12,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
 use omicron_common::zpool_name::ZpoolName;
@@ -27,7 +26,8 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
+    RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
+    ZoneImageResolverInventory,
 };
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 

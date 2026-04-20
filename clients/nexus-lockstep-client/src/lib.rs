@@ -140,12 +140,10 @@ impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     }
 }
 
-impl From<&omicron_common::api::internal::shared::SourceNatConfigGeneric>
+impl From<&sled_agent_types::inventory::SourceNatConfigGeneric>
     for types::SourceNatConfigGeneric
 {
-    fn from(
-        r: &omicron_common::api::internal::shared::SourceNatConfigGeneric,
-    ) -> Self {
+    fn from(r: &sled_agent_types::inventory::SourceNatConfigGeneric) -> Self {
         let (first_port, last_port) = r.port_range_raw();
         Self { ip: r.ip, first_port, last_port }
     }

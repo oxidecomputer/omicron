@@ -81,9 +81,7 @@ use omicron_common::address::{
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIps, PrivateIpConfig, SledIdentifiers,
-};
+use omicron_common::api::internal::shared::{PrivateIpConfig, SledIdentifiers};
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
@@ -93,6 +91,8 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIps;
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };

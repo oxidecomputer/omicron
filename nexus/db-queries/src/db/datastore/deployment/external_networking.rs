@@ -561,7 +561,6 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::identity::Resource;
-    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
     use omicron_common::address::IpRange;
     use omicron_common::address::IpRangeIter;
@@ -577,6 +576,7 @@ mod tests {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::OmicronZoneDataset;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::SocketAddr;
