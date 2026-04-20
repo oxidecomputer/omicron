@@ -7571,7 +7571,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     payload JSONB NOT NULL,
     -- A human-readable comment from the diagnosis engine explaining why it
     -- requested this alert.
-    comment TEXT NOT NULL DEFAULT '',
+    comment TEXT NOT NULL,
 
     PRIMARY KEY (sitrep_id, id)
 );
@@ -7593,7 +7593,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
     case_id UUID NOT NULL,
     -- A human-readable comment from the diagnosis engine explaining why it
     -- requested this support bundle.
-    comment TEXT NOT NULL DEFAULT '',
+    comment TEXT NOT NULL,
 
     PRIMARY KEY (sitrep_id, id)
 );

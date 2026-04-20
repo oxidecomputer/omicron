@@ -356,9 +356,15 @@ impl FmRendezvous {
                 status.current_sitrep_bundles_requested += 1;
             }
 
-            // Add a generic reason if the diagnosis engine didn't provide one.
-            // TODO: should the reason string _always_ include the DE's name
-            // and/or the case ID?
+            // Fall back to a generic reason for now if the diagnosis engine
+            // left the comment empty.
+            //
+            // TODO(#9672): We should generally expect that the DE will provide
+            // a comment, and just use it without a fallback. The DE name and
+            // case ID should be recorded in bundle metadata via a separate
+            // path, reading directly from the existing
+            // `support_bundle.fm_case_id` column and maybe a new
+            // `support_bundle.fm_diagnosis_engine_name` column.
             let reason = if comment.is_empty() {
                 format!(
                     "Requested by {de:?} diagnosis engine for case {case_id}"

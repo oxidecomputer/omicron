@@ -143,8 +143,6 @@ impl CaseBuilder {
             anyhow::anyhow!("an alert with ID {id:?} already exists")
         })?;
 
-        // TODO(eliza): add a comment field to the alert request record in the
-        // DB, as well...
         let comment = comment.to_string();
         slog::info!(
             &self.log,
