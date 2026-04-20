@@ -26,6 +26,7 @@ pub struct SupportBundleRequest {
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub requested_sitrep_id: DbTypedUuid<SitrepKind>,
     pub case_id: DbTypedUuid<CaseKind>,
+    pub comment: String,
 }
 
 impl SupportBundleRequest {
@@ -38,12 +39,14 @@ impl SupportBundleRequest {
             id,
             requested_sitrep_id,
             data_selection: _,
+            comment,
         } = req;
         SupportBundleRequest {
             id: id.into(),
             sitrep_id: sitrep_id.into(),
             requested_sitrep_id: requested_sitrep_id.into(),
             case_id: case_id.into(),
+            comment,
         }
     }
 }

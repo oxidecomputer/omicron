@@ -558,6 +558,7 @@ impl DataStore {
                     id: req_id,
                     requested_sitrep_id: sb_req.requested_sitrep_id.into(),
                     data_selection,
+                    comment: sb_req.comment,
                 })
                 .expect("req_id is unique in requests_by_id");
         }
@@ -2205,8 +2206,8 @@ mod tests {
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),
                     requested_sitrep_id: sitrep_id,
-
                     data_selection: BundleDataSelection::all(),
+                    comment: String::new(),
                 })
                 .unwrap();
             // A request with a nontrivial data_selection, including
@@ -2232,8 +2233,8 @@ mod tests {
                     .insert_unique(fm::case::SupportBundleRequest {
                         id: SupportBundleUuid::new_v4(),
                         requested_sitrep_id: sitrep_id,
-
                         data_selection: sel,
+                        comment: String::new(),
                     })
                     .unwrap();
             }
@@ -2357,8 +2358,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: SupportBundleUuid::new_v4(),
                 requested_sitrep_id: sitrep_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
         // A request with HostInfo(Specific) and Ereports with time-range
@@ -2385,8 +2386,8 @@ mod tests {
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),
                     requested_sitrep_id: sitrep_id,
-
                     data_selection: sel,
+                    comment: String::new(),
                 })
                 .unwrap();
         }
@@ -2817,6 +2818,7 @@ mod tests {
                 sitrep_id: ghost_sitrep_id.into(),
                 requested_sitrep_id: ghost_sitrep_id.into(),
                 case_id: ghost_case_id.into(),
+                comment: String::new(),
             })
             .execute_async(&*conn)
             .await

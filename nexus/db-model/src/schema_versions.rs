@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(251, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(252, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(252, "fm-support-bundle-request-comment"),
         KnownVersion::new(251, "fm-sitrep-next-inv-min-time-started"),
         KnownVersion::new(250, "inv-svc-enabled-not-online"),
         KnownVersion::new(249, "fm-support-bundle-request"),

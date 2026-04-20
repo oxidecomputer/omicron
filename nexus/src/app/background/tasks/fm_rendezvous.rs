@@ -347,6 +347,7 @@ impl FmRendezvous {
                 id: bundle_id,
                 requested_sitrep_id,
                 data_selection,
+                comment,
             } = req;
             let bundle_id = *bundle_id;
 
@@ -355,9 +356,16 @@ impl FmRendezvous {
                 status.current_sitrep_bundles_requested += 1;
             }
 
-            let reason = format!(
-                "Requested by {de:?} diagnosis engine for case {case_id}"
-            );
+            // Add a generic reason if the diagnosis engine didn't provide one.
+            // TODO: should the reason string _always_ include the DE's name
+            // and/or the case ID?
+            let reason = if comment.is_empty() {
+                format!(
+                    "Requested by {de:?} diagnosis engine for case {case_id}"
+                )
+            } else {
+                comment.clone()
+            };
             match self
                 .datastore
                 .support_bundle_create(
@@ -1450,8 +1458,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle1_id,
                 requested_sitrep_id: sitrep1_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: "PSU removed — collecting diagnostics".to_string(),
             })
             .unwrap();
 
@@ -1499,6 +1507,11 @@ mod tests {
             .expect("bundle1 must have been created");
         assert_eq!(db_bundle.state, db::model::SupportBundleState::Collecting,);
         assert_eq!(db_bundle.fm_case_id.map(|id| id.into()), Some(case1_id),);
+        assert_eq!(
+            db_bundle.reason_for_creation,
+            "PSU removed — collecting diagnostics",
+            "DE-provided comment should be used as reason_for_creation",
+        );
 
         // The collector should have been activated.
         assert!(
@@ -1522,8 +1535,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle2_id,
                 requested_sitrep_id: sitrep2_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 
@@ -1621,8 +1634,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle_id,
                 requested_sitrep_id: sitrep_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 

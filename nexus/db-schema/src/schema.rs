@@ -3260,6 +3260,7 @@ table! {
         sitrep_id -> Uuid,
         requested_sitrep_id -> Uuid,
         case_id -> Uuid,
+        comment -> Text,
     }
 }
 

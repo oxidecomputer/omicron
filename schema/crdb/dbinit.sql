@@ -7588,6 +7588,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
     requested_sitrep_id UUID NOT NULL,
     -- UUID of the case to which this request belongs.
     case_id UUID NOT NULL,
+    -- A human-readable comment from the diagnosis engine explaining why it
+    -- requested this support bundle.
+    comment TEXT NOT NULL DEFAULT '',
 
     PRIMARY KEY (sitrep_id, id)
 );
@@ -8469,7 +8472,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '251.0.0', NULL)
+    (TRUE, NOW(), NOW(), '252.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
