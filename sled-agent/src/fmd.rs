@@ -4,12 +4,14 @@
 
 //! Collects fault information from the illumos Fault Management Daemon (FMD).
 
-use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryResult;
 
 #[cfg(target_os = "illumos")]
 mod illumos {
     use fmd_adm::{FmdAdm, NvList, NvValue};
-    use sled_agent_types::inventory::{FmdCase, FmdInventory, FmdResource};
+    use sled_agent_types::inventory::{
+        FmdCase, FmdInventory, FmdInventoryResult, FmdResource,
+    };
 
     pub(super) fn nvvalue_to_json(value: &NvValue) -> serde_json::Value {
         match value {
@@ -60,11 +62,11 @@ mod illumos {
         serde_json::Value::Object(map)
     }
 
-    pub(super) fn collect() -> FmdInventory {
+    pub(super) fn collect() -> FmdInventoryResult {
         let adm = match FmdAdm::open() {
             Ok(adm) => adm,
             Err(e) => {
-                return FmdInventory::Error {
+                return FmdInventoryResult::Error {
                     error: format!("failed to open fmd: {e}"),
                 };
             }
@@ -81,7 +83,7 @@ mod illumos {
                 })
                 .collect(),
             Err(e) => {
-                return FmdInventory::Error {
+                return FmdInventoryResult::Error {
                     error: format!("failed to list fmd cases: {e}"),
                 };
             }
@@ -100,31 +102,33 @@ mod illumos {
                 })
                 .collect(),
             Err(e) => {
-                return FmdInventory::Error {
+                return FmdInventoryResult::Error {
                     error: format!("failed to list fmd resources: {e}"),
                 };
             }
         };
 
-        FmdInventory::Available { cases, resources }
+        FmdInventoryResult::Available(FmdInventory { cases, resources })
     }
 }
 
-pub(crate) async fn collect_fmd_inventory() -> Option<FmdInventory> {
+pub(crate) async fn collect_fmd_inventory() -> FmdInventoryResult {
     #[cfg(target_os = "illumos")]
     {
         // FMD queries go through door calls to fmd(1M) and can block, so run
         // them on a blocking-friendly thread rather than stalling the runtime.
         match tokio::task::spawn_blocking(illumos::collect).await {
-            Ok(inv) => Some(inv),
-            Err(e) => Some(FmdInventory::Error {
+            Ok(inv) => inv,
+            Err(e) => FmdInventoryResult::Error {
                 error: format!("fmd collection task failed: {e}"),
-            }),
+            },
         }
     }
     #[cfg(not(target_os = "illumos"))]
     {
-        None
+        FmdInventoryResult::Error {
+            error: "fmd not supported on this platform".to_string(),
+        }
     }
 }
 

@@ -59,11 +59,18 @@ pub struct FmdResource {
 /// Result of querying FMD for fault information.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum FmdInventory {
+pub enum FmdInventoryResult {
     /// FMD data was successfully collected.
-    Available { cases: Vec<FmdCase>, resources: Vec<FmdResource> },
-    /// FMD data collection failed.
+    Available(FmdInventory),
+    /// FMD data collection failed or is not available on this platform.
     Error { error: String },
+}
+
+/// Successfully collected FMD fault data.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct FmdInventory {
+    pub cases: Vec<FmdCase>,
+    pub resources: Vec<FmdResource>,
 }
 
 /// Identity and basic status information about this sled agent
@@ -87,7 +94,7 @@ pub struct Inventory {
     pub smf_services_enabled_not_online:
         v34::inventory::SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
-    pub fmd: Option<FmdInventory>,
+    pub fmd: FmdInventoryResult,
 }
 
 impl From<Inventory> for v34::inventory::Inventory {

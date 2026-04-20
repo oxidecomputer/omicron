@@ -1358,6 +1358,7 @@ mod tests {
     use oxnet::Ipv6Net;
     use sled_agent_types::early_networking::RackNetworkConfig;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::FmdInventoryResult;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1530,7 +1531,9 @@ mod tests {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
-                fmd: None,
+                fmd: FmdInventoryResult::Error {
+                    error: "fmd not collected during rack setup".to_string(),
+                },
             },
             is_scrimlet,
         )

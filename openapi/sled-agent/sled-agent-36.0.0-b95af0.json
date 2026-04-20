@@ -5395,6 +5395,28 @@
         ]
       },
       "FmdInventory": {
+        "description": "Successfully collected FMD fault data.",
+        "type": "object",
+        "properties": {
+          "cases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FmdCase"
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FmdResource"
+            }
+          }
+        },
+        "required": [
+          "cases",
+          "resources"
+        ]
+      },
+      "FmdInventoryResult": {
         "description": "Result of querying FMD for fault information.",
         "oneOf": [
           {
@@ -5408,25 +5430,7 @@
                 ]
               },
               "value": {
-                "type": "object",
-                "properties": {
-                  "cases": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/FmdCase"
-                    }
-                  },
-                  "resources": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/FmdResource"
-                    }
-                  }
-                },
-                "required": [
-                  "cases",
-                  "resources"
-                ]
+                "$ref": "#/components/schemas/FmdInventory"
               }
             },
             "required": [
@@ -5435,7 +5439,7 @@
             ]
           },
           {
-            "description": "FMD data collection failed.",
+            "description": "FMD data collection failed or is not available on this platform.",
             "type": "object",
             "properties": {
               "type": {
@@ -6140,12 +6144,7 @@
             "$ref": "#/components/schemas/OmicronFileSourceResolverInventory"
           },
           "fmd": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/FmdInventory"
-              }
-            ]
+            "$ref": "#/components/schemas/FmdInventoryResult"
           },
           "last_reconciliation": {
             "nullable": true,
@@ -6220,6 +6219,7 @@
           "datasets",
           "disks",
           "file_source_resolver",
+          "fmd",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",

@@ -166,6 +166,7 @@ pub mod inventory {
     pub use crate::v34::inventory::SvcsError;
     pub use crate::v36::inventory::FmdCase;
     pub use crate::v36::inventory::FmdInventory;
+    pub use crate::v36::inventory::FmdInventoryResult;
     pub use crate::v36::inventory::FmdResource;
     pub use crate::v36::inventory::Inventory;
 
