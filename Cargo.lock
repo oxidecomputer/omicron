@@ -5269,7 +5269,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=98632476e0c40af5a3eddae41eb322bd5b54cc4a#98632476e0c40af5a3eddae41eb322bd5b54cc4a"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -5951,7 +5951,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=98632476e0c40af5a3eddae41eb322bd5b54cc4a#98632476e0c40af5a3eddae41eb322bd5b54cc4a"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -9548,7 +9548,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=98632476e0c40af5a3eddae41eb322bd5b54cc4a#98632476e0c40af5a3eddae41eb322bd5b54cc4a"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -9567,7 +9567,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=98632476e0c40af5a3eddae41eb322bd5b54cc4a#98632476e0c40af5a3eddae41eb322bd5b54cc4a"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -9580,7 +9580,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=98632476e0c40af5a3eddae41eb322bd5b54cc4a#98632476e0c40af5a3eddae41eb322bd5b54cc4a"
 dependencies = [
  "libc",
  "libnet",
@@ -9677,7 +9677,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=98632476e0c40af5a3eddae41eb322bd5b54cc4a#98632476e0c40af5a3eddae41eb322bd5b54cc4a"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
