@@ -155,12 +155,8 @@ impl super::Nexus {
             self.assemble_state_for_new_target(opctx, new_target).await?;
 
         // Archive the Reconfigurator state file.
-        // XXX-dap commonize filename construction with autoplanner
-        let debug_name = format!(
-            "blueprint-target-{}-{}.json",
-            blueprint.time_created.format("%Y%m%dT%H%MZ"),
-            blueprint.id
-        );
+        let debug_name =
+            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Target);
         let deposit = self
             .debug_dropbox_reconfigurator
             .deposit_file_str(&debug_name, &debug)
@@ -325,12 +321,8 @@ impl super::Nexus {
         })?;
 
         // Archive the Reconfigurator state file.
-        // XXX-dap commonize filename construction with autoplanner
-        let debug_name = format!(
-            "blueprint-plan-{}-{}.json",
-            blueprint.time_created.format("%Y%m%dT%H%MZ"),
-            blueprint.id
-        );
+        let debug_name =
+            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Plan);
         let deposit = self
             .debug_dropbox_reconfigurator
             .deposit_file_str(&debug_name, &debug)
@@ -892,6 +884,33 @@ impl SledUpdateStatus {
             Self::PreviousUpdatePending
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BlueprintDebugAction {
+    /// the autoplanner generated this blueprint and will try to make it the
+    /// target
+    Autoplan,
+    /// someone explicitly ran the planner using the Nexus internal API
+    /// (likely a person running `omdb`)
+    Plan,
+    /// someone explicit set the target blueprint using the Nexus internal API
+    /// (likely a person running `omdb`)
+    Target,
+}
+
+/// Returns the filename for a debug drop file related to blueprint planning
+pub fn blueprint_debug_filename(
+    blueprint: &Blueprint,
+    action: BlueprintDebugAction,
+) -> String {
+    let action_str = match action {
+        BlueprintDebugAction::Autoplan => "autoplan",
+        BlueprintDebugAction::Plan => "plan",
+        BlueprintDebugAction::Target => "target",
+    };
+    let time_str = blueprint.time_created.format("%Y%m%dT%H%MZ");
+    format!("{time_str}-{action_str}-{}.json", blueprint.id)
 }
 
 #[cfg(test)]

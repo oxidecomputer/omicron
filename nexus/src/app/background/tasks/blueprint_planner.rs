@@ -5,8 +5,10 @@
 //! Background task for automatic update planning.
 
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
+use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
+use crate::app::blueprint_debug_filename;
 use anyhow::Context;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -320,8 +322,10 @@ impl BlueprintPlanner {
 
         // Archive the Reconfigurator state file.  As above, we require that
         // this succeed.
-        let debug_name =
-            blueprint_debug_filename(blueprint_id, &blueprint.time_created);
+        let debug_name = blueprint_debug_filename(
+            &blueprint,
+            BlueprintDebugAction::Autoplan,
+        );
         let deposit =
             self.debug_dropbox.deposit_file_str(&debug_name, &debug).await?;
 
@@ -482,17 +486,6 @@ impl BackgroundTask for BlueprintPlanner {
     }
 }
 
-fn blueprint_debug_filename(
-    blueprint_id: BlueprintUuid,
-    time_created: &chrono::DateTime<Utc>,
-) -> String {
-    format!(
-        "blueprint-autoplan-{}-{}.json",
-        time_created.format("%Y%m%dT%H%MZ"),
-        blueprint_id
-    )
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -502,7 +495,6 @@ mod test {
     use crate::app::background::tasks::inventory_load::InventoryLoader;
     use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
     use assert_matches::assert_matches;
-    use chrono::DateTime;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_test_utils::db::TestDatabase;
@@ -828,18 +820,5 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_blueprint_debug_filename() {
-        let blueprint_id: BlueprintUuid =
-            "1dfe4b95-ac1e-40fa-b219-2c78cde26fc2".parse().unwrap();
-        let time_created: DateTime<Utc> =
-            "2025-11-20T19:09:00Z".parse().unwrap();
-        assert_eq!(
-            blueprint_debug_filename(blueprint_id, &time_created),
-            "blueprint-autoplan-20251120T1909Z-1dfe4b95-ac1e-40fa-b219-\
-             2c78cde26fc2.json",
-        );
     }
 }
