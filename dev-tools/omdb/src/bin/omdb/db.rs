@@ -4890,16 +4890,21 @@ fn print_instance_table(instances: &[&InstanceAndActiveVmm]) {
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct SledInstanceRow {
         instance_id: String,
+        propolis_id: MaybePropolisId,
         state: String,
         name: String,
     }
 
     let rows: Vec<SledInstanceRow> = instances
         .iter()
-        .map(|inst| SledInstanceRow {
-            instance_id: inst.instance().id().to_string(),
-            state: inst.effective_state().to_string(),
-            name: inst.instance().name().to_string(),
+        .map(|inst| {
+            let f = instance_fields(inst);
+            SledInstanceRow {
+                instance_id: f.id,
+                propolis_id: f.propolis_id,
+                state: f.state,
+                name: f.name,
+            }
         })
         .collect();
 
@@ -5419,6 +5424,24 @@ struct VmmStateRow {
     generation: u64,
 }
 
+/// Common fields extracted from an InstanceAndActiveVmm, shared by
+/// both `CustomerInstanceRow` and `SledInstanceRow`.
+struct InstanceFields {
+    id: String,
+    propolis_id: MaybePropolisId,
+    state: String,
+    name: String,
+}
+
+fn instance_fields(inst: &InstanceAndActiveVmm) -> InstanceFields {
+    InstanceFields {
+        id: inst.instance().id().to_string(),
+        propolis_id: inst.into(),
+        state: inst.effective_state().to_string(),
+        name: inst.instance().name().to_string(),
+    }
+}
+
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
@@ -5498,14 +5521,15 @@ async fn cmd_db_instances(
             continue;
         }
 
+        let f = instance_fields(&i);
         let cir = CustomerInstanceRow {
-            id: i.instance().id().to_string(),
-            name: i.instance().name().to_string(),
-            state: i.effective_state().to_string(),
+            id: f.id,
+            state: f.state,
             intent: i.instance().intended_state,
-            propolis_id: (&i).into(),
+            propolis_id: f.propolis_id,
             sled_id: (&i).into(),
             host_serial,
+            name: f.name,
         };
 
         rows.push(cir);
