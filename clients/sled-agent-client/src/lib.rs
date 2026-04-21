@@ -57,9 +57,9 @@ progenitor::generate_api!(
         DiskVariant = omicron_common::disk::DiskVariant,
         Epoch = trust_quorum_types::types::Epoch,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
-        ExternalIpConfig = omicron_common::api::internal::shared::ExternalIpConfig,
-        ExternalIpv4Config = omicron_common::api::internal::shared::ExternalIpv4Config,
-        ExternalIpv6Config = omicron_common::api::internal::shared::ExternalIpv6Config,
+        ExternalIpConfig = sled_agent_types_versions::latest::instance::ExternalIpConfig,
+        ExternalIpv4Config = sled_agent_types_versions::latest::instance::ExternalIpv4Config,
+        ExternalIpv6Config = sled_agent_types_versions::latest::instance::ExternalIpv6Config,
         Generation = omicron_common::api::external::Generation,
         Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
@@ -77,7 +77,8 @@ progenitor::generate_api!(
         MigrationState = sled_agent_types_versions::latest::instance::MigrationState,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        NetworkInterface = sled_agent_types_versions::latest::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
         Nonce = sled_agent_types_versions::latest::rot::Nonce,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
@@ -93,7 +94,7 @@ progenitor::generate_api!(
         PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
         RackNetworkConfig = sled_agent_types_versions::latest::early_networking::RackNetworkConfig,
         ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
-        ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
+        ResolvedVpcFirewallRule = sled_agent_types_versions::latest::instance::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
         Rot = sled_agent_types_versions::latest::rot::Rot,
@@ -105,7 +106,7 @@ progenitor::generate_api!(
         Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
         SledVmmState = sled_agent_types_versions::latest::instance::SledVmmState,
-        SourceNatConfigGeneric = omicron_common::api::internal::shared::SourceNatConfigGeneric,
+        SourceNatConfigGeneric = sled_agent_types_versions::latest::inventory::SourceNatConfigGeneric,
         SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
         SystemNetworkingConfig = sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig,
         Threshold = trust_quorum_types::types::Threshold,
@@ -193,21 +194,6 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
             Udp => Self::Udp,
             Icmp(v) => Self::Icmp(v),
             Icmp6(v) => Self::Icmp6(v),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
-    for types::NetworkInterfaceKind
-{
-    fn from(
-        s: omicron_common::api::internal::shared::NetworkInterfaceKind,
-    ) -> Self {
-        use omicron_common::api::internal::shared::NetworkInterfaceKind::*;
-        match s {
-            Instance { id } => Self::Instance(id),
-            Service { id } => Self::Service(id),
-            Probe { id } => Self::Probe(id),
         }
     }
 }

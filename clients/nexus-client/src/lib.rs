@@ -29,8 +29,8 @@ progenitor::generate_api!(
         Generation = omicron_common::api::external::Generation,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
-        NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        NetworkInterface = sled_agent_types::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },

@@ -878,9 +878,7 @@ impl SledAgentApi for SledAgentImpl {
         let body_args = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                let rules: Vec<_> =
-                    body_args.rules.into_iter().map(Into::into).collect();
-                sa.firewall_rules_ensure(body_args.vni, &rules)
+                sa.firewall_rules_ensure(body_args.vni, &body_args.rules)
                     .await
                     .map_err(Error::from)?;
                 Ok(HttpResponseUpdatedNoContent())

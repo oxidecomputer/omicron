@@ -22,7 +22,6 @@ use nexus_types::{
         views::NatEntryView,
     },
 };
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_common::api::{
     external::{Name, http_pagination::PaginatedById},
     internal::nexus::{
@@ -34,6 +33,7 @@ use omicron_common::api::{
 use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::v1::inventory::NetworkInterface as NetworkInterfaceV1;
 use uuid::Uuid;
 
 api_versions!([

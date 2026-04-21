@@ -347,6 +347,7 @@ impl FmRendezvous {
                 id: bundle_id,
                 requested_sitrep_id,
                 data_selection,
+                comment,
             } = req;
             let bundle_id = *bundle_id;
 
@@ -355,9 +356,22 @@ impl FmRendezvous {
                 status.current_sitrep_bundles_requested += 1;
             }
 
-            let reason = format!(
-                "Requested by {de:?} diagnosis engine for case {case_id}"
-            );
+            // Fall back to a generic reason for now if the diagnosis engine
+            // left the comment empty.
+            //
+            // TODO(#9672): We should generally expect that the DE will provide
+            // a comment, and just use it without a fallback. The DE name and
+            // case ID should be recorded in bundle metadata via a separate
+            // path, reading directly from the existing
+            // `support_bundle.fm_case_id` column and maybe a new
+            // `support_bundle.fm_diagnosis_engine_name` column.
+            let reason = if comment.is_empty() {
+                format!(
+                    "Requested by {de:?} diagnosis engine for case {case_id}"
+                )
+            } else {
+                comment.clone()
+            };
             match self
                 .datastore
                 .support_bundle_create(
@@ -548,6 +562,7 @@ mod tests {
                 class: AlertClass::TestFoo,
                 requested_sitrep_id: sitrep1_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         let sitrep1 = {
@@ -626,6 +641,7 @@ mod tests {
                 class: AlertClass::TestFooBar,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         // Also, add a second alert request to the existing case.
@@ -636,6 +652,7 @@ mod tests {
                 class: AlertClass::TestFooBaz,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         let sitrep2 = {
@@ -1450,8 +1467,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle1_id,
                 requested_sitrep_id: sitrep1_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: "test support bundle".to_string(),
             })
             .unwrap();
 
@@ -1499,6 +1516,10 @@ mod tests {
             .expect("bundle1 must have been created");
         assert_eq!(db_bundle.state, db::model::SupportBundleState::Collecting,);
         assert_eq!(db_bundle.fm_case_id.map(|id| id.into()), Some(case1_id),);
+        assert_eq!(
+            db_bundle.reason_for_creation, "test support bundle",
+            "DE-provided comment should be used as reason_for_creation",
+        );
 
         // The collector should have been activated.
         assert!(
@@ -1522,8 +1543,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle2_id,
                 requested_sitrep_id: sitrep2_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 
@@ -1621,8 +1642,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle_id,
                 requested_sitrep_id: sitrep_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 

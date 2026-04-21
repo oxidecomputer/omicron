@@ -27,10 +27,7 @@ use illumos_utils::opte::{
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::api::internal::shared::{
-    DelegatedZvol, ExternalIpConfig, NetworkInterface, ResolvedVpcFirewallRule,
-    SledIdentifiers,
-};
+use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
@@ -47,6 +44,7 @@ use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -1925,11 +1923,7 @@ impl Instance {
             requested_nics: local_config.nics,
             external_ips: local_config.external_ips,
             multicast_groups: local_config.multicast_groups,
-            firewall_rules: local_config
-                .firewall_rules
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            firewall_rules: local_config.firewall_rules,
             dhcp_config,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
@@ -2768,10 +2762,8 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
-    use omicron_common::api::internal::shared::{
-        DhcpConfig, ExternalIpv4Config, ExternalIpv6Config, SledIdentifiers,
-        SourceNatConfigV6,
-    };
+    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::ClientInfo;
@@ -2782,7 +2774,10 @@ mod tests {
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
     use sled_storage::config::MountConfig;
@@ -3636,11 +3631,7 @@ mod tests {
                 requested_nics: local_config.nics,
                 external_ips: local_config.external_ips,
                 multicast_groups: local_config.multicast_groups,
-                firewall_rules: local_config
-                    .firewall_rules
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
+                firewall_rules: local_config.firewall_rules,
                 dhcp_config,
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,

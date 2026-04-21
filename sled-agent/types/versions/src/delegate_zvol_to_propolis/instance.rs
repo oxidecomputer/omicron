@@ -6,8 +6,6 @@ use std::net::{IpAddr, SocketAddr};
 
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -19,6 +17,8 @@ use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::ResolvedVpcFirewallRule;
 use crate::v1::instance::VmmRuntimeState;
 use crate::v1::instance::VmmSpec;
+use crate::v1::inventory::NetworkInterface;
+use crate::v1::inventory::SourceNatConfig;
 use crate::v7;
 use crate::v7::instance::InstanceMulticastMembership;
 
