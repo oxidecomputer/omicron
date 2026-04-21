@@ -4,7 +4,7 @@
 
 //! Implementation of client methods that write to the ClickHouse database.
 
-// Copyright 2025 Oxide Computer Company
+// Copyright 2026 Oxide Computer Company
 
 use crate::Error;
 use crate::client::Client;
@@ -13,10 +13,12 @@ use crate::model::to_block::ToBlock as _;
 use crate::native::block::Block;
 use camino::Utf8PathBuf;
 use oximeter::Sample;
+use oximeter::TimeseriesName;
 use oximeter::TimeseriesSchema;
 use slog::debug;
+use slog::error;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::collections::btree_map::Entry;
 
 use super::Handle;
@@ -60,8 +62,8 @@ impl DbWrite for Client {
         let mut handle = self.claim_connection().await?;
         debug!(self.log, "unrolling {} total samples", samples.len());
         let UnrolledSampleRows { new_schema, blocks } =
-            self.unroll_samples(&mut handle, samples).await;
-        self.save_new_schema_or_remove(&mut handle, new_schema).await?;
+            self.unroll_samples(&mut handle, samples).await?;
+        self.insert_schema(&mut handle, new_schema).await?;
         self.insert_unrolled_samples(&mut handle, blocks).await
     }
 
@@ -188,39 +190,77 @@ impl TestDbWrite for Client {
 }
 
 impl Client {
-    // Unroll each sample into its consituent rows, after verifying the schema.
+    // Unroll each sample into its constituent rows, after verifying the schema
+    // against the database.
     //
-    // Note that this also inserts the schema into the internal cache, if it
-    // does not already exist there.
+    // For each unique timeseries name in the batch, the database is queried to
+    // fetch the existing schema. Samples whose derived schema conflicts with
+    // the database are skipped with a logged error. Schemas not yet present in
+    // the database are returned in `new_schema` for the caller to insert.
     pub(super) async fn unroll_samples(
         &self,
         handle: &mut Handle,
         samples: &[Sample],
-    ) -> UnrolledSampleRows {
-        let mut seen_timeseries = BTreeSet::new();
-        let mut table_blocks = BTreeMap::new();
-        let mut new_schema = BTreeMap::new();
-
+    ) -> Result<UnrolledSampleRows, Error> {
+        // First pass: collect one derived schema per unique timeseries name,
+        // constructing the schema only on the first occurrence of each name.
+        let mut derived: BTreeMap<TimeseriesName, TimeseriesSchema> =
+            BTreeMap::new();
         for sample in samples.iter() {
-            match self.verify_or_cache_sample_schema(handle, sample).await {
-                Err(_) => {
-                    // Skip the sample, but otherwise do nothing. The error is logged in the above
-                    // call.
-                    continue;
+            let name = sample
+                .timeseries_name
+                .parse::<TimeseriesName>()
+                .expect("sample timeseries name must be valid");
+            derived
+                .entry(name)
+                .or_insert_with(|| TimeseriesSchema::from(sample));
+        }
+
+        // Fetch whatever the database currently has for those names.
+        let db_schemas =
+            self.fetch_schema_from_db(handle, derived.keys()).await?;
+
+        // Classify each derived schema by consuming the map. Schemas already
+        // present in the database that match are dropped silently. Mismatched
+        // schemas are logged and their names added to `skip`. New schemas are
+        // moved into `new_schema` for insertion.
+        let mut skip = HashSet::new();
+        let mut new_schema = Vec::new();
+        for (name, derived_schema) in derived {
+            match db_schemas.get(&name) {
+                Some(existing) if existing == &derived_schema => {}
+                Some(existing) => {
+                    error!(
+                        self.log,
+                        "timeseries schema mismatch, samples will be skipped";
+                        "timeseries_name" => %name,
+                        "expected" => ?existing,
+                        "actual" => ?derived_schema,
+                    );
+                    skip.insert(String::from(name));
                 }
-                Ok(None) => {}
-                Ok(Some(schema)) => {
+                None => {
                     debug!(
                         self.log,
                         "new timeseries schema";
-                        "timeseries_name" => %schema.timeseries_name,
-                        "schema" => ?schema,
+                        "timeseries_name" => %name,
+                        "schema" => ?derived_schema,
                     );
-                    new_schema.insert(schema.timeseries_name.clone(), schema);
+                    new_schema.push(derived_schema);
                 }
             }
+        }
 
-            // Key on both the timeseries name and key, as timeseries may actually share keys.
+        // Second pass: build data blocks for all non-skipped samples.
+        let mut seen_timeseries = HashSet::new();
+        let mut table_blocks = BTreeMap::new();
+        for sample in samples.iter() {
+            if skip.contains(sample.timeseries_name.as_str()) {
+                continue;
+            }
+
+            // Key on both the timeseries name and key, as timeseries may
+            // actually share keys.
             let key = (
                 sample.timeseries_name.as_str(),
                 crate::timeseries_key(sample),
@@ -256,8 +296,7 @@ impl Client {
             seen_timeseries.insert(key);
         }
 
-        let new_schema = new_schema.into_values().collect();
-        UnrolledSampleRows { new_schema, blocks: table_blocks }
+        Ok(UnrolledSampleRows { new_schema, blocks: table_blocks })
     }
 
     // Insert unrolled sample rows into the corresponding tables.
@@ -290,63 +329,26 @@ impl Client {
         Ok(())
     }
 
-    // Save new schema to the database, or remove them from the cache on
-    // failure.
-    //
-    // This attempts to insert the provided schema into the timeseries schema
-    // table. If that fails, those schema are _also_ removed from the internal
-    // cache.
-    //
-    // TODO-robustness There's still a race possible here. If two distinct clients receive new
-    // but conflicting schema, they will both try to insert those at some point into the schema
-    // tables. It's not clear how to handle this, since ClickHouse provides no transactions.
-    // This is unlikely to happen at this point, because the design is such that there will be
-    // a single `oximeter` instance, which has one client object, connected to a single
-    // ClickHouse server. But once we start replicating data, the window within which the race
-    // can occur is much larger, since it includes the time it takes ClickHouse to replicate
-    // data between nodes.
-    //
-    // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
-    // receive a sample with a new schema, and both would then try to insert that schema.
-    pub(super) async fn save_new_schema_or_remove(
+    // Insert new timeseries schema into the database.
+    pub(super) async fn insert_schema(
         &self,
         handle: &mut Handle,
         new_schema: Vec<TimeseriesSchema>,
     ) -> Result<(), Error> {
-        if !new_schema.is_empty() {
-            debug!(
-                self.log,
-                "inserting {} new timeseries schema",
-                new_schema.len()
-            );
-            let body = const_format::formatcp!(
-                "INSERT INTO {}.timeseries_schema FORMAT Native",
-                crate::DATABASE_NAME
-            );
-            let block = TimeseriesSchema::to_block(&new_schema)?;
-
-            // Try to insert the schema.
-            //
-            // If this fails, be sure to remove the schema we've added from the
-            // internal cache. Since we check the internal cache first for
-            // schema, if we fail here but _don't_ remove the schema, we'll
-            // never end up inserting the schema, but we will insert samples.
-            if let Err(e) = self.insert_native(handle, &body, block).await {
-                debug!(
-                    self.log,
-                    "failed to insert new schema, removing from cache";
-                    "error" => ?e,
-                );
-                let mut schema = self.schema.lock().await;
-                for schema_to_remove in new_schema.iter() {
-                    schema
-                        .remove(&schema_to_remove.timeseries_name)
-                        .expect("New schema should have been cached");
-                }
-                return Err(e);
-            }
+        if new_schema.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        debug!(
+            self.log,
+            "inserting {} new timeseries schema",
+            new_schema.len()
+        );
+        let body = const_format::formatcp!(
+            "INSERT INTO {}.timeseries_schema FORMAT Native",
+            crate::DATABASE_NAME
+        );
+        let block = TimeseriesSchema::to_block(&new_schema)?;
+        self.insert_native(handle, &body, block).await.map(|_| ())
     }
 
     // Run one or more SQL statements.
