@@ -78,7 +78,7 @@ pub enum VmmState {
 }
 
 /// The dynamic runtime properties of an individual VMM process.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub struct VmmRuntimeState {
     /// The last state reported by this VMM.
     pub state: VmmState,
@@ -90,7 +90,7 @@ pub struct VmmRuntimeState {
 }
 
 /// A wrapper type containing a sled's total knowledge of the state of a VMM.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub struct SledVmmState {
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
@@ -110,7 +110,7 @@ pub struct Migrations<'state> {
 
 /// An update from a sled regarding the state of a migration, indicating the
 /// role of the VMM whose migration state was updated.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub struct MigrationRuntimeState {
     pub migration_id: Uuid,
     pub state: MigrationState,

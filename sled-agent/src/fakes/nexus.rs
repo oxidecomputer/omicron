@@ -15,10 +15,10 @@ use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use sled_agent_types::instance::SledVmmState;
 use sled_agent_types_versions::v1::instance::VmmPathParam;
 use transient_dns_server::TransientDnsServer;
 

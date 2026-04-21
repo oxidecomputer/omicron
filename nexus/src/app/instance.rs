@@ -62,7 +62,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIps;
 use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
@@ -83,6 +82,8 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use sled_agent_types::instance as sled_agent;
+use sled_agent_types::instance::SledVmmState;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
@@ -1145,11 +1146,11 @@ impl super::Nexus {
         &self,
         propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
-    ) -> Result<Option<nexus::SledVmmState>, InstanceStateChangeError> {
+    ) -> Result<Option<SledVmmState>, InstanceStateChangeError> {
         let sa = self.sled_client(&sled_id).await?;
         sa.vmm_unregister(propolis_id)
             .await
-            .map(|res| res.into_inner().updated_runtime.map(Into::into))
+            .map(|res| res.into_inner().updated_runtime)
             .map_err(|e| {
                 InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
             })
@@ -1384,7 +1385,7 @@ impl super::Nexus {
                         &VmmPutStateBody { state: requested.into() },
                     )
                     .await
-                    .map(|res| res.into_inner().updated_runtime.map(Into::into))
+                    .map(|res| res.into_inner().updated_runtime)
                     .map_err(|e| SledAgentInstanceError(e));
 
                 // If the operation succeeded, write the instance state back,
@@ -1651,15 +1652,15 @@ impl super::Nexus {
         // the sled-agent to create the VMM in. Once sled-agent acknowledges our
         // registration request, we will advance the database record to the new
         // state.
-        let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
+        let vmm_runtime = sled_agent::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            gen_: initial_vmm.generation.next(),
+            generation: initial_vmm.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
-                    sled_agent_client::types::VmmState::Migrating
+                    sled_agent::VmmState::Migrating
                 }
                 InstanceRegisterReason::Start { .. } => {
-                    sled_agent_client::types::VmmState::Starting
+                    sled_agent::VmmState::Starting
                 }
             },
         };
@@ -1681,7 +1682,7 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| res.into_inner().into())
+            .map(|res| res.into_inner())
             .map_err(|e| SledAgentInstanceError(e));
 
         match instance_register_result {
@@ -1945,7 +1946,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
-        new_runtime_state: &nexus::SledVmmState,
+        new_runtime_state: &sled_agent::SledVmmState,
     ) -> Result<(), Error> {
         if let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
@@ -2737,7 +2738,7 @@ pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
     propolis_id: PropolisUuid,
-    new_runtime_state: &nexus::SledVmmState,
+    new_runtime_state: &SledVmmState,
 ) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
     let migrations = new_runtime_state.migrations();
     info!(opctx.log, "received new VMM runtime state from sled agent";

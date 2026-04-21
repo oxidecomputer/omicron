@@ -6802,6 +6802,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -7141,6 +7142,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types-versions",
  "uuid",
 ]
 
@@ -8722,6 +8724,7 @@ dependencies = [
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-async",

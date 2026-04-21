@@ -7,7 +7,6 @@
 use std::net::SocketAddr;
 
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::ExternalIpConfig;
@@ -19,6 +18,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::v1::instance::InstanceMetadata;
+use crate::v1::instance::VmmRuntimeState;
 use crate::v7::instance::InstanceMulticastMembership;
 use crate::v18::attached_subnet::AttachedSubnet;
 use crate::v29::instance::VmmSpec;

@@ -27,7 +27,6 @@ use illumos_utils::opte::{
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     DelegatedZvol, ExternalIpConfig, NetworkInterface, ResolvedVpcFirewallRule,
     SledIdentifiers,

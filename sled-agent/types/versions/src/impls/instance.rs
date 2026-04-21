@@ -41,6 +41,21 @@ impl VmmStateRequested {
     }
 }
 
+impl From<VmmState> for omicron_common::api::external::InstanceState {
+    fn from(state: VmmState) -> Self {
+        match state {
+            VmmState::Starting => Self::Starting,
+            VmmState::Running => Self::Running,
+            VmmState::Stopping => Self::Stopping,
+            VmmState::Stopped => Self::Stopped,
+            VmmState::Rebooting => Self::Rebooting,
+            VmmState::Migrating => Self::Migrating,
+            VmmState::Failed => Self::Failed,
+            VmmState::Destroyed => Self::Destroyed,
+        }
+    }
+}
+
 impl VmmSpec {
     pub fn crucible_backends(
         &self,

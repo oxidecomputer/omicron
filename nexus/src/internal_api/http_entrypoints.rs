@@ -33,7 +33,7 @@ use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
-use omicron_common::api::internal::nexus::SledVmmState;
+use sled_agent_types_versions::v1::instance::SledVmmState;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
