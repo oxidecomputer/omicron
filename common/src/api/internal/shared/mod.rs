@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 mod private_ip_config;
 
-// Re-export latest version of all NIC-related types.
+// Re-export private IP config types.
 pub use private_ip_config::PrivateIpConfig;
 pub use private_ip_config::PrivateIpConfigError;
 pub use private_ip_config::PrivateIpv4Config;
