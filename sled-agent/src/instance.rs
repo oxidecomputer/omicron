@@ -2768,7 +2768,6 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
-    use omicron_common::api::internal::nexus::VmmState;
     use omicron_common::api::internal::shared::{
         DhcpConfig, ExternalIpv4Config, ExternalIpv6Config, SledIdentifiers,
         SourceNatConfigV6,
@@ -2785,6 +2784,7 @@ mod tests {
     };
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::zone_bundle::CleanupContext;
+    use sled_agent_types_versions::v1;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
@@ -2818,10 +2818,15 @@ mod tests {
         fn cpapi_instances_put(
             &self,
             _propolis_id: PropolisUuid,
-            new_runtime_state: SledVmmState,
+            new_runtime_state: v1::instance::SledVmmState,
         ) -> Result<(), omicron_common::api::external::Error> {
+            // useless `Into`/`From` conversion is allowed here because
+            // `v1::instance::SledVmmState` and `latest::instance::SledVmmState`
+            // are *currently* the same type, but may not be forever...
+            #[allow(clippy::useless_conversion)]
+            let state = SledVmmState::from(new_runtime_state);
             self.observed_runtime_state
-                .send(ReceivedInstanceState::InstancePut(new_runtime_state))
+                .send(ReceivedInstanceState::InstancePut(state))
                 .map_err(|_| {
                     omicron_common::api::external::Error::internal_error(
                         "couldn't send SledInstanceState to test driver",
