@@ -118,6 +118,14 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let new_state = new_runtime_state.into_inner();
+        // useless `Into`/`From` conversion is allowed here because
+        // `v1::instance::SledVmmState` and `latest::instance::SledVmmState` are
+        // *currently* the same type, but may not be forever. in practice, this
+        // conversion is going to last until "my next PR", at which point, it
+        // just gets deleted, so, whatever...
+        #[allow(clippy::useless_conversion)]
+        let new_state =
+            sled_agent_types::instance::SledVmmState::from(new_state);
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus
