@@ -456,7 +456,11 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
-                oximeter_db::Client::new_with_resolver(native_resolver, &log)
+                oximeter_db::Client::new_with_resolver(
+                    native_resolver,
+                    "nexus-oximeter-reader",
+                    &log,
+                )
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };

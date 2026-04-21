@@ -9,10 +9,10 @@ use std::net::IpAddr;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, Name, NameOrId,
 };
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::v1::inventory::NetworkInterface as NetworkInterfaceV1;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]

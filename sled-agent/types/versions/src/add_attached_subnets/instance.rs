@@ -4,8 +4,6 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::external_ip::v1::ExternalIpConfig;
 use omicron_uuid_kinds::InstanceUuid;
 
 use crate::v10::instance::ResolvedVpcFirewallRule;
@@ -17,6 +15,8 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
+use crate::v10::inventory::NetworkInterface;
+use crate::v11::instance::ExternalIpConfig;
 use crate::v18::attached_subnet::AttachedSubnet;
 
 use crate::v17;
