@@ -1449,7 +1449,6 @@ impl DbArgs {
                         cmd_db_sled_instances(
                             &opctx,
                             &datastore,
-                            &fetch_opts,
                             args,
                         )
                         .await
@@ -4701,7 +4700,6 @@ async fn cmd_db_sleds(
 async fn cmd_db_sled_instances(
     opctx: &OpContext,
     datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
     args: &SledInstancesArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_schema::schema::instance::dsl;
@@ -4792,100 +4790,47 @@ async fn cmd_db_sled_instances(
         });
     }
 
-    // Step 2: Fetch all non-deleted instances joined with their
-    // active VMMs.
-    let limit = fetch_opts.fetch_limit;
-    let instances: Vec<InstanceAndActiveVmm> = dsl::instance
-        .filter(dsl::time_deleted.is_null())
-        .left_join(
-            vmm_dsl::vmm.on(vmm_dsl::id
-                .nullable()
-                .eq(dsl::active_propolis_id)
-                .and(vmm_dsl::time_deleted.is_null())),
-        )
-        .limit(i64::from(u32::from(limit)))
-        .select((Instance::as_select(), Option::<Vmm>::as_select()))
-        .load_async(&*datastore.pool_connection_for_tests().await?)
-        .await
-        .context("loading instances")?
-        .into_iter()
-        .map(|i: (Instance, Option<Vmm>)| i.into())
-        .collect();
-
-    check_limit(&instances, limit, || "listing instances".to_string());
-
-    // Step 3: Group instances by sled_id (skip those with no
-    // active VMM / no sled).
-    let mut instances_by_sled: BTreeMap<SledUuid, Vec<&InstanceAndActiveVmm>> =
-        BTreeMap::new();
-    let mut unmatched: Vec<&InstanceAndActiveVmm> = Vec::new();
-
-    for inst in &instances {
-        let sled_id = match inst.sled_id() {
-            Some(id) => id,
-            None => continue, // no active VMM, skip
-        };
-        if sled_info.contains_key(&sled_id) {
-            instances_by_sled.entry(sled_id).or_default().push(inst);
-        } else {
-            unmatched.push(inst);
-        }
-    }
-
-    // Step 4: Sort sleds by slot number so that Sled 2 comes
+    // Step 2: Sort sleds by slot number so that Sled 2 comes
     // before Sled 10.
-    let mut sorted_sleds: Vec<_> = instances_by_sled
-        .iter()
-        .filter_map(|(sled_id, insts)| {
-            sled_info.get(sled_id).map(|info| (info, *sled_id, insts))
-        })
-        .collect();
-    sorted_sleds.sort_by(|(a, _, _), (b, _, _)| a.sp_slot.cmp(&b.sp_slot));
+    let mut sorted_sleds: Vec<_> = sled_info.iter().collect();
+    sorted_sleds.sort_by(|(_, a), (_, b)| a.sp_slot.cmp(&b.sp_slot));
 
-    for (info, sled_id, insts) in &sorted_sleds {
+    // Step 3: For each sled, query for instances running on it
+    // and print the results.
+    for (sled_id, info) in &sorted_sleds {
+        let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())
+                    .and(vmm_dsl::sled_id.eq(sled_id.into_untyped_uuid()))),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("loading instances")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
         println!(
             "{} (serial: {})  sled_id: {}",
             info.slot_label(),
             info.serial,
             sled_id,
         );
-        print_instance_table(insts);
+        if !instances.is_empty() {
+            print_instance_table(&instances);
+        }
         println!();
-    }
-
-    // Step 5: Show instances on sleds not in inventory, but only
-    // when no filters are active (if the user asked for specific
-    // sleds, everything else is irrelevant, not "unknown").
-    let has_filter = args.sled_numbers.is_some()
-        || args.serials.is_some()
-        || args.sled_ids.is_some();
-    if !has_filter && !unmatched.is_empty() {
-        // Group unmatched by sled_id.
-        let mut unmatched_by_sled: BTreeMap<
-            SledUuid,
-            Vec<&InstanceAndActiveVmm>,
-        > = BTreeMap::new();
-        for inst in &unmatched {
-            if let Some(sled_id) = inst.sled_id() {
-                unmatched_by_sled.entry(sled_id).or_default().push(inst);
-            }
-        }
-        for (sled_id, insts) in &unmatched_by_sled {
-            println!("??? (serial: unknown)  sled_id: {}", sled_id,);
-            eprintln!(
-                "  NOTE: sled {} not found in latest \
-                 inventory collection",
-                sled_id,
-            );
-            print_instance_table(insts);
-            println!();
-        }
     }
 
     Ok(())
 }
 
-fn print_instance_table(instances: &[&InstanceAndActiveVmm]) {
+fn print_instance_table(instances: &[InstanceAndActiveVmm]) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct SledInstanceRow {
