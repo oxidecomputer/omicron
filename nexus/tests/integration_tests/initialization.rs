@@ -8,7 +8,7 @@ use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::address::MGS_PORT;
-use oxide_debug_dropbox::DebugDropbox;
+use omicron_debug_dropbox::DebugDropbox;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::sync::Arc;

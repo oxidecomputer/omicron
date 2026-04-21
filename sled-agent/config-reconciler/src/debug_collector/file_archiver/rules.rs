@@ -123,7 +123,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
     // unwrap(): DEBUG_DROPBOX_PATH is a path under `/`.  We should never fail
     // to strip the leading '/'.
     let debug_dropbox: Utf8PathBuf =
-        Utf8Path::new(oxide_debug_dropbox::DEBUG_DROPBOX_PATH)
+        Utf8Path::new(omicron_debug_dropbox::DEBUG_DROPBOX_PATH)
             .strip_prefix("/")
             .unwrap()
             .to_owned();

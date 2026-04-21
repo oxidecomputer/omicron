@@ -42,7 +42,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
-use oxide_debug_dropbox::DebugDropbox;
+use omicron_debug_dropbox::DebugDropbox;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;

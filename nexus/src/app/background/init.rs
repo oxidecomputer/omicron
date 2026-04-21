@@ -1338,7 +1338,7 @@ pub struct BackgroundTasksData {
     /// Console session absolute timeout, from
     /// `pkg.console.session_absolute_timeout_minutes`.
     pub console_session_absolute_timeout: chrono::TimeDelta,
-    pub debug_dropbox: Arc<oxide_debug_dropbox::Producer>,
+    pub debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

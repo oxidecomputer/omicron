@@ -36,8 +36,8 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use oxide_debug_dropbox::DebugDropbox;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
@@ -326,7 +326,7 @@ pub struct Nexus {
     quiesce: NexusQuiesceHandle,
 
     /// dropbox producer for Reconfigurator
-    debug_dropbox_reconfigurator: Arc<oxide_debug_dropbox::Producer>,
+    debug_dropbox_reconfigurator: Arc<omicron_debug_dropbox::Producer>,
 }
 
 impl Nexus {

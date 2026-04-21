@@ -57,7 +57,7 @@ enum PlanError {
     #[error("failed to assemble debug state")]
     AssembleDebugState(#[source] anyhow::Error),
     #[error("failed to save debug state to dropbox")]
-    SaveDebugState(#[from] oxide_debug_dropbox::DepositError),
+    SaveDebugState(#[from] omicron_debug_dropbox::DepositError),
 }
 
 /// Background task that runs the update planner.
@@ -68,7 +68,7 @@ pub struct BlueprintPlanner {
     rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
     tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
-    debug_dropbox: Arc<oxide_debug_dropbox::Producer>,
+    debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
 }
 
 /// The default number of blueprints, beyond which the auto-planner will stop
@@ -93,7 +93,7 @@ impl BlueprintPlanner {
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
-        debug_dropbox: Arc<oxide_debug_dropbox::Producer>,
+        debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
     ) -> Self {
         let (tx_planned, _) = watch::channel(None);
         Self {
@@ -510,9 +510,9 @@ mod test {
     use nexus_types::deployment::{
         PendingMgsUpdates, ReconfiguratorConfig, ReconfiguratorConfigView,
     };
+    use omicron_debug_dropbox::DebugDropbox;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use oxide_debug_dropbox::DebugDropbox;
     use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =

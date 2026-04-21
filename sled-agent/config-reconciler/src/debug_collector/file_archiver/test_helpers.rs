@@ -259,7 +259,7 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 } else {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
                 }
-            } else if s.contains(oxide_debug_dropbox::DEBUG_DROPBOX_PATH) {
+            } else if s.contains(omicron_debug_dropbox::DEBUG_DROPBOX_PATH) {
                 Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
             } else {
                 Err(anyhow!("unknown non-global zone test file kind"))
