@@ -18,7 +18,9 @@ use dropshot_api_manager_types::api_versions;
 use hyper::header;
 use installinator_common_versions::latest;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::ArtifactHashId;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use tufaceous_artifact::ArtifactHash;
 use update_engine::{NestedSpec, events::EventReport};
 
 api_versions!([
@@ -40,7 +42,7 @@ pub trait InstallinatorApi {
     }]
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ArtifactHashId>,
+        path: Path<GetArtifactPathParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
 
     /// Report progress and completion to the server.
@@ -59,6 +61,15 @@ pub trait InstallinatorApi {
         path: Path<latest::report::ReportQuery>,
         report: TypedBody<EventReport<NestedSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetArtifactPathParams {
+    /// This parameter is ignored. Recommend using "any".
+    pub kind: String,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
 }
 
 /// Add a content length header to a response.

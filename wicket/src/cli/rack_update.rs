@@ -25,9 +25,9 @@ use crate::{
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
-use omicron_common::update::ArtifactId;
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
+use tufaceous_artifact::DisplayTags;
 use update_engine::{
     AbortReason, EventBuffer, ExecutionStatus, FailureReason, NestedError,
     StepKey, StepSpec, TerminalKind,
@@ -419,13 +419,8 @@ fn build_rack_update_status(
     response: GetArtifactsAndEventReportsResponse,
     selector: &ComponentIdSelector,
 ) -> Result<RackUpdateStatus> {
-    let artifacts: Vec<ArtifactId> = response
-        .artifacts
-        .into_iter()
-        .map(|a| a.artifact_id)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
+    let mut artifacts = response.artifacts;
+    artifacts.sort();
 
     let event_reports = parse_event_report_map(log, response.event_reports);
 
@@ -528,11 +523,10 @@ fn write_status_table(
     out: &mut dyn Write,
     status: &RackUpdateStatus,
 ) -> Result<()> {
-    #[derive(tabled::Tabled)]
+    #[derive(PartialEq, Eq, PartialOrd, Ord, tabled::Tabled)]
     #[tabled(rename_all = "UPPERCASE")]
     struct ArtifactRow {
-        name: String,
-        kind: String,
+        tags: String,
         version: String,
     }
 
@@ -560,15 +554,15 @@ fn write_status_table(
             .unwrap_or("(none)")
     )?;
 
-    let artifact_rows: Vec<ArtifactRow> = status
+    let mut artifact_rows: Vec<ArtifactRow> = status
         .artifacts
         .iter()
         .map(|a| ArtifactRow {
-            name: a.name.clone(),
-            kind: a.kind.to_string(),
+            tags: DisplayTags::from(&a.tags).to_string(),
             version: a.version.to_string(),
         })
         .collect();
+    artifact_rows.sort_unstable();
     let artifact_table = tabled::Table::new(artifact_rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 2, 0, 0))

@@ -24,10 +24,10 @@ use proptest::{collection::vec_deque, prelude::*};
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
-use tufaceous_artifact::ArtifactHashId;
 use update_engine::events::StepEventIsTerminal;
 
 use crate::{
+    artifact::ArtifactLookupId,
     errors::{DiscoverPeersError, HttpError},
     fetch::{FetchArtifactImpl, FetchReceiver},
     peers::{PeerAddress, PeerAddresses},
@@ -252,7 +252,7 @@ impl FetchArtifactImpl for MockFetchBackend {
         &self,
         peer: PeerAddress,
         // We don't (yet) use the artifact ID in MockPeers
-        _artifact_hash_id: ArtifactHashId,
+        _hash: ArtifactLookupId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         let peer_data = self
             .get(peer)
@@ -690,7 +690,7 @@ mod tests {
         errors::DiscoverPeersError,
         fetch::{FetchArtifactBackend, FetchedArtifact},
         reporter::{ProgressReporter, ReportProgressBackend},
-        test_helpers::{dummy_artifact_hash_id, with_test_runtime},
+        test_helpers::with_test_runtime,
     };
 
     use bytes::Buf;
@@ -703,7 +703,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::UnboundedReceiverStream;
-    use tufaceous_artifact::KnownArtifactKind;
+    use tufaceous_artifact::ArtifactHash;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]
@@ -846,7 +846,10 @@ mod tests {
                     anyhow::anyhow!("ran out of attempts"),
                 )),
             },
-            &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
+            ArtifactLookupId {
+                kind: "test-control-plane",
+                hash: ArtifactHash([0; 32]),
+            },
         )
         .await
     }
