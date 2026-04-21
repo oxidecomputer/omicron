@@ -86,7 +86,6 @@ use sled_agent_resolvable_files::{
 };
 use sled_agent_scrimlet_reconcilers::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::instance::ExternalIpConfig;
-use sled_agent_types::instance::ExternalIps;
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
