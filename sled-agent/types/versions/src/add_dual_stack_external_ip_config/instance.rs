@@ -13,7 +13,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,6 +29,7 @@ use crate::v7::instance::InstanceMulticastMembership;
 use crate::v9::instance::DelegatedZvol;
 use crate::v10;
 use crate::v10::instance::ResolvedVpcFirewallRule;
+use crate::v10::inventory::NetworkInterface;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.

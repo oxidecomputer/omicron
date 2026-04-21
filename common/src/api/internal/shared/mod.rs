@@ -4,7 +4,6 @@
 
 //! Types shared between Nexus and Sled Agent.
 
-use super::nexus::HostIdentifier;
 use crate::{
     api::external::{self, MacAddr, Vni},
     disk::DatasetName,
@@ -30,11 +29,13 @@ use std::{
 use strum::EnumCount;
 use uuid::Uuid;
 
-pub mod network_interface;
+mod private_ip_config;
 
-// Re-export latest version of all NIC-related types.
-pub use network_interface::NetworkInterfaceKind;
-pub use network_interface::*;
+// Re-export private IP config types.
+pub use private_ip_config::PrivateIpConfig;
+pub use private_ip_config::PrivateIpConfigError;
+pub use private_ip_config::PrivateIpv4Config;
+pub use private_ip_config::PrivateIpv6Config;
 
 /// Description of source IPs allowed to reach rack services.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -126,19 +127,6 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
 pub struct ResolvedVpcRoute {
     pub dest: IpNet,
     pub target: RouterTarget,
-}
-
-/// VPC firewall rule after object name resolution has been performed by Nexus
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-pub struct ResolvedVpcFirewallRule {
-    pub status: external::VpcFirewallRuleStatus,
-    pub direction: external::VpcFirewallRuleDirection,
-    pub targets: Vec<NetworkInterface>,
-    pub filter_hosts: Option<HashSet<HostIdentifier>>,
-    pub filter_ports: Option<Vec<external::L4PortRange>>,
-    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
-    pub action: external::VpcFirewallRuleAction,
-    pub priority: external::VpcFirewallRulePriority,
 }
 
 /// A mapping from a virtual NIC to a physical host

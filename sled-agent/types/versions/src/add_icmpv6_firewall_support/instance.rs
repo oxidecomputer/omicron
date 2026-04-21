@@ -13,7 +13,6 @@ use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -23,6 +22,7 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v7::instance::InstanceMulticastMembership;
 use crate::v10;
+use crate::v10::inventory::NetworkInterface;
 use crate::v11::instance::ExternalIpConfig;
 use crate::v18;
 use crate::v18::attached_subnet::AttachedSubnet;
@@ -128,23 +128,6 @@ impl From<v29::instance::InstanceEnsureBody> for InstanceEnsureBody {
             migration_id: old.migration_id,
             propolis_addr: old.propolis_addr,
             metadata: old.metadata,
-        }
-    }
-}
-
-impl From<ResolvedVpcFirewallRule>
-    for omicron_common::api::internal::shared::ResolvedVpcFirewallRule
-{
-    fn from(rule: ResolvedVpcFirewallRule) -> Self {
-        Self {
-            status: rule.status,
-            direction: rule.direction,
-            targets: rule.targets,
-            filter_hosts: rule.filter_hosts,
-            filter_ports: rule.filter_ports,
-            filter_protocols: rule.filter_protocols,
-            action: rule.action,
-            priority: rule.priority,
         }
     }
 }

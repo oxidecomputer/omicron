@@ -75,7 +75,8 @@ progenitor::generate_api!(
         MeasurementLog = sled_agent_types_versions::latest::rot::MeasurementLog,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        NetworkInterface = sled_agent_types_versions::latest::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
         Nonce = sled_agent_types_versions::latest::rot::Nonce,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
@@ -91,7 +92,7 @@ progenitor::generate_api!(
         PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
         RackNetworkConfig = sled_agent_types_versions::latest::early_networking::RackNetworkConfig,
         ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
-        ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
+        ResolvedVpcFirewallRule = sled_agent_types_versions::latest::instance::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
         Rot = sled_agent_types_versions::latest::rot::Rot,
@@ -271,21 +272,6 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
             Udp => Self::Udp,
             Icmp(v) => Self::Icmp(v),
             Icmp6(v) => Self::Icmp6(v),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
-    for types::NetworkInterfaceKind
-{
-    fn from(
-        s: omicron_common::api::internal::shared::NetworkInterfaceKind,
-    ) -> Self {
-        use omicron_common::api::internal::shared::NetworkInterfaceKind::*;
-        match s {
-            Instance { id } => Self::Instance(id),
-            Service { id } => Self::Service(id),
-            Probe { id } => Self::Probe(id),
         }
     }
 }

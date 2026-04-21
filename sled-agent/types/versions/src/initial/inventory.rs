@@ -15,8 +15,11 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
+use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::Vni;
 use omicron_common::disk::{
     DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
 };
@@ -28,6 +31,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
+use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
@@ -36,6 +40,7 @@ use serde::{Deserialize, Serialize};
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
+use uuid::Uuid;
 
 use crate::impls::inventory::SourceNatConfigError;
 
@@ -881,4 +886,57 @@ impl<'de> Deserialize<'de> for SourceNatConfig {
         SourceNatConfig::new(shadow.ip, shadow.first_port, shadow.last_port)
             .map_err(D::Error::custom)
     }
+}
+
+/// The type of network interface
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    Hash,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NetworkInterfaceKind {
+    /// A vNIC attached to a guest instance
+    Instance { id: Uuid },
+    /// A vNIC associated with an internal service
+    Service { id: Uuid },
+    /// A vNIC associated with a probe
+    Probe { id: Uuid },
+}
+
+/// Information required to construct a virtual network interface
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffable,
+)]
+pub struct NetworkInterface {
+    pub id: Uuid,
+    pub kind: NetworkInterfaceKind,
+    pub name: Name,
+    pub ip: IpAddr,
+    pub mac: MacAddr,
+    pub subnet: IpNet,
+    pub vni: Vni,
+    pub primary: bool,
+    pub slot: u8,
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }

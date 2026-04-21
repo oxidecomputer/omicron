@@ -24,9 +24,9 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
+use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 use std::net::IpAddr;
 
 /// A base BGP configuration.

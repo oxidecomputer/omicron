@@ -133,6 +133,7 @@ pub mod inventory {
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
     pub use crate::v1::inventory::MupdateOverrideNonBootInventory;
+    pub use crate::v1::inventory::NetworkInterfaceKind;
     pub use crate::v1::inventory::OmicronZoneDataset;
     pub use crate::v1::inventory::OmicronZoneImageSource;
     pub use crate::v1::inventory::OrphanedDataset;
@@ -142,6 +143,8 @@ pub mod inventory {
     pub use crate::v1::inventory::SledRole;
     pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneKind;
+
+    pub use crate::v10::inventory::NetworkInterface;
 
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
