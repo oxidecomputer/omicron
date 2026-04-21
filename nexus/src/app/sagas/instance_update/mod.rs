@@ -365,6 +365,7 @@ use nexus_types::identity::Resource;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::SledVmmState;
+use omicron_common::backoff;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -1410,6 +1411,9 @@ fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
     }
 }
 
+const RETRY_WARN_AFTER: std::time::Duration =
+    std::time::Duration::from_secs(20);
+
 /// Unlock the instance record while unwinding.
 ///
 /// This is factored out of the actual reverse action, because the `Params` type
@@ -1448,7 +1452,6 @@ async fn unwind_instance_lock(
     //   happily because it doesn't matter if the instance is actually unlocked.
     use dropshot::HttpError;
     use futures::{TryFutureExt, future};
-    use omicron_common::backoff;
 
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
@@ -1462,9 +1465,6 @@ async fn unwind_instance_lock(
         "instance_id" => %instance_id,
         "lock" => ?lock,
     );
-
-    const WARN_DURATION: std::time::Duration =
-        std::time::Duration::from_secs(20);
 
     let did_unlock = backoff::retry_notify_ext(
         // This is an internal service query to CockroachDB.
@@ -1505,7 +1505,7 @@ async fn unwind_instance_lock(
                     "call_count" => call_count,
                     "total_duration" => ?total_duration,
                 );
-            } else if total_duration > WARN_DURATION {
+            } else if total_duration > RETRY_WARN_AFTER {
                 warn!(
                     log,
                     "instance update: server error while unlocking instance, \

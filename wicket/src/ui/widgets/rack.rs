@@ -189,15 +189,15 @@ impl ComponentPresence {
             (None, true) => Self::Suspicious,
             (Some(ignition), false) => match ignition {
                 // No ignition and no state = no sled.
-                SpIgnition::No => Self::NotPresent,
+                SpIgnition::Absent => Self::NotPresent,
                 // Ignition says it's present but we have no state - suspect!
-                SpIgnition::Yes { .. } => Self::Suspicious,
+                SpIgnition::Present { .. } => Self::Suspicious,
             },
             (Some(ignition), true) => match ignition {
                 // No ignition but we have state - suspect!
-                SpIgnition::No => Self::Suspicious,
+                SpIgnition::Absent => Self::Suspicious,
                 // Ignition and state = sled present.
-                SpIgnition::Yes { .. } => Self::Present,
+                SpIgnition::Present { .. } => Self::Present,
             },
         }
     }

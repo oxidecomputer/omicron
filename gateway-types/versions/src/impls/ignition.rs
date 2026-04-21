@@ -30,6 +30,25 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
     }
 }
 
+impl SpIgnition {
+    /// Returns `true` if there is a SP present in this slot and it is powered
+    /// on.
+    pub fn is_sp_running(&self) -> bool {
+        match self {
+            Self::Present { power, .. } => *power, // ...better go catch it!
+            Self::Absent => false,
+        }
+    }
+
+    /// Returns `true` if the SP fault bit is set.
+    pub fn is_sp_faulted(&self) -> bool {
+        match self {
+            Self::Present { flt_sp, .. } => *flt_sp,
+            Self::Absent => false,
+        }
+    }
+}
+
 impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
     fn from(st: gateway_messages::ignition::SystemType) -> Self {
         use gateway_messages::ignition::SystemType;

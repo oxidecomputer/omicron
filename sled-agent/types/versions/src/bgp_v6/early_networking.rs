@@ -468,6 +468,9 @@ impl RouterLifetimeConfig {
     // Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
     const MAX: u16 = 9000;
 
+    /// Construct a new `RouterLifetimeConfig`
+    ///
+    /// Fails if `v` is above the maximum allowable value.
     pub fn new(v: u16) -> Result<Self, RouterLifetimeConfigError> {
         if v > Self::MAX {
             return Err(RouterLifetimeConfigError::ValueTooLarge);
@@ -528,12 +531,12 @@ impl JsonSchema for RouterLifetimeConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum RouterLifetimeConfigError {
     #[error(
-        "router lifetime config cannot be greater than {}",
+        "router_lifetime cannot be greater than {}",
         RouterLifetimeConfig::MAX
     )]
     ValueTooLarge,
     #[error(
-        "max path value must be an integer between {} and {}",
+        "router_lifetime must be an integer between {} and {}",
         RouterLifetimeConfig::DEFAULT,
         RouterLifetimeConfig::MAX
     )]
