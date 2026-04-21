@@ -5,7 +5,7 @@
 use super::rng;
 use anyhow::Context;
 use fm::analysis_reports;
-use iddqd::id_ord_map::{self, IdOrdMap};
+use iddqd::id_ord_map::{Entry, IdOrdMap, RefMut};
 use nexus_types::alert::AlertClass;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
@@ -52,30 +52,33 @@ impl AllCases {
     pub fn open_case(
         &mut self,
         de: fm::DiagnosisEngineKind,
-    ) -> iddqd::id_ord_map::RefMut<'_, CaseBuilder> {
-        let (id, case_rng) = self.rng.next_case();
+    ) -> RefMut<'_, CaseBuilder> {
         let sitrep_id = self.sitrep_id;
-        let case = match self.cases.entry(&id) {
-            iddqd::id_ord_map::Entry::Occupied(_) => {
-                panic!("generated a colliding UUID!")
+        let (id, case_rng) = loop {
+            let (id, case_rng) = self.rng.next_case();
+            if !self.cases.contains_key(&id) {
+                break (id, case_rng);
             }
-            iddqd::id_ord_map::Entry::Vacant(entry) => {
-                let case = fm::Case {
-                    id,
-                    metadata: fm::case::Metadata {
-                        created_sitrep_id: self.sitrep_id,
-                        closed_sitrep_id: None,
-                        de,
-                        comment: String::new(),
-                    },
-                    ereports: Default::default(),
-                    alerts_requested: Default::default(),
-                    support_bundles_requested: Default::default(),
-                };
-                let mut builder =
-                    CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
-                builder.report_log.entry("opened case");
-                entry.insert(builder)
+        };
+        let case = fm::Case {
+            id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: self.sitrep_id,
+                closed_sitrep_id: None,
+                de,
+                comment: String::new(),
+            },
+            ereports: Default::default(),
+            alerts_requested: Default::default(),
+            support_bundles_requested: Default::default(),
+        };
+        let mut builder =
+            CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
+        builder.report_log.entry("opened case");
+        let case = match self.cases.entry(&id) {
+            Entry::Vacant(entry) => entry.insert(builder),
+            Entry::Occupied(_) => {
+                unreachable!("UUID was just confirmed vacant")
             }
         };
 
@@ -96,7 +99,7 @@ impl AllCases {
     pub fn case_mut(
         &mut self,
         id: &CaseUuid,
-    ) -> Option<id_ord_map::RefMut<'_, CaseBuilder>> {
+    ) -> Option<RefMut<'_, CaseBuilder>> {
         self.cases.get_mut(id)
     }
 
@@ -130,21 +133,24 @@ impl CaseBuilder {
         alert: &impl serde::Serialize,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
-        let id = self.rng.next_alert();
-        let req = fm::case::AlertRequest {
-            id,
-            class,
-            requested_sitrep_id: self.sitrep_id,
-            payload: serde_json::to_value(&alert).with_context(|| {
-                format!("failed to serialize payload for {class:?} alert")
-            })?,
-            comment: comment.to_string(),
-        };
-        self.case.alerts_requested.insert_unique(req).map_err(|_| {
-            anyhow::anyhow!("an alert with ID {id:?} already exists")
+        let payload = serde_json::to_value(&alert).with_context(|| {
+            format!("failed to serialize payload for {class:?} alert")
         })?;
-
         let comment = comment.to_string();
+        let id = loop {
+            let id = self.rng.next_alert();
+            let req = fm::case::AlertRequest {
+                id,
+                class,
+                requested_sitrep_id: self.sitrep_id,
+                payload: payload.clone(),
+                comment: comment.clone(),
+            };
+            if self.case.alerts_requested.insert_unique(req).is_ok() {
+                break id;
+            }
+        };
+
         slog::info!(
             &self.log,
             "requested an alert";
@@ -165,23 +171,21 @@ impl CaseBuilder {
         &mut self,
         data_selection: BundleDataSelection,
         comment: impl ToString,
-    ) -> anyhow::Result<()> {
-        let id = self.rng.next_support_bundle();
-        let req = fm::case::SupportBundleRequest {
-            id,
-            requested_sitrep_id: self.sitrep_id,
-            data_selection,
-            comment: comment.to_string(),
-        };
-        self.case.support_bundles_requested.insert_unique(req).map_err(
-            |_| {
-                anyhow::anyhow!(
-                    "a support bundle request with ID {id:?} already exists"
-                )
-            },
-        )?;
-
+    ) {
         let comment = comment.to_string();
+        let id = loop {
+            let id = self.rng.next_support_bundle();
+            let req = fm::case::SupportBundleRequest {
+                id,
+                requested_sitrep_id: self.sitrep_id,
+                data_selection: data_selection.clone(),
+                comment: comment.clone(),
+            };
+            if self.case.support_bundles_requested.insert_unique(req).is_ok() {
+                break id;
+            }
+        };
+
         slog::info!(
             &self.log,
             "requested a support bundle";
@@ -192,8 +196,6 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
-
-        Ok(())
     }
 
     pub fn close(&mut self, comment: impl ToString) {
