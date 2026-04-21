@@ -109,6 +109,10 @@ pub mod instance {
     pub use crate::v29::instance::VmmSpec;
 
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
+    pub use crate::v32::instance::ExternalIpConfig;
+    pub use crate::v32::instance::ExternalIps;
+    pub use crate::v32::instance::ExternalIpv4Config;
+    pub use crate::v32::instance::ExternalIpv6Config;
     pub use crate::v32::instance::InstanceEnsureBody;
     pub use crate::v32::instance::InstanceSledLocalConfig;
 }
@@ -142,6 +146,10 @@ pub mod inventory {
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
+    pub use crate::v11::inventory::SourceNatConfig;
+    pub use crate::v11::inventory::SourceNatConfigGeneric;
+    pub use crate::v11::inventory::SourceNatConfigV4;
+    pub use crate::v11::inventory::SourceNatConfigV6;
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
@@ -173,6 +181,7 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
     pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
+    pub use crate::impls::inventory::SourceNatConfigError;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
     pub use crate::impls::inventory::ZpoolHealthParseError;
 }

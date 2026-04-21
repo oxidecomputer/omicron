@@ -38,7 +38,7 @@ use omicron_common::address::{
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, PrivateIpConfig,
-    PrivateIpConfigError, SourceNatConfigError, SourceNatConfigGeneric,
+    PrivateIpConfigError,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
@@ -63,6 +63,8 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::inventory::SourceNatConfigError;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;

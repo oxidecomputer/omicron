@@ -100,6 +100,7 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
@@ -3125,7 +3126,7 @@ impl InvOmicronSledConfigZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfigGeneric::new(
+                        SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,

@@ -13,9 +13,7 @@ use iddqd::id_upcast;
 use omicron_common::{
     api::{
         external::{self, ByteCount, Generation},
-        internal::shared::{
-            NetworkInterface, external_ip::v1::SourceNatConfig,
-        },
+        internal::shared::NetworkInterface,
     },
     disk::{DatasetConfig, OmicronPhysicalDiskConfig},
     zpool_name::ZpoolName,
@@ -32,7 +30,8 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
+    RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
+    ZoneImageResolverInventory,
 };
 use crate::v4;
 

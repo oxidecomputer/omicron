@@ -30,22 +30,11 @@ use std::{
 use strum::EnumCount;
 use uuid::Uuid;
 
-pub mod external_ip;
 pub mod network_interface;
 
 // Re-export latest version of all NIC-related types.
 pub use network_interface::NetworkInterfaceKind;
 pub use network_interface::*;
-
-// Re-export latest version of the external IP types.
-pub use external_ip::ExternalIpConfig;
-pub use external_ip::ExternalIps;
-pub use external_ip::ExternalIpv4Config;
-pub use external_ip::ExternalIpv6Config;
-pub use external_ip::SourceNatConfigError;
-pub use external_ip::SourceNatConfigGeneric;
-pub use external_ip::SourceNatConfigV4;
-pub use external_ip::SourceNatConfigV6;
 
 /// Description of source IPs allowed to reach rack services.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
