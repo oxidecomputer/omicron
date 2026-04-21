@@ -1399,7 +1399,7 @@ impl super::Nexus {
                 // Ok(None) here, in which case, there's nothing to write back.
                 match instance_put_result {
                     Ok(Some(ref state)) => self
-                        .notify_vmm_updated(opctx, propolis_id, state)
+                        .update_vmm_state(opctx, propolis_id, state)
                         .await
                         .map_err(Into::into),
                     Ok(None) => Ok(()),
@@ -1687,7 +1687,7 @@ impl super::Nexus {
 
         match instance_register_result {
             Ok(state) => {
-                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
+                self.update_vmm_state(opctx, *propolis_id, &state).await?;
                 let runtime: db::model::VmmRuntimeState =
                     state.vmm_state.into();
                 Ok(db::model::Vmm {
@@ -1776,7 +1776,8 @@ impl super::Nexus {
                 // attempting to transition their instance's state, and then,
                 // upon fetching the instance, transiently see an instance state
                 // suggesting it's "doing fine" until the update saga completes.
-                self.update_instance(&opctx.log, saga, instance_id).await;
+                self.run_instance_update_saga(&opctx.log, saga, instance_id)
+                    .await;
             }
             // XXX: It's not clear what to do with this error; should it be
             // bubbled back up to the caller?
@@ -1940,9 +1941,10 @@ impl super::Nexus {
             .await
     }
 
-    /// Invoked by a sled agent to publish an updated runtime state for an
-    /// Instance.
-    pub(crate) async fn notify_vmm_updated(
+    /// Update the runtime state of the VMM with the provided `propolis_id` to
+    /// `new_runtime_state`, potentially spawning an instance update saga if the
+    /// instance's state must change as a result of the VMM update.
+    pub(crate) async fn update_vmm_state(
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
@@ -1970,7 +1972,11 @@ impl super::Nexus {
                 "vmm_state" => ?new_runtime_state.vmm_state,
                 "migration_state" => ?new_runtime_state.migrations(),
             );
-            tokio::spawn(self.update_instance(&opctx.log, saga, instance_id));
+            tokio::spawn(self.run_instance_update_saga(
+                &opctx.log,
+                saga,
+                instance_id,
+            ));
         }
 
         Ok(())
@@ -2554,7 +2560,7 @@ impl super::Nexus {
     /// using `tokio::spawn`.
     ///
     /// [instance-update saga]: crate::app::sagas::instance_update
-    fn update_instance(
+    fn run_instance_update_saga(
         &self,
         log: &slog::Logger,
         saga: steno::SagaDag,

@@ -121,7 +121,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus
-                .notify_vmm_updated(&opctx, path.propolis_id, &new_state)
+                .update_vmm_state(&opctx, path.propolis_id, &new_state)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
