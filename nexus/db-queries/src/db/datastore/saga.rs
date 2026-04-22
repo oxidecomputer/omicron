@@ -168,7 +168,7 @@ impl DataStore {
         Ok(sagas)
     }
 
-    pub async fn saga_list_long_running_or_unwinding_batched(
+    pub async fn saga_list_running_or_unwinding_older_than_batched(
         &self,
         opctx: &OpContext,
         time_threshold: TimeDelta,
@@ -834,7 +834,7 @@ mod test {
         // Querying with a large threshold should return no sagas, since all
         // test sagas were just created and none are older than 10 hours.
         let observed_sagas = datastore
-            .saga_list_long_running_or_unwinding_batched(
+            .saga_list_running_or_unwinding_older_than_batched(
                 &opctx,
                 TimeDelta::hours(10),
             )
@@ -850,7 +850,7 @@ mod test {
         // future to avoid flakyness. All sagas in the Running or Unwinding
         // states should be returned.
         let mut observed_sagas = datastore
-            .saga_list_long_running_or_unwinding_batched(
+            .saga_list_running_or_unwinding_older_than_batched(
                 &opctx,
                 TimeDelta::seconds(-10),
             )
