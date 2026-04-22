@@ -199,7 +199,6 @@ mod api_impl {
     use iddqd::IdOrdMap;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::SledVmmState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -226,6 +225,7 @@ mod api_impl {
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::InstanceMulticastMembership;
+    use sled_agent_types::instance::SledVmmState;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;
@@ -276,6 +276,7 @@ mod api_impl {
     use sled_agent_types_versions::v25;
     use sled_agent_types_versions::v26;
     use sled_agent_types_versions::v30;
+    use sled_agent_types_versions::v33;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -786,6 +787,13 @@ mod api_impl {
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v33(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

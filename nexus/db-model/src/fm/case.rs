@@ -6,6 +6,7 @@
 
 use super::AlertRequest;
 use super::DiagnosisEngine;
+use super::SupportBundleRequest;
 use crate::DbTypedUuid;
 use crate::ereport;
 use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
@@ -53,10 +54,13 @@ impl CaseMetadata {
     ) -> Self {
         let fm::Case {
             id,
-            created_sitrep_id,
-            closed_sitrep_id,
-            de,
-            comment,
+            metadata:
+                fm::case::Metadata {
+                    created_sitrep_id,
+                    closed_sitrep_id,
+                    de,
+                    comment,
+                },
             alerts_requested: _,
             support_bundles_requested: _,
             ereports: _,
@@ -139,4 +143,5 @@ pub struct Case {
     pub metadata: CaseMetadata,
     pub ereports: Vec<CaseEreport>,
     pub alerts_requested: Vec<AlertRequest>,
+    pub support_bundles_requested: Vec<SupportBundleRequest>,
 }

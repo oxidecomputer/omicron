@@ -18,13 +18,14 @@ function usage {
 PACKAGES=(
   "crucible"
   "crucible-pantry"
-  "crucible-dtrace"
+  "crucible-utils"
 )
 
 CRATES=(
   "crucible-agent-client"
   "crucible-pantry-client"
   "crucible-smf"
+  "crucible-common"
 )
 
 REPO="oxidecomputer/crucible"

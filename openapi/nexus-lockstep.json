@@ -3291,6 +3291,15 @@
           "stage0_next"
         ]
       },
+      "CaseUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::CaseUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Certificate": {
         "type": "object",
         "properties": {
@@ -8539,10 +8548,6 @@
         "minimum": 0,
         "maximum": 9000
       },
-      "RouterPeerIpAddr": {
-        "type": "string",
-        "format": "ip"
-      },
       "RouterPeerType": {
         "oneOf": [
           {
@@ -8573,11 +8578,8 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RouterPeerIpAddr"
-                  }
-                ]
+                "type": "string",
+                "format": "ip"
               },
               "type": {
                 "type": "string",
@@ -9166,8 +9168,18 @@
         }
       },
       "SupportBundleInfo": {
+        "description": "Support bundle info with internal-only fields.\n\nThis wraps the external API's [`ExternalSupportBundleInfo`] and extends it with fields that are only exposed through the lockstep API (e.g., for OMDB).",
         "type": "object",
         "properties": {
+          "fm_case_id": {
+            "nullable": true,
+            "description": "The FM case ID that triggered creation of this bundle, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CaseUuid"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -9644,7 +9656,7 @@
             "type": "object",
             "properties": {
               "ip_net": {
-                "$ref": "#/components/schemas/UplinkIpNet"
+                "$ref": "#/components/schemas/IpNet"
               },
               "type": {
                 "type": "string",
@@ -9683,9 +9695,6 @@
         "required": [
           "address"
         ]
-      },
-      "UplinkIpNet": {
-        "$ref": "#/components/schemas/IpNet"
       },
       "UserId": {
         "title": "A username for a local-only user",
