@@ -586,6 +586,12 @@ mod tests {
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();
+            new_case
+                .request_support_bundle(
+                    nexus_types::support_bundle::BundleDataSelection::all(),
+                    "requesting a support bundle",
+                )
+                .unwrap();
             *new_case.id()
         };
 
@@ -626,6 +632,27 @@ mod tests {
         assert!(
             new_case.is_open(),
             "new case should be open in the output sitrep"
+        );
+        assert_eq!(
+            new_case.alerts_requested.len(),
+            1,
+            "new case should have the one requested alert"
+        );
+        assert_eq!(
+            new_case.support_bundles_requested.len(),
+            1,
+            "new case should have the one requested support bundle"
+        );
+        let bundle_req = new_case
+            .support_bundles_requested
+            .iter()
+            .next()
+            .expect("new case should have a support bundle request");
+        assert_eq!(bundle_req.comment, "requesting a support bundle");
+        assert_eq!(
+            bundle_req.requested_sitrep_id, output_sitrep.metadata.id,
+            "support bundle request should be tagged with the sitrep ID in \
+             which it was requested"
         );
 
         assert!(

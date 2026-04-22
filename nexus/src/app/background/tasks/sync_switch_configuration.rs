@@ -836,8 +836,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     }),
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
-                                    src_addr: None,
                                     src_port: None,
+                                    src_addr: None,
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist
@@ -887,8 +887,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
                                     router_lifetime: router_lifetime.as_u16(),
-                                    src_addr: None,
                                     src_port: None,
+                                    src_addr: None,
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist

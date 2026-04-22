@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "58a19139aa83aa31e3e1ac84e68a678643433b57"
+source.commit = "4d1f20f793da102b29b914569725ebc9fdf746dd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "795e10d43c3894acee1428381f30612a398881457ed36f5cef66f168f3d58806"
+source.sha256 = "2cb4a97731d55bea78b83aabbba9a43602419e49a9d3eeb214b745463388ff60"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "58a19139aa83aa31e3e1ac84e68a678643433b57"
+source.commit = "4d1f20f793da102b29b914569725ebc9fdf746dd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "a73c012fd802ab6f21d057eff029b5cc4cf84a6299a5ace20e14c8953d791c94"
+source.sha256 = "932cc6149eb87ee9c01226a49708b34fea0479c357f1b19d779f96be40a4c729"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,7 +714,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "58a19139aa83aa31e3e1ac84e68a678643433b57"
+source.commit = "4d1f20f793da102b29b914569725ebc9fdf746dd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "dd07d2ea491842cce28fd4eabc0f957f7672a75a8e4d92c31630d4332cb40ebd"

@@ -2525,7 +2525,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=58a19139aa83aa31e3e1ac84e68a678643433b57#58a19139aa83aa31e3e1ac84e68a678643433b57"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=4d1f20f793da102b29b914569725ebc9fdf746dd#4d1f20f793da102b29b914569725ebc9fdf746dd"
 dependencies = [
  "oxnet",
  "progenitor 0.13.0",
@@ -5283,7 +5283,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -5966,7 +5966,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -6503,7 +6503,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=58a19139aa83aa31e3e1ac84e68a678643433b57#58a19139aa83aa31e3e1ac84e68a678643433b57"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=4d1f20f793da102b29b914569725ebc9fdf746dd#4d1f20f793da102b29b914569725ebc9fdf746dd"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -6804,6 +6804,8 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -7143,6 +7145,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types-versions",
  "uuid",
 ]
 
@@ -7344,6 +7347,7 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "sled-agent-client",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "uuid",
@@ -7802,7 +7806,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "serde_json",
- "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog-error-chain",
  "strum 0.27.2",
@@ -8711,6 +8715,7 @@ dependencies = [
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-async",
@@ -9562,7 +9567,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -9581,7 +9586,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -9594,7 +9599,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "libc",
  "libnet",
@@ -9691,7 +9696,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -11693,7 +11698,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=58a19139aa83aa31e3e1ac84e68a678643433b57#58a19139aa83aa31e3e1ac84e68a678643433b57"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=4d1f20f793da102b29b914569725ebc9fdf746dd#4d1f20f793da102b29b914569725ebc9fdf746dd"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -13530,6 +13535,7 @@ dependencies = [
  "daft",
  "iddqd",
  "indent_write",
+ "itertools 0.14.0",
  "omicron-common",
  "omicron-ledger",
  "omicron-passwords",

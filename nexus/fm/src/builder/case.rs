@@ -8,6 +8,7 @@ use fm::analysis_reports;
 use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::alert::AlertClass;
 use nexus_types::fm;
+use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::sync::Arc;
@@ -155,6 +156,41 @@ impl CaseBuilder {
             .entry("requested alert")
             .kv("alert_id", id)
             .kv("alert_class", &class)
+            .comment(comment);
+
+        Ok(())
+    }
+
+    pub fn request_support_bundle(
+        &mut self,
+        data_selection: BundleDataSelection,
+        comment: impl ToString,
+    ) -> anyhow::Result<()> {
+        let id = self.rng.next_support_bundle();
+        let req = fm::case::SupportBundleRequest {
+            id,
+            requested_sitrep_id: self.sitrep_id,
+            data_selection,
+            comment: comment.to_string(),
+        };
+        self.case.support_bundles_requested.insert_unique(req).map_err(
+            |_| {
+                anyhow::anyhow!(
+                    "a support bundle request with ID {id:?} already exists"
+                )
+            },
+        )?;
+
+        let comment = comment.to_string();
+        slog::info!(
+            &self.log,
+            "requested a support bundle";
+            "support_bundle_id" => %id,
+            "comment" => %comment,
+        );
+        self.report_log
+            .entry("requested support bundle")
+            .kv("support_bundle_id", id)
             .comment(comment);
 
         Ok(())

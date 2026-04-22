@@ -112,6 +112,7 @@ serde_with.workspace = true
 sha2.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
+sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
