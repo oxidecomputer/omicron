@@ -233,9 +233,10 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /// is `SimMode::Api).
     pub async fn sim_poke(&self, id: Uuid, mode: PokeMode) {
         let mut should_step = true;
+        let mut should_destroy = false;
 
         while should_step {
-            let (new_state, to_destroy) = {
+            let new_state = {
                 // The object must be present in `objects` because it only gets
                 // removed when it comes to rest in the "Destroyed" state, but
                 // we can only get here if there's an asynchronous state
@@ -261,11 +262,11 @@ impl<S: Simulatable + 'static> SimCollection<S> {
                     info!(&self.log, "object is ready to destroy";
                           "object_id" => %id);
 
-                    (after, Some(object))
-                } else {
-                    objects.insert(id, object);
-                    (after, None)
+                    should_destroy = true;
                 }
+
+                objects.insert(id, object);
+                after
             };
 
             // Notify Nexus that the object's state has changed.
@@ -281,7 +282,14 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             // TODO-correctness Is it a problem that nobody
             // waits on the background task?  If we did it here, we'd deadlock,
             // since we're invoked from the background task.
-            if let Some(destroyed_object) = to_destroy {
+            if should_destroy {
+                let destroyed_object = {
+                    let mut objects = self.objects.lock().await;
+
+                    info!(&self.log, "removing destroyed object";
+                          "object_id" => %id);
+                    objects.remove(&id).unwrap()
+                };
                 if let Some(mut tx) = destroyed_object.channel_tx {
                     tx.close_channel();
                 }

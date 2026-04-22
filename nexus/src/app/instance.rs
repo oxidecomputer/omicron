@@ -1952,7 +1952,7 @@ impl super::Nexus {
             "ding, dong! received doorbell notification for VMM {vmm_id}";
             "vmm_id" => %vmm_id,
         );
-        let (_, sled) =
+        let (vmm, sled) =
             match self.db_datastore.vmm_fetch_with_sled(opctx, &vmm_id).await {
                 Ok(vmm) => vmm,
                 Err(error) => {
@@ -1969,8 +1969,11 @@ impl super::Nexus {
                     return Err(error);
                 }
             };
+        slog::info!(&opctx.log, "found vmm and sled for updated vmm id {vmm_id}"; "vmm" => #?vmm, "sled" => #?sled);
         let sled_agent = self.sled_client(&sled.id()).await?;
+        slog::info!(&opctx.log, "got client for sled");
         let state = sled_agent.vmm_get_state(&vmm_id).await?.into_inner();
+        slog::info!(&opctx.log, "got state from sled"; "state" => #?state);
         self.update_vmm_state(opctx, vmm_id, &state).await
     }
 
