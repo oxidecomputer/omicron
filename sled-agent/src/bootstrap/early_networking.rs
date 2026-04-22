@@ -41,8 +41,9 @@ use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
-    PortSpeed, RackNetworkConfig, RouterPeerType, SwitchSlot, UplinkAddress,
+    PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
 };
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
@@ -137,7 +138,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     pub async fn lookup_uplinked_switch_zone_underlay_addrs(
         &self,
         resolver: &DnsResolver,
-        config_rx: &watch::Receiver<RackNetworkConfig>,
+        config_rx: &watch::Receiver<SystemNetworkingConfig>,
         wait_for_at_least_one: Duration,
     ) -> HashMap<SwitchSlot, Ipv6Addr> {
         let query_start = Instant::now();
@@ -147,6 +148,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 // Which switches have configured ports?
                 let uplinked_switches = config_rx
                     .borrow()
+                    .rack_network_config
                     .ports
                     .iter()
                     .map(|port_config| port_config.switch)
@@ -313,7 +315,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// Returns the list of uplinks configured via DPD.
     pub(crate) async fn init_switch_config(
         &mut self,
-        rack_network_config_rx: &watch::Receiver<RackNetworkConfig>,
+        network_config_rx: &watch::Receiver<SystemNetworkingConfig>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
@@ -352,7 +354,8 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // Take a snapshot of the current `RackNetworkConfig` at this point so
         // we use one consistent config throughout the rest of this function.
-        let rack_network_config = rack_network_config_rx.borrow().clone();
+        let rack_network_config =
+            network_config_rx.borrow().rack_network_config.clone();
 
         // We now know which switch we are: filter the uplinks to just ours.
         let our_ports = rack_network_config
@@ -598,6 +601,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
+                            src_addr: None,
+                            src_port: None,
                         };
                         match bgp_peer_configs.get_mut(&port.port) {
                             Some(peers) => {
@@ -650,6 +655,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
                             router_lifetime: router_lifetime.as_u16(),
+                            src_addr: None,
+                            src_port: None,
                         };
                         match bgp_unnumbered_peer_configs.get_mut(&port.port) {
                             Some(peers) => {
@@ -701,7 +708,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     fanout: config.max_paths.as_nonzero_u8(),
                 };
 
-                if let Err(e) = mgd.bgp_apply(&request).await {
+                if let Err(e) = mgd.bgp_apply_v2(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";

@@ -26,7 +26,10 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -784,12 +787,23 @@ impl SwitchPortBgpPeerConfig {
         interface_name: Name,
         p: &networking_types::BgpPeer,
     ) -> Self {
+        // Numbered peers are represented as a non-NULL `addr` and an arbitrary
+        // `router_lifetime` (we just use the default). Unnumbered are
+        // represented as a NULL `addr` and their desired `router_lifetime`.
+        let (addr, router_lifetime) = match p.addr {
+            RouterPeerType::Numbered { ip } => {
+                (Some(IpAddr::from(ip)), RouterLifetimeConfig::default())
+            }
+            RouterPeerType::Unnumbered { router_lifetime } => {
+                (None, router_lifetime)
+            }
+        };
         Self {
             id: Uuid::new_v4(),
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr: p.addr.map(|a| a.into()),
+            addr: addr.map(From::from),
             hold_time: p.hold_time.into(),
             idle_hold_time: p.idle_hold_time.into(),
             delay_open: p.delay_open.into(),
@@ -812,7 +826,7 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
-            router_lifetime: p.router_lifetime.into(),
+            router_lifetime: router_lifetime.as_u16().into(),
         }
     }
 }

@@ -6,28 +6,28 @@
 //! [`EarlyNetworkConfigEnvelope`], as determined by the envelope's metadata
 //! (particularly, [`EarlyNetworkConfigEnvelope::schema_version`].
 //!
-//! Adding a new `EarlyNetworkConfigBody` has extra requirements beyond normal
+//! Adding a new `SystemNetworkingConfig` has extra requirements beyond normal
 //! sled-agent API types, because it's kept as a serialized blob in both the
 //! bootstore and CRDB. Many of these requirements are enforced statically by
 //! the macros in this module.
 //!
-//! To add a new `EarlyNetworkConfigBody` version:
+//! To add a new `SystemNetworkingConfig` version:
 //!
 //! 1. Follow the normal instructions for adding a new API version at all,
 //!    including creating a new `vN` module in this crate and updating the
-//!    [`latest::early_networking::EarlyNetworkConfigBody`] to be a re-export of
-//!    your new version.
+//!    [`latest::system_networking::SystemNetworkingConfig`] to be a
+//!    re-export of your new version.
 //!
 //! 2. Ensure your type has an associated
-//!    [`latest::early_networking::EarlyNetworkConfigBody::SCHEMA_VERSION`]
+//!    [`latest::system_networking::SystemNetworkingConfig::SCHEMA_VERSION`]
 //!    constant. It must have the value of the previous latest
-//!    `EarlyNetworkConfigBody::SCHEMA_VERSION`'s plus 1. This is enforced by
+//!    `SystemNetworkingConfig::SCHEMA_VERSION`'s plus 1. This is enforced by
 //!    the `assert_consecutive_versions!()` macro below.
 //!
 //! 3. Ensure your type has a `TryFrom<_>` implementation to convert from the
-//!    previous latest `EarlyNetworkConfigBody`. This is used during the
+//!    previous latest `SystemNetworkingConfig`. This is used during the
 //!    deserialization process: if we find an envelope containing the previous
-//!    `EarlyNetworkConfigBody`'s schema version, we'll deserialize as that
+//!    `SystemNetworkingConfig`'s schema version, we'll deserialize as that
 //!    version and then convert to the latest via this `TryFrom` impl. It must
 //!    use `anyhow::Error` as the associated error type, or this module will
 //!    fail to compile.
@@ -40,17 +40,17 @@
 //!    able to convert old versions to new versions.
 //!
 //! 4. Update [`EarlyNetworkConfigEnvelope::deserialize_body()`] below, adding
-//!    your new version (via the `vN::early_networking::EarlyNetworkConfigBody`
-//!    path, NOT the `latest::early_networking::EarlyNetworkConfigBody` path) to
-//!    the invocation of `versioned_decode!()`. This is the macro the emits a
-//!    `match` statement for all known `EarlyNetworkConfigBody` schema versions
+//!    your new version (via the `vN::system_networking::SystemNetworkingConfig`
+//!    path, NOT the `latest::system_networking::SystemNetworkingConfig` path)
+//!    to the invocation of `versioned_decode!()`. This is the macro the emits a
+//!    `match` statement for all known `SystemNetworkingConfig` schema versions
 //!    and handles conversion up to the latest via the `TryFrom<_>` impls
 //!    described above.
 
 use bootstore::schemes::v0 as bootstore;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use sled_agent_types_versions::{latest, v20, v26, v30};
+use sled_agent_types_versions::{latest, v20, v26, v30, v33};
 use slog_error_chain::SlogInlineError;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -72,7 +72,7 @@ pub enum EarlyNetworkConfigEnvelopeError {
     #[error("unknown early network config schema version: {schema_version}")]
     UnknownSchemaVersion { schema_version: u32 },
     #[error(
-        "could not convert EarlyNetworkConfigBody from version {from_version} \
+        "could not convert SystemNetworkingConfig from version {from_version} \
          to version {to_version}"
     )]
     ConvertBody {
@@ -84,7 +84,7 @@ pub enum EarlyNetworkConfigEnvelopeError {
 }
 
 /// Asserts at compile time that adjacent
-/// `EarlyNetworkConfigBody::SCHEMA_VERSION` values are consecutive.
+/// `SystemNetworkingConfig::SCHEMA_VERSION` values are consecutive.
 macro_rules! assert_consecutive_versions {
     ($sole:path) => {};
     ($a:path, $b:path $(, $rest:path)*) => {
@@ -103,7 +103,7 @@ macro_rules! migrate {
             EarlyNetworkConfigEnvelopeError::ConvertBody {
                 from_version: <$from>::SCHEMA_VERSION,
                 to_version: <$next>::SCHEMA_VERSION,
-                err,
+                err: err.into(),
             }
         })?
     }};
@@ -114,16 +114,16 @@ macro_rules! migrate {
             EarlyNetworkConfigEnvelopeError::ConvertBody {
                 from_version: <$from>::SCHEMA_VERSION,
                 to_version: <$next>::SCHEMA_VERSION,
-                err,
+                err: err.into(),
             }
         })?;
         migrate!(converted, $next, $($rest),+)
     }};
 }
 
-/// Emits a match over `EarlyNetworkConfigBody::SCHEMA_VERSION` values. Each
+/// Emits a match over `SystemNetworkingConfig::SCHEMA_VERSION` values. Each
 /// match arm body will attempt to deserialize the value as the matching
-/// `EarlyNetworkConfigBody` type, and then for all types except the newest,
+/// `SystemNetworkingConfig` type, and then for all types except the newest,
 /// chain through `TryFrom` conversions (via `migrate!`, defined above) until we
 /// convert to the newest.
 macro_rules! version_match {
@@ -175,14 +175,14 @@ macro_rules! version_match {
 macro_rules! versioned_decode {
     ( $first:path $(, $rest:path)* $(,)? ) => {{
         // Statically guarantee each successive
-        // `EarlyNetworkConfigBody::SCHEMA_VERSION` is equal to the previous
+        // `SystemNetworkingConfig::SCHEMA_VERSION` is equal to the previous
         // type's `SCHEMA_VERSION + 1`.
         assert_consecutive_versions!($first $(, $rest)*);
 
         // Actual function: emit the match over all known `SCHEMA_VERSION`s.
         |schema_version: u32, body: ::serde_json::Value|
             -> ::std::result::Result<
-                latest::early_networking::EarlyNetworkConfigBody,
+                latest::system_networking::SystemNetworkingConfig,
                 EarlyNetworkConfigEnvelopeError
             >
         {
@@ -191,7 +191,7 @@ macro_rules! versioned_decode {
     }};
 }
 
-/// Envelope containing a versioned JSON blob (an [`EarlyNetworkConfigBody`]).
+/// Envelope containing a versioned JSON blob (a [`SystemNetworkingConfig`]).
 ///
 /// A [`WriteNetworkConfigRequest`] received by sled-agent (typically sent by
 /// Nexus) results in a new [`bootstore::NetworkConfig`] being written to the
@@ -199,33 +199,33 @@ macro_rules! versioned_decode {
 ///
 /// * The [`WriteNetworkConfigRequest::body`] will be wrapped in an
 ///   [`EarlyNetworkConfigEnvelope`]. `schema_version` records the
-///   [`EarlyNetworkConfigBody::SCHEMA_VERSION`] of the particular version of
-///   the body, and `body` contains the JSON-ified [`EarlyNetworkConfigBody`]
-///   itself.
+///   [`SystemNetworkingConfig::SCHEMA_VERSION`] of the particular version
+///   of the body, and `body` contains the JSON-ified
+///   [`SystemNetworkingConfig`] itself.
 /// * The [`bootstore::NetworkConfig::generation`] will be set to the generation
 ///   from the incoming [`WriteNetworkConfigRequest::generation`]. The
 ///   [`bootstore::NetworkConfig::blob`] contains the JSON-ified
 ///   [`EarlyNetworkConfigEnvelope`] from the previous bullet.
 ///
-/// [`EarlyNetworkConfigBody`]:
-/// sled_agent_types_versions::latest::early_networking::EarlyNetworkConfigBody
-/// [`EarlyNetworkConfigBody::SCHEMA_VERSION`]:
-/// sled_agent_types_versions::latest::early_networking::EarlyNetworkConfigBody::SCHEMA_VERSION
+/// [`SystemNetworkingConfig`]:
+/// sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig
+/// [`SystemNetworkingConfig::SCHEMA_VERSION`]:
+/// sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig::SCHEMA_VERSION
 /// [`WriteNetworkConfigRequest`]:
-/// sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest
+/// sled_agent_types_versions::latest::system_networking::WriteNetworkConfigRequest
 /// [`WriteNetworkConfigRequest::body`]:
-/// sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest::body
+/// sled_agent_types_versions::latest::system_networking::WriteNetworkConfigRequest::body
 /// [`WriteNetworkConfigRequest::generation`]:
-/// sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest::generation
+/// sled_agent_types_versions::latest::system_networking::WriteNetworkConfigRequest::generation
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct EarlyNetworkConfigEnvelope {
-    // Which version of `EarlyNetworkConfigBody` is serialized into `body`.
+    // Which version of `SystemNetworkingConfig` is serialized into `body`.
     pub(crate) schema_version: u32,
 
     // The actual early network configuration details.
     //
-    // These are a serialized `EarlyNetworkConfigBody` of some version. We must
-    // inspect `schema_version` to know how to interpret this value.
+    // These are a serialized `SystemNetworkingConfig` of some version. We
+    // must inspect `schema_version` to know how to interpret this value.
     pub(crate) body: serde_json::Value,
 }
 
@@ -281,29 +281,30 @@ impl EarlyNetworkConfigEnvelope {
 
     /// Deserialize the body of this envelope, based on the `schema_version`,
     /// and convert the contained config to
-    /// [`latest::early_networking::EarlyNetworkConfigBody`] if necessary.
+    /// [`latest::system_networking::SystemNetworkingConfig`] if necessary.
     pub fn deserialize_body(
         &self,
     ) -> Result<
-        latest::early_networking::EarlyNetworkConfigBody,
+        latest::system_networking::SystemNetworkingConfig,
         EarlyNetworkConfigEnvelopeError,
     > {
         // Ordered list, from oldest to newest, of all known
-        // `EarlyNetworkConfigBody` type versions.
+        // `SystemNetworkingConfig`/`EarlyNetworkConfigBody` type versions.
         //
         // Important: This method's return type uses the
-        // [`latest::early_networking::EarlyNetworkConfigBody`] reexport, but
+        // [`latest::system_networking::SystemNetworkingConfig`] reexport, but
         // the list here never uses that reexport. This ensures that if someone
         // updates the `latest::*` export _without_ adding that latest version
         // to this invocation, this method will fail to compile.
         //
         // If this has brought you to this comment, please see the block comment
         // at the top of this module for the full set of instructions for adding
-        // a new `EarlyNetworkConfigBody` version.
+        // a new `SystemNetworkingConfig` version.
         let f = versioned_decode!(
             v20::early_networking::EarlyNetworkConfigBody,
             v26::early_networking::EarlyNetworkConfigBody,
             v30::early_networking::EarlyNetworkConfigBody,
+            v33::system_networking::SystemNetworkingConfig,
         );
         f(self.schema_version, self.body.clone())
     }
@@ -323,7 +324,7 @@ fn deserialize_body<T: DeserializeOwned>(
 // We need to be able to construct [`EarlyNetworkConfigEnvelope`]s for every
 // version of `EarlyNetworkConfigBody` (starting from the version of
 // `EarlyNetworkConfigBody` that was current when `EarlyNetworkConfigEnvelope`
-// was introduced; i.e., v20).
+// was introduced; i.e., v20) through the latest `SystemNetworkingConfig`.
 //
 // Put those `From` impls here. They're all identical, so we use this macro to
 // remain consistent; in particular, we _must_ ensure that we set
@@ -351,3 +352,4 @@ macro_rules! from_body_for_envelope {
 from_body_for_envelope!(v20::early_networking::EarlyNetworkConfigBody);
 from_body_for_envelope!(v26::early_networking::EarlyNetworkConfigBody);
 from_body_for_envelope!(v30::early_networking::EarlyNetworkConfigBody);
+from_body_for_envelope!(v33::system_networking::SystemNetworkingConfig);

@@ -2218,7 +2218,6 @@ async fn cmd_db_rack_list(
     struct RackRow {
         id: String,
         initialized: bool,
-        tuf_base_url: String,
         rack_subnet: String,
     }
 
@@ -2234,7 +2233,6 @@ async fn cmd_db_rack_list(
     let rows = rack_list.into_iter().map(|rack| RackRow {
         id: rack.id().to_string(),
         initialized: rack.initialized,
-        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
         rack_subnet: rack
             .rack_subnet
             .map(|subnet| subnet.to_string())
@@ -7410,20 +7408,19 @@ async fn cmd_db_migrations_list(
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_schema::schema::migration::dsl;
-    use omicron_common::api::internal::nexus;
 
     let mut state_filters = Vec::new();
     if args.completed {
-        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+        state_filters.push(MigrationState::COMPLETED);
     }
     if args.failed {
-        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+        state_filters.push(MigrationState::FAILED);
     }
     if args.in_progress {
-        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+        state_filters.push(MigrationState::IN_PROGRESS);
     }
     if args.pending {
-        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+        state_filters.push(MigrationState::PENDING);
     }
 
     let mut query = dsl::migration.into_boxed();

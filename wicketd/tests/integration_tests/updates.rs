@@ -35,7 +35,10 @@ use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
-    rack_update::{ClearUpdateStateResponse, StartUpdateOptions},
+    rack_update::{
+        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
+        StartUpdateOptions, UpdateState,
+    },
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
@@ -136,6 +139,8 @@ async fn test_updates() {
     // Ensure that this is a sensible result.
     let mut kinds = BTreeSet::new();
     let mut installable_kinds = BTreeSet::new();
+    let expected_artifact_ids: BTreeSet<_> =
+        response.artifacts.iter().map(|a| a.artifact_id.clone()).collect();
     for artifact in response.artifacts {
         kinds.insert(artifact.artifact_id.kind);
         for installable in artifact.installable {
@@ -183,6 +188,26 @@ async fn test_updates() {
         }
     }
 
+    {
+        // Before starting, all artifacts should be present, no components should be present,
+        // and the state should be NotStarted.
+        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let actual_ids: BTreeSet<_> = status.artifacts.into_iter().collect();
+        assert_eq!(
+            expected_artifact_ids, actual_ids,
+            "all uploaded artifacts appear in status"
+        );
+        assert_eq!(
+            status.state,
+            UpdateState::NotStarted,
+            "no update started yet"
+        );
+        assert!(
+            status.components.is_empty(),
+            "no component events before update starts"
+        );
+    }
+
     // Now, try starting the update on SP 0.
     let options = StartUpdateOptions::default();
     let params = StartUpdateParams { targets: vec![target_sp], options };
@@ -193,6 +218,17 @@ async fn test_updates() {
         .expect("update started successfully");
 
     let terminal_event = 'outer: loop {
+        // This loop tests the failure path, so expect either InProgress or Failed.
+        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        assert!(
+            matches!(
+                status.state,
+                UpdateState::InProgress | UpdateState::Failed
+            ),
+            "unexpected state during update: {:?}",
+            status.state,
+        );
+
         let event_report = wicketd_testctx
             .wicketd_client
             .get_update_sp(&target_sp.type_, target_sp.slot)
@@ -220,6 +256,35 @@ async fn test_updates() {
         other => {
             panic!("unexpected terminal event kind: {other:?}");
         }
+    }
+
+    {
+        // After the failure, status should reflect Failed for sled 0.
+        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        assert_eq!(status.state, UpdateState::Failed);
+        let sled0 = status
+            .components
+            .iter()
+            .find(|c| c.id == target_sp)
+            .expect("sled 0 should appear in components");
+        assert_eq!(sled0.state, UpdateState::Failed);
+        assert!(
+            matches!(&sled0.exit_message, Some(ExitMessage { message, .. }) if !message.is_empty()),
+            "failed component should have a non-empty exit message",
+        );
+
+        // If we filter to sled 0 only, still show Failed.
+        let filtered =
+            get_rack_update_status(&wicketd_testctx, &["--sled", "0"]).await;
+        assert_eq!(filtered.state, UpdateState::Failed);
+        assert_eq!(filtered.components.len(), 1);
+        assert_eq!(filtered.components[0].state, UpdateState::Failed);
+
+        // If we filter to sled 1 (not part of the update), show NotStarted and no components.
+        let filtered =
+            get_rack_update_status(&wicketd_testctx, &["--sled", "1"]).await;
+        assert_eq!(filtered.state, UpdateState::NotStarted);
+        assert!(filtered.components.is_empty());
     }
 
     // Try starting the update again -- this should fail because we require that
@@ -282,6 +347,26 @@ async fn test_updates() {
         );
     }
 
+    {
+        // After clearing, status should show NotStarted and no components.
+        // Uploaded artifacts should be unaffected by the clear.
+        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        assert_eq!(
+            status.state,
+            UpdateState::NotStarted,
+            "update state cleared"
+        );
+        assert!(
+            status.components.is_empty(),
+            "no components should be present"
+        );
+        let actual_ids: BTreeSet<_> = status.artifacts.into_iter().collect();
+        assert_eq!(
+            expected_artifact_ids, actual_ids,
+            "artifacts should be unaffected by clear"
+        );
+    }
+
     // Check to see that the update state for SP 0 was cleared.
     let event_report = wicketd_testctx
         .wicketd_client
@@ -296,6 +381,28 @@ async fn test_updates() {
     );
 
     wicketd_testctx.teardown().await;
+}
+
+async fn get_rack_update_status(
+    wicketd_testctx: &WicketdTestContext,
+    extra_args: &[&str],
+) -> RackUpdateStatus {
+    let args: Vec<&str> = ["rack-update", "status", "--json"]
+        .into_iter()
+        .chain(extra_args.iter().copied())
+        .collect();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let output = OutputKind::Captured {
+        log: wicketd_testctx.log().clone(),
+        stdout: &mut stdout,
+        stderr: &mut stderr,
+    };
+    wicket::exec_with_args(wicketd_testctx.wicketd_addr, args, output)
+        .await
+        .expect("wicket rack-update status failed to run");
+    serde_json::from_slice(&stdout)
+        .expect("rack-update status --json output is valid JSON")
 }
 
 // See documentation for extract_nested_artifact_pair in update_plan.rs for why

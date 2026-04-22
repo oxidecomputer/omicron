@@ -9,7 +9,6 @@
 //! in-memory state because port manager tests assert on subscription contents.
 
 use crate::addrobj::AddrObject;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearMcast2PhysReq;
 use oxide_vpc::api::ClearMcastForwardingReq;
@@ -35,6 +34,7 @@ use oxide_vpc::api::SetMcastForwardingReq;
 use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::SourceFilter;
 use oxide_vpc::api::VpcCfg;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;

@@ -17,7 +17,6 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
 use oxnet::IpNet;
@@ -26,9 +25,6 @@ use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
-use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceMulticastMembership,
-};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;

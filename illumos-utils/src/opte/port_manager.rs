@@ -18,17 +18,11 @@ use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
-use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
-use omicron_common::api::internal::shared::ExternalIpv4Config;
-use omicron_common::api::internal::shared::ExternalIpv6Config;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
@@ -68,6 +62,12 @@ use oxide_vpc::api::VpcCfg;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIpv4Config;
+use sled_agent_types::instance::ExternalIpv6Config;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::multicast::ClearMcast2Phys;
 use sled_agent_types::multicast::ClearMcastForwarding;
 use sled_agent_types::multicast::Mcast2PhysMapping;
@@ -105,49 +105,17 @@ struct RouteSet {
     active_ports: usize,
 }
 
-/// Lock ordering for `PortManagerInner` fields:
-///
-/// The only lock nesting is:
-/// - `routes` then `ports` in `vpc_routes_ensure`
-///
-/// Note: `release_inner` acquires `ports` then `routes` sequentially
-/// (dropping each before acquiring the next).
-#[derive(Debug)]
-struct PortManagerInner {
-    log: Logger,
-
-    /// Sequential identifier for each port on the system.
-    next_port_id: AtomicU64,
-
-    /// IP address of the hosting sled on the underlay.
-    underlay_ip: Ipv6Addr,
-
-    /// Map of all ports and their mutable state, keyed on the interface
-    /// Uuid and its kind (which includes the Uuid of the parent instance
-    /// or service).
-    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), PortState>>,
-
-    /// Map of all current resolved routes.
-    routes: Mutex<HashMap<RouterId, RouteSet>>,
-}
-
 /// Mutable per-port state tracked alongside the immutable `Port`.
 #[derive(Debug)]
 struct PortState {
     port: Port,
-    /// Mappings of associated Internet Gateways for External IPs on this NIC.
-    eip_gateways: HashMap<IpAddr, HashSet<Uuid>>,
-    /// Active multicast subscriptions, mapping group IP → source filter.
+    /// Active multicast subscriptions, mapping group IP to source filter.
     mcast_subscriptions: HashMap<IpAddr, SourceFilter>,
 }
 
 impl PortState {
     fn new(port: Port) -> Self {
-        Self {
-            port,
-            eip_gateways: HashMap::new(),
-            mcast_subscriptions: HashMap::new(),
-        }
+        Self { port, mcast_subscriptions: HashMap::new() }
     }
 }
 
@@ -169,6 +137,31 @@ fn multicast_cfg_to_source_filter(cfg: &MulticastGroupCfg) -> SourceFilter {
     }
 }
 
+#[derive(Debug)]
+struct PortManagerInner {
+    log: Logger,
+
+    /// Sequential identifier for each port on the system.
+    next_port_id: AtomicU64,
+
+    /// IP address of the hosting sled on the underlay.
+    underlay_ip: Ipv6Addr,
+
+    /// Map of all ports and their mutable state, keyed on the interface
+    /// Uuid and its kind (which includes the Uuid of the parent instance
+    /// or service).
+    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), PortState>>,
+
+    /// Map of all current resolved routes.
+    routes: Mutex<HashMap<RouterId, RouteSet>>,
+
+    /// Mappings of associated Internet Gateways for all External IPs
+    /// attached to each NIC.
+    ///
+    /// IGW IDs are specific to the VPC of each NIC.
+    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
+}
+
 impl PortManagerInner {
     fn next_port_name(&self) -> String {
         format!(
@@ -179,8 +172,8 @@ impl PortManagerInner {
     }
 }
 
-/// Parameters needed to create and configure an OPTE port.
 #[derive(Debug)]
+/// Parameters needed to create and configure an OPTE port.
 pub struct PortCreateParams<'a> {
     pub nic: &'a NetworkInterface,
     pub external_ips: &'a ExternalIpConfig,
@@ -390,6 +383,7 @@ impl PortManager {
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
+            eip_gateways: Mutex::new(Default::default()),
         });
 
         Self { inner }
@@ -455,7 +449,6 @@ impl PortManager {
             hdl
         };
         let (port, ticket) = {
-            let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(PortData {
                 name: port_name.clone(),
@@ -465,8 +458,18 @@ impl PortManager {
                 vni,
                 gateway,
             });
-            let new_port_state = PortState::new(port.clone());
-            let old = ports.insert((nic.id, nic.kind), new_port_state);
+
+            // NOTE: We may add external IPs below, which can fail. If that
+            // does, we drop the `ticket` on the way out of this block. That
+            // attempts to acquire this lock, in order to remove itself on drop.
+            // We need to drop the lock before that, to avoid a deadlock, so
+            // let's do it right away, after inserting.
+            let old = self
+                .inner
+                .ports
+                .lock()
+                .unwrap()
+                .insert((nic.id, nic.kind), PortState::new(port.clone()));
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
@@ -485,8 +488,7 @@ impl PortManager {
                 // `Instance::refresh_external_ips_inner`), and to prevent updates
                 // racing with nexus before an instance/port are reachable from their
                 // respective managers.
-                let port_state = ports.get(&(nic.id, nic.kind)).unwrap();
-                self.external_ips_ensure_port(port_state, external_ips)?;
+                self.external_ips_ensure_port(&port, nic.id, external_ips)?;
             }
             (port, ticket)
         };
@@ -737,17 +739,13 @@ impl PortManager {
     ///
     /// Returns whether the internal mappings were changed.
     pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
-        let mut ports = self.inner.ports.lock().unwrap();
-        ports.iter_mut().fold(false, |changed, ((nic_id, _), port_state)| {
-            let new_gw =
-                mappings.mappings.get(nic_id).cloned().unwrap_or_default();
-            if port_state.eip_gateways != new_gw {
-                port_state.eip_gateways = new_gw;
-                true
-            } else {
-                changed
-            }
-        })
+        let mut gateways = self.inner.eip_gateways.lock().unwrap();
+
+        let changed = &*gateways != &mappings.mappings;
+
+        *gateways = mappings.mappings;
+
+        changed
     }
 
     /// Lookup an OPTE port, and ensure its external IP config is up to date.
@@ -762,20 +760,19 @@ impl PortManager {
             Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
         })?;
 
-        self.external_ips_ensure_port(port_state, external_ips)
+        self.external_ips_ensure_port(&port_state.port, nic_id, external_ips)
     }
 
     /// Ensure external IPs for an OPTE port are up to date.
-    fn external_ips_ensure_port(
+    pub fn external_ips_ensure_port(
         &self,
-        port_state: &PortState,
+        port: &Port,
+        nic_id: Uuid,
         external_ips: &ExternalIpConfig,
     ) -> Result<(), Error> {
-        let inet_gw_map = if port_state.eip_gateways.is_empty() {
-            None
-        } else {
-            Some(port_state.eip_gateways.clone())
-        };
+        let egw_lock = self.inner.eip_gateways.lock().unwrap();
+        let inet_gw_map = egw_lock.get(&nic_id).cloned();
+        drop(egw_lock);
 
         // NOTE: The Option::map() call here is a bit confusing.
         //
@@ -795,14 +792,18 @@ impl PortManager {
             .v6
             .as_ref()
             .map(|v6| build_external_ipv6_config(Some(v6)));
-        let inet_gw_map = inet_gw_map.map(|map| {
-            map.into_iter()
-                .map(|(k, v)| (k.into(), v.into_iter().collect()))
-                .collect()
-        });
+        let inet_gw_map = if let Some(map) = inet_gw_map {
+            Some(
+                map.into_iter()
+                    .map(|(k, v)| (k.into(), v.into_iter().collect()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
 
         let req = SetExternalIpsReq {
-            port_name: port_state.port.name().into(),
+            port_name: port.name().into(),
             external_ips_v4,
             external_ips_v6,
             inet_gw_map,
@@ -921,129 +922,6 @@ impl PortManager {
                 "active_groups" => port_state.mcast_subscriptions.len(),
             );
         }
-
-        Ok(())
-    }
-
-    pub fn firewall_rules_ensure(
-        &self,
-        vni: external::Vni,
-        rules: &[ResolvedVpcFirewallRule],
-    ) -> Result<(), Error> {
-        info!(
-            self.inner.log,
-            "Ensuring VPC firewall rules";
-            "vni" => ?vni,
-            "rules" => ?&rules,
-        );
-
-        let hdl = Handle::new()?;
-        let ports = self.inner.ports.lock().unwrap();
-
-        // We update VPC rules as a set so grab only
-        // the relevant ports using the VPC's VNI.
-        let vpc_ports = ports.iter().filter(|((_, _), port_state)| {
-            u32::from(vni) == u32::from(*port_state.port.vni())
-        });
-        for ((_, _), port_state) in vpc_ports {
-            let port = &port_state.port;
-            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
-            let port_name = port.name().to_string();
-            info!(
-                self.inner.log,
-                "Setting OPTE firewall rules";
-                "port" => ?&port_name,
-                "rules" => ?&rules,
-            );
-            hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
-                port_name,
-                rules,
-            })?;
-        }
-        Ok(())
-    }
-
-    pub fn list_virtual_nics(
-        &self,
-    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
-        let hdl = Handle::new()?;
-        let v2p = hdl.dump_v2p()?;
-        let mut mappings: Vec<_> = vec![];
-
-        for mapping in v2p.mappings {
-            let vni = mapping
-                .vni
-                .as_u32()
-                .try_into()
-                .expect("opte VNI should be 24 bits");
-
-            for entry in mapping.ip4 {
-                mappings.push(VirtualNetworkInterfaceHost {
-                    virtual_ip: IpAddr::V4(entry.0.into()),
-                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
-                    physical_host_ip: entry.1.ip.into(),
-                    vni,
-                });
-            }
-
-            for entry in mapping.ip6 {
-                mappings.push(VirtualNetworkInterfaceHost {
-                    virtual_ip: IpAddr::V6(entry.0.into()),
-                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
-                    physical_host_ip: entry.1.ip.into(),
-                    vni,
-                });
-            }
-        }
-
-        Ok(mappings)
-    }
-
-    pub fn set_virtual_nic_host(
-        &self,
-        mapping: &VirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            self.inner.log,
-            "Mapping virtual NIC to physical host";
-            "mapping" => ?&mapping,
-        );
-        let hdl = Handle::new()?;
-        hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
-            vip: mapping.virtual_ip.into(),
-            phys: oxide_vpc::api::PhysNet {
-                ether: oxide_vpc::api::MacAddr::from(
-                    (*mapping.virtual_mac).into_array(),
-                ),
-                ip: mapping.physical_host_ip.into(),
-                vni: Vni::new(mapping.vni).unwrap(),
-            },
-        })?;
-
-        Ok(())
-    }
-
-    pub fn unset_virtual_nic_host(
-        &self,
-        mapping: &VirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            self.inner.log,
-            "Clearing mapping of virtual NIC to physical host";
-            "mapping" => ?&mapping,
-        );
-
-        let hdl = Handle::new()?;
-        hdl.clear_v2p(&oxide_vpc::api::ClearVirt2PhysReq {
-            vip: mapping.virtual_ip.into(),
-            phys: oxide_vpc::api::PhysNet {
-                ether: oxide_vpc::api::MacAddr::from(
-                    (*mapping.virtual_mac).into_array(),
-                ),
-                ip: mapping.physical_host_ip.into(),
-                vni: Vni::new(mapping.vni).unwrap(),
-            },
-        })?;
 
         Ok(())
     }
@@ -1262,6 +1140,129 @@ impl PortManager {
             .collect()
     }
 
+    pub fn firewall_rules_ensure(
+        &self,
+        vni: external::Vni,
+        rules: &[ResolvedVpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules";
+            "vni" => ?vni,
+            "rules" => ?&rules,
+        );
+
+        let hdl = Handle::new()?;
+        let ports = self.inner.ports.lock().unwrap();
+
+        // We update VPC rules as a set so grab only
+        // the relevant ports using the VPC's VNI.
+        let vpc_ports = ports.iter().filter(|((_, _), port_state)| {
+            u32::from(vni) == u32::from(*port_state.port.vni())
+        });
+        for ((_, _), port_state) in vpc_ports {
+            let port = &port_state.port;
+            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
+            let port_name = port.name().to_string();
+            info!(
+                self.inner.log,
+                "Setting OPTE firewall rules";
+                "port" => ?&port_name,
+                "rules" => ?&rules,
+            );
+            hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
+                port_name,
+                rules,
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        let hdl = Handle::new()?;
+        let v2p = hdl.dump_v2p()?;
+        let mut mappings: Vec<_> = vec![];
+
+        for mapping in v2p.mappings {
+            let vni = mapping
+                .vni
+                .as_u32()
+                .try_into()
+                .expect("opte VNI should be 24 bits");
+
+            for entry in mapping.ip4 {
+                mappings.push(VirtualNetworkInterfaceHost {
+                    virtual_ip: IpAddr::V4(entry.0.into()),
+                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
+                    physical_host_ip: entry.1.ip.into(),
+                    vni,
+                });
+            }
+
+            for entry in mapping.ip6 {
+                mappings.push(VirtualNetworkInterfaceHost {
+                    virtual_ip: IpAddr::V6(entry.0.into()),
+                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
+                    physical_host_ip: entry.1.ip.into(),
+                    vni,
+                });
+            }
+        }
+
+        Ok(mappings)
+    }
+
+    pub fn set_virtual_nic_host(
+        &self,
+        mapping: &VirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+        let hdl = Handle::new()?;
+        hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
+            vip: mapping.virtual_ip.into(),
+            phys: oxide_vpc::api::PhysNet {
+                ether: oxide_vpc::api::MacAddr::from(
+                    (*mapping.virtual_mac).into_array(),
+                ),
+                ip: mapping.physical_host_ip.into(),
+                vni: Vni::new(mapping.vni).unwrap(),
+            },
+        })?;
+
+        Ok(())
+    }
+
+    pub fn unset_virtual_nic_host(
+        &self,
+        mapping: &VirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Clearing mapping of virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+
+        let hdl = Handle::new()?;
+        hdl.clear_v2p(&oxide_vpc::api::ClearVirt2PhysReq {
+            vip: mapping.virtual_ip.into(),
+            phys: oxide_vpc::api::PhysNet {
+                ether: oxide_vpc::api::MacAddr::from(
+                    (*mapping.virtual_mac).into_array(),
+                ),
+                ip: mapping.physical_host_ip.into(),
+                vni: Vni::new(mapping.vni).unwrap(),
+            },
+        })?;
+
+        Ok(())
+    }
+
     pub fn attached_subnets_ensure(
         &self,
         nic_id: Uuid,
@@ -1468,6 +1469,7 @@ impl PortTicket {
             );
             return Err(Error::ReleaseMissingPort(self.id, self.kind));
         };
+        let port = &port_state.port;
         drop(ports);
 
         // Cleanup the set of subnets we want to receive routes for.
@@ -1490,7 +1492,6 @@ impl PortTicket {
                 );
             }
         };
-        let port = &port_state.port;
         let mut routes = self.manager.routes.lock().unwrap();
         remove_key(&mut routes, port.system_router_key());
         if let Some(key) = port.custom_ipv4_router_key() {
@@ -1500,7 +1501,6 @@ impl PortTicket {
             remove_key(&mut routes, key);
         }
         drop(routes);
-
         debug!(
             self.manager.log,
             "Removed OPTE port from manager";
@@ -1540,12 +1540,7 @@ mod tests {
     use crate::opte::Handle;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
-    use omicron_common::api::internal::shared::ExternalIpConfig;
-    use omicron_common::api::internal::shared::ExternalIpv4Config;
-    use omicron_common::api::internal::shared::ExternalIpv6Config;
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
@@ -1553,8 +1548,6 @@ mod tests {
     use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
     use omicron_common::api::internal::shared::RouterTarget;
     use omicron_common::api::internal::shared::RouterVersion;
-    use omicron_common::api::internal::shared::SourceNatConfigV4;
-    use omicron_common::api::internal::shared::SourceNatConfigV6;
     use omicron_test_utils::dev::test_setup_log;
     use oxide_vpc::api::DhcpCfg;
     use oxide_vpc::api::FilterMode;
@@ -1565,6 +1558,13 @@ mod tests {
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::SourceNatConfigV4;
+    use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::multicast::MulticastGroupCfg;
     use std::collections::HashSet;
     use std::net::IpAddr;
@@ -1625,7 +1625,6 @@ mod tests {
             }),
             v6: None,
         };
-        const MAX_PORT: u16 = (1 << 14) - 1;
         let (port0, _ticket0) = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
@@ -2084,14 +2083,12 @@ mod tests {
             gateway_ip,
             external_ips:
                 oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
-            attached_subnets,
-            transit_ips,
+            attached_subnets: _,
+            transit_ips: _,
         }) = IpCfg::try_from(&prs).unwrap()
         else {
-            panic!("Expected IPv6 config")
+            panic!("Expected IPv4 config")
         };
-        assert!(attached_subnets.is_empty());
-        assert!(transit_ips.is_empty());
 
         assert_eq!(private_ip, priv_ip.into());
         assert_eq!(

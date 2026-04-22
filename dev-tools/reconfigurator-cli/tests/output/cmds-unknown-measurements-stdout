@@ -163,23 +163,23 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
     omicron zones:
-    -------------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source                disposition   underlay IP           
-    -------------------------------------------------------------------------------------------------------------------------
-*   clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   - install dataset           in service    fd00:1122:3344:102::23
-     └─                                                      + artifact: version 1.0.0                                       
-*   crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   - install dataset           in service    fd00:1122:3344:102::26
-     └─                                                      + artifact: version 1.0.0                                       
-*   crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   - install dataset           in service    fd00:1122:3344:102::25
-     └─                                                      + artifact: version 1.0.0                                       
-*   external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   - install dataset           in service    fd00:1122:3344:102::24
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   - install dataset           in service    fd00:1122:3344:1::1   
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   - install dataset           in service    fd00:1122:3344:102::21
-     └─                                                      + artifact: version 1.0.0                                       
-*   nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   - install dataset           in service    fd00:1122:3344:102::22
-     └─                                                      + artifact: version 1.0.0                                       
+    ------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP          
+    ------------------------------------------------------------------------------------------------------------------------
+*   clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   - install dataset           in service    fd00:1122:3344:102::5
+     └─                                                      + artifact: version 1.0.0                                      
+*   crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   - install dataset           in service    fd00:1122:3344:102::8
+     └─                                                      + artifact: version 1.0.0                                      
+*   crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   - install dataset           in service    fd00:1122:3344:102::7
+     └─                                                      + artifact: version 1.0.0                                      
+*   external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   - install dataset           in service    fd00:1122:3344:102::6
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   - install dataset           in service    fd00:1122:3344:1::1  
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   - install dataset           in service    fd00:1122:3344:102::3
+     └─                                                      + artifact: version 1.0.0                                      
+*   nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   - install dataset           in service    fd00:1122:3344:102::4
+     └─                                                      + artifact: version 1.0.0                                      
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
@@ -227,21 +227,21 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
     omicron zones:
-    -------------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source                disposition   underlay IP           
-    -------------------------------------------------------------------------------------------------------------------------
-*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - install dataset           in service    fd00:1122:3344:101::25
-     └─                                                      + artifact: version 1.0.0                                       
-*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - install dataset           in service    fd00:1122:3344:101::24
-     └─                                                      + artifact: version 1.0.0                                       
-*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - install dataset           in service    fd00:1122:3344:101::23
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   - install dataset           in service    fd00:1122:3344:2::1   
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - install dataset           in service    fd00:1122:3344:101::21
-     └─                                                      + artifact: version 1.0.0                                       
-*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - install dataset           in service    fd00:1122:3344:101::22
-     └─                                                      + artifact: version 1.0.0                                       
+    ------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP          
+    ------------------------------------------------------------------------------------------------------------------------
+*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - install dataset           in service    fd00:1122:3344:101::7
+     └─                                                      + artifact: version 1.0.0                                      
+*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - install dataset           in service    fd00:1122:3344:101::6
+     └─                                                      + artifact: version 1.0.0                                      
+*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - install dataset           in service    fd00:1122:3344:101::5
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   - install dataset           in service    fd00:1122:3344:2::1  
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - install dataset           in service    fd00:1122:3344:101::3
+     └─                                                      + artifact: version 1.0.0                                      
+*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - install dataset           in service    fd00:1122:3344:101::4
+     └─                                                      + artifact: version 1.0.0                                      
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
@@ -289,21 +289,21 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
     omicron zones:
-    -------------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source                disposition   underlay IP           
-    -------------------------------------------------------------------------------------------------------------------------
-*   crucible          f55647d4-5500-4ad3-893a-df45bd50d622   - install dataset           in service    fd00:1122:3344:103::25
-     └─                                                      + artifact: version 1.0.0                                       
-*   crucible_pantry   75b220ba-a0f4-4872-8202-dc7c87f062d0   - install dataset           in service    fd00:1122:3344:103::24
-     └─                                                      + artifact: version 1.0.0                                       
-*   external_dns      f6ec9c67-946a-4da3-98d5-581f72ce8bf0   - install dataset           in service    fd00:1122:3344:103::23
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   - install dataset           in service    fd00:1122:3344:3::1   
-     └─                                                      + artifact: version 1.0.0                                       
-*   internal_ntp      f10a4fb9-759f-4a65-b25e-5794ad2d07d8   - install dataset           in service    fd00:1122:3344:103::21
-     └─                                                      + artifact: version 1.0.0                                       
-*   nexus             3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   - install dataset           in service    fd00:1122:3344:103::22
-     └─                                                      + artifact: version 1.0.0                                       
+    ------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP          
+    ------------------------------------------------------------------------------------------------------------------------
+*   crucible          f55647d4-5500-4ad3-893a-df45bd50d622   - install dataset           in service    fd00:1122:3344:103::7
+     └─                                                      + artifact: version 1.0.0                                      
+*   crucible_pantry   75b220ba-a0f4-4872-8202-dc7c87f062d0   - install dataset           in service    fd00:1122:3344:103::6
+     └─                                                      + artifact: version 1.0.0                                      
+*   external_dns      f6ec9c67-946a-4da3-98d5-581f72ce8bf0   - install dataset           in service    fd00:1122:3344:103::5
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   - install dataset           in service    fd00:1122:3344:3::1  
+     └─                                                      + artifact: version 1.0.0                                      
+*   internal_ntp      f10a4fb9-759f-4a65-b25e-5794ad2d07d8   - install dataset           in service    fd00:1122:3344:103::3
+     └─                                                      + artifact: version 1.0.0                                      
+*   nexus             3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   - install dataset           in service    fd00:1122:3344:103::4
+     └─                                                      + artifact: version 1.0.0                                      
 
 
  COCKROACHDB SETTINGS:
@@ -429,7 +429,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::26
+    last allocated IP:   fd00:1122:3344:102::8
 
     host phase 2 contents:
     ------------------------
@@ -475,16 +475,16 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
     omicron zones:
-    -----------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source              disposition   underlay IP           
-    -----------------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   artifact: version 1.0.0   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   artifact: version 1.0.0   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   artifact: version 1.0.0   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   artifact: version 1.0.0   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   artifact: version 1.0.0   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   artifact: version 1.0.0   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   artifact: version 1.0.0   in service    fd00:1122:3344:102::22
+    ----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition   underlay IP          
+    ----------------------------------------------------------------------------------------------------------------------
+    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   artifact: version 1.0.0   in service    fd00:1122:3344:102::5
+    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   artifact: version 1.0.0   in service    fd00:1122:3344:102::8
+    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   artifact: version 1.0.0   in service    fd00:1122:3344:102::7
+    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   artifact: version 1.0.0   in service    fd00:1122:3344:102::6
+    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   artifact: version 1.0.0   in service    fd00:1122:3344:1::1  
+    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   artifact: version 1.0.0   in service    fd00:1122:3344:102::3
+    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   artifact: version 1.0.0   in service    fd00:1122:3344:102::4
 
 
 
@@ -492,7 +492,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::25
+    last allocated IP:   fd00:1122:3344:101::7
 
     host phase 2 contents:
     ------------------------
@@ -536,15 +536,15 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
     omicron zones:
-    -----------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source              disposition   underlay IP           
-    -----------------------------------------------------------------------------------------------------------------------
-    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   artifact: version 1.0.0   in service    fd00:1122:3344:101::25
-    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   artifact: version 1.0.0   in service    fd00:1122:3344:101::24
-    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   artifact: version 1.0.0   in service    fd00:1122:3344:101::23
-    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 1.0.0   in service    fd00:1122:3344:2::1   
-    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   artifact: version 1.0.0   in service    fd00:1122:3344:101::21
-    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   artifact: version 1.0.0   in service    fd00:1122:3344:101::22
+    ----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition   underlay IP          
+    ----------------------------------------------------------------------------------------------------------------------
+    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   artifact: version 1.0.0   in service    fd00:1122:3344:101::7
+    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   artifact: version 1.0.0   in service    fd00:1122:3344:101::6
+    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   artifact: version 1.0.0   in service    fd00:1122:3344:101::5
+    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 1.0.0   in service    fd00:1122:3344:2::1  
+    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   artifact: version 1.0.0   in service    fd00:1122:3344:101::3
+    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   artifact: version 1.0.0   in service    fd00:1122:3344:101::4
 
 
 
@@ -552,7 +552,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::25
+    last allocated IP:   fd00:1122:3344:103::7
 
     host phase 2 contents:
     ------------------------
@@ -596,15 +596,15 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
     omicron zones:
-    -----------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source              disposition   underlay IP           
-    -----------------------------------------------------------------------------------------------------------------------
-    crucible          f55647d4-5500-4ad3-893a-df45bd50d622   artifact: version 1.0.0   in service    fd00:1122:3344:103::25
-    crucible_pantry   75b220ba-a0f4-4872-8202-dc7c87f062d0   artifact: version 1.0.0   in service    fd00:1122:3344:103::24
-    external_dns      f6ec9c67-946a-4da3-98d5-581f72ce8bf0   artifact: version 1.0.0   in service    fd00:1122:3344:103::23
-    internal_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   artifact: version 1.0.0   in service    fd00:1122:3344:3::1   
-    internal_ntp      f10a4fb9-759f-4a65-b25e-5794ad2d07d8   artifact: version 1.0.0   in service    fd00:1122:3344:103::21
-    nexus             3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   artifact: version 1.0.0   in service    fd00:1122:3344:103::22
+    ----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition   underlay IP          
+    ----------------------------------------------------------------------------------------------------------------------
+    crucible          f55647d4-5500-4ad3-893a-df45bd50d622   artifact: version 1.0.0   in service    fd00:1122:3344:103::7
+    crucible_pantry   75b220ba-a0f4-4872-8202-dc7c87f062d0   artifact: version 1.0.0   in service    fd00:1122:3344:103::6
+    external_dns      f6ec9c67-946a-4da3-98d5-581f72ce8bf0   artifact: version 1.0.0   in service    fd00:1122:3344:103::5
+    internal_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   artifact: version 1.0.0   in service    fd00:1122:3344:3::1  
+    internal_ntp      f10a4fb9-759f-4a65-b25e-5794ad2d07d8   artifact: version 1.0.0   in service    fd00:1122:3344:103::3
+    nexus             3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   artifact: version 1.0.0   in service    fd00:1122:3344:103::4
 
 
  COCKROACHDB SETTINGS:

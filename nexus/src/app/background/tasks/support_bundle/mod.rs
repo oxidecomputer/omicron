@@ -7,6 +7,5 @@
 mod cache;
 pub mod collection;
 pub mod perfetto;
-pub mod request;
 mod step;
 mod steps;

@@ -5,5 +5,4 @@
 //! Version `BGP_v6` of the Sled Agent API.
 
 pub mod early_networking;
-pub mod rack_init;
 pub mod uplink;

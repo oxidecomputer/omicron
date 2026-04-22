@@ -46,8 +46,6 @@ use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_types::early_networking::LldpAdminStatus;
-use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
@@ -588,44 +586,26 @@ impl super::Nexus {
             let peers: Vec<networking::BgpPeer> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| {
-                    // TODO-cleanup Extend stronger types out to the external
-                    // API (omicron#9832).
-                    //
-                    // For now, squash unnumbered back to None, and fill in a
-                    // default router_lifetime for numbered.
-                    let (addr, router_lifetime) = match r.addr {
-                        RouterPeerType::Unnumbered { router_lifetime } => {
-                            (None, router_lifetime.as_u16())
-                        }
-                        RouterPeerType::Numbered { ip } => (
-                            Some(ip.into()),
-                            RouterLifetimeConfig::default().as_u16(),
-                        ),
-                    };
-                    networking::BgpPeer {
-                        bgp_config: NameOrId::Name(
-                            format!("as{}", r.asn).parse().unwrap(),
-                        ),
-                        interface_name: link_name.clone(),
-                        addr,
-                        hold_time: r.hold_time() as u32,
-                        idle_hold_time: r.idle_hold_time() as u32,
-                        delay_open: r.delay_open() as u32,
-                        connect_retry: r.connect_retry() as u32,
-                        keepalive: r.keepalive() as u32,
-                        remote_asn: r.remote_asn,
-                        min_ttl: r.min_ttl,
-                        md5_auth_key: r.md5_auth_key.clone(),
-                        multi_exit_discriminator: r.multi_exit_discriminator,
-                        local_pref: r.local_pref,
-                        enforce_first_as: r.enforce_first_as,
-                        communities: r.communities.clone(),
-                        allowed_import: r.allowed_import.clone(),
-                        allowed_export: r.allowed_export.clone(),
-                        vlan_id: r.vlan_id,
-                        router_lifetime,
-                    }
+                .map(|r| networking::BgpPeer {
+                    bgp_config: NameOrId::Name(
+                        format!("as{}", r.asn).parse().unwrap(),
+                    ),
+                    addr: r.addr,
+                    hold_time: r.hold_time() as u32,
+                    idle_hold_time: r.idle_hold_time() as u32,
+                    delay_open: r.delay_open() as u32,
+                    connect_retry: r.connect_retry() as u32,
+                    keepalive: r.keepalive() as u32,
+                    remote_asn: r.remote_asn,
+                    min_ttl: r.min_ttl,
+                    md5_auth_key: r.md5_auth_key.clone(),
+                    multi_exit_discriminator: r.multi_exit_discriminator,
+                    local_pref: r.local_pref,
+                    enforce_first_as: r.enforce_first_as,
+                    communities: r.communities.clone(),
+                    allowed_import: r.allowed_import.clone(),
+                    allowed_export: r.allowed_export.clone(),
+                    vlan_id: r.vlan_id,
                 })
                 .collect();
 

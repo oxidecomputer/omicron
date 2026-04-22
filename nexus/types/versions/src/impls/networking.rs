@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::latest;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use oxnet::IpNet;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
@@ -49,5 +50,22 @@ impl latest::networking::AggregateBgpMessageHistory {
         switch_histories: Vec<latest::networking::SwitchBgpHistory>,
     ) -> Self {
         Self { switch_histories }
+    }
+}
+
+impl latest::networking::SwitchPortSettingsCreate {
+    pub fn new(identity: IdentityMetadataCreateParams) -> Self {
+        Self {
+            identity,
+            port_config: latest::networking::SwitchPortConfigCreate {
+                geometry: latest::networking::SwitchPortGeometry::Qsfp28x1,
+            },
+            groups: Vec::new(),
+            links: Vec::new(),
+            interfaces: Vec::new(),
+            routes: Vec::new(),
+            bgp_peers: Vec::new(),
+            addresses: Vec::new(),
+        }
     }
 }

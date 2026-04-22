@@ -5,6 +5,7 @@
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
+use crate::fm::EreportId;
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
@@ -17,21 +18,21 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Case {
     pub id: CaseUuid,
-    pub created_sitrep_id: SitrepUuid,
-    pub closed_sitrep_id: Option<SitrepUuid>,
-
-    pub de: DiagnosisEngineKind,
+    #[serde(flatten)]
+    pub metadata: Metadata,
 
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
     pub support_bundles_requested: IdOrdMap<SupportBundleRequest>,
-
-    pub comment: String,
 }
 
 impl Case {
+    pub fn id(&self) -> &CaseUuid {
+        &self.id
+    }
+
     pub fn is_open(&self) -> bool {
-        self.closed_sitrep_id.is_none()
+        self.metadata.is_open()
     }
 
     pub fn display_indented(
@@ -58,6 +59,83 @@ impl IdOrdItem for Case {
     iddqd::id_upcast!();
 }
 
+/// Metadata about a case.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Metadata {
+    pub created_sitrep_id: SitrepUuid,
+    pub closed_sitrep_id: Option<SitrepUuid>,
+
+    pub de: DiagnosisEngineKind,
+
+    pub comment: String,
+}
+
+impl Metadata {
+    pub fn is_open(&self) -> bool {
+        self.closed_sitrep_id.is_none()
+    }
+
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+        sitrep: Option<SitrepUuid>,
+    ) -> impl fmt::Display + '_ {
+        struct DisplayMetadata<'a> {
+            meta: &'a Metadata,
+            indent: usize,
+            sitrep_id: Option<SitrepUuid>,
+        }
+
+        impl fmt::Display for DisplayMetadata<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let DisplayMetadata {
+                    meta:
+                        Metadata {
+                            de,
+                            created_sitrep_id,
+                            closed_sitrep_id,
+                            comment,
+                        },
+                    indent,
+                    sitrep_id,
+                } = self;
+                let sitrep_id = sitrep_id.as_ref();
+                let this_sitrep = move |s| {
+                    if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
+                };
+
+                const DE: &str = "diagnosis engine:";
+                const OPENED_IN: &str = "opened in sitrep:";
+                const CLOSED_IN: &str = "closed in sitrep:";
+                const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
+
+                if !comment.is_empty() {
+                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                }
+                writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
+                writeln!(
+                    f,
+                    "{:>indent$}{OPENED_IN:<WIDTH$} {created_sitrep_id}{}",
+                    "",
+                    this_sitrep(created_sitrep_id)
+                )?;
+                if let Some(closed_id) = closed_sitrep_id {
+                    writeln!(
+                        f,
+                        "{:>indent$}{CLOSED_IN:<WIDTH$} {closed_id}{}",
+                        "",
+                        this_sitrep(closed_id)
+                    )?;
+                }
+
+                Ok(())
+            }
+        }
+
+        DisplayMetadata { meta: self, indent, sitrep_id: sitrep }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct CaseEreport {
     pub id: CaseEreportUuid,
@@ -75,12 +153,19 @@ impl IdOrdItem for CaseEreport {
     iddqd::id_upcast!();
 }
 
+impl CaseEreport {
+    pub fn ereport_id(&self) -> &EreportId {
+        self.ereport.id()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AlertRequest {
     pub id: AlertUuid,
     pub class: AlertClass,
     pub payload: serde_json::Value,
     pub requested_sitrep_id: SitrepUuid,
+    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for AlertRequest {
@@ -102,6 +187,7 @@ pub struct SupportBundleRequest {
     /// Which data to include in the support bundle. Use
     /// [`BundleDataSelection::all()`] to request all data.
     pub data_selection: BundleDataSelection,
+    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for SupportBundleRequest {
@@ -122,28 +208,13 @@ struct DisplayCase<'a> {
 impl fmt::Display for DisplayCase<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const BULLET: &str = "* ";
-        const fn const_max_len(strs: &[&str]) -> usize {
-            let mut max = 0;
-            let mut i = 0;
-            while i < strs.len() {
-                let len = strs[i].len();
-                if len > max {
-                    max = len;
-                }
-                i += 1;
-            }
-            max
-        }
 
         let &Self {
             case:
                 Case {
                     id,
-                    created_sitrep_id,
-                    closed_sitrep_id,
-                    de,
+                    metadata,
                     ereports,
-                    comment,
                     alerts_requested,
                     support_bundles_requested,
                 },
@@ -158,35 +229,14 @@ impl fmt::Display for DisplayCase<'_> {
         writeln!(
             f,
             "{:>indent$}case {id}",
-            if indent > 0 { BULLET } else { "" }
+            if indent > 0 { BULLET } else { "" },
         )?;
         writeln!(
             f,
             "{:>indent$}=========================================",
             ""
         )?;
-
-        const DE: &str = "diagnosis engine:";
-        const OPENED_IN: &str = "opened in sitrep:";
-        const CLOSED_IN: &str = "closed in sitrep:";
-        const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
-        writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
-        writeln!(
-            f,
-            "{:>indent$}{OPENED_IN:<WIDTH$} {created_sitrep_id}{}",
-            "",
-            this_sitrep(*created_sitrep_id)
-        )?;
-        if let Some(closed_id) = closed_sitrep_id {
-            writeln!(
-                f,
-                "{:>indent$}{CLOSED_IN:<WIDTH$} {closed_id}{}",
-                "",
-                this_sitrep(*closed_id)
-            )?;
-        }
-
-        writeln!(f, "\n{:>indent$}comment: {comment}", "")?;
+        metadata.display_multiline(indent, sitrep_id).fmt(f)?;
 
         if !ereports.is_empty() {
             writeln!(f, "\n{:>indent$}ereports:", "")?;
@@ -241,22 +291,30 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}-----------------", "")?;
 
             let indent = indent + 2;
-            for AlertRequest { id, class, payload: _, requested_sitrep_id } in
-                alerts_requested.iter()
+            for AlertRequest {
+                id,
+                class,
+                payload: _,
+                requested_sitrep_id,
+                comment,
+            } in alerts_requested.iter()
             {
                 const CLASS: &str = "class:";
                 const REQUESTED_IN: &str = "requested in:";
+                const COMMENT: &str = "comment:";
 
-                const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
+                const WIDTH: usize =
+                    const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
                 writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
                 writeln!(
                     f,
-                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
+                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -269,11 +327,14 @@ impl fmt::Display for DisplayCase<'_> {
                 id,
                 requested_sitrep_id,
                 data_selection,
+                comment,
             } in support_bundles_requested.iter()
             {
                 const REQUESTED_IN: &str = "requested in:";
                 const DATA: &str = "data:";
-                const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
+                const COMMENT: &str = "comment:";
+                const WIDTH: usize =
+                    const_max_len(&[REQUESTED_IN, DATA, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
                 writeln!(
@@ -283,7 +344,8 @@ impl fmt::Display for DisplayCase<'_> {
                     this_sitrep(*requested_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}{DATA}", "")?;
-                writeln!(f, "{}\n", data_selection.display(indent + 2))?;
+                writeln!(f, "{}", data_selection.display(indent + 2))?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -291,6 +353,19 @@ impl fmt::Display for DisplayCase<'_> {
 
         Ok(())
     }
+}
+
+const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
 }
 
 #[cfg(test)]
@@ -402,6 +477,7 @@ mod tests {
                 class: AlertClass::TestFoo,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: created_sitrep_id,
+                comment: "power shelf rectifier removed".to_string(),
             })
             .unwrap();
         alerts_requested
@@ -410,6 +486,7 @@ mod tests {
                 class: AlertClass::TestFooBar,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: closed_sitrep_id,
+                comment: String::new(),
             })
             .unwrap();
 
@@ -425,6 +502,7 @@ mod tests {
                 id: bundle1_id,
                 requested_sitrep_id: created_sitrep_id,
                 data_selection: bundle1_data,
+                comment: "test support bundle".to_string(),
             })
             .unwrap();
         support_bundles_requested
@@ -432,20 +510,23 @@ mod tests {
                 id: bundle2_id,
                 requested_sitrep_id: closed_sitrep_id,
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 
         // Create the case
         let case = Case {
             id: case_id,
-            created_sitrep_id,
-            closed_sitrep_id: Some(closed_sitrep_id),
-            de: DiagnosisEngineKind::PowerShelf,
+            metadata: Metadata {
+                created_sitrep_id,
+                closed_sitrep_id: Some(closed_sitrep_id),
+                de: DiagnosisEngineKind::PowerShelf,
+                comment: "Power shelf rectifier added and removed here :-)"
+                    .to_string(),
+            },
             ereports,
             alerts_requested,
             support_bundles_requested,
-            comment: "Power shelf rectifier added and removed here :-)"
-                .to_string(),
         };
 
         eprintln!("example case display:");

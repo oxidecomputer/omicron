@@ -23,15 +23,22 @@ pub async fn spawn_collection_steps(
     cache: &Cache,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let request = collection.request();
-
-    if !request.include_sp_dumps() {
+    if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
 
-    let Some(mgs_client) = cache.get_or_initialize_mgs_client(collection).await
-    else {
-        bail!("Could not initialize MGS client");
+    let init_future = async {
+        let Some(mgs_client) =
+            cache.get_or_initialize_mgs_client(collection).await
+        else {
+            bail!("Could not initialize MGS client");
+        };
+        let sps = steps::sled_cubby::get_available_sps(&mgs_client).await?;
+        Ok::<_, anyhow::Error>((mgs_client, sps))
+    };
+    let (mgs_client, available_sps) = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = init_future => result?,
     };
 
     let sp_dumps_dir = dir.join("sp_task_dumps");
@@ -40,7 +47,7 @@ pub async fn spawn_collection_steps(
     })?;
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
-    for sp in steps::sled_cubby::get_available_sps(&mgs_client).await? {
+    for sp in available_sps {
         extra_steps.push(CollectionStep::new(
             format!("SP dump for {:?}", sp),
             Box::new({
@@ -64,44 +71,64 @@ async fn collect_sp_dump(
     sp: SpIdentifier,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    if !collection.request().include_sp_dumps() {
+    if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
 
-    save_sp_dumps(mgs_client, sp, dir).await.with_context(|| {
-        format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
-    })?;
+    save_sp_dumps(collection, mgs_client, sp, dir).await.with_context(
+        || format!("failed to save SP dump from: {} {}", sp.type_, sp.slot),
+    )?;
 
     Ok(CollectionStepOutput::None)
 }
 
+// Download and save SP task dumps.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// HTTP requests to MGS are eagerly cancelled via `select!`.
 async fn save_sp_dumps(
+    collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
     sp_dumps_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
-    let dump_count = mgs_client
-        .sp_task_dump_count(&sp.type_, sp.slot)
-        .await
-        .context("failed to get task dump count from SP")?
-        .into_inner();
+    let fetch_dumps = async {
+        let dump_count = mgs_client
+            .sp_task_dump_count(&sp.type_, sp.slot)
+            .await
+            .context("failed to get task dump count from SP")?
+            .into_inner();
+
+        let mut dumps = Vec::with_capacity(dump_count as usize);
+        for i in 0..dump_count {
+            let task_dump = mgs_client
+                .sp_task_dump_get(&sp.type_, sp.slot, i)
+                .await
+                .with_context(|| {
+                    format!("failed to get task dump {i} from SP")
+                })?
+                .into_inner();
+
+            let zip_bytes = base64::engine::general_purpose::STANDARD
+                .decode(task_dump.base64_zip)
+                .context("failed to decode base64-encoded SP task dump zip")?;
+            dumps.push((i, zip_bytes));
+        }
+        Ok::<_, anyhow::Error>(dumps)
+    };
+    let dumps = tokio::select! {
+        _ = collection.cancelled() => return Ok(()),
+        result = fetch_dumps => result?,
+    };
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
     tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
         format!("Failed to create output directory {output_dir}")
     })?;
 
-    for i in 0..dump_count {
-        let task_dump = mgs_client
-            .sp_task_dump_get(&sp.type_, sp.slot, i)
-            .await
-            .with_context(|| format!("failed to get task dump {i} from SP"))?
-            .into_inner();
-
-        let zip_bytes = base64::engine::general_purpose::STANDARD
-            .decode(task_dump.base64_zip)
-            .context("failed to decode base64-encoded SP task dump zip")?;
-
+    for (i, zip_bytes) in dumps {
         tokio::fs::write(output_dir.join(format!("dump-{i}.zip")), zip_bytes)
             .await
             .context("failed to write SP task dump zip to disk")?;

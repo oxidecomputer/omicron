@@ -56,8 +56,8 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
-        NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        NetworkInterface = sled_agent_types::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
@@ -68,7 +68,7 @@ progenitor::generate_api!(
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
-        RecoverySiloConfig = sled_agent_types_versions::latest::rack_init::RecoverySiloConfig,
+        RecoverySiloConfig = bootstrap_agent_lockstep_types::RecoverySiloConfig,
         RouterPeerType = sled_agent_types::early_networking::RouterPeerType,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
@@ -140,12 +140,10 @@ impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     }
 }
 
-impl From<&omicron_common::api::internal::shared::SourceNatConfigGeneric>
+impl From<&sled_agent_types::inventory::SourceNatConfigGeneric>
     for types::SourceNatConfigGeneric
 {
-    fn from(
-        r: &omicron_common::api::internal::shared::SourceNatConfigGeneric,
-    ) -> Self {
+    fn from(r: &sled_agent_types::inventory::SourceNatConfigGeneric) -> Self {
         let (first_port, last_port) = r.port_range_raw();
         Self { ip: r.ip, first_port, last_port }
     }

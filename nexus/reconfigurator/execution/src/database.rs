@@ -85,8 +85,6 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::sled::SledState;
-    use nexus_types::inventory::NetworkInterface;
-    use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
@@ -101,6 +99,8 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
     use std::collections::BTreeMap;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;

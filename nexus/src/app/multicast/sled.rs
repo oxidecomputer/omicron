@@ -18,6 +18,8 @@
 //! [`dataplane`]: super::dataplane
 
 use std::collections::BTreeSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
@@ -320,9 +322,15 @@ impl MulticastSledClient {
         .map_err(|e| anyhow::anyhow!(e))
         .context("failed to resolve switch zone addresses")?;
 
+        // Hash the group UUID to distribute switch selection across both
+        // switches. All Nexuses compute the same hash for a given group,
+        // so they agree on the mapping without coordination.
+        let mut hasher = DefaultHasher::new();
+        group_id.hash(&mut hasher);
+        let idx = (hasher.finish() as usize) % switch_zone_addrs.len();
         let switch_ip = switch_zone_addrs
             .iter()
-            .min_by_key(|(slot, _)| *slot)
+            .nth(idx)
             .map(|(_, ip)| *ip)
             .context("no switch zone found for forwarding next hop")?;
 

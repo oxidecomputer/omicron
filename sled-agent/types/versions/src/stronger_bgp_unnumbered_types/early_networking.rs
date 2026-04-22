@@ -121,7 +121,7 @@ pub enum RouterPeerType {
 // detailed error messages we produce. We manually implement Deserialize per
 // https://github.com/serde-rs/serde/issues/2211#issuecomment-1627628399.
 #[serde(into = "IpNet")]
-#[schemars(with = "IpNet")]
+#[schemars(transparent)]
 pub struct UplinkIpNet(pub(crate) IpNet);
 
 impl<'de> Deserialize<'de> for UplinkIpNet {
@@ -186,7 +186,7 @@ impl TryFrom<IpNet> for UplinkIpNet {
 // detailed error messages we produce. We manually implement Deserialize per
 // https://github.com/serde-rs/serde/issues/2211#issuecomment-1627628399.
 #[serde(into = "IpAddr")]
-#[schemars(with = "IpAddr")]
+#[schemars(transparent)]
 pub struct RouterPeerIpAddr(pub(crate) IpAddr);
 
 impl<'de> Deserialize<'de> for RouterPeerIpAddr {
@@ -535,7 +535,7 @@ impl From<BgpPeerConfig> for v20::BgpPeerConfig {
 }
 
 /// Initial network configuration
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RackNetworkConfig {
     pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks

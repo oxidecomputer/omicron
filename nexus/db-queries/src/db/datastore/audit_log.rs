@@ -231,6 +231,7 @@ mod tests {
         AuditLogActor, AuditLogEntryInitParams, AuditLogResultKind,
     };
     use omicron_common::api::external::Error;
+    use omicron_common::now_db_precision;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
@@ -246,7 +247,7 @@ mod tests {
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
         };
-        let t0 = Utc::now();
+        let t0 = now_db_precision();
         let t_future: DateTime<Utc> = "2099-01-01T00:00:00Z".parse().unwrap();
 
         let audit_log = datastore
@@ -285,7 +286,7 @@ mod tests {
             .expect_err("inserting same entry again should error");
         assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
 
-        let t1 = Utc::now();
+        let t1 = now_db_precision();
 
         let completion = AuditLogCompletion::Success { http_status_code: 201 };
         datastore
@@ -293,7 +294,7 @@ mod tests {
             .await
             .expect("complete audit log entry");
 
-        let t2 = Utc::now();
+        let t2 = now_db_precision();
 
         let entry2_params = AuditLogEntryInitParams {
             request_id: "req-2".to_string(),
@@ -310,7 +311,7 @@ mod tests {
             .await
             .expect("init second audit log entry");
 
-        let t3 = Utc::now();
+        let t3 = now_db_precision();
 
         // before entry2 is completed, it doesn't come back in the list
         let audit_log = datastore
@@ -331,7 +332,7 @@ mod tests {
             .await
             .expect("complete audit log entry");
 
-        let t4 = Utc::now();
+        let t4 = now_db_precision();
 
         // get both entries
         let audit_log = datastore
@@ -392,7 +393,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let t0 = Utc::now();
+        let t0 = now_db_precision();
 
         let base_params = AuditLogEntryInitParams {
             request_id: "req-1".to_string(),
@@ -512,7 +513,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let now = Utc::now();
+        let now = now_db_precision();
         let two_hours_ago = now - TimeDelta::try_hours(2).unwrap();
         let cutoff = now - TimeDelta::try_hours(1).unwrap();
 

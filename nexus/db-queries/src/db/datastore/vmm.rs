@@ -30,10 +30,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::Migrations;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_types::instance::{MigrationRuntimeState, Migrations};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -205,9 +204,7 @@ impl DataStore {
         new_runtime: &VmmRuntimeState,
         Migrations { migration_in, migration_out }: Migrations<'_>,
     ) -> Result<VmmStateUpdateResult, Error> {
-        fn migration_id(
-            m: Option<&nexus::MigrationRuntimeState>,
-        ) -> Option<Uuid> {
+        fn migration_id(m: Option<&MigrationRuntimeState>) -> Option<Uuid> {
             m.as_ref().map(|m| m.migration_id)
         }
 
@@ -447,10 +444,10 @@ mod tests {
     use crate::db::model::VmmState;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::VmmCpuPlatform;
-    use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::instance::MigrationState;
 
     #[tokio::test]
     async fn test_vmm_and_migration_update_runtime() {
@@ -517,9 +514,9 @@ mod tests {
             "migration" => ?migration1,
         );
 
-        let vmm1_migration_out = nexus::MigrationRuntimeState {
+        let vmm1_migration_out = MigrationRuntimeState {
             migration_id: migration1.id,
-            state: nexus::MigrationState::Completed,
+            state: MigrationState::Completed,
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
@@ -539,9 +536,9 @@ mod tests {
             )
             .await
             .expect("vmm1 state should update");
-        let vmm2_migration_in = nexus::MigrationRuntimeState {
+        let vmm2_migration_in = MigrationRuntimeState {
             migration_id: migration1.id,
-            state: nexus::MigrationState::Completed,
+            state: MigrationState::Completed,
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
@@ -625,9 +622,9 @@ mod tests {
             "migration" => ?migration2,
         );
 
-        let vmm2_migration_out = nexus::MigrationRuntimeState {
+        let vmm2_migration_out = MigrationRuntimeState {
             migration_id: migration2.id,
-            state: nexus::MigrationState::Completed,
+            state: MigrationState::Completed,
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
@@ -648,10 +645,10 @@ mod tests {
             .await
             .expect("vmm2 state should update");
 
-        let vmm3_migration_in = nexus::MigrationRuntimeState {
+        let vmm3_migration_in = MigrationRuntimeState {
             migration_id: migration2.id,
             // Let's make this fail, just for fun...
-            state: nexus::MigrationState::Failed,
+            state: MigrationState::Failed,
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };

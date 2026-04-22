@@ -1999,7 +1999,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &DEMO_SUBNET_POOL_UTILIZATION_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_CURRENT_SILO_SUBNET_POOLS_URL,

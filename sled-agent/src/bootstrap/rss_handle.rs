@@ -5,10 +5,12 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
+use crate::rack_setup::service::RackInitializeRequestParams;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::RssStep;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
@@ -16,8 +18,6 @@ use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_types::rack_init::RackInitializeRequestParams;
-use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;

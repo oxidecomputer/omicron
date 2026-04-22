@@ -37,6 +37,7 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 supports-color.workspace = true
+tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true

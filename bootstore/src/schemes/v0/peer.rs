@@ -221,6 +221,12 @@ impl NodeHandle {
         rx.await?
     }
 
+    /// Get the current contents of the watch channel containing the network
+    /// config
+    pub fn network_config_contents(&self) -> Option<NetworkConfig> {
+        self.network_config_rx.borrow().clone()
+    }
+
     /// Subscribe to the watch channel containing the network config
     pub fn network_config_subscribe(
         &self,

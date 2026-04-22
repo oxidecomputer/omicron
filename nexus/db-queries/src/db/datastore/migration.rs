@@ -24,10 +24,10 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_types::instance;
 use uuid::Uuid;
 
 impl DataStore {
@@ -87,7 +87,7 @@ impl DataStore {
         opctx: &OpContext,
         migration_id: Uuid,
     ) -> UpdateResult<bool> {
-        let failed = MigrationState(nexus::MigrationState::Failed);
+        let failed = MigrationState::FAILED;
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration_id))
             .filter(dsl::time_deleted.is_null())
@@ -133,7 +133,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
-        migration: &nexus::MigrationRuntimeState,
+        migration: &instance::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
         let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
@@ -155,7 +155,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
-        migration: &nexus::MigrationRuntimeState,
+        migration: &instance::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
         let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
