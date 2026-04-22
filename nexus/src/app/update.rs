@@ -6,6 +6,7 @@
 
 use crate::app::background::LoadedTargetBlueprint;
 use bytes::Bytes;
+use chrono::TimeDelta;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
@@ -34,6 +35,10 @@ use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
 use uuid::Uuid;
+
+// TODO-K: Set back to an hour
+/// Threshold at which we consider an active saga stale
+const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(1);
 
 /// Used to pull data out of the channels
 #[derive(Clone)]
@@ -237,16 +242,7 @@ impl super::Nexus {
         // We want a rough idea of whether the system is in a healthy state or
         // not. We do this by retrieving the latest inventory collection and
         // performing a series of checks.
-        let contact_support = match self
-            .datastore()
-            .inventory_get_latest_collection(opctx)
-            .await?
-        {
-            // There should always be an inventory collection before or after an
-            // update
-            None => true,
-            Some(collection) => collection.contact_support(),
-        };
+        let contact_support = self.contact_support(opctx).await?;
 
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
@@ -255,6 +251,38 @@ impl super::Nexus {
             suspended,
             contact_support,
         })
+    }
+
+    /// Let the customer know whether they should call support based on whether
+    /// the system is in a roughly healthy state based a few health checks.
+    ///
+    /// The system is considered relatively healthy when:
+    /// - All zpools are online.
+    /// - All enabled SMF services are in an online state.
+    /// - No sagas have been running for longer than an hour.
+    async fn contact_support(&self, opctx: &OpContext) -> Result<bool, Error> {
+        let Some(inventory) =
+            self.datastore().inventory_get_latest_collection(opctx).await?
+        else {
+            // There should always be an inventory collection before or after an
+            // update
+            return Ok(true);
+        };
+
+        let stale_active_sagas = self
+            .datastore()
+            .saga_list_running_or_unwinding_older_than_batched(
+                opctx,
+                STALE_SAGA_THRESHOLD,
+            )
+            .await?;
+
+        // TODO-K: separate these to male sure they all run
+        let unhealthy = inventory.any_unhealhty_zpools()
+            || inventory.any_enabled_smf_services_not_online()
+            || !stale_active_sagas.is_empty();
+
+        Ok(unhealthy)
     }
 
     /// Build a map of version strings to the number of components on that

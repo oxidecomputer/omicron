@@ -285,7 +285,10 @@ impl Collection {
     /// Check whether any zpools across all sleds are not online.
     pub fn any_unhealhty_zpools(&self) -> bool {
         self.sled_agents.iter().all(|sled_agent| {
-            sled_agent.zpools.iter().any(|zpool| zpool.health != ZpoolHealth::Online)
+            sled_agent
+                .zpools
+                .iter()
+                .any(|zpool| zpool.health != ZpoolHealth::Online)
         })
     }
 
