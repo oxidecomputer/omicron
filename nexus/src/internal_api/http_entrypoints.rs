@@ -110,19 +110,18 @@ impl NexusInternalApi for NexusInternalApiImpl {
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        new_runtime_state: TypedBody<
+        // This is ignored, as this API is now treated as ringing the VMM's
+        // doorbell, and the body is discarded.
+        _new_runtime_state: TypedBody<
             sled_agent_types_versions::v1::instance::SledVmmState,
         >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let new_state = new_runtime_state.into_inner();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
-            nexus
-                .update_vmm_state(&opctx, path.propolis_id, &new_state)
-                .await?;
+            nexus.notify_vmm_updated(&opctx, path.propolis_id).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx

@@ -39,6 +39,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
@@ -1939,6 +1940,38 @@ impl super::Nexus {
                 pagparams,
             )
             .await
+    }
+
+    pub(crate) async fn notify_vmm_updated(
+        &self,
+        opctx: &OpContext,
+        vmm_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        slog::debug!(
+            &opctx.log,
+            "ding, dong! received doorbell notification for VMM {vmm_id}";
+            "vmm_id" => %vmm_id,
+        );
+        let (_, sled) =
+            match self.db_datastore.vmm_fetch_with_sled(opctx, &vmm_id).await {
+                Ok(vmm) => vmm,
+                Err(error) => {
+                    // Note that it would be quite weird if the VMM/sled-agent
+                    // lookup failed with `NotFound`, since...we just got a
+                    // notification *from* that sled-agent...
+                    slog::warn!(
+                        &opctx.log,
+                        "failed to look up VMM and sled-agent for updated VMM \
+                         {vmm_id}";
+                         "vmm_id" => %vmm_id,
+                         "error" => &InlineErrorChain::new(&error),
+                    );
+                    return Err(error);
+                }
+            };
+        let sled_agent = self.sled_client(&sled.id()).await?;
+        let state = sled_agent.vmm_get_state(&vmm_id).await?.into_inner();
+        self.update_vmm_state(opctx, vmm_id, &state).await
     }
 
     /// Update the runtime state of the VMM with the provided `propolis_id` to
