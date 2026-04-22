@@ -3485,6 +3485,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
+
     let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
         match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
             Err(error) => {
@@ -3510,6 +3511,30 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                      not yet been loaded.\n\
                  (i) note: this should only happen if Nexus has just started.",
             );
+            return;
+        }
+        Outcome::WaitingForNewerInventory {
+            parent_inv_id,
+            next_inv_min_time_started,
+            input_inv_time_started,
+        } => {
+            const PARENT_INV: &str = "parent sitrep's inventory ID:";
+            const MIN_STARTED: &str = "earliest start time for next inventory:";
+            const LOADED_STARTED: &str = "loaded inventory started at:";
+            const WIDTH: usize =
+                const_max_len(&[PARENT_INV, MIN_STARTED, LOADED_STARTED]) + 1;
+            println!(
+                "    waiting for a newer inventory collection than the one \
+                 in the parent sitrep"
+            );
+            let min_started = humantime::format_rfc3339_millis(
+                next_inv_min_time_started.into(),
+            );
+            let loaded_started =
+                humantime::format_rfc3339_millis(input_inv_time_started.into());
+            println!("      {PARENT_INV:<WIDTH$}{parent_inv_id}");
+            println!("      {MIN_STARTED:<WIDTH$}{min_started}");
+            println!("      {LOADED_STARTED:<WIDTH$}{loaded_started}");
             return;
         }
         Outcome::PreparationError(error) => {

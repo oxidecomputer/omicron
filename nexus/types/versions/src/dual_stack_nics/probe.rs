@@ -6,10 +6,10 @@
 
 use omicron_common::api::external;
 use omicron_common::api::external::Name;
-use omicron_common::api::internal::shared::network_interface::NetworkInterface;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::v10::inventory::NetworkInterface;
 use uuid::Uuid;
 
 use crate::v2025_11_20_00::probe::ProbeExternalIp;

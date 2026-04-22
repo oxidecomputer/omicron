@@ -1,0 +1,15 @@
+[package]
+name = "oximeter-producer-api"
+version = "0.1.0"
+edition.workspace = true
+description = "API description for the Oximeter producer server"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+dropshot.workspace = true
+omicron-workspace-hack.workspace = true
+oximeter-types.workspace = true
+oximeter-types-versions.workspace = true

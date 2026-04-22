@@ -20,17 +20,11 @@ use macaddr::MacAddr6;
 use omicron_common::address::IPV4_MULTICAST_RANGE;
 use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
-use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
-use omicron_common::api::internal::shared::ExternalIpv4Config;
-use omicron_common::api::internal::shared::ExternalIpv6Config;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
@@ -61,6 +55,12 @@ use oxide_vpc::api::VpcCfg;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIpv4Config;
+use sled_agent_types::instance::ExternalIpv6Config;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -414,7 +414,6 @@ impl PortManager {
             hdl
         };
         let (port, ticket) = {
-            let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(PortData {
                 name: port_name.clone(),
@@ -424,7 +423,18 @@ impl PortManager {
                 vni,
                 gateway,
             });
-            let old = ports.insert((nic.id, nic.kind), port.clone());
+
+            // NOTE: We may add external IPs below, which can fail. If that
+            // does, we drop the `ticket` on the way out of this block. That
+            // attempts to acquire this lock, in order to remove itself on drop.
+            // We need to drop the lock before that, to avoid a deadlock, so
+            // let's do it right away, after inserting.
+            let old = self
+                .inner
+                .ports
+                .lock()
+                .unwrap()
+                .insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
@@ -1222,12 +1232,7 @@ mod tests {
     use crate::opte::Handle;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
-    use omicron_common::api::internal::shared::ExternalIpConfig;
-    use omicron_common::api::internal::shared::ExternalIpv4Config;
-    use omicron_common::api::internal::shared::ExternalIpv6Config;
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
@@ -1235,8 +1240,6 @@ mod tests {
     use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
     use omicron_common::api::internal::shared::RouterTarget;
     use omicron_common::api::internal::shared::RouterVersion;
-    use omicron_common::api::internal::shared::SourceNatConfigV4;
-    use omicron_common::api::internal::shared::SourceNatConfigV6;
     use omicron_test_utils::dev::test_setup_log;
     use oxide_vpc::api::DhcpCfg;
     use oxide_vpc::api::IpCfg;
@@ -1245,6 +1248,13 @@ mod tests {
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::SourceNatConfigV4;
+    use sled_agent_types::inventory::SourceNatConfigV6;
     use std::collections::HashSet;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;

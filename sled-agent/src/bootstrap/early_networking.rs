@@ -601,6 +601,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
+                            src_addr: None,
+                            src_port: None,
                         };
                         match bgp_peer_configs.get_mut(&port.port) {
                             Some(peers) => {
@@ -653,6 +655,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
                             router_lifetime: router_lifetime.as_u16(),
+                            src_addr: None,
+                            src_port: None,
                         };
                         match bgp_unnumbered_peer_configs.get_mut(&port.port) {
                             Some(peers) => {
@@ -713,7 +717,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
 
-                if let Err(e) = mgd.update_rib_bestpath_fanout(&fanout).await {
+                if let Err(e) = mgd.update_bestpath_fanout(&fanout).await {
                     error!(
                         self.log,
                         "error while updating bestpath fanout";
