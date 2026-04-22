@@ -49,14 +49,13 @@ pub struct UpdateStatus {
     /// manually applied update, then set that as the target release.
     pub suspended: bool,
 
-    /// Whether the system is healthy
+    /// Whether the user should contact support
     ///
     /// This is a rough high-level indicator of overall system health. When true,
     /// a subset of components are operating normally. When false, one or more
-    /// components from that subset may be experiencing issues. During an update,
-    /// it is normal for the system to show as "unhealthy". If the system appears
-    /// unhealthy before or after an update has ocurred, please contact support.
-    pub is_system_healthy: bool,
+    /// components from that subset may be experiencing issues. If this field
+    /// is true, please contact support.
+    pub contact_support: bool,
 }
 
 // Response-only type: convert from new to old.

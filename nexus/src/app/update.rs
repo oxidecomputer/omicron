@@ -237,15 +237,15 @@ impl super::Nexus {
         // We want a rough idea of whether the system is in a healthy state or
         // not. We do this by retrieving the latest inventory collection and
         // performing a series of checks.
-        let is_system_healthy = match self
+        let contact_support = match self
             .datastore()
             .inventory_get_latest_collection(opctx)
             .await?
         {
             // There should always be an inventory collection before or after an
             // update
-            None => false,
-            Some(collection) => collection.is_system_healthy(),
+            None => true,
+            Some(collection) => collection.contact_support(),
         };
 
         Ok(update::UpdateStatus {
@@ -253,7 +253,7 @@ impl super::Nexus {
             components_by_release_version,
             time_last_step_planned,
             suspended,
-            is_system_healthy,
+            contact_support,
         })
     }
 

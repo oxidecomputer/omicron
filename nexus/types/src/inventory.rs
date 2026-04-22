@@ -282,45 +282,39 @@ impl Collection {
             .map(|membership| membership.clone())
     }
 
-    /// Check whether all zpools across all sleds are online.
-    pub fn are_all_zpools_healthy(&self) -> bool {
+    /// Check whether any zpools across all sleds are not online.
+    pub fn any_unhealhty_zpools(&self) -> bool {
         self.sled_agents.iter().all(|sled_agent| {
-            sled_agent.zpools.iter().all(|zpool| match zpool.health {
-                ZpoolHealth::Online => true,
-                ZpoolHealth::Degraded
-                | ZpoolHealth::Faulted
-                | ZpoolHealth::Offline
-                | ZpoolHealth::Removed
-                | ZpoolHealth::Unavailable => false,
-            })
+            sled_agent.zpools.iter().any(|zpool| zpool.health != ZpoolHealth::Online)
         })
     }
 
-    /// Check whether all enabled SMF services across all zones in all sleds
-    /// are online.
-    pub fn are_all_enabled_smf_services_online(&self) -> bool {
+    /// Check whether any enabled SMF services across all zones in all sleds
+    /// are not online.
+    pub fn any_enabled_smf_services_not_online(&self) -> bool {
         self.sled_agents.iter().all(|sled_agent| {
             match &sled_agent.smf_services_enabled_not_online {
                 SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
-                    svcs.services.is_empty()
+                    !svcs.services.is_empty()
                 }
                 // If there are any command errors or data is unavailable we
                 // assume the system is not in a healthy state
                 SvcsEnabledNotOnlineResult::SvcsCmdError(_)
-                | SvcsEnabledNotOnlineResult::DataUnavailable => false,
+                | SvcsEnabledNotOnlineResult::DataUnavailable => true,
             }
         })
     }
 
-    /// Check whether the system is in a roughly healthy state based on
-    /// inventory data.
+    /// Let the customer know whether they should call support based on whether
+    /// the system is in a roughly healthy state based a few health checks.
     ///
     /// The system is considered relatively healthy when:
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
-    pub fn is_system_healthy(&self) -> bool {
-        self.are_all_zpools_healthy()
-            && self.are_all_enabled_smf_services_online()
+    /// - No sagas have been running for longer than an hour.
+    pub fn contact_support(&self) -> bool {
+        self.any_unhealhty_zpools()
+            || self.any_enabled_smf_services_not_online()
     }
 
     /// Return a type which can be used to display a collection in a
@@ -840,7 +834,7 @@ mod test {
                 test_sled_inventory(healthy_zpools(), healthy_services()),
             )
             .unwrap();
-        assert!(builder.build().is_system_healthy());
+        assert!(!builder.build().contact_support());
     }
 
     #[test]
@@ -852,7 +846,7 @@ mod test {
                 test_sled_inventory(unhealthy_zpools(), healthy_services()),
             )
             .unwrap();
-        assert!(!builder.build().is_system_healthy());
+        assert!(builder.build().contact_support());
     }
 
     #[test]
@@ -864,7 +858,7 @@ mod test {
                 test_sled_inventory(healthy_zpools(), unhealthy_services()),
             )
             .unwrap();
-        assert!(!builder.build().is_system_healthy());
+        assert!(builder.build().contact_support());
     }
 
     #[test]
@@ -876,6 +870,6 @@ mod test {
                 test_sled_inventory(unhealthy_zpools(), unhealthy_services()),
             )
             .unwrap();
-        assert!(!builder.build().is_system_healthy());
+        assert!(builder.build().contact_support());
     }
 }

@@ -29790,8 +29790,8 @@
               "minimum": 0
             }
           },
-          "is_system_healthy": {
-            "description": "Whether the system is healthy\n\nThis is a rough high-level indicator of overall system health. When true, a subset of components are operating normally. When false, one or more components from that subset may be experiencing issues. During an update, it is normal for the system to show as \"unhealthy\". If the system appears unhealthy before or after an update has ocurred, please contact support.",
+          "contact_support": {
+            "description": "Whether the user should contact support\n\nThis is a rough high-level indicator of overall system health. When true, a subset of components are operating normally. When false, one or more components from that subset may be experiencing issues. If this field is true, please contact support.",
             "type": "boolean"
           },
           "suspended": {
@@ -29815,7 +29815,7 @@
         },
         "required": [
           "components_by_release_version",
-          "is_system_healthy",
+          "contact_support",
           "suspended",
           "target_release",
           "time_last_step_planned"
