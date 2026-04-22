@@ -5,7 +5,7 @@
 use super::rng;
 use anyhow::Context;
 use fm::analysis_reports;
-use iddqd::id_ord_map::{Entry, IdOrdMap, RefMut};
+use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::alert::AlertClass;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
@@ -52,7 +52,7 @@ impl AllCases {
     pub fn open_case(
         &mut self,
         de: fm::DiagnosisEngineKind,
-    ) -> RefMut<'_, CaseBuilder> {
+    ) -> id_ord_map::RefMut<'_, CaseBuilder> {
         let sitrep_id = self.sitrep_id;
         let (id, case_rng) = loop {
             let (id, case_rng) = self.rng.next_case();
@@ -76,8 +76,8 @@ impl AllCases {
             CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
         builder.report_log.entry("opened case");
         let case = match self.cases.entry(&id) {
-            Entry::Vacant(entry) => entry.insert(builder),
-            Entry::Occupied(_) => {
+            id_ord_map::Entry::Vacant(entry) => entry.insert(builder),
+            id_ord_map::Entry::Occupied(_) => {
                 unreachable!("UUID was just confirmed vacant")
             }
         };
@@ -99,7 +99,7 @@ impl AllCases {
     pub fn case_mut(
         &mut self,
         id: &CaseUuid,
-    ) -> Option<RefMut<'_, CaseBuilder>> {
+    ) -> Option<id_ord_map::RefMut<'_, CaseBuilder>> {
         self.cases.get_mut(id)
     }
 
@@ -139,17 +139,21 @@ impl CaseBuilder {
         let comment = comment.to_string();
         let id = loop {
             let id = self.rng.next_alert();
-            let req = fm::case::AlertRequest {
-                id,
-                class,
-                requested_sitrep_id: self.sitrep_id,
-                payload: payload.clone(),
-                comment: comment.clone(),
-            };
-            if self.case.alerts_requested.insert_unique(req).is_ok() {
+            if !self.case.alerts_requested.contains_key(&id) {
                 break id;
             }
         };
+        let req = fm::case::AlertRequest {
+            id,
+            class,
+            requested_sitrep_id: self.sitrep_id,
+            payload,
+            comment: comment.clone(),
+        };
+        self.case
+            .alerts_requested
+            .insert_unique(req)
+            .expect("UUID should be unused");
 
         slog::info!(
             &self.log,
@@ -175,16 +179,20 @@ impl CaseBuilder {
         let comment = comment.to_string();
         let id = loop {
             let id = self.rng.next_support_bundle();
-            let req = fm::case::SupportBundleRequest {
-                id,
-                requested_sitrep_id: self.sitrep_id,
-                data_selection: data_selection.clone(),
-                comment: comment.clone(),
-            };
-            if self.case.support_bundles_requested.insert_unique(req).is_ok() {
+            if !self.case.support_bundles_requested.contains_key(&id) {
                 break id;
             }
         };
+        let req = fm::case::SupportBundleRequest {
+            id,
+            requested_sitrep_id: self.sitrep_id,
+            data_selection,
+            comment: comment.clone(),
+        };
+        self.case
+            .support_bundles_requested
+            .insert_unique(req)
+            .expect("UUID should be unused");
 
         slog::info!(
             &self.log,
