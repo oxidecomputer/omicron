@@ -6803,6 +6803,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -8725,6 +8726,7 @@ dependencies = [
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-async",

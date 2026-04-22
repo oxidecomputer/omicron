@@ -27,7 +27,7 @@ use omicron_common::api::{
     internal::nexus::{
         DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
         ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
-        RepairProgress, RepairStartInfo, SledVmmState,
+        RepairProgress, RepairStartInfo,
     },
 };
 use omicron_uuid_kinds::*;
@@ -98,7 +98,17 @@ pub trait NexusInternalApi {
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        new_runtime_state: TypedBody<SledVmmState>,
+        // Note that this is explicitly pointed at the V1 version of
+        // `SledVmmState`, NOT latest. That is because the Nexus internal API is
+        // client-side versioned, and cannot be updated to use the latest
+        // version of this type freely.
+        //
+        // Instead, this API is deprecated and will be replaced with
+        // `cpapi_vmm_doorbell`, which does *not* provide a body, in a
+        // subsequent version of the Nexus API.
+        new_runtime_state: TypedBody<
+            sled_agent_types_versions::v1::instance::SledVmmState,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Report updated state for a disk.

@@ -17,7 +17,7 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -43,6 +43,7 @@ use sled_agent_types::diagnostics::{
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,

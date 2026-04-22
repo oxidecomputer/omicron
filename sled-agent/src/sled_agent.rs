@@ -47,7 +47,7 @@ use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -76,7 +76,8 @@ use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    SledVmmState, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;

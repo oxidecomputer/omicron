@@ -72,9 +72,11 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
-    fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Input;
+impl From<sled_agent_types_versions::v1::instance::VmmState>
+    for types::VmmState
+{
+    fn from(s: sled_agent_types_versions::v1::instance::VmmState) -> Self {
+        use sled_agent_types_versions::v1::instance::VmmState as Input;
         match s {
             Input::Starting => types::VmmState::Starting,
             Input::Running => types::VmmState::Running,
@@ -88,9 +90,11 @@ impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
     }
 }
 
-impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
+impl From<types::VmmState>
+    for sled_agent_types_versions::v1::instance::VmmState
+{
     fn from(s: types::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Output;
+        use sled_agent_types_versions::v1::instance::VmmState as Output;
         match s {
             types::VmmState::Starting => Output::Starting,
             types::VmmState::Running => Output::Running,
@@ -104,10 +108,12 @@ impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
+impl From<sled_agent_types_versions::v1::instance::VmmRuntimeState>
     for types::VmmRuntimeState
 {
-    fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
+    fn from(
+        s: sled_agent_types_versions::v1::instance::VmmRuntimeState,
+    ) -> Self {
         Self {
             gen_: s.generation,
             state: s.state.into(),
@@ -116,10 +122,10 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::SledVmmState>
+impl From<sled_agent_types_versions::v1::instance::SledVmmState>
     for types::SledVmmState
 {
-    fn from(s: omicron_common::api::internal::nexus::SledVmmState) -> Self {
+    fn from(s: sled_agent_types_versions::v1::instance::SledVmmState) -> Self {
         Self {
             vmm_state: s.vmm_state.into(),
             migration_in: s.migration_in.map(Into::into),
@@ -128,11 +134,11 @@ impl From<omicron_common::api::internal::nexus::SledVmmState>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::MigrationRuntimeState>
+impl From<sled_agent_types_versions::v1::instance::MigrationRuntimeState>
     for types::MigrationRuntimeState
 {
     fn from(
-        s: omicron_common::api::internal::nexus::MigrationRuntimeState,
+        s: sled_agent_types_versions::v1::instance::MigrationRuntimeState,
     ) -> Self {
         Self {
             migration_id: s.migration_id,
@@ -143,11 +149,13 @@ impl From<omicron_common::api::internal::nexus::MigrationRuntimeState>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::MigrationState>
+impl From<sled_agent_types_versions::v1::instance::MigrationState>
     for types::MigrationState
 {
-    fn from(s: omicron_common::api::internal::nexus::MigrationState) -> Self {
-        use omicron_common::api::internal::nexus::MigrationState as Input;
+    fn from(
+        s: sled_agent_types_versions::v1::instance::MigrationState,
+    ) -> Self {
+        use sled_agent_types_versions::v1::instance::MigrationState as Input;
         match s {
             Input::Pending => Self::Pending,
             Input::InProgress => Self::InProgress,

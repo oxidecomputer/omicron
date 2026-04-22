@@ -93,12 +93,18 @@ pub mod instance {
     pub use crate::v1::instance::InstanceExternalIpBody;
     pub use crate::v1::instance::InstanceMetadata;
     pub use crate::v1::instance::InstanceMigrationTargetParams;
+    pub use crate::v1::instance::MigrationRuntimeState;
+    pub use crate::v1::instance::MigrationState;
+    pub use crate::v1::instance::Migrations;
+    pub use crate::v1::instance::SledVmmState;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
     pub use crate::v1::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
+    pub use crate::v1::instance::VmmRuntimeState;
+    pub use crate::v1::instance::VmmState;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
