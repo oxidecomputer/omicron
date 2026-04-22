@@ -408,7 +408,7 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
 
-    pub use crate::add_contact_support_to_update_status::update::UpdateStatus;
+    pub use crate::v2026_04_22_00::update::UpdateStatus;
 }
 
 pub mod vpc {

@@ -80,4 +80,4 @@ pub mod v2026_03_25_00;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
 pub mod v2026_04_16_00;
 #[path = "add_contact_support_to_update_status/mod.rs"]
-pub mod add_contact_support_to_update_status;
+pub mod v2026_04_22_00;
