@@ -186,8 +186,10 @@ impl DataStore {
             let mut batch =
                 paginated(dsl::saga, dsl::id, &p.current_pagparams())
                     .filter(
-                        dsl::saga_state
-                            .eq_any(vec![SagaState::Running, SagaState::Unwinding]),
+                        dsl::saga_state.eq_any(vec![
+                            SagaState::Running,
+                            SagaState::Unwinding,
+                        ]),
                     )
                     .filter(dsl::time_created.lt(time_limit))
                     .select(db::saga_types::Saga::as_select())
