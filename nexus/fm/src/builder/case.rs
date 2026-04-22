@@ -52,33 +52,35 @@ impl AllCases {
     pub fn open_case(
         &mut self,
         de: fm::DiagnosisEngineKind,
-    ) -> id_ord_map::RefMut<'_, CaseBuilder> {
-        let sitrep_id = self.sitrep_id;
+    ) -> iddqd::id_ord_map::RefMut<'_, CaseBuilder> {
         let (id, case_rng) = loop {
             let (id, case_rng) = self.rng.next_case();
             if !self.cases.contains_key(&id) {
                 break (id, case_rng);
             }
         };
-        let case = fm::Case {
-            id,
-            metadata: fm::case::Metadata {
-                created_sitrep_id: self.sitrep_id,
-                closed_sitrep_id: None,
-                de,
-                comment: String::new(),
-            },
-            ereports: Default::default(),
-            alerts_requested: Default::default(),
-            support_bundles_requested: Default::default(),
-        };
-        let mut builder =
-            CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
-        builder.report_log.entry("opened case");
+        let sitrep_id = self.sitrep_id;
         let case = match self.cases.entry(&id) {
-            id_ord_map::Entry::Vacant(entry) => entry.insert(builder),
-            id_ord_map::Entry::Occupied(_) => {
-                unreachable!("UUID was just confirmed vacant")
+            iddqd::id_ord_map::Entry::Occupied(_) => {
+                unreachable!("UUID should be unused")
+            }
+            iddqd::id_ord_map::Entry::Vacant(entry) => {
+                let case = fm::Case {
+                    id,
+                    metadata: fm::case::Metadata {
+                        created_sitrep_id: self.sitrep_id,
+                        closed_sitrep_id: None,
+                        de,
+                        comment: String::new(),
+                    },
+                    ereports: Default::default(),
+                    alerts_requested: Default::default(),
+                    support_bundles_requested: Default::default(),
+                };
+                let mut builder =
+                    CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
+                builder.report_log.entry("opened case");
+                entry.insert(builder)
             }
         };
 
@@ -133,10 +135,6 @@ impl CaseBuilder {
         alert: &impl serde::Serialize,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
-        let payload = serde_json::to_value(&alert).with_context(|| {
-            format!("failed to serialize payload for {class:?} alert")
-        })?;
-        let comment = comment.to_string();
         let id = loop {
             let id = self.rng.next_alert();
             if !self.case.alerts_requested.contains_key(&id) {
@@ -147,14 +145,17 @@ impl CaseBuilder {
             id,
             class,
             requested_sitrep_id: self.sitrep_id,
-            payload,
-            comment: comment.clone(),
+            payload: serde_json::to_value(&alert).with_context(|| {
+                format!("failed to serialize payload for {class:?} alert")
+            })?,
+            comment: comment.to_string(),
         };
         self.case
             .alerts_requested
             .insert_unique(req)
             .expect("UUID should be unused");
 
+        let comment = comment.to_string();
         slog::info!(
             &self.log,
             "requested an alert";
@@ -176,7 +177,6 @@ impl CaseBuilder {
         data_selection: BundleDataSelection,
         comment: impl ToString,
     ) {
-        let comment = comment.to_string();
         let id = loop {
             let id = self.rng.next_support_bundle();
             if !self.case.support_bundles_requested.contains_key(&id) {
@@ -187,13 +187,14 @@ impl CaseBuilder {
             id,
             requested_sitrep_id: self.sitrep_id,
             data_selection,
-            comment: comment.clone(),
+            comment: comment.to_string(),
         };
         self.case
             .support_bundles_requested
             .insert_unique(req)
             .expect("UUID should be unused");
 
+        let comment = comment.to_string();
         slog::info!(
             &self.log,
             "requested a support bundle";
