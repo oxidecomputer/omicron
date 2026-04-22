@@ -130,7 +130,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         vpc_name,
-        StatusCode::BAD_REQUEST,
+        StatusCode::CONFLICT,
     )
     .await;
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");

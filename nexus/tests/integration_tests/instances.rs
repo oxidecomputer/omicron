@@ -390,7 +390,7 @@ async fn test_instances_create_reboot_halt(
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
             }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+            .expect_status(Some(StatusCode::CONFLICT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
