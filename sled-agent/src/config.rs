@@ -14,8 +14,8 @@ use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
+use sled_hardware::DataLinks;
 use sled_hardware::UnparsedDisk;
-use sled_hardware::is_oxide_sled;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -99,9 +99,8 @@ pub struct Config {
     /// systems.
     pub data_link: Option<PhysicalLink>,
 
-    /// The data links that sled-agent will treat as a real gimlet cxgbe0/cxgbe1
-    /// links.
-    pub data_links: [String; 2],
+    /// The data links sled-agent will use.
+    pub data_links: DataLinks,
 
     #[serde(default)]
     pub updates: ConfigUpdates,
@@ -159,8 +158,11 @@ impl Config {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
-            if is_oxide_sled().map_err(ConfigError::SystemDetection)? {
-                Dladm::list_physical()
+            match self.data_links {
+                DataLinks::Virtual { .. } => {
+                    Dladm::find_physical().await.map_err(ConfigError::FindLinks)
+                }
+                DataLinks::Physical => Dladm::list_physical()
                     .await
                     .map_err(ConfigError::FindLinks)?
                     .into_iter()
@@ -169,9 +171,7 @@ impl Config {
                         ConfigError::FindLinks(
                             FindPhysicalLinkError::NoPhysicalLinkFound,
                         )
-                    })
-            } else {
-                Dladm::find_physical().await.map_err(ConfigError::FindLinks)
+                    }),
             }
         }
     }
