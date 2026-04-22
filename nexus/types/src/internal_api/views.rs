@@ -4,6 +4,7 @@
 
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
+use crate::external_api::support_bundle::SupportBundleInfo as ExternalSupportBundleInfo;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use crate::quiesce::SagaQuiesceStatus;
@@ -24,6 +25,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::disk::M2Slot;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use schemars::JsonSchema;
@@ -1247,6 +1249,18 @@ impl IdOrdItem for HeldDbClaimInfo {
     }
 
     id_upcast!();
+}
+
+/// Support bundle info with internal-only fields.
+///
+/// This wraps the external API's [`ExternalSupportBundleInfo`] and extends it
+/// with fields that are only exposed through the lockstep API (e.g., for OMDB).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleInfo {
+    #[serde(flatten)]
+    pub base: ExternalSupportBundleInfo,
+    /// The FM case ID that triggered creation of this bundle, if any.
+    pub fm_case_id: Option<CaseUuid>,
 }
 
 #[cfg(test)]

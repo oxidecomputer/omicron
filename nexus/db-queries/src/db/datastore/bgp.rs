@@ -18,12 +18,14 @@ use nexus_db_model::{
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType,
 };
 use ref_cast::RefCast;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -832,26 +834,22 @@ impl DataStore {
     }
 
     /// Look up communities for a BGP peer.
-    ///
-    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`
-    /// (the function will query using the sentinel value 0.0.0.0/32).
     pub async fn communities_for_peer(
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &str,
-        addr: Option<IpAddr>,
+        interface_name: &external::Name,
+        addr: RouterPeerType,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
-        // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
-        let db_addr: IpNetwork = addr
-            .unwrap_or_else(|| IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
-            .into();
+        // For unnumbered peers (addr is None), use sentinel value
+        let db_addr: IpNetwork =
+            addr.ip_squashing_unnumbered_to_sentinel().into();
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
-            .filter(dsl::interface_name.eq(interface_name.to_owned()))
+            .filter(dsl::interface_name.eq(interface_name.to_string()))
             .filter(dsl::addr.eq(db_addr))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -865,25 +863,22 @@ impl DataStore {
     }
 
     /// Look up allowed exports for a BGP peer.
-    ///
-    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`.
     pub async fn allow_export_for_peer(
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &str,
-        addr: Option<IpAddr>,
+        interface_name: &external::Name,
+        addr: RouterPeerType,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
 
-        // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
-        // for the allow_export table (which has non-nullable addr)
-        let db_addr: IpNetwork = addr
-            .unwrap_or_else(|| IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
-            .into();
+        // For unnumbered peers (addr is None), use sentinel value for the
+        // allow_export table (which has non-nullable addr)
+        let db_addr: IpNetwork =
+            addr.ip_squashing_unnumbered_to_sentinel().into();
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -893,24 +888,27 @@ impl DataStore {
                 async move {
                     // Query the main peer config table. For unnumbered peers,
                     // addr is NULL; for numbered peers, addr matches.
-                    let active = if let Some(addr) = addr {
-                        let addr = IpNetwork::from(addr);
-                        peer_dsl::switch_port_settings_bgp_peer_config
-                            .filter(db_peer::port_settings_id.eq(port_settings_id))
-                            .filter(db_peer::addr.eq(addr))
-                            .select(db_peer::allow_export_list_active)
-                            .limit(1)
-                            .first_async::<bool>(&conn)
-                            .await
-                    } else {
-                        peer_dsl::switch_port_settings_bgp_peer_config
-                            .filter(db_peer::port_settings_id.eq(port_settings_id))
-                            .filter(db_peer::addr.is_null())
-                            .filter(db_peer::interface_name.eq(interface_name.to_owned()))
-                            .select(db_peer::allow_export_list_active)
-                            .limit(1)
-                            .first_async::<bool>(&conn)
-                            .await
+                    let active = match addr {
+                        RouterPeerType::Numbered { ip } => {
+                            let addr = IpNetwork::from(IpAddr::from(ip));
+                            peer_dsl::switch_port_settings_bgp_peer_config
+                                .filter(db_peer::port_settings_id.eq(port_settings_id))
+                                .filter(db_peer::addr.eq(addr))
+                                .select(db_peer::allow_export_list_active)
+                                .limit(1)
+                                .first_async::<bool>(&conn)
+                                .await
+                        }
+                        RouterPeerType::Unnumbered { .. } => {
+                            peer_dsl::switch_port_settings_bgp_peer_config
+                                .filter(db_peer::port_settings_id.eq(port_settings_id))
+                                .filter(db_peer::addr.is_null())
+                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
+                                .select(db_peer::allow_export_list_active)
+                                .limit(1)
+                                .first_async::<bool>(&conn)
+                                .await
+                        }
                     };
 
                     let active = active.map_err(|e| {
@@ -937,7 +935,7 @@ impl DataStore {
                         )
                         .filter(
                             db_allow::interface_name
-                                .eq(interface_name.to_owned()),
+                                .eq(interface_name.to_string()),
                         )
                         .filter(db_allow::addr.eq(db_addr))
                         .load_async(&conn)
@@ -960,25 +958,22 @@ impl DataStore {
     }
 
     /// Look up allowed imports for a BGP peer.
-    ///
-    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`.
     pub async fn allow_import_for_peer(
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &str,
-        addr: Option<IpAddr>,
+        interface_name: &external::Name,
+        addr: RouterPeerType,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
 
-        // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
-        // for the allow_import table (which has non-nullable addr)
-        let db_addr: IpNetwork = addr
-            .unwrap_or_else(|| IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
-            .into();
+        // For unnumbered peers (addr is None), use sentinel value for the
+        // allow_import table (which has non-nullable addr)
+        let db_addr: IpNetwork =
+            addr.ip_squashing_unnumbered_to_sentinel().into();
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -989,24 +984,27 @@ impl DataStore {
                 async move {
                     // Query the main peer config table. For unnumbered peers,
                     // addr is NULL; for numbered peers, addr matches.
-                    let active = if let Some(addr) = addr {
-                        let addr = IpNetwork::from(addr);
-                        peer_dsl::switch_port_settings_bgp_peer_config
-                            .filter(db_peer::port_settings_id.eq(port_settings_id))
-                            .filter(db_peer::addr.eq(addr))
-                            .select(db_peer::allow_import_list_active)
-                            .limit(1)
-                            .first_async::<bool>(&conn)
-                            .await
-                    } else {
-                        peer_dsl::switch_port_settings_bgp_peer_config
-                            .filter(db_peer::port_settings_id.eq(port_settings_id))
-                            .filter(db_peer::addr.is_null())
-                            .filter(db_peer::interface_name.eq(interface_name.to_owned()))
-                            .select(db_peer::allow_import_list_active)
-                            .limit(1)
-                            .first_async::<bool>(&conn)
-                            .await
+                    let active = match addr {
+                        RouterPeerType::Numbered { ip } => {
+                            let addr = IpNetwork::from(IpAddr::from(ip));
+                            peer_dsl::switch_port_settings_bgp_peer_config
+                                .filter(db_peer::port_settings_id.eq(port_settings_id))
+                                .filter(db_peer::addr.eq(addr))
+                                .select(db_peer::allow_import_list_active)
+                                .limit(1)
+                                .first_async::<bool>(&conn)
+                                .await
+                        }
+                        RouterPeerType::Unnumbered { .. } => {
+                            peer_dsl::switch_port_settings_bgp_peer_config
+                                .filter(db_peer::port_settings_id.eq(port_settings_id))
+                                .filter(db_peer::addr.is_null())
+                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
+                                .select(db_peer::allow_import_list_active)
+                                .limit(1)
+                                .first_async::<bool>(&conn)
+                                .await
+                        }
                     };
 
                     let active = active.map_err(|e| {
@@ -1033,7 +1031,7 @@ impl DataStore {
                         )
                         .filter(
                             db_allow::interface_name
-                                .eq(interface_name.to_owned()),
+                                .eq(interface_name.to_string()),
                         )
                         .filter(db_allow::addr.eq(db_addr))
                         .load_async(&conn)

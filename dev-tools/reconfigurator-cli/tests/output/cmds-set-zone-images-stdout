@@ -15,7 +15,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::2e
+    last allocated IP:   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -90,23 +90,23 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
-    clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   install dataset   in service    fd00:1122:3344:101::25
-    crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   install dataset   in service    fd00:1122:3344:101::2d
-    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset   in service    fd00:1122:3344:101::2e
-    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset   in service    fd00:1122:3344:101::2c
-    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset   in service    fd00:1122:3344:101::29
-    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset   in service    fd00:1122:3344:101::2a
-    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset   in service    fd00:1122:3344:101::2b
-    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset   in service    fd00:1122:3344:101::28
-    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset   in service    fd00:1122:3344:101::27
-    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset   in service    fd00:1122:3344:101::26
+    clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   install dataset   in service    fd00:1122:3344:101::7 
+    crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   install dataset   in service    fd00:1122:3344:101::f 
+    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset   in service    fd00:1122:3344:101::10
+    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset   in service    fd00:1122:3344:101::e 
+    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset   in service    fd00:1122:3344:101::b 
+    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset   in service    fd00:1122:3344:101::c 
+    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset   in service    fd00:1122:3344:101::d 
+    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset   in service    fd00:1122:3344:101::a 
+    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset   in service    fd00:1122:3344:101::9 
+    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset   in service    fd00:1122:3344:101::8 
     internal_dns      1f19f188-e062-489c-b318-070819d86d5a   install dataset   in service    fd00:1122:3344:3::1   
     internal_dns      2fa580a0-db67-4581-9c53-24fd1f42540e   install dataset   in service    fd00:1122:3344:2::1   
     internal_dns      fc6956b2-56a8-4337-a93a-4d5a5d36f123   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset   in service    fd00:1122:3344:101::21
-    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset   in service    fd00:1122:3344:101::23
-    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset   in service    fd00:1122:3344:101::24
-    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset   in service    fd00:1122:3344:101::22
+    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset   in service    fd00:1122:3344:101::3 
+    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset   in service    fd00:1122:3344:101::5 
+    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset   in service    fd00:1122:3344:101::6 
+    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset   in service    fd00:1122:3344:101::4 
 
 
  COCKROACHDB SETTINGS:
@@ -151,7 +151,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     state:::::::::::::   active
     config generation:   4
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::2e
+    last allocated IP:   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -226,23 +226,23 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     ----------------------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source                         disposition   underlay IP           
     ----------------------------------------------------------------------------------------------------------------------------------
-    clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   artifact: version 1.2.3              in service    fd00:1122:3344:101::25
-    crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   artifact: version valid-non-semver   in service    fd00:1122:3344:101::2d
-    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset                      in service    fd00:1122:3344:101::2e
-    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset                      in service    fd00:1122:3344:101::2c
-    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset                      in service    fd00:1122:3344:101::29
-    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset                      in service    fd00:1122:3344:101::2a
-    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset                      in service    fd00:1122:3344:101::2b
-    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset                      in service    fd00:1122:3344:101::28
-    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset                      in service    fd00:1122:3344:101::27
-    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset                      in service    fd00:1122:3344:101::26
+    clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   artifact: version 1.2.3              in service    fd00:1122:3344:101::7 
+    crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   artifact: version valid-non-semver   in service    fd00:1122:3344:101::f 
+    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset                      in service    fd00:1122:3344:101::10
+    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset                      in service    fd00:1122:3344:101::e 
+    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset                      in service    fd00:1122:3344:101::b 
+    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset                      in service    fd00:1122:3344:101::c 
+    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset                      in service    fd00:1122:3344:101::d 
+    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset                      in service    fd00:1122:3344:101::a 
+    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset                      in service    fd00:1122:3344:101::9 
+    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset                      in service    fd00:1122:3344:101::8 
     internal_dns      1f19f188-e062-489c-b318-070819d86d5a   install dataset                      in service    fd00:1122:3344:3::1   
     internal_dns      2fa580a0-db67-4581-9c53-24fd1f42540e   install dataset                      in service    fd00:1122:3344:2::1   
     internal_dns      fc6956b2-56a8-4337-a93a-4d5a5d36f123   install dataset                      in service    fd00:1122:3344:1::1   
-    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset                      in service    fd00:1122:3344:101::21
-    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset                      in service    fd00:1122:3344:101::23
-    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset                      in service    fd00:1122:3344:101::24
-    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset                      in service    fd00:1122:3344:101::22
+    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset                      in service    fd00:1122:3344:101::3 
+    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset                      in service    fd00:1122:3344:101::5 
+    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset                      in service    fd00:1122:3344:101::6 
+    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset                      in service    fd00:1122:3344:101::4 
 
 
  COCKROACHDB SETTINGS:
@@ -349,24 +349,24 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     ------------------------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source                           disposition   underlay IP           
     ------------------------------------------------------------------------------------------------------------------------------------
-    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset                        in service    fd00:1122:3344:101::2e
-    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset                        in service    fd00:1122:3344:101::2c
-    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset                        in service    fd00:1122:3344:101::29
-    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset                        in service    fd00:1122:3344:101::2a
-    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset                        in service    fd00:1122:3344:101::2b
-    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset                        in service    fd00:1122:3344:101::28
-    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset                        in service    fd00:1122:3344:101::27
-    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset                        in service    fd00:1122:3344:101::26
+    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset                        in service    fd00:1122:3344:101::10
+    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset                        in service    fd00:1122:3344:101::e 
+    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset                        in service    fd00:1122:3344:101::b 
+    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset                        in service    fd00:1122:3344:101::c 
+    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset                        in service    fd00:1122:3344:101::d 
+    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset                        in service    fd00:1122:3344:101::a 
+    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset                        in service    fd00:1122:3344:101::9 
+    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset                        in service    fd00:1122:3344:101::8 
     internal_dns      1f19f188-e062-489c-b318-070819d86d5a   install dataset                        in service    fd00:1122:3344:3::1   
     internal_dns      2fa580a0-db67-4581-9c53-24fd1f42540e   install dataset                        in service    fd00:1122:3344:2::1   
     internal_dns      fc6956b2-56a8-4337-a93a-4d5a5d36f123   install dataset                        in service    fd00:1122:3344:1::1   
-    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset                        in service    fd00:1122:3344:101::21
-    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset                        in service    fd00:1122:3344:101::23
-    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset                        in service    fd00:1122:3344:101::24
-    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset                        in service    fd00:1122:3344:101::22
-*   clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   - install dataset                      in service    fd00:1122:3344:101::25
+    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset                        in service    fd00:1122:3344:101::3 
+    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset                        in service    fd00:1122:3344:101::5 
+    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset                        in service    fd00:1122:3344:101::6 
+    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset                        in service    fd00:1122:3344:101::4 
+*   clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   - install dataset                      in service    fd00:1122:3344:101::7 
      └─                                                      + artifact: version 1.2.3                                                  
-*   crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   - install dataset                      in service    fd00:1122:3344:101::2d
+*   crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   - install dataset                      in service    fd00:1122:3344:101::f 
      └─                                                      + artifact: version valid-non-semver                                       
 
 
@@ -413,7 +413,7 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     state:::::::::::::   active
     config generation:   6
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::2e
+    last allocated IP:   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -488,23 +488,23 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
-    clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   install dataset   in service    fd00:1122:3344:101::25
-    crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   install dataset   in service    fd00:1122:3344:101::2d
-    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset   in service    fd00:1122:3344:101::2e
-    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset   in service    fd00:1122:3344:101::2c
-    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset   in service    fd00:1122:3344:101::29
-    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset   in service    fd00:1122:3344:101::2a
-    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset   in service    fd00:1122:3344:101::2b
-    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset   in service    fd00:1122:3344:101::28
-    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset   in service    fd00:1122:3344:101::27
-    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset   in service    fd00:1122:3344:101::26
+    clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   install dataset   in service    fd00:1122:3344:101::7 
+    crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   install dataset   in service    fd00:1122:3344:101::f 
+    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset   in service    fd00:1122:3344:101::10
+    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset   in service    fd00:1122:3344:101::e 
+    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset   in service    fd00:1122:3344:101::b 
+    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset   in service    fd00:1122:3344:101::c 
+    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset   in service    fd00:1122:3344:101::d 
+    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset   in service    fd00:1122:3344:101::a 
+    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset   in service    fd00:1122:3344:101::9 
+    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset   in service    fd00:1122:3344:101::8 
     internal_dns      1f19f188-e062-489c-b318-070819d86d5a   install dataset   in service    fd00:1122:3344:3::1   
     internal_dns      2fa580a0-db67-4581-9c53-24fd1f42540e   install dataset   in service    fd00:1122:3344:2::1   
     internal_dns      fc6956b2-56a8-4337-a93a-4d5a5d36f123   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset   in service    fd00:1122:3344:101::21
-    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset   in service    fd00:1122:3344:101::23
-    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset   in service    fd00:1122:3344:101::24
-    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset   in service    fd00:1122:3344:101::22
+    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset   in service    fd00:1122:3344:101::3 
+    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset   in service    fd00:1122:3344:101::5 
+    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset   in service    fd00:1122:3344:101::6 
+    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset   in service    fd00:1122:3344:101::4 
 
 
  COCKROACHDB SETTINGS:
@@ -611,24 +611,24 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
     ------------------------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source                           disposition   underlay IP           
     ------------------------------------------------------------------------------------------------------------------------------------
-    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset                        in service    fd00:1122:3344:101::2e
-    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset                        in service    fd00:1122:3344:101::2c
-    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset                        in service    fd00:1122:3344:101::29
-    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset                        in service    fd00:1122:3344:101::2a
-    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset                        in service    fd00:1122:3344:101::2b
-    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset                        in service    fd00:1122:3344:101::28
-    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset                        in service    fd00:1122:3344:101::27
-    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset                        in service    fd00:1122:3344:101::26
+    crucible          b8766bf4-a8cb-4851-b7a1-199b8eb5da11   install dataset                        in service    fd00:1122:3344:101::10
+    crucible          d4c24690-28b6-4926-b003-48f01a7a8bdd   install dataset                        in service    fd00:1122:3344:101::e 
+    crucible_pantry   3d853da1-51a7-4a9b-9254-ba480e6037f2   install dataset                        in service    fd00:1122:3344:101::b 
+    crucible_pantry   80d4a70a-db63-412d-81d6-7f17c18895dd   install dataset                        in service    fd00:1122:3344:101::c 
+    crucible_pantry   daca619d-d809-47d0-9957-d7ba9de2922e   install dataset                        in service    fd00:1122:3344:101::d 
+    external_dns      2f114b3c-adc9-4189-918e-f99984976121   install dataset                        in service    fd00:1122:3344:101::a 
+    external_dns      a399d697-11cd-47cc-ac25-60ac6a07083d   install dataset                        in service    fd00:1122:3344:101::9 
+    external_dns      b6dcd340-c890-44a7-a6e7-3023f7182e1c   install dataset                        in service    fd00:1122:3344:101::8 
     internal_dns      1f19f188-e062-489c-b318-070819d86d5a   install dataset                        in service    fd00:1122:3344:3::1   
     internal_dns      2fa580a0-db67-4581-9c53-24fd1f42540e   install dataset                        in service    fd00:1122:3344:2::1   
     internal_dns      fc6956b2-56a8-4337-a93a-4d5a5d36f123   install dataset                        in service    fd00:1122:3344:1::1   
-    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset                        in service    fd00:1122:3344:101::21
-    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset                        in service    fd00:1122:3344:101::23
-    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset                        in service    fd00:1122:3344:101::24
-    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset                        in service    fd00:1122:3344:101::22
-*   clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   - artifact: version 1.2.3              in service    fd00:1122:3344:101::25
+    internal_ntp      46cb864e-d722-4805-8725-5ec3c7f4e7f0   install dataset                        in service    fd00:1122:3344:101::3 
+    nexus             417f0724-65fa-4819-9e3b-02beb942f2cd   install dataset                        in service    fd00:1122:3344:101::5 
+    nexus             871381e9-f76c-4f63-af49-4cedcc5ff52d   install dataset                        in service    fd00:1122:3344:101::6 
+    nexus             a24a9100-c1f6-4478-9412-4b7a6649bd7c   install dataset                        in service    fd00:1122:3344:101::4 
+*   clickhouse        7cbd5731-4f6a-4d13-9248-2ec7483d3c37   - artifact: version 1.2.3              in service    fd00:1122:3344:101::7 
      └─                                                      + install dataset                                                          
-*   crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   - artifact: version valid-non-semver   in service    fd00:1122:3344:101::2d
+*   crucible          87505ee8-022c-45fd-8a38-55ffd685bca6   - artifact: version valid-non-semver   in service    fd00:1122:3344:101::f 
      └─                                                      + install dataset                                                          
 
 

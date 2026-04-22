@@ -80,6 +80,42 @@ mod probes {
     /// Fires just after a failed collection from a producer, with an error
     /// message describing the failure.
     fn collection__failed(producer_id: &str, msg: &str) {}
+
+    /// Fires just before forwarding successful results to the result sink task.
+    fn results__sink__send__start(producer_id: &str, n_samples: u64) {}
+
+    /// Fires just after forwarding successful results to the result sink task.
+    fn results__sink__send__done(producer_id: &str) {}
+
+    /// Fires when the results sink dequeues an item from its result queue, but
+    /// before processing it.
+    fn results__sink__item__dequeued() {}
+
+    /// Fires after the results sink processes an item dequeued from its results
+    /// queue, with the number of samples.
+    fn results__sink__item__processed(n_samples: usize) {}
+
+    /// Fires when we have dropped old samples because the database insertion is
+    /// slower than the data batching task.
+    ///
+    /// We batch data from individual collection tasks into a ring buffer. When
+    /// that gets large enough, we insert the full contents into the database.
+    /// In the event that the database insertions are _very_ slow, and cannot
+    /// keep up with new batches, we'll drop the oldest samples. This probe
+    /// fires with the number of samples we dropped.
+    fn dropped__old__samples(n_dropped: usize) {}
+
+    /// Fires just before attempting to insert a batch of samples into the
+    /// database.
+    fn insert__samples__start(n_samples: usize) {}
+
+    /// Fires just after successfully inserting a batch of samples into the
+    /// database.
+    fn insert__samples__done() {}
+
+    /// Fires just after failing to insert a batch of samples into the database,
+    /// with the error details.
+    fn insert__samples__failed(msg: &str) {}
 }
 
 /// Errors collecting metric data

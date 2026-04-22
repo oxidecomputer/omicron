@@ -17,7 +17,7 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -43,6 +43,7 @@ use sled_agent_types::diagnostics::{
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
@@ -82,7 +83,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26, v30};
+use sled_agent_types_versions::{v1, v20, v25, v26, v30, v33};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -881,9 +882,7 @@ impl SledAgentApi for SledAgentImpl {
         let body_args = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                let rules: Vec<_> =
-                    body_args.rules.into_iter().map(Into::into).collect();
-                sa.firewall_rules_ensure(body_args.vni, &rules)
+                sa.firewall_rules_ensure(body_args.vni, &body_args.rules)
                     .await
                     .map_err(Error::from)?;
                 Ok(HttpResponseUpdatedNoContent())
@@ -1046,6 +1045,7 @@ impl SledAgentApi for SledAgentImpl {
         // Use shorter names so rustfmt doesn't give up on this function.
         use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
         use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
+        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
         type LatestEnvelope = EarlyNetworkConfigEnvelope;
 
         let sa = rqctx.context();
@@ -1072,8 +1072,9 @@ impl SledAgentApi for SledAgentImpl {
                                         InlineErrorChain::new(&err),
                                     ))
                                 })?;
-                        let body =
-                            BodyV20::from(BodyV26::from(latest_version_body));
+                        let body = BodyV20::from(BodyV26::from(BodyV30::from(
+                            latest_version_body,
+                        )));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,
                             schema_version: BodyV20::SCHEMA_VERSION,
@@ -1091,6 +1092,26 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(config))
             })
             .await
+    }
+
+    async fn write_network_bootstore_config_v33(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v30(

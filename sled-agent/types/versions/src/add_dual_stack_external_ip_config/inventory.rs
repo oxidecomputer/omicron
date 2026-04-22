@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -11,10 +11,8 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::{
-    api::{
-        external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfigGeneric},
-    },
+    address::{Ip, NUM_SOURCE_NAT_PORTS},
+    api::external::{ByteCount, Generation},
     disk::{DatasetConfig, OmicronPhysicalDiskConfig},
     zpool_name::ZpoolName,
 };
@@ -25,6 +23,7 @@ use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::impls::inventory::SourceNatConfigError;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -32,6 +31,7 @@ use crate::v1::inventory::{
     RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
 use crate::v10;
+use crate::v10::inventory::NetworkInterface;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 
 /// Identity and basic status information about this sled agent
@@ -369,11 +369,10 @@ impl TryFrom<v10::inventory::OmicronZoneType> for OmicronZoneType {
                 nic,
                 snat_cfg,
             } => {
-                let (first_port, last_port) = snat_cfg.port_range_raw();
                 let snat_cfg = SourceNatConfigGeneric::new(
                     snat_cfg.ip,
-                    first_port,
-                    last_port,
+                    snat_cfg.first_port,
+                    snat_cfg.last_port,
                 )
                 .map_err(|e| external::Error::invalid_request(e.to_string()))?;
                 Ok(Self::BoundaryNtp {
@@ -592,7 +591,7 @@ impl TryFrom<OmicronZoneType> for v10::inventory::OmicronZoneType {
     type Error = external::Error;
 
     fn try_from(v11: OmicronZoneType) -> Result<Self, Self::Error> {
-        use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
+        use crate::v1::inventory::SourceNatConfig;
 
         match v11 {
             OmicronZoneType::BoundaryNtp {
@@ -602,26 +601,23 @@ impl TryFrom<OmicronZoneType> for v10::inventory::OmicronZoneType {
                 domain,
                 nic,
                 snat_cfg,
-            } => {
-                let (first_port, last_port) = snat_cfg.port_range_raw();
-                Ok(v10::inventory::OmicronZoneType::BoundaryNtp {
-                    address,
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                    nic,
-                    snat_cfg: SourceNatConfig::new(
-                        snat_cfg.ip,
-                        first_port,
-                        last_port,
-                    )
-                    .map_err(|e| {
-                        external::Error::invalid_request(format!(
-                            "invalid SNAT config: {e}"
-                        ))
-                    })?,
-                })
-            }
+            } => Ok(v10::inventory::OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg: SourceNatConfig::new(
+                    snat_cfg.ip,
+                    snat_cfg.first_port,
+                    snat_cfg.last_port,
+                )
+                .map_err(|e| {
+                    external::Error::invalid_request(format!(
+                        "invalid SNAT config: {e}"
+                    ))
+                })?,
+            }),
             OmicronZoneType::Clickhouse { address, dataset } => {
                 Ok(v10::inventory::OmicronZoneType::Clickhouse {
                     address,
@@ -765,5 +761,144 @@ impl TryFrom<OmicronZonesConfig> for v10::inventory::OmicronZonesConfig {
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
         })
+    }
+}
+
+/// Helper trait specifying the name of the JSON Schema for a `SourceNatConfig`.
+///
+/// This exists so we can use a generic type and have the names of the concrete
+/// type aliases be the same as the name of schema object.
+pub trait SnatSchema {
+    fn json_schema_name() -> String;
+}
+
+impl SnatSchema for Ipv4Addr {
+    fn json_schema_name() -> String {
+        String::from("SourceNatConfigV4")
+    }
+}
+
+impl SnatSchema for Ipv6Addr {
+    fn json_schema_name() -> String {
+        String::from("SourceNatConfigV6")
+    }
+}
+
+impl SnatSchema for IpAddr {
+    fn json_schema_name() -> String {
+        String::from("SourceNatConfigGeneric")
+    }
+}
+
+/// An IP address and port range used for source NAT, i.e., making
+/// outbound network connections from guests or services.
+// Note that `Deserialize` is manually implemented; if you make any changes to
+// the fields of this structure, you must make them to that implementation too.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    daft::Diffable,
+)]
+pub struct SourceNatConfig<T: Ip> {
+    /// The external address provided to the instance or service.
+    pub ip: T,
+    /// The first port used for source NAT, inclusive.
+    pub(crate) first_port: u16,
+    /// The last port used for source NAT, also inclusive.
+    pub(crate) last_port: u16,
+}
+
+/// An IP address and port range used for source NAT, i.e., making
+/// outbound network connections from guests or services.
+// Private type only used for deriving the actual JSON schema object itself,
+// and for checked deserialization.
+//
+// The fields of `SourceNatConfigShadow` should exactly match the fields
+// of `SourceNatConfig`. We're not really using serde's remote derive,
+// but by adding the attribute we get compile-time checking that all the
+// field names and types match. (It doesn't check the _order_, but that
+// should be fine as long as we're using JSON or similar formats.)
+#[derive(Deserialize, JsonSchema)]
+#[serde(remote = "SourceNatConfig")]
+struct SourceNatConfigShadow<T: Ip + SnatSchema> {
+    /// The external address provided to the instance or service.
+    ip: T,
+    /// The first port used for source NAT, inclusive.
+    first_port: u16,
+    /// The last port used for source NAT, also inclusive.
+    last_port: u16,
+}
+
+pub type SourceNatConfigV4 = SourceNatConfig<Ipv4Addr>;
+pub type SourceNatConfigV6 = SourceNatConfig<Ipv6Addr>;
+pub type SourceNatConfigGeneric = SourceNatConfig<IpAddr>;
+
+impl<T> JsonSchema for SourceNatConfig<T>
+where
+    T: Ip + SnatSchema,
+{
+    fn schema_name() -> String {
+        <T as SnatSchema>::json_schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        SourceNatConfigShadow::<T>::json_schema(generator)
+    }
+}
+
+// We implement `Deserialize` manually to add validity checking on the port
+// range.
+impl<'de, T> Deserialize<'de> for SourceNatConfig<T>
+where
+    T: Ip + SnatSchema + Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let shadow = SourceNatConfigShadow::deserialize(deserializer)?;
+        SourceNatConfig::new(shadow.ip, shadow.first_port, shadow.last_port)
+            .map_err(D::Error::custom)
+    }
+}
+
+// This impl is here instead of crate::impls because we need it in our
+// Deserialize implementation.
+impl<T: Ip> SourceNatConfig<T> {
+    /// Construct a `SourceNatConfig` with the given port range, both inclusive.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `(first_port, last_port)` is not aligned to
+    /// [`NUM_SOURCE_NAT_PORTS`].
+    pub fn new(
+        ip: T,
+        first_port: u16,
+        last_port: u16,
+    ) -> Result<Self, SourceNatConfigError> {
+        if first_port.is_multiple_of(NUM_SOURCE_NAT_PORTS)
+            && last_port
+                .checked_sub(first_port)
+                .and_then(|diff| diff.checked_add(1))
+                == Some(NUM_SOURCE_NAT_PORTS)
+        {
+            Ok(Self { ip, first_port, last_port })
+        } else {
+            Err(SourceNatConfigError::UnalignedPortPair {
+                first_port,
+                last_port,
+            })
+        }
     }
 }

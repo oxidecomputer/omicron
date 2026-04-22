@@ -587,38 +587,150 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         }
     }
 
-    let mut output =
-        String::from("Mutating endpoints without audit logging:\n");
-    for (op_id, (method, path)) in &missing_audit {
-        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
-    }
+    // Exercise endpoints not in VERIFY_ENDPOINTS. These require special
+    // handling (unauthenticated, non-JSON bodies, etc.) that prevents them
+    // from being included in the generic loop above.
+    //
+    // For each endpoint we derive the operation_id from the URL via the
+    // API spec (api_operations.find) rather than hardcoding it, so that a
+    // URL change or mix-up is caught automatically.
 
-    output.push_str(
-        "\nMutating endpoints not tested (not in VERIFY_ENDPOINTS):\n",
-    );
-    for (op_id, (method, path)) in &untested_mutating {
-        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
-    }
+    // Make a request and check whether an audit log entry was produced.
+    // Looks up the operation_id from the URL via the API spec rather than
+    // hardcoding it, so a URL change or mix-up is caught automatically.
+    // The builder is wrapped in NexusRequest with UnprivilegedUser auth,
+    // which is harmless for unauthenticated endpoints (they ignore it).
+    // Panics if the URL doesn't match any API operation.
+    let mut check_manual =
+        async |method: &str, url: &str, builder: RequestBuilder<'_>| {
+            let before = fetch_log(client, t_start, None).await.items.len();
+            let _ = NexusRequest::new(
+                builder.allow_non_dropshot_errors().expect_status(None),
+            )
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await;
+            let after = fetch_log(client, t_start, None).await.items.len();
+            let op = api_operations.find(method, url).unwrap_or_else(|| {
+                panic!("{} {} does not match any API operation", method, url)
+            });
+            if let Some(info) = untested_mutating.remove(&op.operation_id) {
+                if after <= before {
+                    missing_audit.insert(op.operation_id.clone(), info);
+                }
+            }
+        };
 
-    // Print a helpful message when there are new uncovered endpoints
-    let expected_path = "tests/output/uncovered-audit-log-endpoints.txt";
-    let expected = std::fs::read_to_string(expected_path).unwrap_or_default();
-    let expected_ops: std::collections::HashSet<&str> = expected
-        .lines()
-        .skip(1) // skip the header line
-        .filter_map(|line| line.split_whitespace().next())
-        .collect();
-    let unexpected_uncovered: Vec<_> = missing_audit
+    // login_local: unauthenticated, JSON body
+    check_manual(
+        "POST",
+        "/v1/login/fake-silo/local",
+        RequestBuilder::new(client, Method::POST, "/v1/login/fake-silo/local")
+            .body(Some(&serde_json::json!({
+                "username": "nonexistent",
+                "password": "doesntmatter"
+            }))),
+    )
+    .await;
+
+    // login_saml: unauthenticated, takes UntypedBody (any bytes work)
+    check_manual(
+        "POST",
+        "/login/fake-silo/saml/fake-provider",
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            "/login/fake-silo/saml/fake-provider",
+        )
+        .body(Some(&serde_json::json!({}))),
+    )
+    .await;
+
+    // logout: session cookie-based, no body needed
+    check_manual(
+        "POST",
+        "/v1/logout",
+        RequestBuilder::new(client, Method::POST, "/v1/logout"),
+    )
+    .await;
+
+    // device_auth_request: unauthenticated, URL-encoded body
+    check_manual(
+        "POST",
+        "/device/auth",
+        RequestBuilder::new(client, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&device::DeviceAuthRequest {
+                client_id: uuid::Uuid::nil(),
+                ttl_seconds: None,
+            })),
+    )
+    .await;
+
+    // device_auth_confirm: authenticated, JSON body
+    check_manual(
+        "POST",
+        "/device/confirm",
+        RequestBuilder::new(client, Method::POST, "/device/confirm").body(
+            Some(&device::DeviceAuthVerify {
+                user_code: "fake-code".to_string(),
+            }),
+        ),
+    )
+    .await;
+
+    // device_access_token: unauthenticated, URL-encoded body
+    check_manual(
+        "POST",
+        "/device/token",
+        RequestBuilder::new(client, Method::POST, "/device/token")
+            .body_urlencoded(Some(&device::DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code: "fake-code".to_string(),
+                client_id: uuid::Uuid::nil(),
+            })),
+    )
+    .await;
+
+    // Mutating POST endpoints that are intentionally not audit-logged.
+    // If you're adding a new endpoint here, include a comment explaining why.
+    let allowed_unaudited: BTreeMap<&str, (&str, &str)> = BTreeMap::from([
+        // Intermediate steps of the device OAuth flow. The meaningful
+        // endpoint is device_auth_confirm, which is where authentication
+        // and token creation happen. device_auth_request has no user
+        // identity, and device_access_token is just polling (mostly 400s)
+        // until the token created by confirm is ready.
+        ("device_access_token", ("post", "/device/token")),
+        ("device_auth_request", ("post", "/device/auth")),
+        // Called many times per disk image upload, other related endpoints
+        // cover it. See
+        // https://github.com/oxidecomputer/omicron/pull/10046
+        ("disk_bulk_write_import", ("post", "/v1/disks/{disk}/bulk-write")),
+        // Needs rework to extract actor identity before we can log it.
+        // Low priority since sessions expire anyway.
+        ("logout", ("post", "/v1/logout")),
+        // Read-only queries that happen to use POST for the request body.
+        ("system_timeseries_query", ("post", "/v1/system/timeseries/query")),
+        ("timeseries_query", ("post", "/v1/timeseries/query")),
+    ]);
+
+    // Check for endpoints missing audit logging. missing_audit contains
+    // endpoints we tested and found to lack audit logging. untested_mutating
+    // contains mutating endpoints not in VERIFY_ENDPOINTS that we couldn't
+    // test in the generic loop (they need special request construction).
+    // Both need to be in the allowlist or have audit logging added.
+    let unexpected_unaudited: Vec<_> = missing_audit
         .keys()
-        .filter(|op| !expected_ops.contains(op.as_str()))
+        .chain(untested_mutating.keys())
+        .filter(|op| !allowed_unaudited.contains_key(op.as_str()))
         .collect();
-    if !unexpected_uncovered.is_empty() {
+    if !unexpected_unaudited.is_empty() {
         eprintln!();
         eprintln!(
             "======================================================================="
         );
         eprintln!("ENDPOINTS MISSING AUDIT LOGGING:");
-        for op in &unexpected_uncovered {
+        for op in &unexpected_unaudited {
             eprintln!("  - {}", op);
         }
         eprintln!();
@@ -633,41 +745,53 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             "If the endpoint is read-only despite using POST (like the timeseries"
         );
         eprintln!(
-            "query endpoints), add it to uncovered-audit-log-endpoints.txt."
+            "query endpoints), add it to the allowed_unaudited list in this test."
         );
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
-
-    // NOTE: We intentionally do NOT use expectorate's assert_contents here
-    // because we don't want EXPECTORATE=overwrite to allow people to
-    // accidentally add uncovered endpoints to the allowlist.
-    similar_asserts::assert_eq!(
-        expected,
-        output,
-        "left: uncovered-audit-log-endpoints.txt, right: actual"
+    assert!(
+        unexpected_unaudited.is_empty(),
+        "Unexpected unaudited endpoints: {:?}",
+        unexpected_unaudited,
     );
 
-    // Check for GET endpoints that unexpectedly have audit logging
-    let mut get_output = String::from("GET endpoints with audit logging:\n");
-    for (op_id, (method, path)) in &unexpected_get_audit {
-        get_output
-            .push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    // Check that the allowlist doesn't have stale entries for endpoints
+    // that have since gained audit logging or been removed.
+    let actual_unaudited: BTreeMap<&str, (&str, &str)> = missing_audit
+        .iter()
+        .chain(untested_mutating.iter())
+        .map(|(op, (m, p))| (op.as_str(), (m.as_str(), p.as_str())))
+        .collect();
+    for (op, (method, path)) in &allowed_unaudited {
+        match actual_unaudited.get(op) {
+            None => {
+                panic!(
+                    "Stale allowed_unaudited entry: {} ({} {:?}) — \
+                     endpoint now has audit logging or no longer exists, \
+                     remove it from the list",
+                    op, method, path,
+                );
+            }
+            Some((actual_method, actual_path)) => {
+                assert_eq!(
+                    (actual_method, actual_path),
+                    (method, path),
+                    "allowed_unaudited entry for {} has wrong method/path",
+                    op,
+                );
+            }
+        }
     }
 
-    let get_expected_path = "tests/output/audited-get-endpoints.txt";
-    let get_expected =
-        std::fs::read_to_string(get_expected_path).unwrap_or_default();
-    let get_expected_ops: std::collections::HashSet<&str> = get_expected
-        .lines()
-        .skip(1) // skip the header line
-        .filter_map(|line| line.split_whitespace().next())
-        .collect();
+    // GET endpoints that are intentionally audit-logged (should be rare).
+    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+
     let unexpected_audited: Vec<_> = unexpected_get_audit
         .keys()
-        .filter(|op| !get_expected_ops.contains(op.as_str()))
+        .filter(|op| !allowed_audited_gets.contains_key(op.as_str()))
         .collect();
     if !unexpected_audited.is_empty() {
         eprintln!();
@@ -685,20 +809,16 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         eprintln!(
             "modify state. If this endpoint was intentionally audited (rare),"
         );
-        eprintln!("add it to audited-get-endpoints.txt.");
+        eprintln!("add it to the allowed_audited_gets list in this test.");
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
-
-    // NOTE: We intentionally do NOT use expectorate's assert_contents here
-    // because we don't want EXPECTORATE=overwrite to allow people to
-    // accidentally add audited GET endpoints to the list.
-    similar_asserts::assert_eq!(
-        get_expected,
-        get_output,
-        "left: audited-get-endpoints.txt, right: actual"
+    assert!(
+        unexpected_audited.is_empty(),
+        "Unexpected audited GET endpoints: {:?}",
+        unexpected_audited,
     );
 }
 

@@ -5,10 +5,10 @@
 //! Helpers for configuring and starting a [`trust_quorum::NodeTask`] during
 //! bootstrap agent startup.
 
-use super::config::TRUST_QUORUM_PORT;
 use super::server::StartError;
 use crate::bootstrap::bootstore_setup::bootstore_fsm_state_paths;
 use camino::Utf8PathBuf;
+use omicron_common::address::TRUST_QUORUM_PORT;
 use sled_hardware_types::BaseboardId;
 use sled_storage::dataset::CLUSTER_DATASET;
 use sprockets_tls::keys::SprocketsConfig;

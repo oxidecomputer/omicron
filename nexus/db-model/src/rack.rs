@@ -16,7 +16,6 @@ pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
     pub initialized: bool,
-    pub tuf_base_url: Option<String>,
     pub rack_subnet: Option<IpNetwork>,
 }
 
@@ -25,7 +24,6 @@ impl Rack {
         Self {
             identity: RackIdentity::new(id),
             initialized: false,
-            tuf_base_url: None,
             rack_subnet: None,
         }
     }

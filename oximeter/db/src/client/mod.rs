@@ -103,15 +103,22 @@ impl Client {
     /// connection pool.
     pub fn new_with_resolver(
         native_resolver: BoxedResolver,
+        pool_name: &str,
         log: &Logger,
     ) -> Self {
-        Self::new_with_pool_policy(native_resolver, Default::default(), log)
+        Self::new_with_pool_policy(
+            native_resolver,
+            pool_name,
+            Default::default(),
+            log,
+        )
     }
 
     /// Construct a ClickHouse client with a specific qorb connection pool
     /// policy.
     pub fn new_with_pool_policy(
         native_resolver: BoxedResolver,
+        pool_name: &str,
         policy: Policy,
         log: &Logger,
     ) -> Self {
@@ -123,7 +130,7 @@ impl Client {
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
         let native_pool = match Pool::new(
-            "clickhouse".to_string(),
+            pool_name.to_string(),
             native_resolver,
             Arc::new(native::connection::Connector),
             policy,
@@ -5082,8 +5089,12 @@ mod tests {
             claim_timeout: Duration::from_secs(1),
             ..Default::default()
         };
-        let new_client =
-            Client::new_with_pool_policy(resolver, policy, &logctx.log);
+        let new_client = Client::new_with_pool_policy(
+            resolver,
+            "oximeter-test",
+            policy,
+            &logctx.log,
+        );
 
         // And then assert that when we try to insert samples, we _fail_ rather
         // than timeout. Timing out here would only happen if we tried to do

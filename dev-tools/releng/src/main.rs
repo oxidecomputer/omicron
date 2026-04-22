@@ -46,7 +46,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(19, 0, 0);
+const BASE_VERSION: Version = Version::new(20, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -91,7 +91,7 @@ const TUF_PACKAGES: [&PackageName; 12] = [
     &PackageName::new_const("probe"),
 ];
 
-const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
+const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/3/dev/";
 const HELIOS_REPO: &str = "https://github.com/oxidecomputer/helios.git";
 
 static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
@@ -158,7 +158,7 @@ struct Args {
     #[clap(long)]
     extra_manifest: Option<Utf8PathBuf>,
 
-    /// Extra helios-dev origin to be passed along to helios-build
+    /// Extra helios origin to be passed along to helios-build
     #[clap(long)]
     extra_origin: Option<String>,
 
@@ -269,18 +269,6 @@ async fn main() -> Result<()> {
     )?);
     let opte_version =
         fs::read_to_string(WORKSPACE_DIR.join("tools/opte_version")).await?;
-
-    // Parse tools/opte_version_override for OPTE_COMMIT. When set, we
-    // download the override p5p from buildomat and use it as a package
-    // source during image build instead of the helios pkg repo version.
-    let opte_override = parse_opte_version_override(
-        &WORKSPACE_DIR.join("tools/opte_version_override"),
-    )
-    .await?;
-    if let Some(ov) = &opte_override {
-        info!(logger, "OPTE override active: commit={}", ov.commit);
-    }
-    let opte_version = opte_version.trim();
 
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(Duration::from_secs(15))
@@ -629,7 +617,7 @@ async fn main() -> Result<()> {
             .arg("-o") // output directory for image
             .arg(args.output_dir.join(format!("os-{}", target)))
             .arg("-F") // pass extra image builder features
-            .arg(format!("optever={opte_version}"))
+            .arg(format!("optever={}", opte_version.trim()))
             .arg("-P") // include all files from extra proto area
             .arg(proto_dir.join("root"))
             .arg("-N") // image name
@@ -684,36 +672,14 @@ async fn main() -> Result<()> {
         if !args.helios_local {
             image_cmd = image_cmd
                 .arg("-p") // use an external package repository
-                .arg(format!("helios-dev={HELIOS_PKGREPO}"))
+                .arg(format!("helios={HELIOS_PKGREPO}"))
         }
 
-        // When OPTE_COMMIT is set, download the override p5p from buildomat
-        // and add it as a package source for the image build.
-        if let Some(ov) = &opte_override {
-            let p5p_path = tempdir.path().join(format!("opte-{target}.p5p"));
-            let commit = ov.commit.clone();
-            let dest = p5p_path.clone();
-            let cl = client.clone();
-            let log = logger.clone();
-            jobs.push(
-                format!("{target}-opte-p5p"),
-                download_opte_p5p(log, cl, commit, dest),
-            );
-
-            image_cmd = image_cmd
-                .arg("-p")
-                .arg(format!("helios-dev=file://{p5p_path}"));
-        }
-
-        let image_job = jobs
-            .push_command(format!("{target}-image"), image_cmd)
+        // helios-build experiment-image
+        jobs.push_command(format!("{}-image", target), image_cmd)
             .after("helios-setup")
             .after("helios-incorp")
-            .after(format!("{target}-proto"));
-
-        if opte_override.is_some() {
-            image_job.after(format!("{target}-opte-p5p"));
-        }
+            .after(format!("{}-proto", target));
     }
     // Build the recovery target after we build the host target. Only one
     // of these will build at a time since Cargo locks its target directory;
@@ -919,73 +885,6 @@ async fn build_proto_area(
     }
 
     Ok(())
-}
-
-/// Parsed contents of `tools/opte_version_override` when an override is active.
-struct OpteOverride {
-    commit: String,
-}
-
-/// Parse `tools/opte_version_override` for `OPTE_COMMIT`. Returns `None` if
-/// `OPTE_COMMIT` is unset or empty.
-async fn parse_opte_version_override(
-    path: &Utf8PathBuf,
-) -> Result<Option<OpteOverride>> {
-    let contents = fs::read_to_string(path)
-        .await
-        .context("failed to read tools/opte_version_override")?;
-
-    for line in contents.lines() {
-        let line = line.trim();
-        if let Some(val) = line.strip_prefix("OPTE_COMMIT=") {
-            let val = val.trim_matches('"');
-            if !val.is_empty() {
-                return Ok(Some(OpteOverride { commit: val.to_string() }));
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-const OPTE_BUILDOMAT_BASE: &str =
-    "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte";
-
-/// Download the OPTE override p5p archive from buildomat.
-async fn download_opte_p5p(
-    logger: Logger,
-    client: reqwest::Client,
-    commit: String,
-    dest: Utf8PathBuf,
-) -> Result<()> {
-    let url = format!("{OPTE_BUILDOMAT_BASE}/repo/{commit}/opte.p5p");
-    info!(logger, "downloading OPTE override p5p from {url}");
-    for attempt in 1..=RETRY_ATTEMPTS {
-        let result = async {
-            let response = client.get(&url).send().await?.error_for_status()?;
-            let bytes = response.bytes().await?;
-            fs::write(&dest, &bytes).await?;
-            Ok::<_, anyhow::Error>(())
-        }
-        .await;
-
-        match result {
-            Ok(()) => {
-                info!(logger, "downloaded OPTE p5p to {dest}");
-                return Ok(());
-            }
-            Err(err) => {
-                if attempt == RETRY_ATTEMPTS {
-                    return Err(err).with_context(|| {
-                        format!("failed to download OPTE p5p from {url}")
-                    });
-                }
-                info!(logger, "retrying OPTE p5p download (attempt {attempt})");
-            }
-        }
-    }
-
-    bail!("failed to download OPTE p5p after {RETRY_ATTEMPTS} attempts")
 }
 
 async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {

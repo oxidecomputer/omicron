@@ -59,6 +59,7 @@ bootstrap-agent-client.workspace = true
 bootstrap-agent-lockstep-client.workspace = true
 omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
+gateway-types.workspace = true
 installinator-api.workspace = true
 installinator-common.workspace = true
 omicron-certificates.workspace = true

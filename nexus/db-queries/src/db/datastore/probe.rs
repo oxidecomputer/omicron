@@ -25,7 +25,6 @@ use nexus_db_model::VpcSubnet;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::identity::Resource;
-use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -41,6 +40,7 @@ use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use sled_agent_client::types::ProbeCreate;
+use sled_agent_types::inventory::NetworkInterface;
 use uuid::Uuid;
 
 impl super::DataStore {

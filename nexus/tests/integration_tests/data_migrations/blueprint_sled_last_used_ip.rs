@@ -23,7 +23,7 @@ const SLED_SUBNET_3: &str = "fd00:1122:3344:0103";
 
 async fn before_impl(ctx: &MigrationContext<'_>) {
     // Blueprint 1: 2 sleds with 3 zones each, IPs with final hextet both
-    // above and below ::20 (SLED_RESERVED_ADDRESSES).
+    // above and below ::20 (the legacy value of SLED_RESERVED_ADDRESSES).
     //
     // Blueprint 2: all 3 sleds, but the third sled has no zones
     //

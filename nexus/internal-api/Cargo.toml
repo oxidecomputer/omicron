@@ -17,4 +17,5 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
+sled-agent-types-versions.workspace = true
 uuid.workspace = true

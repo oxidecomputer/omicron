@@ -80,9 +80,10 @@ impl Alert {
             id,
             class,
             ref payload,
-            // Ignore the sitrep ID fields, as they are not included in the
-            // alert model.
+            // Ignore the sitrep ID and comment fields, as they are not
+            // included in the alert model.
             requested_sitrep_id: _,
+            comment: _,
         } = req;
 
         Self {

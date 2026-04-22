@@ -5,12 +5,10 @@
 //! Background task for fault management sitrep garbage collection.
 
 use crate::app::background::BackgroundTask;
-use crate::db::pagination::Paginator;
-use dropshot::PaginationOrder;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::fm::GcOrphansResult;
 use nexus_types::internal_api::background::SitrepGcStatus as Status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -48,73 +46,41 @@ impl SitrepGc {
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
         let mut status = Status::default();
-        let mut paginator =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
 
-        while let Some(p) = paginator.next() {
-            let orphans = match self
-                .datastore
-                .fm_sitrep_list_orphaned(&opctx, p.current_pagparams())
-                .await
-            {
-                Ok(orphans) => orphans,
-                Err(err) => {
-                    let err = InlineErrorChain::new(&err);
-                    const MSG: &str = "failed to list orphaned sitreps";
-                    slog::error!(
-                        &opctx.log,
-                        "{MSG}";
-                        &err,
-                    );
-                    status.errors.push(format!("{MSG}: {err}"));
-                    break;
-                }
-            };
-
-            paginator = p.found_batch(&orphans, &|id| *id);
-            let found = orphans.len();
-            status.orphaned_sitreps_found += found;
-
-            let deleted = match self
-                .datastore
-                .fm_sitrep_delete_all(&opctx, orphans)
-                .await
-            {
-                Ok(deleted) => deleted,
-                Err(err) => {
-                    let err = InlineErrorChain::new(&err);
-                    const MSG: &str = "failed to delete orphaned sitreps";
-                    slog::error!(
-                        &opctx.log,
-                        "{MSG}";
-                        &err,
-                    );
-                    status.errors.push(format!("{MSG}: {err}"));
-                    continue;
-                }
-            };
-
-            status.orphaned_sitreps_deleted += deleted;
-            if deleted > 0 {
-                slog::debug!(
+        match self.datastore.fm_sitrep_gc_orphans(&opctx).await {
+            Ok(GcOrphansResult {
+                sitreps_deleted,
+                sitrep_metadata_batches,
+                batch_size,
+                child_tables,
+            }) => {
+                status.orphaned_sitreps_deleted = sitreps_deleted;
+                status.sitrep_metadata_batches = sitrep_metadata_batches;
+                status.batch_size = batch_size;
+                status.child_tables = child_tables
+                    .into_iter()
+                    .map(|(table, stats)| {
+                        (
+                            table.table_name().to_string(),
+                            nexus_types::internal_api::background::ChildTableGcStats {
+                                rows_deleted: stats.rows_deleted,
+                                batches: stats.batches,
+                            },
+                        )
+                    })
+                    .collect();
+            }
+            Err(err) => {
+                let err = InlineErrorChain::new(&err);
+                const MSG: &str = "failed to GC orphaned sitreps";
+                slog::error!(
                     &opctx.log,
-                    "deleted {deleted} of {found} orphaned sitreps",
+                    "{MSG}";
+                    &err,
                 );
-            } else {
-                slog::trace!(
-                    &opctx.log,
-                    "all {found} orphaned sitreps in this batch have \
-                         already been deleted",
-                );
+                status.errors.push(format!("{MSG}: {err}"));
             }
         }
-
-        slog::info!(
-            &opctx.log,
-            "sitrep garbage collection found {} orphaned sitreps, deleted {}",
-            status.orphaned_sitreps_found,
-            status.orphaned_sitreps_deleted
-        );
 
         status
     }
@@ -151,6 +117,7 @@ mod tests {
                 comment: "test sitrep v1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -175,6 +142,7 @@ mod tests {
                 comment: "test sitrep v2".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -245,7 +213,6 @@ mod tests {
             .expect("sitrep 2 should still exist");
 
         assert_eq!(status.errors, Vec::<String>::new());
-        assert_eq!(status.orphaned_sitreps_found, 7);
         assert_eq!(status.orphaned_sitreps_deleted, 7);
 
         db.terminate().await;
@@ -267,6 +234,7 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: format!("test sitrep v{i}; orphan {i}"),
                 time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
                 parent_sitrep_id,
             },
             // We could populate the orphan sitreps with cases and ereports

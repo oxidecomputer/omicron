@@ -10,6 +10,7 @@ use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
 use crate::TEST_SUITE_PASSWORD_HASH;
 use anyhow::Result;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Utc;
@@ -73,10 +74,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
@@ -92,15 +90,17 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
-use sled_agent_types::rack_init::RecoverySiloConfig;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -912,7 +912,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// write the early network config to all sleds.
     pub async fn configure_sled_agents(&mut self) {
         let early_network_config = WriteNetworkConfigRequest {
-            body: EarlyNetworkConfigBody {
+            body: SystemNetworkingConfig {
                 rack_network_config: RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
@@ -921,6 +921,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     ports: Vec::new(),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
+                // TODO-correctness Can we fill this in for tests?
+                service_zone_nat_entries: None,
             },
             generation: 1,
         };

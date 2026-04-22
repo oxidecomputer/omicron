@@ -6,7 +6,10 @@
 
 use std::{collections::BTreeSet, time::Duration};
 
+use semver::Version;
+
 use dropshot::HttpError;
+use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -131,5 +134,179 @@ impl UpdateTestError {
                 "XXX request should time out before this is hit".into()
             }
         }
+    }
+}
+
+/// Counts of component updates by state.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateStateCounts {
+    pub completed: usize,
+    pub failed: usize,
+    pub aborted: usize,
+    pub in_progress: usize,
+    pub not_started: usize,
+}
+
+impl UpdateStateCounts {
+    pub fn from_components(components: &[ComponentUpdateStatus]) -> Self {
+        let mut counts = Self::default();
+        for c in components {
+            match c.state {
+                UpdateState::Completed => counts.completed += 1,
+                UpdateState::Failed => counts.failed += 1,
+                UpdateState::Aborted => counts.aborted += 1,
+                UpdateState::InProgress => counts.in_progress += 1,
+                UpdateState::NotStarted => counts.not_started += 1,
+            }
+        }
+        counts
+    }
+}
+
+/// The status of a rack update.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RackUpdateStatus {
+    /// The overall update state, rolled up across all components.
+    pub state: UpdateState,
+    /// The version of the top-level TUF archive.
+    pub system_version: Option<Version>,
+    /// The artifacts included in the TUF archive.
+    pub artifacts: Vec<ArtifactId>,
+    /// The update status of each of the target components.
+    pub components: Vec<ComponentUpdateStatus>,
+    /// Counts of component updates by state.
+    pub state_counts: UpdateStateCounts,
+}
+
+/// The message from a failed or aborted update step.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ExitMessage {
+    pub message: String,
+    pub causes: Vec<String>,
+}
+
+/// The status of an update for a component within a rack.
+/// Here, a component means a Sled, Switch, or PSC.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ComponentUpdateStatus {
+    /// The ID of the component.
+    pub id: SpIdentifier,
+    /// The state of the component update.
+    pub state: UpdateState,
+    /// The index of the current step (if in progress) or the last
+    /// step (if terminal).
+    pub step_index: Option<usize>,
+    /// The total number of steps in the update.
+    pub total_steps: Option<usize>,
+    /// The time elapsed since starting the update.
+    pub elapsed_secs: Option<f64>,
+    /// The failure or abort message, if the update reached a terminal failed
+    /// or aborted state.
+    pub exit_message: Option<ExitMessage>,
+}
+
+/// The state of a rack or component update.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateState {
+    NotStarted,
+    InProgress,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+pub fn rollup_update_state(states: &[UpdateState]) -> UpdateState {
+    if states.is_empty() {
+        // An empty list is treated as "not started".
+        UpdateState::NotStarted
+    } else if states.iter().any(|s| matches!(s, UpdateState::Failed)) {
+        // If *any* component failed, the update failed.
+        UpdateState::Failed
+    } else if states.iter().any(|s| matches!(s, UpdateState::Aborted)) {
+        // If *any* component was aborted (and none failed),
+        // the update is aborted.
+        UpdateState::Aborted
+    } else if states.iter().all(|s| matches!(s, UpdateState::Completed)) {
+        // If *all* components are completed, the update is completed.
+        UpdateState::Completed
+    } else if states.iter().all(|s| matches!(s, UpdateState::NotStarted)) {
+        // If *all* components are not started, the update is not started.
+        UpdateState::NotStarted
+    } else {
+        // Here, some components have started, none have failed or been aborted,
+        // and not all are completed. Therefore, the update is in progress.
+        UpdateState::InProgress
+    }
+}
+
+impl UpdateState {
+    /// The exit code corresponding to this state.
+    ///
+    /// State-specific codes start at 4: exit code 1 tends to be used for
+    /// generic errors, and 2 and 3 tend to be reserved for things like
+    /// incorrect CLI args.
+    ///
+    /// - 0: Completed
+    /// - 4: NotStarted
+    /// - 5: InProgress
+    /// - 6: Failed
+    /// - 7: Aborted
+    pub fn exit_code(self) -> u8 {
+        match self {
+            UpdateState::Completed => 0,
+            UpdateState::NotStarted => 4,
+            UpdateState::InProgress => 5,
+            UpdateState::Failed => 6,
+            UpdateState::Aborted => 7,
+        }
+    }
+}
+
+impl std::fmt::Display for UpdateState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateState::NotStarted => write!(f, "not started"),
+            UpdateState::InProgress => write!(f, "in progress"),
+            UpdateState::Completed => write!(f, "completed"),
+            UpdateState::Failed => write!(f, "failed"),
+            UpdateState::Aborted => write!(f, "aborted"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rollup_update_state() {
+        use UpdateState::*;
+
+        // Empty is treated as NotStarted.
+        assert_eq!(rollup_update_state(&[]), NotStarted);
+
+        // Single states roll up to themselves.
+        assert_eq!(rollup_update_state(&[NotStarted]), NotStarted);
+        assert_eq!(rollup_update_state(&[InProgress]), InProgress);
+        assert_eq!(rollup_update_state(&[Completed]), Completed);
+        assert_eq!(rollup_update_state(&[Failed]), Failed);
+        assert_eq!(rollup_update_state(&[Aborted]), Aborted);
+
+        // Failed / Aborted take priority
+        assert_eq!(rollup_update_state(&[Completed, Failed]), Failed);
+        assert_eq!(rollup_update_state(&[InProgress, Failed]), Failed);
+        assert_eq!(rollup_update_state(&[Aborted, Completed]), Aborted);
+        assert_eq!(rollup_update_state(&[Aborted, Failed]), Failed);
+
+        // Complete if all Completed.
+        assert_eq!(rollup_update_state(&[Completed, Completed]), Completed);
+
+        // Otherwise ... InProgress
+        assert_eq!(rollup_update_state(&[Completed, InProgress]), InProgress);
+        assert_eq!(rollup_update_state(&[NotStarted, InProgress]), InProgress);
+        assert_eq!(rollup_update_state(&[NotStarted, Completed]), InProgress);
     }
 }

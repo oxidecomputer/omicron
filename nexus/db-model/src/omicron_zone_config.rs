@@ -15,12 +15,11 @@
 use crate::{MacAddr, Name, SqlU8, SqlU16, SqlU32};
 use anyhow::{Context, anyhow, bail, ensure};
 use ipnetwork::IpNetwork;
-use nexus_types::inventory::NetworkInterface;
-use omicron_common::api::internal::shared::{
-    NetworkInterfaceKind, PrivateIpConfig,
-};
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -138,7 +137,7 @@ pub(crate) struct OmicronZoneNic {
 impl OmicronZoneNic {
     pub(crate) fn new(
         zone_id: OmicronZoneUuid,
-        nic: &nexus_types::inventory::NetworkInterface,
+        nic: &NetworkInterface,
     ) -> anyhow::Result<Self> {
         // We do not bother storing the NIC's kind and associated id
         // because it should be inferrable from the other information

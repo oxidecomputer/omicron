@@ -2,11 +2,11 @@ WITH
   pool_id
     AS (
       SELECT
-        subnet_pool_id AS id
+        l.subnet_pool_id AS id
       FROM
-        subnet_pool_silo_link
+        subnet_pool_silo_link AS l INNER JOIN subnet_pool AS sp ON sp.id = l.subnet_pool_id
       WHERE
-        silo_id = $1 AND ip_version = $2 AND is_default
+        l.silo_id = $1 AND l.ip_version = $2 AND l.is_default AND sp.time_deleted IS NULL
     ),
   exactly_one_default_pool
     AS MATERIALIZED (

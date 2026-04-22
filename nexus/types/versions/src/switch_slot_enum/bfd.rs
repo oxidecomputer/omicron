@@ -8,8 +8,8 @@ use crate::v2026_03_06_01::format_switch_slot_as_name;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::BfdMode;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types_versions::v1::early_networking::BfdMode;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use std::net::IpAddr;
 
 #[derive(

@@ -2030,9 +2030,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let utilization =
-                nexus.subnet_pool_utilization_view(&opctx, &path.pool).await?;
+            let pool_selector = path_params.into_inner().pool;
+            let pool_lookup = nexus.subnet_pool_lookup(&opctx, &pool_selector);
+            let utilization = nexus
+                .subnet_pool_utilization_view(&opctx, &pool_lookup)
+                .await?;
             Ok(HttpResponseOk(utilization))
         };
         apictx

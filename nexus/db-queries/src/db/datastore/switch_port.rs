@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
-
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::datastore::UpdatePrecondition;
@@ -35,6 +32,7 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
+use nexus_types::external_api::networking::router_peer_type_try_from_old_representation;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -44,20 +42,26 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
 use uuid::Uuid;
 
-/// This is a wrapper around [`networking::BgpPeer`], with two additions:
+/// This is a wrapper around [`networking::BgpPeer`], with three additions:
 ///
 /// * [`BgpPeerFromDb::bgp_config_id`] is guaranteed to be an ID, unlike the
 ///   inner [`networking::BgpPeer::bgp_config`] which might be an ID or might be
 ///   a [`Name`].
-/// * Adds [`BgpPeerFromDb::port_settings_id`], which doesn't exist in
-///   inner [`networking::BgpPeer`].
+/// * Adds [`BgpPeerFromDb::port_settings_id`] and
+///   [`BgpPeerFromDb::interface_name`], which don't exist in the inner
+///   [`networking::BgpPeer`].
 #[derive(Clone, Debug)]
 pub struct BgpPeerFromDb {
     port_settings_id: Uuid,
     bgp_config_id: Uuid,
+    interface_name: external::Name,
     inner: networking::BgpPeer,
 }
 
@@ -79,6 +83,10 @@ impl BgpPeerFromDb {
     pub fn as_bgp_peer(&self) -> &networking::BgpPeer {
         &self.inner
     }
+
+    pub fn interface_name(&self) -> &external::Name {
+        &self.interface_name
+    }
 }
 
 // Helper to build a `BgpPeerFromDb`. This is a struct instead of a function so
@@ -92,20 +100,38 @@ struct BgpPeerFromDbBuilder<'a> {
 }
 
 impl BgpPeerFromDbBuilder<'_> {
-    fn build(self) -> BgpPeerFromDb {
+    fn build(self) -> Result<BgpPeerFromDb, String> {
         let Self {
             peer_config: p,
             communities,
             allowed_import,
             allowed_export,
         } = self;
-        BgpPeerFromDb {
+
+        // This will fail if we have a non-NULL but invalid address in the DB,
+        // or if we have an unnumbered address with a too-large
+        // `router_lifetime`. We should have CHECK constraints to prevent both
+        // of these, but don't today.
+        let addr = router_peer_type_try_from_old_representation(
+            p.addr.map(|a| a.ip()),
+            *p.router_lifetime,
+        )
+        .map_err(|err| {
+            format!(
+                "invalid database contents for BGP peer {} ({:?}): {}",
+                p.bgp_config_id,
+                p.addr,
+                InlineErrorChain::new(&err),
+            )
+        })?;
+
+        Ok(BgpPeerFromDb {
             port_settings_id: p.port_settings_id,
             bgp_config_id: p.bgp_config_id,
+            interface_name: p.interface_name.clone().into(),
             inner: networking::BgpPeer {
                 bgp_config: p.bgp_config_id.into(),
-                interface_name: p.interface_name.clone().into(),
-                addr: p.addr.map(|a| a.ip()),
+                addr,
                 hold_time: p.hold_time.into(),
                 idle_hold_time: p.idle_hold_time.into(),
                 delay_open: p.delay_open.into(),
@@ -120,12 +146,11 @@ impl BgpPeerFromDbBuilder<'_> {
                 local_pref: p.local_pref.map(From::from),
                 enforce_first_as: p.enforce_first_as,
                 vlan_id: p.vlan_id.map(From::from),
-                router_lifetime: p.router_lifetime.into(),
                 communities,
                 allowed_import,
                 allowed_export,
             },
-        }
+        })
     }
 }
 
@@ -269,20 +294,7 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    match err {
-                        SpsCreateError::AddressLotNotFound => {
-                            Error::invalid_request("AddressLot not found")
-                        }
-                        SpsCreateError::BgpConfigNotFound => {
-                            Error::invalid_request("BGP config not found")
-                        }
-                        SwitchPortSettingsCreateError::ReserveBlock(
-                            ReserveBlockError::AddressUnavailable,
-                        ) => Error::invalid_request("address unavailable"),
-                        SwitchPortSettingsCreateError::ReserveBlock(
-                            ReserveBlockError::AddressNotInLot,
-                        ) => Error::invalid_request("address not in lot"),
-                    }
+                    Error::from(err)
                 } else {
                     public_error_from_diesel(
                         e,
@@ -361,7 +373,9 @@ impl DataStore {
                 let selector = NameOrId::Id(id);
                 async move {
                     do_switch_port_settings_delete(&conn, &selector, delete_err).await?;
-                    do_switch_port_settings_create(&conn, Some(id), params, create_err).await
+                    do_switch_port_settings_create(
+                        &conn, Some(id), params, create_err,
+                    ).await
                 }
             })
             .await
@@ -374,21 +388,7 @@ impl DataStore {
                     }
                 }
                 else if let Some(err) = create_err.take() {
-                    match err {
-                        SpsCreateError::AddressLotNotFound => {
-                            Error::invalid_request("AddressLot not found")
-                        }
-                        SpsCreateError::BgpConfigNotFound => {
-                            Error::invalid_request("BGP config not found")
-                        }
-                        SwitchPortSettingsCreateError::ReserveBlock(
-                            ReserveBlockError::AddressUnavailable,
-                        ) => Error::invalid_request("address unavailable"),
-                        SwitchPortSettingsCreateError::ReserveBlock(
-                            ReserveBlockError::AddressNotInLot,
-                        ) => Error::invalid_request("address not in lot"),
-
-                    }
+                    Error::from(err)
                 }
                 else {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -428,6 +428,7 @@ impl DataStore {
         #[derive(Debug)]
         enum SwitchPortSettingsGetError {
             NotFound(NameOrId),
+            InternalError(String),
         }
 
         let err = OptionalError::new();
@@ -639,10 +640,11 @@ impl DataStore {
                         .await?;
 
                 for p in peers.iter() {
-                    // For unnumbered peers (addr is None), use the sentinel value
-                    // (UNSPECIFIED address) for lookups since that's how they're stored.
+                    // For unnumbered peers (addr is None), use the sentinel
+                    // value (UNSPECIFIED address) for lookups since that's how
+                    // they're stored.
                     let lookup_addr: IpNetwork = p.addr.unwrap_or_else(|| {
-                        IpNetwork::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                        IpNetwork::from(RouterPeerType::UNNUMBERED_SENTINEL)
                     });
 
                     let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
@@ -692,7 +694,7 @@ impl DataStore {
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
 
-                    result.bgp_peers.push(BgpPeerFromDbBuilder {
+                    let peer_result = BgpPeerFromDbBuilder {
                         peer_config: p,
                         communities: communities
                             .into_iter()
@@ -700,7 +702,20 @@ impl DataStore {
                             .collect(),
                         allowed_import,
                         allowed_export,
-                    }.build());
+                    }.build();
+                    let peer = match peer_result {
+                        Ok(peer) => peer,
+                        Err(message) => {
+                            return Err(
+                                err.bail(
+                                    SwitchPortSettingsGetError::InternalError(
+                                        message,
+                                    )
+                                )
+                            );
+                        }
+                    };
+                    result.bgp_peers.push(peer);
                 }
 
                 // get the address configs
@@ -728,6 +743,9 @@ impl DataStore {
                             NameOrId::Id(uuid) => Error::not_found_by_id(ResourceType::SwitchPortSettings, &uuid),
                             NameOrId::Name(name) => Error::not_found_by_name(ResourceType::SwitchPortSettings, &name),
                         }
+                    }
+                    SwitchPortSettingsGetError::InternalError(cause) => {
+                        Error::internal_error(cause)
                     }
                 }
             } else {
@@ -1198,8 +1216,30 @@ enum SwitchPortSettingsCreateError {
     AddressLotNotFound,
     BgpConfigNotFound,
     ReserveBlock(ReserveBlockError),
+    InternalError(String),
 }
-type SpsCreateError = SwitchPortSettingsCreateError;
+
+impl From<SwitchPortSettingsCreateError> for Error {
+    fn from(err: SwitchPortSettingsCreateError) -> Self {
+        match err {
+            SwitchPortSettingsCreateError::AddressLotNotFound => {
+                Error::invalid_request("AddressLot not found")
+            }
+            SwitchPortSettingsCreateError::BgpConfigNotFound => {
+                Error::invalid_request("BGP config not found")
+            }
+            SwitchPortSettingsCreateError::ReserveBlock(
+                ReserveBlockError::AddressUnavailable,
+            ) => Error::invalid_request("address unavailable"),
+            SwitchPortSettingsCreateError::ReserveBlock(
+                ReserveBlockError::AddressNotInLot,
+            ) => Error::invalid_request("address not in lot"),
+            SwitchPortSettingsCreateError::InternalError(cause) => {
+                Error::internal_error(cause)
+            }
+        }
+    }
+}
 
 async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
@@ -1228,7 +1268,6 @@ async fn do_switch_port_settings_create(
         Some(id) => SwitchPortSettings::with_id(id, &params.identity),
         None => SwitchPortSettings::new(&params.identity),
     };
-    //let port_settings = SwitchPortSettings::new(&params.identity);
     let db_port_settings: SwitchPortSettings =
         diesel::insert_into(port_settings_dsl::switch_port_settings)
             .values(port_settings.clone())
@@ -1413,11 +1452,9 @@ async fn do_switch_port_settings_create(
     let mut bgp_peer_config = Vec::new();
     for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
-            // Track peers for policy lookup. For unnumbered peers (addr is None),
-            // use UNSPECIFIED as the sentinel value.
-            let lookup_addr =
-                p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-            peer_by_addr.insert(lookup_addr, &p);
+            // Track peers for policy lookup.
+            peer_by_addr
+                .insert(p.addr.ip_squashing_unnumbered_to_sentinel(), &p);
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1451,11 +1488,10 @@ async fn do_switch_port_settings_create(
                 }
             };
 
-            // For unnumbered peers (addr is None), use UNSPECIFIED as a sentinel
-            // value in the communities/import/export tables since addr is part
-            // of the primary key.
-            let db_addr: IpNetwork =
-                p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)).into();
+            // Convert peer addresses (which may be unnumbered) into our db
+            // representation (replacing unnumbered with a sentinel value).
+            let db_addr =
+                IpNetwork::from(p.addr.ip_squashing_unnumbered_to_sentinel());
 
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
@@ -1532,33 +1568,37 @@ async fn do_switch_port_settings_create(
             .await?;
 
     for p in db_bgp_peers.into_iter() {
-        // Lookup policies and communities for peers. For unnumbered peers (addr
-        // is None), use UNSPECIFIED as the lookup key.
-        let lookup_addr =
-            p.addr.map(|a| a.ip()).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        let (allowed_import, allowed_export, communities) = (
-            peer_by_addr
-                .get(&lookup_addr)
-                .map(|x| x.allowed_import.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering),
-            peer_by_addr
-                .get(&lookup_addr)
-                .map(|x| x.allowed_export.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering),
-            peer_by_addr
-                .get(&lookup_addr)
-                .map(|x| x.communities.clone())
-                .unwrap_or(Vec::new()),
-        );
-        result.bgp_peers.push(
-            BgpPeerFromDbBuilder {
-                peer_config: &p,
-                communities,
-                allowed_import,
-                allowed_export,
+        // Lookup policies and communities for peers. `peer_by_addr` is keyed by
+        // a non-optional `IpAddr`, where unnumbered peers are mapped to a
+        // sentinel value.
+        let lookup_addr = p
+            .addr
+            .map(|a| a.ip())
+            .unwrap_or(RouterPeerType::UNNUMBERED_SENTINEL);
+        let Some(peer) = peer_by_addr.get(&lookup_addr) else {
+            return Err(err.bail(
+                SwitchPortSettingsCreateError::InternalError(format!(
+                    "unexpectedly missing peer {} (addr: {:?})",
+                    p.bgp_config_id, p.addr,
+                )),
+            ));
+        };
+        let peer_result = BgpPeerFromDbBuilder {
+            peer_config: &p,
+            communities: peer.communities.clone(),
+            allowed_import: peer.allowed_import.clone(),
+            allowed_export: peer.allowed_export.clone(),
+        }
+        .build();
+        let peer = match peer_result {
+            Ok(peer) => peer,
+            Err(message) => {
+                return Err(err.bail(
+                    SwitchPortSettingsCreateError::InternalError(message),
+                ));
             }
-            .build(),
-        );
+        };
+        result.bgp_peers.push(peer);
     }
 
     let mut address_config = Vec::new();
@@ -1872,6 +1912,8 @@ mod test {
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::RouterLifetimeConfig;
+    use sled_agent_types::early_networking::RouterPeerType;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -1934,31 +1976,57 @@ mod test {
             bgp_peers: vec![BgpPeerConfig {
                 link_name: Name::from_str("phy0")
                     .expect("phy0 should be a valid link name"),
-                peers: vec![BgpPeer {
-                    bgp_config: NameOrId::Name(
-                        "test-bgp-config".parse().unwrap(),
-                    ),
-                    interface_name: "qsfp0".parse().unwrap(),
-                    addr: Some(
-                        "192.168.1.1".parse::<std::net::IpAddr>().unwrap(),
-                    ),
-                    hold_time: 0,
-                    idle_hold_time: 0,
-                    delay_open: 0,
-                    connect_retry: 0,
-                    keepalive: 0,
-                    remote_asn: None,
-                    min_ttl: None,
-                    md5_auth_key: None,
-                    multi_exit_discriminator: None,
-                    communities: Vec::new(),
-                    local_pref: None,
-                    enforce_first_as: false,
-                    allowed_export: ImportExportPolicy::NoFiltering,
-                    allowed_import: ImportExportPolicy::NoFiltering,
-                    vlan_id: None,
-                    router_lifetime: 0,
-                }],
+                peers: vec![
+                    BgpPeer {
+                        bgp_config: bgp_config.identity.name.clone().into(),
+                        addr: RouterPeerType::Numbered {
+                            ip: "192.168.1.1".parse().unwrap(),
+                        },
+                        hold_time: 0,
+                        idle_hold_time: 0,
+                        delay_open: 0,
+                        connect_retry: 0,
+                        keepalive: 0,
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::Allow(vec![
+                            "fd00::/64".parse().unwrap(),
+                            "192.168.1.0/24".parse().unwrap(),
+                        ]),
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
+                    },
+                    BgpPeer {
+                        bgp_config: bgp_config.identity.name.clone().into(),
+                        addr: RouterPeerType::Unnumbered {
+                            router_lifetime: RouterLifetimeConfig::new(123)
+                                .unwrap(),
+                        },
+                        hold_time: 0,
+                        idle_hold_time: 0,
+                        delay_open: 0,
+                        connect_retry: 0,
+                        keepalive: 0,
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::Allow(vec![
+                            "fd00:1234::/64".parse().unwrap(),
+                            "192.168.3.0/24".parse().unwrap(),
+                        ]),
+                        vlan_id: None,
+                    },
+                ],
             }],
             addresses: vec![],
         };
@@ -2143,19 +2211,26 @@ mod test {
             }
         }
 
-        assert_eq!(settings.bgp_peers.len(), db_settings.bgp_peers.len());
-        let mut db_peers = HashMap::new();
+        assert_eq!(
+            settings.bgp_peers[0].peers.len(),
+            db_settings.bgp_peers.len()
+        );
 
-        for peer in db_settings.bgp_peers {
-            db_peers.insert(peer.inner.interface_name.clone(), peer);
-        }
+        // Build a map of peer address -> peer so we can pair the db peers up
+        // with our settings in the loop below.
+        let db_peers = db_settings
+            .bgp_peers
+            .into_iter()
+            .map(|peer| (peer.inner.addr, peer))
+            .collect::<HashMap<_, _>>();
 
         for config in settings.bgp_peers {
-            let db_peer = db_peers
-                .get(&config.link_name)
-                .expect("requested peer should be present");
-
             for mut peer in config.peers {
+                let mut db_peer = db_peers
+                    .get(&peer.addr)
+                    .expect("requested peer should be present")
+                    .clone();
+
                 match peer.bgp_config {
                     NameOrId::Id(id) => {
                         assert_eq!(db_peer.bgp_config_id, id);
@@ -2182,13 +2257,25 @@ mod test {
                 // `db_peer.inner.bgp_config` is always populated with an ID.
                 peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
 
-                // TODO-correctness We don't faithfully persist
-                // `interface_name`, and should probably remove the field
-                // entirely
-                // (https://github.com/oxidecomputer/omicron/issues/10104).
-                // For now, manually set the field to match so we can assert_eq
-                // over the entire struct below.
-                peer.interface_name = db_peer.inner.interface_name.clone();
+                // TODO-correctness `ImportExportPolicy::Allow(_)` should
+                // probably use `BTreeSet<_>` instead of `Vec<_>`; for now, sort
+                // both so our comparison below doesn't fail spuriously due to
+                // "same contents, different order".
+                //
+                // https://github.com/oxidecomputer/omicron/issues/10121
+                for policy in [
+                    &mut peer.allowed_import,
+                    &mut peer.allowed_export,
+                    &mut db_peer.inner.allowed_import,
+                    &mut db_peer.inner.allowed_export,
+                ] {
+                    match policy {
+                        ImportExportPolicy::NoFiltering => (),
+                        ImportExportPolicy::Allow(ip_nets) => {
+                            ip_nets.sort_unstable();
+                        }
+                    }
+                }
 
                 assert_eq!(peer, db_peer.inner);
             }

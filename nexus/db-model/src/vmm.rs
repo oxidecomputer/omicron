@@ -145,12 +145,8 @@ pub struct VmmRuntimeState {
     pub state: VmmState,
 }
 
-impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
-    for VmmRuntimeState
-{
-    fn from(
-        value: omicron_common::api::internal::nexus::VmmRuntimeState,
-    ) -> Self {
+impl From<sled_agent_types::instance::VmmRuntimeState> for VmmRuntimeState {
+    fn from(value: sled_agent_types::instance::VmmRuntimeState) -> Self {
         Self {
             state: value.state.into(),
             time_state_updated: value.time_updated,
@@ -159,10 +155,10 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     }
 }
 
-impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
+impl From<Vmm> for sled_agent_types::instance::VmmRuntimeState {
     fn from(s: Vmm) -> Self {
         Self {
-            gen_: s.generation.into(),
+            generation: s.generation.into(),
             state: s.state.into(),
             time_updated: s.time_state_updated,
         }

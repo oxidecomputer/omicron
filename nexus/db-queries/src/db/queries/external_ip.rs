@@ -909,7 +909,6 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
-    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
@@ -919,6 +918,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::inventory::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;

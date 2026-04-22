@@ -10,7 +10,7 @@ use gateway_client::types::MeasurementErrorCode;
 use gateway_client::types::MeasurementKind;
 use gateway_client::types::SpComponentDetails;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpIgnition;
+use gateway_types::ignition::SpIgnition;
 use multimap::MultiMap;
 use nexus_types::inventory::SpType;
 use std::collections::{HashMap, HashSet};
@@ -327,7 +327,7 @@ async fn sp_info_mgs(
     let mut sp_list = all_sp_list
         .iter()
         .filter_map(|ignition| {
-            if matches!(ignition.details, SpIgnition::Yes { .. })
+            if matches!(ignition.details, SpIgnition::Present { .. })
                 && ignition.id.type_ == SpType::Sled
             {
                 if args.matches_sp(&ignition.id) {

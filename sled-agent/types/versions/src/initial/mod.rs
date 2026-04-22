@@ -12,7 +12,6 @@ pub mod disk;
 pub mod early_networking;
 pub mod instance;
 pub mod inventory;
-pub mod rack_init;
 pub mod sled;
 pub mod support_bundle;
 pub mod uplink;

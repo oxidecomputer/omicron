@@ -17,6 +17,7 @@ use crate::rack_setup::{
 };
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -31,13 +32,12 @@ use nexus_lockstep_client::types::{
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintZoneImageSource, blueprint_zone_type,
+    BlueprintZoneImageSource, LastAllocatedSubnetIpOffset, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
 use nexus_types::internal_api::params::ExternalPortDiscovery;
-use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::FileKv;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
@@ -57,8 +57,9 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -463,7 +464,7 @@ pub async fn run_standalone_server(
                         external_ip: from_ipaddr_to_external_floating_ip(
                             external_ip,
                         ),
-                        nic: nexus_types::inventory::NetworkInterface {
+                        nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),
@@ -518,7 +519,7 @@ pub async fn run_standalone_server(
                         dns_address: from_sockaddr_to_external_floating_addr(
                             SocketAddr::V6(external_dns_internal_addr),
                         ),
-                        nic: nexus_types::inventory::NetworkInterface {
+                        nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),
@@ -593,12 +594,25 @@ pub async fn run_standalone_server(
             }
             SocketAddr::V6(addr) => addr,
         };
+
+        let subnet = Ipv6Subnet::new(*underlay_address.ip());
+        let last_allocated_ip_subnet_offset = LastAllocatedSubnetIpOffset::new(
+            zones
+                .iter()
+                .map(|zone| zone.zone_type.underlay_ip())
+                .filter(|ip| subnet.net().contains(*ip))
+                .map(|ip| ip.segments()[7])
+                .max()
+                .expect("no zones are included in the plan"),
+        );
+
         let inventory = server.sled_agent.inventory(underlay_address.into())?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,
             sled_id: config.id,
-            subnet: Ipv6Subnet::new(*underlay_address.ip()),
+            subnet,
+            last_allocated_ip_subnet_offset,
             config: SledConfig {
                 disks: omicron_physical_disks_config
                     .disks

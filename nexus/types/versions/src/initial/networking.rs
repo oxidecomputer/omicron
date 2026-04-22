@@ -16,10 +16,10 @@ use omicron_common::api::external::{
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::BfdMode;
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types_versions::v1::early_networking::BfdMode;
+use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
+use sled_agent_types_versions::v1::early_networking::TxEqConfig;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;

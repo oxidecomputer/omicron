@@ -240,9 +240,9 @@ fn get_sp_metadata_string(
 /// ```
 ///
 /// Note: JSON deserialization validates the start_time/end_time constraints
-/// using `TryFrom<EreportFiltersUnvalidated>`.
+/// using `TryFrom<EreportFiltersParams>`.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "EreportFiltersUnvalidated")]
+#[serde(try_from = "EreportFiltersParams")]
 pub struct EreportFilters {
     /// If present, include only ereports that were collected at the specified
     /// timestamp or later.
@@ -265,32 +265,36 @@ pub struct EreportFilters {
     only_classes: Vec<String>,
 }
 
-/// Private deserialization helper for [`EreportFilters`] that validates the
-/// `start_time <= end_time` invariant.
+/// Helper for [`EreportFilters`] that validates the `start_time <= end_time`
+/// invariant. Used by serde deserialization above, as well as in conversions
+/// from Diesel `Ereports` model types.
 #[derive(Deserialize)]
-struct EreportFiltersUnvalidated {
-    start_time: Option<DateTime<Utc>>,
-    end_time: Option<DateTime<Utc>>,
-    only_serials: Vec<String>,
-    only_classes: Vec<String>,
+#[must_use = "this struct does nothing unless converted to EreportFilters"]
+pub struct EreportFiltersParams {
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub only_serials: Vec<String>,
+    pub only_classes: Vec<String>,
 }
 
-impl TryFrom<EreportFiltersUnvalidated> for EreportFilters {
+impl TryFrom<EreportFiltersParams> for EreportFilters {
     type Error = Error;
 
-    fn try_from(
-        unvalidated: EreportFiltersUnvalidated,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(params: EreportFiltersParams) -> Result<Self, Self::Error> {
+        let EreportFiltersParams {
+            start_time,
+            end_time,
+            only_serials,
+            only_classes,
+        } = params;
         let mut f = Self::new();
-        if let Some(t) = unvalidated.start_time {
+        if let Some(t) = start_time {
             f = f.with_start_time(t)?;
         }
-        if let Some(t) = unvalidated.end_time {
+        if let Some(t) = end_time {
             f = f.with_end_time(t)?;
         }
-        f = f
-            .with_serials(unvalidated.only_serials)
-            .with_classes(unvalidated.only_classes);
+        f = f.with_serials(only_serials).with_classes(only_classes);
         Ok(f)
     }
 }

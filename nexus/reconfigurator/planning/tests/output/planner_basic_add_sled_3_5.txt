@@ -104,20 +104,20 @@ to:   blueprint 4ebbcbb6-a8f3-439e-ae8d-663ac21dcb3a
 
 
     omicron zones:
-    ------------------------------------------------------------------------------------------------------------
-    zone type      zone id                                image source      disposition   underlay IP           
-    ------------------------------------------------------------------------------------------------------------
-    internal_ntp   b2146db5-51f3-4a1f-b2a8-25f12f7ee01b   install dataset   in service    fd00:1122:3344:104::21
-+   crucible       01ba8d76-59f4-48a5-89e5-6c7d96f734bf   install dataset   in service    fd00:1122:3344:104::22
-+   crucible       12be5107-f3eb-4627-ba3f-112a950d2e7d   install dataset   in service    fd00:1122:3344:104::29
-+   crucible       1b4efc8f-0f77-4787-be35-3e1ae60f41cd   install dataset   in service    fd00:1122:3344:104::24
-+   crucible       922381dc-5527-4009-895b-033dcea67474   install dataset   in service    fd00:1122:3344:104::27
-+   crucible       9da6ac20-3be8-45e0-b5d5-337f3df9ab6a   install dataset   in service    fd00:1122:3344:104::2b
-+   crucible       b07276e3-9d5a-426f-bc28-2e02264f4421   install dataset   in service    fd00:1122:3344:104::25
-+   crucible       b1f333a4-240d-49af-83dc-5bbb2ba24980   install dataset   in service    fd00:1122:3344:104::23
-+   crucible       b2f11c86-253f-45e6-abbf-5258423836e1   install dataset   in service    fd00:1122:3344:104::2a
-+   crucible       c01f6527-1259-4d47-95c5-93031ba500ca   install dataset   in service    fd00:1122:3344:104::28
-+   crucible       d32552d3-afcf-4dbe-803c-a483557405c2   install dataset   in service    fd00:1122:3344:104::26
+    -----------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source      disposition   underlay IP          
+    -----------------------------------------------------------------------------------------------------------
+    internal_ntp   b2146db5-51f3-4a1f-b2a8-25f12f7ee01b   install dataset   in service    fd00:1122:3344:104::3
++   crucible       01ba8d76-59f4-48a5-89e5-6c7d96f734bf   install dataset   in service    fd00:1122:3344:104::4
++   crucible       12be5107-f3eb-4627-ba3f-112a950d2e7d   install dataset   in service    fd00:1122:3344:104::b
++   crucible       1b4efc8f-0f77-4787-be35-3e1ae60f41cd   install dataset   in service    fd00:1122:3344:104::6
++   crucible       922381dc-5527-4009-895b-033dcea67474   install dataset   in service    fd00:1122:3344:104::9
++   crucible       9da6ac20-3be8-45e0-b5d5-337f3df9ab6a   install dataset   in service    fd00:1122:3344:104::d
++   crucible       b07276e3-9d5a-426f-bc28-2e02264f4421   install dataset   in service    fd00:1122:3344:104::7
++   crucible       b1f333a4-240d-49af-83dc-5bbb2ba24980   install dataset   in service    fd00:1122:3344:104::5
++   crucible       b2f11c86-253f-45e6-abbf-5258423836e1   install dataset   in service    fd00:1122:3344:104::c
++   crucible       c01f6527-1259-4d47-95c5-93031ba500ca   install dataset   in service    fd00:1122:3344:104::a
++   crucible       d32552d3-afcf-4dbe-803c-a483557405c2   install dataset   in service    fd00:1122:3344:104::8
 
 
  COCKROACHDB SETTINGS:

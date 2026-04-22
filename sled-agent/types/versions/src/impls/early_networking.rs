@@ -192,6 +192,19 @@ impl RouterPeerType {
     /// we choose this sentinel value.
     pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
+    /// Returns true if `Self` describes a numbered peer; false otherwise.
+    pub fn is_numbered(&self) -> bool {
+        match self {
+            Self::Unnumbered { .. } => false,
+            Self::Numbered { .. } => true,
+        }
+    }
+
+    /// Returns true if `Self` describes an unnumbered peer; false otherwise.
+    pub fn is_unnumbered(&self) -> bool {
+        !self.is_numbered()
+    }
+
     /// Squash this address down to an [`IpAddr`] by converting
     /// [`RouterPeerType::Unnumbered`] to
     /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
@@ -202,6 +215,18 @@ impl RouterPeerType {
         match *self {
             Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
             Self::Numbered { ip } => ip.into(),
+        }
+    }
+
+    /// Squash this address down to an [`Option<IpAddr>`] by converting
+    /// [`RouterPeerType::Unnumbered`] to `None`.
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_squashing_unnumbered_to_none(&self) -> Option<IpAddr> {
+        match *self {
+            Self::Unnumbered { .. } => None,
+            Self::Numbered { ip } => Some(ip.into()),
         }
     }
 }

@@ -746,8 +746,7 @@ async fn test_instance_start_creates_networking_state(
 
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
-    use nexus_db_model::Migration;
-    use omicron_common::api::internal::nexus::MigrationState;
+    use nexus_db_model::{Migration, MigrationState};
     async fn migration_fetch(
         cptestctx: &ControlPlaneTestContext,
         migration_id: Uuid,
@@ -867,8 +866,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
-    assert_eq!(migration.source_state, MigrationState::Pending.into());
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
 
     let info = nexus
         .active_instance_info(&instance_id, None)
@@ -898,8 +897,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -910,8 +909,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -920,8 +919,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = dbg!(instance_get(&client, &instance_url).await);
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -940,8 +939,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(current_sled, dst_sled_id);
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Completed.into());
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
 }
 
 #[nexus_test(extra_sled_agents = 3)]
@@ -1119,8 +1118,7 @@ async fn test_instance_migrate_v2p_and_routes(
 async fn test_instance_migration_compatible_cpu_platforms(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    use nexus_db_model::Migration;
-    use omicron_common::api::internal::nexus::MigrationState;
+    use nexus_db_model::{Migration, MigrationState};
     async fn migration_fetch(
         cptestctx: &ControlPlaneTestContext,
         migration_id: Uuid,
@@ -1255,8 +1253,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
-    assert_eq!(migration.source_state, MigrationState::Pending.into());
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
 
     let info = nexus
         .active_instance_info(&instance_id, None)
@@ -1286,8 +1284,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -1298,8 +1296,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -1308,8 +1306,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = dbg!(instance_get(&client, &instance_url).await);
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -1328,8 +1326,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
     assert_eq!(current_sled, dst_sled_id);
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Completed.into());
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
 }
 
 // An instance that requires a Turin CPU will be placed on the Turin sled, and

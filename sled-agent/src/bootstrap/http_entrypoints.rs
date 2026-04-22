@@ -10,24 +10,21 @@
 use super::BootstrapError;
 use super::RssAccessError;
 use super::rack_ops::RssAccess;
+use crate::rack_setup::service::RackInitializeRequestParams;
 use crate::updates::ConfigUpdates;
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_api::BootstrapAgentApi;
 use bootstrap_agent_api::Component;
 use bootstrap_agent_api::bootstrap_agent_api_mod;
-use dropshot::ClientErrorStatusCode;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
-    RequestContext, TypedBody,
+    RequestContext,
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_types::rack_init::RackInitializeRequestParams;
-use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -100,48 +97,6 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
             )
         })?;
         Ok(HttpResponseOk(components))
-    }
-
-    async fn rack_initialization_status(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
-        // This endpoint has moved to the lockstep API on port 8080.
-        Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::GONE,
-            "This endpoint has been permanently moved to the bootstrap agent \
-             lockstep API on port 8080"
-                .to_string(),
-        ))
-    }
-
-    async fn rack_initialize(
-        _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<
-            sled_agent_types_versions::v1::rack_init::RackInitializeRequest,
-        >,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
-        // This endpoint has moved to the lockstep API on port 8080.
-        Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::GONE,
-            "This endpoint has been permanently moved to the bootstrap agent \
-             lockstep API on port 8080"
-                .to_string(),
-        ))
-    }
-
-    async fn rack_reset(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        // This endpoint has moved to the lockstep API on port 8080.
-        Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::GONE,
-            "This endpoint has been permanently moved to the bootstrap agent \
-             lockstep API on port 8080"
-                .to_string(),
-        ))
     }
 
     async fn sled_reset(

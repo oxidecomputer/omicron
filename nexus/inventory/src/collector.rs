@@ -139,16 +139,10 @@ impl<'a> Collector<'a> {
 
             Ok(targets) => {
                 targets.into_inner().into_iter().filter_map(|sp_ignition| {
-                    match sp_ignition.details {
-                        gateway_client::types::SpIgnition::No => None,
-                        gateway_client::types::SpIgnition::Yes {
-                            power: false,
-                            ..
-                        } => None,
-                        gateway_client::types::SpIgnition::Yes {
-                            power: true,
-                            ..
-                        } => Some(sp_ignition.id),
+                    if sp_ignition.details.is_sp_running() {
+                        Some(sp_ignition.id)
+                    } else {
+                        None
                     }
                 })
             }

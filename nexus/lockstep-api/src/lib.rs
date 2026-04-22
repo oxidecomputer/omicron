@@ -38,6 +38,7 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
@@ -385,10 +386,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseOk<ResultsPage<SupportBundleInfo>>, HttpError>;
 
     /// View a support bundle
     #[endpoint {
@@ -398,7 +396,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<support_bundle::SupportBundlePath>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>;
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError>;
 
     /// Download the index of a support bundle
     #[endpoint {
@@ -463,7 +461,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<support_bundle::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>;
+    ) -> Result<HttpResponseCreated<SupportBundleInfo>, HttpError>;
 
     /// Delete an existing support bundle
     ///
@@ -487,7 +485,7 @@ pub trait NexusLockstepApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<support_bundle::SupportBundlePath>,
         body: TypedBody<support_bundle::SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>;
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError>;
 
     /// Get the current clickhouse policy
     #[endpoint {

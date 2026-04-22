@@ -7,9 +7,9 @@
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
-use gateway_client::types::SpIgnition;
 use gateway_client::types::SpState;
 use gateway_messages::SpComponent;
+use gateway_types::ignition::SpIgnition;
 use slog::Logger;
 use slog::warn;
 use std::collections::BTreeMap;

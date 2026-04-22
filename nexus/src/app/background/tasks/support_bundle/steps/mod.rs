@@ -30,9 +30,9 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
             }),
         ),
         CollectionStep::new(
-            SupportBundleCollectionStep::STEP_USER_COMMENT,
+            SupportBundleCollectionStep::STEP_REASON_FOR_CREATION,
             Box::new(|collection, dir| {
-                metadata::collect_user_comment(collection, dir).boxed()
+                metadata::collect_reason_for_creation(collection, dir).boxed()
             }),
         ),
         CollectionStep::new(

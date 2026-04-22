@@ -84,10 +84,10 @@ to:   blueprint d9a427e6-3d1c-462f-ac31-ba067a00c4f9
 
 
     omicron zones:
-    ------------------------------------------------------------------------------------------------------------
-    zone type      zone id                                image source      disposition   underlay IP           
-    ------------------------------------------------------------------------------------------------------------
-+   internal_ntp   b2146db5-51f3-4a1f-b2a8-25f12f7ee01b   install dataset   in service    fd00:1122:3344:104::21
+    -----------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source      disposition   underlay IP          
+    -----------------------------------------------------------------------------------------------------------
++   internal_ntp   b2146db5-51f3-4a1f-b2a8-25f12f7ee01b   install dataset   in service    fd00:1122:3344:104::3
 
 
  COCKROACHDB SETTINGS:
