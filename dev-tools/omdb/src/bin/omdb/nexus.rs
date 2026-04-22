@@ -2809,18 +2809,36 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
-    match serde_json::from_value::<serde_json::Value>(details.clone()) {
+    #[derive(Deserialize)]
+    struct SledPushError {
+        sled_id: String,
+        error: String,
+    }
+
+    #[derive(Deserialize)]
+    struct ServiceFirewallRuleStatus {
+        lookup_error: Option<String>,
+        sled_push_errors: Option<Vec<SledPushError>>,
+    }
+
+    match serde_json::from_value::<ServiceFirewallRuleStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(serde_json::Value::Object(map)) => {
-            if !map.is_empty() {
-                eprintln!("    unexpected return value from task: {:?}", map)
+        Ok(status) => {
+            if let Some(e) = status.lookup_error {
+                eprintln!("    error looking up or resolving rules: {}", e);
             }
-        }
-        Ok(val) => {
-            eprintln!("    unexpected return value from task: {:?}", val)
+            if let Some(failures) = status.sled_push_errors {
+                eprintln!(
+                    "    failed to push rules to {} sled(s):",
+                    failures.len()
+                );
+                for f in &failures {
+                    eprintln!("        sled {}: {}", f.sled_id, f.error);
+                }
+            }
         }
     };
 }

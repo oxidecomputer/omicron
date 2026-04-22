@@ -242,7 +242,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
         use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE;
-        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
 
@@ -269,15 +268,6 @@ impl DataStore {
                 &DNS_VPC_FW_RULE,
             )?;
             fw_rules.insert(DNS_VPC_FW_RULE.name.clone(), rule);
-        }
-
-        if !fw_rules.contains_key(&NEXUS_VPC_FW_RULE.name) {
-            let rule = VpcFirewallRule::new(
-                Uuid::new_v4(),
-                *SERVICES_VPC_ID,
-                &NEXUS_VPC_FW_RULE,
-            )?;
-            fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
         }
 
         if !fw_rules.contains_key(&NEXUS_ICMP_FW_RULE.name) {

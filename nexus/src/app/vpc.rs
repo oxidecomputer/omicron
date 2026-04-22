@@ -263,6 +263,7 @@ impl super::Nexus {
             &self.log,
         )
         .await
+        .map_err(|e| Error::internal_error(&e.to_string()))
     }
 
     pub(crate) async fn resolve_firewall_rules_for_sled_agent(
@@ -328,7 +329,7 @@ impl super::Nexus {
                 error!(
                     self.log,
                     "failed to update sled-agents with new ICMP status";
-                    "error" => format!("{message}: {e:?}"),
+                    "error" => ?e,
                 );
                 Err(Error::unavail(message))
             }

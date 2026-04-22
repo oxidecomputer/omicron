@@ -139,34 +139,46 @@ impl super::Nexus {
         }
     }
 
-    /// Wait until we've applied the user-facing services allowlist.
+    /// Attempt to apply the user-facing services allowlist on a best-effort
+    /// basis.
     ///
-    /// This will block until we've plumbed this allowlist and passed it to the
-    /// sled-agents responsible. This should only be called from
-    /// rack-initialization handling.
-    pub(crate) async fn await_ip_allowlist_plumbing(&self) {
+    /// This makes a single attempt to push the current IP allowlist to all
+    /// relevant sled-agents. Startup continues regardless of the outcome; the
+    /// background task that propagates service firewall rules will retry on
+    /// failure. This should only be called from Nexus startup.
+    pub(crate) async fn attempt_ip_allowlist_plumbing(&self) {
         let opctx = self.opctx_for_internal_api();
-        loop {
-            match nexus_networking::plumb_service_firewall_rules(
-                self.datastore(),
-                &opctx,
-                &[],
-                &opctx,
-                &opctx.log,
-            )
-            .await
-            {
-                Ok(_) => {
-                    info!(self.log, "plumbed initial IP allowlist");
-                    return;
-                }
-                Err(e) => {
+        match nexus_networking::plumb_service_firewall_rules(
+            self.datastore(),
+            &opctx,
+            &[],
+            &opctx,
+            &opctx.log,
+        )
+        .await
+        {
+            Ok(()) => {
+                info!(self.log, "plumbed initial IP allowlist");
+            }
+            Err(nexus_networking::ServiceFirewallRulesError::Lookup(e)) => {
+                error!(
+                    self.log,
+                    "failed to look up initial IP allowlist rules; \
+                    background task will retry";
+                    "error" => ?e,
+                );
+            }
+            Err(nexus_networking::ServiceFirewallRulesError::SledPush(
+                failures,
+            )) => {
+                for (sled_id, e) in &failures {
                     error!(
                         self.log,
-                        "failed to plumb initial IP allowlist";
-                        "error" => ?e
+                        "failed to push initial IP allowlist to sled-agent; \
+                        background task will retry";
+                        "sled_id" => %sled_id,
+                        "error" => ?e,
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }
         }
