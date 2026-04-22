@@ -481,8 +481,8 @@ mod test {
             ledgered_sled_config: None,
             reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
             last_reconciliation: None,
-            file_source_resolver:
-                OmicronFileSourceResolverInventory::new_fake(),
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
             smf_services_enabled_not_online: smf_services,
             reference_measurements: iddqd::IdOrdMap::new(),
         }
@@ -578,7 +578,9 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_contact_support_healthy_system(cptestctx: &ControlPlaneTestContext) {
+    async fn test_contact_support_healthy_system(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = fake_opctx(cptestctx);
         insert_fake_collection(
