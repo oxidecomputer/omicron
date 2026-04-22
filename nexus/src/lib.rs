@@ -40,12 +40,12 @@ use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
 use nexus_types::inventory::Collection;
-use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::disk::DatasetKind;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
@@ -54,7 +54,6 @@ use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
@@ -83,6 +82,7 @@ impl InternalServer {
     pub async fn start(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
@@ -93,6 +93,7 @@ impl InternalServer {
             config.deployment.rack_id,
             ctxlog,
             &config,
+            debug_dropbox,
         )
         .await?;
 
@@ -321,8 +322,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<InternalServer, String> {
-        let internal_server = InternalServer::start(config, &log).await?;
+        let internal_server =
+            InternalServer::start(config, &log, debug_dropbox).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         Ok(internal_server)
     }
@@ -621,22 +624,13 @@ impl nexus_test_interface::NexusServer for Server {
 }
 
 /// Run an instance of the Nexus server.
-pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
-    use slog::Drain;
-    let (drain, registration) = slog_dtrace::with_drain(
-        config.pkg.log.to_logger("nexus").map_err(|message| {
-            format!("initializing logger: {}", InlineErrorChain::new(&message))
-        })?,
-    );
-    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
-    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-        let msg = format!("failed to register DTrace probes: {}", e);
-        error!(log, "{}", msg);
-        return Err(msg);
-    } else {
-        debug!(log, "registered DTrace probes");
-    }
-    let internal_server = InternalServer::start(config, &log).await?;
+pub async fn run_server(
+    config: &NexusConfig,
+    log: slog::Logger,
+    debug_dropbox: Arc<DebugDropbox>,
+) -> Result<(), String> {
+    let internal_server =
+        InternalServer::start(config, &log, debug_dropbox).await?;
     let server = Server::start(internal_server).await?;
     server.wait_for_finish().await
 }

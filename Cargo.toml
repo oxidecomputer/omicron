@@ -645,6 +645,8 @@ omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-cockroach-metrics = { path = "cockroach-metrics" }
 omicron-common = { path = "common" }
+# XXX-dap publish
+omicron-debug-dropbox = { git = "https://github.com/oxidecomputer/omicron-debug-dropbox", rev = "13e5461bc3a725789ae6463d2b3b7d64528ffdde" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
