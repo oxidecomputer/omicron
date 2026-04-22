@@ -9315,6 +9315,8 @@ dependencies = [
  "daft",
  "data-encoding",
  "der",
+ "derive_more 2.1.1",
+ "derive_more-impl",
  "digest",
  "dof 0.3.0",
  "dof 0.4.0",
