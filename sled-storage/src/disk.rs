@@ -13,7 +13,8 @@ use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware::{
-    DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
+    DiskFirmware, Partition, PooledDisk, PooledDiskError, SledModel,
+    UnparsedDisk,
 };
 use slog::{Logger, info};
 
@@ -277,13 +278,14 @@ impl Disk {
     pub async fn new(
         log: &Logger,
         mount_config: &MountConfig,
+        model: SledModel,
         raw_disk: RawDisk,
         pool_id: Option<ZpoolUuid>,
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let disk: Disk = match raw_disk {
             RawDisk::Real(disk) => {
-                PooledDisk::new(log, disk, pool_id).await?.into()
+                PooledDisk::new(log, model, disk, pool_id).await?.into()
             }
             RawDisk::Synthetic(disk) => Disk::Synthetic(
                 SyntheticDisk::new(log, mount_config, disk, pool_id).await,

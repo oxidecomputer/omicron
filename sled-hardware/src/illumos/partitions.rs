@@ -10,8 +10,8 @@ use std::sync::OnceLock;
 use crate::DiskPaths;
 use crate::Partition;
 use crate::PooledDiskError;
+use crate::SledModel;
 use crate::illumos::gpt;
-use crate::is_oxide_sled;
 use camino::Utf8Path;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
@@ -176,6 +176,7 @@ fn parse_partition_types<const N: usize>(
 pub async fn ensure_partition_layout(
     log: &Logger,
     paths: &DiskPaths,
+    model: SledModel,
     variant: DiskVariant,
     identity: &DiskIdentity,
     zpool_id: Option<ZpoolUuid>,
@@ -184,6 +185,7 @@ pub async fn ensure_partition_layout(
         log,
         &Zpool::real_api(),
         paths,
+        model,
         variant,
         identity,
         zpool_id,
@@ -197,6 +199,7 @@ async fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     log: &Logger,
     zpool_api: &dyn illumos_utils::zpool::Api,
     paths: &DiskPaths,
+    model: SledModel,
     variant: DiskVariant,
     identity: &DiskIdentity,
     zpool_id: Option<ZpoolUuid>,
@@ -240,7 +243,7 @@ async fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                 DiskVariant::U2 => {
                     // First we need to check that this disk is of the proper
                     // size and correct logical block address formatting.
-                    ensure_size_and_formatting(&log, identity)?;
+                    ensure_size_and_formatting(&log, model, identity)?;
 
                     info!(
                         log,
@@ -294,6 +297,7 @@ fn read_partitions<GPT: gpt::LibEfiGpt>(
 
 fn ensure_size_and_formatting(
     log: &Logger,
+    model: SledModel,
     identity: &DiskIdentity,
 ) -> Result<(), NvmeFormattingError> {
     use libnvme::Nvme;
@@ -304,7 +308,7 @@ fn ensure_size_and_formatting(
     // - Failing tests which use zvols rather than real NVMe devices
     // - Breaking virtual environments like a4x2 which likely don't expose or
     //   implement changing the LBA on emulated devices.
-    if !is_oxide_sled().map_err(NvmeFormattingError::SystemDetection)? {
+    if model.is_generic_sled().map_err(NvmeFormattingError::SystemDetection)? {
         return Ok(());
     }
 
@@ -465,6 +469,7 @@ mod test {
             &log,
             illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths { devfs_path, dev_path: None },
+            SledModel::Auto,
             DiskVariant::U2,
             &mock_disk_identity(),
             None,
@@ -494,6 +499,7 @@ mod test {
                 devfs_path,
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
+            SledModel::Auto,
             DiskVariant::U2,
             &mock_disk_identity(),
             Some(ZpoolUuid::new_v4()),
@@ -523,6 +529,7 @@ mod test {
                     devfs_path,
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH))
                 },
+                SledModel::Auto,
                 DiskVariant::M2,
                 &mock_disk_identity(),
                 None,
@@ -565,6 +572,7 @@ mod test {
                 devfs_path,
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
+            SledModel::Auto,
             DiskVariant::U2,
             &mock_disk_identity(),
             None,
@@ -611,6 +619,7 @@ mod test {
                 devfs_path,
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
+            SledModel::Auto,
             DiskVariant::M2,
             &mock_disk_identity(),
             None,
@@ -654,6 +663,7 @@ mod test {
                     devfs_path,
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
+                SledModel::Auto,
                 DiskVariant::M2,
                 &mock_disk_identity(),
                 None,
@@ -683,6 +693,7 @@ mod test {
                     devfs_path,
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
+                SledModel::Auto,
                 DiskVariant::U2,
                 &mock_disk_identity(),
                 None,

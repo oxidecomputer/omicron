@@ -104,7 +104,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
-use sled_hardware::is_oxide_sled;
+use sled_hardware::SledModel;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -606,6 +606,7 @@ pub struct ServiceManagerInner {
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
+    sled_model: SledModel,
     time_synced: AtomicBool,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
     sidecar_revision: SidecarRevision,
@@ -750,6 +751,7 @@ impl ServiceManager {
         ddm_reconciler: DdmReconciler,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
+        sled_model: SledModel,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         zone_image_resolver: ZoneImageSourceResolver,
@@ -759,6 +761,7 @@ impl ServiceManager {
             ddm_reconciler,
             bootstrap_networking,
             sled_mode,
+            sled_model,
             sidecar_revision,
             switch_zone_maghemite_links,
             zone_image_resolver,
@@ -772,6 +775,7 @@ impl ServiceManager {
         ddm_reconciler: DdmReconciler,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
+        sled_model: SledModel,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         zone_image_resolver: ZoneImageSourceResolver,
@@ -788,6 +792,7 @@ impl ServiceManager {
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SwitchZoneState::Disabled),
                 sled_mode,
+                sled_model,
                 time_synced: AtomicBool::new(false),
                 sidecar_revision,
                 switch_zone_maghemite_links,
@@ -974,9 +979,10 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
-        let is_oxide_sled = is_oxide_sled().map_err(|e| {
-            Error::Underlay(underlay::Error::SystemDetection(e))
-        })?;
+        let is_oxide_sled =
+            self.inner.sled_model.is_oxide_compute_sled().map_err(|e| {
+                Error::Underlay(underlay::Error::SystemDetection(e))
+            })?;
 
         for svc_details in zone_args.switch_zone_services() {
             match &svc_details {
@@ -2867,9 +2873,13 @@ impl ServiceManager {
                         );
                     }
 
-                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
+                    let is_oxide_sled = self
+                        .inner
+                        .sled_model
+                        .is_oxide_compute_sled()
+                        .map_err(|e| {
+                            Error::Underlay(underlay::Error::SystemDetection(e))
+                        })?;
 
                     if is_oxide_sled {
                         // Collect the prefixes for each techport.
@@ -3068,9 +3078,13 @@ impl ServiceManager {
                         }
                     }
 
-                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
+                    let is_oxide_sled = self
+                        .inner
+                        .sled_model
+                        .is_oxide_compute_sled()
+                        .map_err(|e| {
+                            Error::Underlay(underlay::Error::SystemDetection(e))
+                        })?;
 
                     let maghemite_interfaces: Vec<AddrObject> = if is_oxide_sled
                     {

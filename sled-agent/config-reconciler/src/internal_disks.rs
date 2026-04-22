@@ -516,6 +516,7 @@ mod internal_disk_details {
 pub use internal_disk_details::{InternalDiskDetails, InternalDiskDetailsId};
 #[cfg(not(any(test, feature = "testing")))]
 use internal_disk_details::{InternalDiskDetails, InternalDiskDetailsId};
+use sled_hardware::SledModel;
 
 impl IdOrdItem for InternalDiskDetails {
     type Key<'a> = &'a InternalDiskDetailsId;
@@ -893,7 +894,15 @@ impl DiskAdopter for RealDiskAdopter {
     ) -> Result<Disk, DiskError> {
         let pool_id = None; // control plane doesn't manage M.2s
         let key_requester = None; // M.2s are unencrypted
-        Disk::new(log, mount_config, raw_disk, pool_id, key_requester).await
+        Disk::new(
+            log,
+            mount_config,
+            SledModel::Auto,
+            raw_disk,
+            pool_id,
+            key_requester,
+        )
+        .await
     }
 }
 

@@ -9,6 +9,7 @@ use anyhow::ensure;
 use omicron_common::disk::DiskVariant;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
+use sled_hardware::SledModel;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::disk::RawDisk;
@@ -20,8 +21,9 @@ pub struct Hardware {
 }
 
 impl Hardware {
-    pub async fn scan(log: &Logger) -> Result<Self> {
-        let is_oxide_sled = sled_hardware::is_oxide_sled()
+    pub async fn scan(model: SledModel, log: &Logger) -> Result<Self> {
+        let is_oxide_sled = model
+            .is_oxide_compute_sled()
             .context("failed to detect whether host is an oxide sled")?;
         ensure!(is_oxide_sled, "hardware scan only supported on oxide sleds");
 
@@ -53,6 +55,7 @@ impl Hardware {
                     let disk = Disk::new(
                         log,
                         &MountConfig::default(),
+                        model,
                         disk,
                         None,
                         None,

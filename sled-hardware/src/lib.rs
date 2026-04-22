@@ -53,6 +53,36 @@ impl std::fmt::Display for DendriteAsic {
     }
 }
 
+/// The model of sled the agent is running on
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SledModel {
+    /// Automatically detect the model of the sled
+    Auto,
+    /// Force the sled to be recognized as an Oxide compute sled
+    OxideComputeSled,
+    /// Force the sled to be recognized as a generic sled
+    Generic,
+}
+
+impl SledModel {
+    pub fn is_oxide_compute_sled(&self) -> anyhow::Result<bool> {
+        Ok(match self {
+            SledModel::Auto => auto_detect_oxide_compute_sled()?,
+            SledModel::OxideComputeSled => true,
+            SledModel::Generic => false,
+        })
+    }
+
+    pub fn is_generic_sled(&self) -> anyhow::Result<bool> {
+        Ok(match self {
+            SledModel::Auto => !auto_detect_oxide_compute_sled()?,
+            SledModel::OxideComputeSled => false,
+            SledModel::Generic => true,
+        })
+    }
+}
+
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
 #[derive(Copy, Clone, Debug)]
 pub enum SledMode {

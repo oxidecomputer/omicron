@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::SledModel;
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Api;
@@ -297,6 +298,7 @@ impl PooledDisk {
     /// Create a new PooledDisk
     pub async fn new(
         log: &Logger,
+        model: SledModel,
         unparsed_disk: UnparsedDisk,
         zpool_id: Option<ZpoolUuid>,
     ) -> Result<Self, PooledDiskError> {
@@ -305,9 +307,10 @@ impl PooledDisk {
         let identity = &unparsed_disk.identity;
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions =
-            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)
-                .await?;
+        let partitions = ensure_partition_layout(
+            &log, &paths, model, variant, identity, zpool_id,
+        )
+        .await?;
 
         // Find the path to the zpool which exists on this disk.
         //

@@ -141,6 +141,7 @@ impl BootstrapAgentStartup {
             ddm_reconciler,
             startup_networking,
             sled_mode,
+            config.sled_model,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.zone_image_resolver.clone(),
@@ -247,9 +248,10 @@ async fn enable_mg_ddm(
     log: &Logger,
 ) -> Result<(), StartError> {
     info!(log, "finding links {:?}", config.data_links);
-    let mg_addr_objs = underlay::find_nics(&config.data_links)
-        .await
-        .map_err(StartError::FindMaghemiteAddrObjs)?;
+    let mg_addr_objs =
+        underlay::find_nics(config.sled_model, &config.data_links)
+            .await
+            .map_err(StartError::FindMaghemiteAddrObjs)?;
     if mg_addr_objs.is_empty() {
         return Err(StartError::NoUnderlayAddrObjs);
     }

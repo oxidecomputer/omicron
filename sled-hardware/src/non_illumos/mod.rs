@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
-use crate::{HardwareView, SledMode};
+use crate::{HardwareView, SledMode, SledModel};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
@@ -74,6 +74,7 @@ impl HardwareManager {
 pub async fn ensure_partition_layout(
     _log: &Logger,
     _paths: &DiskPaths,
+    _model: SledModel,
     _variant: DiskVariant,
     _identity: &DiskIdentity,
     _zpool_id: Option<ZpoolUuid>,
@@ -82,6 +83,6 @@ pub async fn ensure_partition_layout(
 }
 
 /// Return true if the host system is an Oxide sled.
-pub fn is_oxide_sled() -> anyhow::Result<bool> {
+pub(crate) fn auto_detect_oxide_compute_sled() -> anyhow::Result<bool> {
     Ok(false)
 }

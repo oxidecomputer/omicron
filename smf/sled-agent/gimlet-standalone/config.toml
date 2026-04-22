@@ -1,5 +1,8 @@
 # Sled Agent Configuration
 
+# Identifies whether sled agent is running on an Oxide sled.
+sled_model = "oxide_compute_sled"
+
 # Identifies whether sled agent treats itself as a scrimlet or a gimlet.
 #
 # If this is set to "scrimlet", the sled agent treats itself as a scrimlet.

@@ -45,6 +45,7 @@ use update_engine::{
 };
 
 use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
+use sled_hardware::SledModel;
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
@@ -117,8 +118,11 @@ impl WriteDestination {
         Ok(Self { drives, is_host_phase_2_block_device: false })
     }
 
-    pub(crate) async fn from_hardware(log: &Logger) -> Result<Self> {
-        let hardware = Hardware::scan(log).await?;
+    pub(crate) async fn from_hardware(
+        model: SledModel,
+        log: &Logger,
+    ) -> Result<Self> {
+        let hardware = Hardware::scan(model, log).await?;
 
         // We want the `,raw`-suffixed path to the boot image partition, as that
         // allows us file-like access via the character device.

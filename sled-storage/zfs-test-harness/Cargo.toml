@@ -15,6 +15,7 @@ illumos-utils.workspace = true
 key-manager.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+sled-hardware.workspace = true
 sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true

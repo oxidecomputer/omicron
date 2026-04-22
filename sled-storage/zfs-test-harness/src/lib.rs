@@ -24,6 +24,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::InternalZpoolUuid;
+use sled_hardware::SledModel;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::M2_DEBUG_DATASET;
 use sled_storage::disk::Disk;
@@ -270,6 +271,7 @@ impl Inner {
         let disk = Disk::new(
             &self.log,
             &self.mount_config,
+            SledModel::Auto,
             raw_disk,
             None,
             Some(&self.key_requester),

@@ -2576,6 +2576,7 @@ mod illumos_tests {
     use tokio::sync::watch;
     use xshell::Shell;
     use xshell::cmd;
+    use sled_hardware::SledModel;
 
     /// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for
     /// epoch 0
@@ -2730,6 +2731,7 @@ mod illumos_tests {
             let _disk = Disk::new(
                 &self.log,
                 &self.mount_config,
+                SledModel::Auto,
                 raw_disk.into(),
                 Some(zpool.id()),
                 Some(&self.key_requester),

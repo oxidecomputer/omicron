@@ -55,6 +55,7 @@ use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::Mountpoint;
+use sled_hardware::SledModel;
 
 /// Set of currently managed zpools.
 ///
@@ -803,6 +804,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
         let disk = Disk::new(
             log,
             mount_config,
+            SledModel::Auto,
             raw_disk,
             Some(pool_id),
             Some(self.key_requester),

@@ -15,6 +15,7 @@ use installinator_common::{
 };
 use omicron_common::FileKv;
 use sha2::{Digest, Sha256};
+use sled_hardware::SledModel;
 use slog::{Drain, error, warn};
 use tufaceous_artifact::{
     ArtifactHash, ArtifactHashId, InstallinatorArtifactKind,
@@ -124,7 +125,7 @@ impl DebugHardwareScan {
         // Finding the write destination from the gimlet hardware logs details
         // about what it's doing sufficiently for this subcommand; just create a
         // write destination and then discard it.
-        _ = WriteDestination::from_hardware(log).await?;
+        _ = WriteDestination::from_hardware(SledModel::Auto, log).await?;
         Ok(())
     }
 }
@@ -191,7 +192,7 @@ impl InstallOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
         if self.bootstrap_sled {
             let data_links = [self.data_link0.clone(), self.data_link1.clone()];
-            crate::bootstrap::bootstrap_sled(&data_links, log.clone()).await?;
+            crate::bootstrap::bootstrap_sled(SledModel::Auto, &data_links, log.clone()).await?;
         }
 
         let lookup_id = self.artifact_ids.resolve()?;
@@ -645,7 +646,8 @@ async fn scan_hardware_with_retries(
     let mut retry = 0;
     let result = loop {
         let log = log.clone();
-        let result = WriteDestination::from_hardware(&log).await;
+        let result =
+            WriteDestination::from_hardware(SledModel::Auto, &log).await;
 
         match result {
             Ok(destination) => break Ok(destination),

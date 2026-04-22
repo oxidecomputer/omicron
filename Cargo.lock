@@ -17739,6 +17739,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "sled-hardware",
  "sled-storage",
  "slog",
  "slog-error-chain",

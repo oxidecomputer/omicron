@@ -80,7 +80,7 @@ enum Error {
 }
 
 /// Return true if the host system is an Oxide Sled.
-pub fn is_oxide_sled() -> anyhow::Result<bool> {
+pub(crate) fn auto_detect_oxide_compute_sled() -> anyhow::Result<bool> {
     let mut device_info = DevInfo::new()?;
     let mut node_walker = device_info.walk_node();
     let Some(root) = node_walker.next().transpose()? else {

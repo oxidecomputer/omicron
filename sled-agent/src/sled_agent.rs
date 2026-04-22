@@ -532,7 +532,8 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics(&config.data_links).await?;
+        let underlay_nics =
+            underlay::find_nics(config.sled_model, &config.data_links).await?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Start collecting metric data.
@@ -548,7 +549,10 @@ impl SledAgent {
             MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
-        for link in underlay::find_chelsio_links(&config.data_links).await? {
+        for link in
+            underlay::find_chelsio_links(config.sled_model, &config.data_links)
+                .await?
+        {
             match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)

@@ -14,8 +14,8 @@ use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
+use sled_hardware::SledModel;
 use sled_hardware::UnparsedDisk;
-use sled_hardware::is_oxide_sled;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -56,6 +56,8 @@ pub struct Config {
     pub log: ConfigLogging,
     /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
     pub sled_mode: SledMode,
+    /// The model of the sled running the agent
+    pub sled_model: SledModel,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
     /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
@@ -159,7 +161,11 @@ impl Config {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
-            if is_oxide_sled().map_err(ConfigError::SystemDetection)? {
+            if self
+                .sled_model
+                .is_oxide_compute_sled()
+                .map_err(ConfigError::SystemDetection)?
+            {
                 Dladm::list_physical()
                     .await
                     .map_err(ConfigError::FindLinks)?
