@@ -7737,7 +7737,6 @@ dependencies = [
  "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
- "nexus-inventory",
  "nexus-types-versions",
  "omicron-common",
  "omicron-passwords",
