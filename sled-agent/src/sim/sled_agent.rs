@@ -62,7 +62,7 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, FmdInventoryResult,
+    ConfigReconcilerInventoryStatus, FmdInventory, FmdInventoryResult,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
     InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronZonesConfig, SingleMeasurementInventory, SledRole, ZpoolHealth,
@@ -995,9 +995,7 @@ impl SledAgent {
             ),
             smf_services_enabled_not_online,
             reference_measurements,
-            fmd: FmdInventoryResult::Error {
-                error: "fmd not collected in simulator".to_string(),
-            },
+            fmd: FmdInventoryResult::Available(FmdInventory::default()),
         })
     }
 

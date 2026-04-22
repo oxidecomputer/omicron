@@ -67,7 +67,9 @@ pub enum FmdInventoryResult {
 }
 
 /// Successfully collected FMD fault data.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
 pub struct FmdInventory {
     pub cases: Vec<FmdCase>,
     pub resources: Vec<FmdResource>,

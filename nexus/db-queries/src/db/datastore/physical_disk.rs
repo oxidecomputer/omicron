@@ -347,9 +347,10 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, FmdInventoryResult,
-        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-        SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+        Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
+        FmdInventoryResult, Inventory, InventoryDisk,
+        OmicronFileSourceResolverInventory, SledCpuFamily, SledRole,
+        SvcsEnabledNotOnlineResult,
     };
     use std::num::NonZeroU32;
 
@@ -711,9 +712,7 @@ mod test {
                     smf_services_enabled_not_online:
                         SvcsEnabledNotOnlineResult::DataUnavailable,
                     reference_measurements: IdOrdMap::new(),
-                    fmd: FmdInventoryResult::Error {
-                        error: "(testing) FMD unavailable".to_string(),
-                    },
+                    fmd: FmdInventoryResult::Available(FmdInventory::default()),
                 },
             )
             .unwrap();

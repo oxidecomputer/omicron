@@ -239,6 +239,7 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::FmdInventoryResult;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
@@ -377,9 +378,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                fmd: FmdInventoryResult::Error {
-                    error: "(testing) FMD unavailable".to_string(),
-                },
+                fmd: FmdInventoryResult::Available(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
