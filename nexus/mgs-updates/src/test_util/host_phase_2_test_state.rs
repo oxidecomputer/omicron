@@ -225,6 +225,7 @@ mod api_impl {
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::InstanceMulticastMembership;
+    use sled_agent_types::instance::InstancePathParam;
     use sled_agent_types::instance::SledVmmState;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
@@ -272,6 +273,7 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
     use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_agent_types_versions::v1;
+    use sled_agent_types_versions::v7;
     use sled_agent_types_versions::v20;
     use sled_agent_types_versions::v25;
     use sled_agent_types_versions::v26;
@@ -629,18 +631,34 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn vmm_join_multicast_group(
+        async fn instance_join_multicast_group(
             _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<VmmPathParam>,
+            _path_params: Path<InstancePathParam>,
             _body: TypedBody<InstanceMulticastMembership>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
-        async fn vmm_leave_multicast_group(
+        async fn instance_leave_multicast_group(
+            _rqctx: RequestContext<Self::Context>,
+            _path_params: Path<InstancePathParam>,
+            _body: TypedBody<InstanceMulticastMembership>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_join_multicast_group_v7(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
-            _body: TypedBody<InstanceMulticastMembership>,
+            _body: TypedBody<v7::instance::InstanceMulticastBody>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_leave_multicast_group_v7(
+            _rqctx: RequestContext<Self::Context>,
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<v7::instance::InstanceMulticastBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

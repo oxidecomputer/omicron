@@ -23,6 +23,7 @@ use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::ListPortsResp;
 use oxide_vpc::api::McastSubscribeReq;
 use oxide_vpc::api::McastUnsubscribeReq;
+use oxide_vpc::api::MulticastUnderlay;
 use oxide_vpc::api::NoResp;
 use oxide_vpc::api::PortInfo;
 use oxide_vpc::api::RouterClass;
@@ -197,6 +198,11 @@ pub(crate) struct PortData {
 pub(crate) struct State {
     pub ports: HashMap<String, PortData>,
     pub underlay_initialized: bool,
+    /// Multicast-to-physical mappings, keyed on (group, underlay).
+    ///
+    /// Persisted across [`Handle`] lifetimes to simulate xde kernel state
+    /// surviving sled-agent restarts.
+    pub m2p: Vec<(oxide_vpc::api::IpAddr, MulticastUnderlay)>,
 }
 
 const NO_RESPONSE: NoResp = NoResp { unused: 99 };
@@ -204,7 +210,11 @@ static OPTE_STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
 fn opte_state() -> &'static Mutex<State> {
     OPTE_STATE.get_or_init(|| {
-        Mutex::new(State { ports: HashMap::new(), underlay_initialized: false })
+        Mutex::new(State {
+            ports: HashMap::new(),
+            underlay_initialized: false,
+            m2p: Vec::new(),
+        })
     })
 }
 
@@ -379,15 +389,21 @@ impl Handle {
     }
 
     /// Set a multicast-to-physical mapping.
-    pub fn set_m2p(&self, _: &SetMcast2PhysReq) -> Result<NoResp, OpteError> {
+    pub fn set_m2p(&self, req: &SetMcast2PhysReq) -> Result<NoResp, OpteError> {
+        let mut state = opte_state().lock().unwrap();
+        // Deduplicate by replacing existing entry for the same group.
+        state.m2p.retain(|(g, _)| *g != req.group);
+        state.m2p.push((req.group, req.underlay));
         Ok(NO_RESPONSE)
     }
 
     /// Clear a multicast-to-physical mapping.
     pub fn clear_m2p(
         &self,
-        _: &ClearMcast2PhysReq,
+        req: &ClearMcast2PhysReq,
     ) -> Result<NoResp, OpteError> {
+        let mut state = opte_state().lock().unwrap();
+        state.m2p.retain(|(g, u)| !(*g == req.group && *u == req.underlay));
         Ok(NO_RESPONSE)
     }
 
@@ -409,7 +425,20 @@ impl Handle {
 
     /// Dump all multicast-to-physical mappings.
     pub fn dump_m2p(&self) -> Result<DumpMcast2PhysResp, OpteError> {
-        Ok(DumpMcast2PhysResp { ip4: Vec::new(), ip6: Vec::new() })
+        let state = opte_state().lock().unwrap();
+        let mut ip4 = Vec::new();
+        let mut ip6 = Vec::new();
+        for (group, underlay) in &state.m2p {
+            match group {
+                oxide_vpc::api::IpAddr::Ip4(v4) => {
+                    ip4.push((*v4, *underlay));
+                }
+                oxide_vpc::api::IpAddr::Ip6(v6) => {
+                    ip6.push((*v6, *underlay));
+                }
+            }
+        }
+        Ok(DumpMcast2PhysResp { ip4, ip6 })
     }
 
     /// Dump all multicast forwarding entries.

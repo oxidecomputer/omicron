@@ -29,6 +29,7 @@ Crucible Pantry (client: crucible-pantry-client)
 Maghemite DDM Admin (client: ddm-admin-client)
     consumed by: installinator (omicron/installinator) via 1 path
     consumed by: mgd (maghemite/mgd) via 1 path
+    consumed by: omicron-nexus (omicron/nexus) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: wicketd (omicron/wicketd) via 1 path
 

@@ -1095,12 +1095,14 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 sagas.clone(),
-                inventory_load_watcher.clone(),
                 args.multicast_enabled,
-                config.multicast_reconciler.sled_cache_ttl_secs,
                 config.multicast_reconciler.backplane_cache_ttl_secs,
             )),
             opctx: opctx.child(BTreeMap::new()),
+            // Wake the reconciler whenever the inventory loader publishes a
+            // fresh collection so newly-discovered sleds become resolvable
+            // (DDM-peer fallback / inventory mapping) within the same tick
+            // instead of waiting for the periodic timer.
             watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_multicast_reconciler,
         });

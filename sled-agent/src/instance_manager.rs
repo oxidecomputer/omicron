@@ -18,7 +18,7 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::SledIdentifiers;
-use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
@@ -42,6 +42,9 @@ pub enum Error {
 
     #[error("VMM with ID {0} not found")]
     NoSuchVmm(PropolisUuid),
+
+    #[error("No active VMM for instance {0}")]
+    NoActiveVmmForInstance(InstanceUuid),
 
     #[error("OPTE port management error")]
     Opte(#[from] illumos_utils::opte::Error),
@@ -303,16 +306,21 @@ impl InstanceManager {
         rx.await?
     }
 
-    pub async fn join_multicast_group(
+    /// Subscribe an instance's active VMM OPTE port to a multicast group.
+    ///
+    /// The active Propolis ID is resolved inside the manager's run loop so
+    /// that the lookup and the OPTE dispatch are serialized with other
+    /// per-instance state changes.
+    pub async fn join_multicast_group_by_instance(
         &self,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
-            .send(InstanceManagerRequest::JoinMulticastGroup {
-                propolis_id,
+            .send(InstanceManagerRequest::JoinMulticastGroupByInstance {
+                instance_id,
                 membership: membership.clone(),
                 tx,
             })
@@ -322,22 +330,48 @@ impl InstanceManager {
         rx.await?
     }
 
-    pub async fn leave_multicast_group(
+    /// Unsubscribe an instance's active VMM OPTE port from a multicast group.
+    ///
+    /// The active Propolis ID is resolved inside the manager's run loop so
+    /// that the lookup and the OPTE dispatch are serialized with other
+    /// per-instance state changes.
+    pub async fn leave_multicast_group_by_instance(
         &self,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
-            .send(InstanceManagerRequest::LeaveMulticastGroup {
-                propolis_id,
+            .send(InstanceManagerRequest::LeaveMulticastGroupByInstance {
+                instance_id,
                 membership: membership.clone(),
                 tx,
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
 
+        rx.await?
+    }
+
+    /// Resolve a Propolis ID to its registered instance ID.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(None)` if no instance is registered with that Propolis ID.
+    pub async fn instance_id_for_propolis(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<Option<InstanceUuid>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::LookupInstanceForPropolis {
+                propolis_id,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -482,15 +516,19 @@ enum InstanceManagerRequest {
     RefreshExternalIps {
         tx: oneshot::Sender<Result<(), Error>>,
     },
-    JoinMulticastGroup {
-        propolis_id: PropolisUuid,
+    JoinMulticastGroupByInstance {
+        instance_id: InstanceUuid,
         membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), Error>>,
     },
-    LeaveMulticastGroup {
-        propolis_id: PropolisUuid,
+    LeaveMulticastGroupByInstance {
+        instance_id: InstanceUuid,
         membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), Error>>,
+    },
+    LookupInstanceForPropolis {
+        propolis_id: PropolisUuid,
+        tx: oneshot::Sender<Result<Option<InstanceUuid>, Error>>,
     },
     GetState {
         propolis_id: PropolisUuid,
@@ -630,11 +668,14 @@ impl InstanceManagerRunner {
                         Some(RefreshExternalIps { tx }) => {
                             self.refresh_external_ips(tx)
                         },
-                        Some(JoinMulticastGroup { propolis_id, membership, tx }) => {
-                            self.join_multicast_group(tx, propolis_id, &membership)
-                        },
-                        Some(LeaveMulticastGroup { propolis_id, membership, tx }) => {
-                            self.leave_multicast_group(tx, propolis_id, &membership)
+                        Some(JoinMulticastGroupByInstance { instance_id, membership, tx }) => {
+                            self.join_multicast_group_by_instance(tx, instance_id, &membership)
+                        }
+                        Some(LeaveMulticastGroupByInstance { instance_id, membership, tx }) => {
+                            self.leave_multicast_group_by_instance(tx, instance_id, &membership)
+                        }
+                        Some(LookupInstanceForPropolis { propolis_id, tx }) => {
+                            self.lookup_instance_for_propolis(tx, propolis_id)
                         }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
@@ -903,30 +944,64 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    fn join_multicast_group(
+    /// Resolve the active VMM for `instance_id` and forward a join to its
+    /// instance task. The lookup runs inside this dispatcher loop, so it is
+    /// serialized with `EnsureRegistered`, `EnsureUnregistered`, and other
+    /// state changes for the same instance. If no active VMM is registered
+    /// the call is a noop, then there is no OPTE port to update.
+    fn join_multicast_group_by_instance(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        let Some(instance) = self.get_propolis(propolis_id) else {
-            return Err(Error::NoSuchVmm(propolis_id));
+        let Some(instance) = self.find_instance(instance_id) else {
+            return tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed);
         };
         instance.join_multicast_group(tx, membership)?;
         Ok(())
     }
 
-    fn leave_multicast_group(
+    /// Resolve the active VMM for `instance_id` and forward a leave to its
+    /// instance task. See [`Self::join_multicast_group_by_instance`] for the
+    /// serialization and no-active-VMM behavior.
+    fn leave_multicast_group_by_instance(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        let Some(instance) = self.get_propolis(propolis_id) else {
-            return Err(Error::NoSuchVmm(propolis_id));
+        let Some(instance) = self.find_instance(instance_id) else {
+            return tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed);
         };
         instance.leave_multicast_group(tx, membership)?;
         Ok(())
+    }
+
+    /// Locate the active VMM whose instance ID matches `instance_id`.
+    ///
+    /// The instance manager indexes by Propolis ID, so this is a linear
+    /// scan over the active jobs. The dispatcher serializes calls, so the
+    /// scan runs without any external lock contention.
+    fn find_instance(&self, instance_id: InstanceUuid) -> Option<&Instance> {
+        self.jobs.values().find(|i| i.id() == instance_id)
+    }
+
+    /// Look up the instance ID for a registered Propolis ID.
+    ///
+    /// Runs inside the dispatcher loop, so the lookup is serialized with
+    /// other per-instance state changes.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(None)` if no instance is registered with that Propolis ID.
+    fn lookup_instance_for_propolis(
+        &self,
+        tx: oneshot::Sender<Result<Option<InstanceUuid>, Error>>,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        let result = self.get_propolis(propolis_id).map(|i| i.id());
+        tx.send(Ok(result)).map_err(|_| Error::FailedSendClientClosed)
     }
 
     fn get_instance_state(

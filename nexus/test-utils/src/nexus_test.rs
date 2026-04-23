@@ -35,10 +35,12 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
+use uuid::Uuid;
 
 pub struct ControlPlaneBuilder<'a> {
     // required
@@ -117,6 +119,15 @@ pub struct ControlPlaneTestContext<N> {
     /// Ports of stopped dendrite instances (for use by start_dendrite)
     pub stopped_dendrite_ports: RwLock<HashMap<SwitchSlot, u16>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
+    /// Cache used by [`crate::multicast::populate_ddm_peers`] so the
+    /// inventory collection used to derive `sp_slot` for every sled runs
+    /// once per fixture per stable sled-set instead of on every call.
+    ///
+    /// This is keyed by the in-service sled-id set so the cache rebuilds
+    /// whenever a sled transitions in or is deemed out of service.
+    pub multicast_ddm_peers:
+        Mutex<Option<(BTreeSet<Uuid>, dev::maghemite::PeerMap)>>,
     pub external_dns_zone_name: String,
     pub external_dns: TransientDnsServer,
     pub internal_dns: TransientDnsServer,
@@ -319,6 +330,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut ddm) in self.ddm {
+            ddm.cleanup().await;
         }
         self.logctx.cleanup_successful();
     }

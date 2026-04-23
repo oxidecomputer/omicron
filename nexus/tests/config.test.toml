@@ -212,7 +212,6 @@ fm.rendezvous_period_secs = 300
 probe_distributor.period_secs = 60
 multicast_reconciler.period_secs = 60
 # Use shorter TTLs for tests to ensure cache invalidation logic is exercised
-multicast_reconciler.sled_cache_ttl_secs = 60
 multicast_reconciler.backplane_cache_ttl_secs = 120
 trust_quorum.period_secs = 60
 attached_subnet_manager.period_secs = 60

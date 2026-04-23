@@ -137,7 +137,7 @@ impl From<AttachMemberError> for external::Error {
 /// - **Reactivate**: Member in "Left" (time_deleted=NULL) → transition to
 ///   "Joining", update `sled_id`
 /// - **Insert new**: Member in "Left" (time_deleted set) → create new row
-/// - **Idempotent**: Member already "Joining" or "Joined" → no-op
+/// - **Idempotent**: Member already "Joining" or "Joined" → noop
 ///
 /// Atomically validates group and instance exist, retrieves instance's current
 /// sled_id, and performs member upsert. Returns member ID.

@@ -9,6 +9,7 @@ use omicron_common::api::external::IdentityMetadata;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::time::Duration;
@@ -20,6 +21,7 @@ pub use sim::TEST_RESERVOIR_RAM;
 pub mod background;
 pub mod db;
 pub mod http_testing;
+pub mod multicast;
 mod nexus_test;
 pub mod resource_helpers;
 pub mod sql;
@@ -117,21 +119,36 @@ async fn wait_for_producer_impl(
     .expect("Failed to find producer within time limit");
 }
 
-/// Build a DPD client for test validation using the first running dendrite instance
+/// Build a DPD client for `Switch0` in the test fixture.
+///
+/// Deterministic by default. Tests that need to validate state on every
+/// switch in a multi-switch fixture should use [`dpd_clients_by_switch`]
+/// instead and iterate, since each switch independently programs its own
+/// underlay group / NAT / forwarding state.
 pub fn dpd_client<N: NexusServer>(
     cptestctx: &ControlPlaneTestContext<N>,
 ) -> dpd_client::Client {
-    // Get the first available dendrite instance and extract the values we need
-    let dendrite_guard = cptestctx.dendrite.read().unwrap();
-    let (switch_slot, dendrite_instance) = dendrite_guard
-        .iter()
-        .next()
-        .expect("No dendrite instances running for test");
+    use sled_agent_types::early_networking::SwitchSlot;
+    dpd_client_for(cptestctx, SwitchSlot::Switch0)
+}
 
-    // Copy the values we need while the guard is still alive
-    let switch_slot = *switch_slot;
-    let port = dendrite_instance.port;
-    drop(dendrite_guard);
+/// Build a DPD client targeting a specific switch slot.
+pub fn dpd_client_for<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+    switch_slot: sled_agent_types::early_networking::SwitchSlot,
+) -> dpd_client::Client {
+    let port = {
+        let dendrite = cptestctx.dendrite.read().unwrap();
+        dendrite
+            .get(&switch_slot)
+            .unwrap_or_else(|| {
+                panic!(
+                    "no dendrite instance running for {switch_slot:?} in \
+                     test fixture",
+                )
+            })
+            .port
+    };
 
     let client_state = dpd_client::ClientState {
         tag: String::from("nexus-test"),
@@ -143,6 +160,40 @@ pub fn dpd_client<N: NexusServer>(
 
     let addr = Ipv6Addr::LOCALHOST;
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
+}
+
+/// Build DPD clients for every switch slot in the test fixture, ordered by
+/// `SwitchSlot`.
+///
+/// Use this when validating a per-switch invariant (e.g., "every switch has
+/// the full underlay-member set"). Iterates the dendrite map deterministically
+/// so log output and assertions are stable across test passes.
+pub fn dpd_clients_by_switch<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+) -> BTreeMap<sled_agent_types::early_networking::SwitchSlot, dpd_client::Client>
+{
+    let dendrite = cptestctx.dendrite.read().unwrap();
+    dendrite
+        .iter()
+        .map(|(slot, instance)| (*slot, instance.port))
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .map(|(slot, port)| {
+            let client_state = dpd_client::ClientState {
+                tag: String::from("nexus-test"),
+                log: cptestctx.logctx.log.new(slog::o!(
+                    "component" => "DpdClient",
+                    "switch_slot" => format!("{slot:?}"),
+                )),
+            };
+            let addr = Ipv6Addr::LOCALHOST;
+            let client = dpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                client_state,
+            );
+            (slot, client)
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -17,13 +17,16 @@
 //!
 //! [`dataplane`]: super::dataplane
 
-use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use anyhow::Context;
+use futures::future::join_all;
+use omicron_common::api::external;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{debug, info, warn};
 
 use nexus_db_model::{
@@ -35,7 +38,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::{
-    GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledUuid,
+    GenericUuid, InstanceUuid, MulticastGroupUuid, SledUuid,
 };
 use sled_agent_client::types::{
     ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping, McastFilterMode,
@@ -87,23 +90,6 @@ impl MulticastSledClient {
         .await
     }
 
-    /// Look up the current `propolis_id` for an instance.
-    async fn lookup_propolis_id(
-        &self,
-        opctx: &OpContext,
-        instance_id: InstanceUuid,
-    ) -> Result<Option<PropolisUuid>, anyhow::Error> {
-        let instance_state = self
-            .datastore
-            .instance_get_state(opctx, &instance_id)
-            .await
-            .context("failed to look up instance state")?;
-
-        Ok(instance_state
-            .and_then(|s| s.propolis_id)
-            .map(PropolisUuid::from_untyped_uuid))
-    }
-
     /// Build the membership descriptor sent to sled-agent for
     /// subscribe/unsubscribe calls.
     fn membership_for(
@@ -116,37 +102,20 @@ impl MulticastSledClient {
         }
     }
 
-    /// Subscribe a VMM to a multicast group via sled-agent.
+    /// Subscribe an instance's active VMM OPTE port to a multicast group.
     ///
-    /// Looks up the instance's current `propolis_id` and calls the sled-agent
-    /// endpoint to configure OPTE port-level multicast filters. The member's
-    /// per-instance source IPs are passed for SSM filtering.
-    pub(crate) async fn subscribe_vmm(
+    /// Sled-agent resolves the active Propolis under its per-instance state
+    /// lock and configures OPTE port-level multicast filters. The member's
+    /// per-instance source IPs are passed for SSM filtering. If no active
+    /// VMM is registered the call is a noop since the OPTE port is gone.
+    pub(crate) async fn subscribe_instance(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
         sled_id: SledUuid,
-        cached_propolis_id: Option<PropolisUuid>,
     ) -> Result<(), anyhow::Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(member.parent_id);
-        // If the instance has no propolis_id (already stopped/destroyed),
-        // the OPTE port is gone and there's nothing to subscribe.
-        let propolis_id = match cached_propolis_id {
-            Some(id) => id,
-            None => match self.lookup_propolis_id(opctx, instance_id).await? {
-                Some(id) => id,
-                None => {
-                    debug!(
-                        opctx.log,
-                        "no propolis_id for instance, skipping subscribe";
-                        "member_id" => %member.id,
-                        "instance_id" => %instance_id
-                    );
-                    return Ok(());
-                }
-            },
-        };
 
         let client = self
             .sled_client(opctx, sled_id)
@@ -156,15 +125,15 @@ impl MulticastSledClient {
         let membership = Self::membership_for(group, member);
 
         client
-            .vmm_join_multicast_group(&propolis_id, &membership)
+            .instance_join_multicast_group(&instance_id, &membership)
             .await
-            .context("sled-agent vmm_join_multicast_group call failed")?;
+            .context("sled-agent instance_join_multicast_group call failed")?;
 
         debug!(
             opctx.log,
-            "subscribed VMM to multicast group via sled-agent";
+            "subscribed instance to multicast group via sled-agent";
             "member_id" => %member.id,
-            "propolis_id" => %propolis_id,
+            "instance_id" => %instance_id,
             "sled_id" => %sled_id,
             "group_ip" => %group.multicast_ip
         );
@@ -172,37 +141,18 @@ impl MulticastSledClient {
         Ok(())
     }
 
-    /// Unsubscribe a VMM from a multicast group via sled-agent.
+    /// Unsubscribe an instance's active VMM OPTE port from a multicast group.
     ///
     /// Best-effort since if the VMM or sled is already gone, the unsubscribe
-    /// is effectively a no-op since the OPTE port was destroyed.
-    pub(crate) async fn unsubscribe_vmm(
+    /// is effectively a noop because the OPTE port was destroyed.
+    pub(crate) async fn unsubscribe_instance(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
         sled_id: SledUuid,
-        cached_propolis_id: Option<PropolisUuid>,
     ) -> Result<(), anyhow::Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(member.parent_id);
-
-        // If the instance has no propolis_id (already stopped/destroyed),
-        // the OPTE port is gone and there's nothing to unsubscribe.
-        let propolis_id = match cached_propolis_id {
-            Some(id) => id,
-            None => match self.lookup_propolis_id(opctx, instance_id).await? {
-                Some(id) => id,
-                None => {
-                    debug!(
-                        opctx.log,
-                        "no propolis_id for instance, skipping unsubscribe";
-                        "member_id" => %member.id,
-                        "instance_id" => %instance_id
-                    );
-                    return Ok(());
-                }
-            },
-        };
 
         let client = self
             .sled_client(opctx, sled_id)
@@ -212,15 +162,15 @@ impl MulticastSledClient {
         let membership = Self::membership_for(group, member);
 
         client
-            .vmm_leave_multicast_group(&propolis_id, &membership)
+            .instance_leave_multicast_group(&instance_id, &membership)
             .await
-            .context("sled-agent vmm_leave_multicast_group call failed")?;
+            .context("sled-agent instance_leave_multicast_group call failed")?;
 
         debug!(
             opctx.log,
-            "unsubscribed VMM from multicast group via sled-agent";
+            "unsubscribed instance from multicast group via sled-agent";
             "member_id" => %member.id,
-            "propolis_id" => %propolis_id,
+            "instance_id" => %instance_id,
             "sled_id" => %sled_id,
             "group_ip" => %group.multicast_ip
         );
@@ -249,23 +199,15 @@ impl MulticastSledClient {
         opctx: &OpContext,
         group: &MulticastGroup,
     ) -> Result<(), anyhow::Error> {
-        let underlay_group_id = group
-            .underlay_group_id
-            .context("group missing underlay_group_id")?;
-
-        let underlay_group = self
-            .datastore
-            .underlay_multicast_group_fetch(opctx, underlay_group_id)
+        let underlay_ip = self
+            .resolve_underlay_ip(opctx, group)
             .await
-            .context("failed to fetch underlay group")?;
-
-        let underlay_ip = match underlay_group.multicast_ip.ip() {
-            IpAddr::V6(v6) => v6,
-            other => anyhow::bail!(
-                "underlay multicast address for group {} is {other}, expected IPv6",
-                group.id()
-            ),
-        };
+            .with_context(|| {
+                format!(
+                    "failed to resolve underlay multicast address for group {}",
+                    group.id()
+                )
+            })?;
 
         let group_ip = group.multicast_ip.ip();
 
@@ -322,17 +264,9 @@ impl MulticastSledClient {
         .map_err(|e| anyhow::anyhow!(e))
         .context("failed to resolve switch zone addresses")?;
 
-        // Hash the group UUID to distribute switch selection across both
-        // switches. All Nexuses compute the same hash for a given group,
-        // so they agree on the mapping without coordination.
-        let mut hasher = DefaultHasher::new();
-        group_id.hash(&mut hasher);
-        let idx = (hasher.finish() as usize) % switch_zone_addrs.len();
-        let switch_ip = switch_zone_addrs
-            .iter()
-            .nth(idx)
-            .map(|(_, ip)| *ip)
-            .context("no switch zone found for forwarding next hop")?;
+        let switch_ip =
+            select_forwarding_switch_ip(group_id, &switch_zone_addrs)
+                .context("no switch zone found for forwarding next hop")?;
 
         let convergence_params = GroupConvergenceParams {
             group_ip,
@@ -342,9 +276,11 @@ impl MulticastSledClient {
             switch_ip,
         };
 
-        let mut failed_sleds: usize = 0;
-
-        for sled in &all_sleds {
+        // Fan out per-sled convergence so a 32-sled rack doesn't pay
+        // N-sequential RPC round-trips. Each sled's RPC is independent,
+        // we accumulate per-sled failures rather than fail-fast.
+        let convergence_params = &convergence_params;
+        let results = join_all(all_sleds.iter().map(|sled| async move {
             let sled_id: SledUuid = sled.id();
             let client = match self.sled_client(opctx, sled_id).await {
                 Ok(c) => c,
@@ -356,13 +292,11 @@ impl MulticastSledClient {
                         "sled_id" => %sled_id,
                         "error" => %e
                     );
-                    failed_sleds += 1;
-                    continue;
+                    return Err(());
                 }
             };
-
             if let Err(e) =
-                converge_sled_m2p_and_forwarding(&client, &convergence_params)
+                converge_sled_m2p_and_forwarding(&client, convergence_params)
                     .await
             {
                 warn!(
@@ -372,9 +306,13 @@ impl MulticastSledClient {
                     "group_ip" => %group_ip,
                     "error" => %e
                 );
-                failed_sleds += 1;
+                return Err(());
             }
-        }
+            Ok(())
+        }))
+        .await;
+
+        let failed_sleds = results.iter().filter(|r| r.is_err()).count();
 
         info!(
             opctx.log,
@@ -397,6 +335,45 @@ impl MulticastSledClient {
         }
 
         Ok(())
+    }
+
+    async fn resolve_underlay_ip(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+    ) -> Result<Ipv6Addr, anyhow::Error> {
+        let underlay_group_id = group
+            .underlay_group_id
+            .context("group missing underlay_group_id")?;
+
+        match self
+            .datastore
+            .underlay_multicast_group_fetch(opctx, underlay_group_id)
+            .await
+        {
+            Ok(underlay_group) => match underlay_group.multicast_ip.ip() {
+                IpAddr::V6(v6) => Ok(v6),
+                other => anyhow::bail!(
+                    "underlay multicast address for group {} is {other}, \
+                     expected IPv6",
+                    group.id()
+                ),
+            },
+            Err(external::Error::ObjectNotFound { .. }) => {
+                let salt = group.underlay_salt.map_or(0, |s| *s);
+                match super::map_external_to_underlay_ip(
+                    group.multicast_ip.ip(),
+                    salt,
+                ) {
+                    IpAddr::V6(v6) => Ok(v6),
+                    IpAddr::V4(_) => anyhow::bail!(
+                        "computed IPv4 underlay address for group {}",
+                        group.id()
+                    ),
+                }
+            }
+            Err(e) => Err(e).context("failed to fetch underlay group"),
+        }
     }
 
     /// Clear M2P mappings and forwarding entries from all sleds for
@@ -552,4 +529,67 @@ async fn converge_forwarding(
     }
 
     Ok(())
+}
+
+fn select_forwarding_switch_ip(
+    group_id: MulticastGroupUuid,
+    switch_zone_addrs: &HashMap<SwitchSlot, Ipv6Addr>,
+) -> Option<Ipv6Addr> {
+    let mut ordered_switches: Vec<_> = switch_zone_addrs.iter().collect();
+    ordered_switches.sort_by_key(|(slot, _)| **slot);
+
+    if ordered_switches.is_empty() {
+        return None;
+    }
+
+    // Hash the group UUID to distribute switch selection across both
+    // switches. Ordering by slot keeps the selection stable across
+    // reconciliation passes and Nexus instances.
+    let mut hasher = DefaultHasher::new();
+    group_id.hash(&mut hasher);
+    let idx = (hasher.finish() as usize) % ordered_switches.len();
+    Some(*ordered_switches[idx].1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_forwarding_switch_ip;
+
+    use std::collections::HashMap;
+    use std::net::Ipv6Addr;
+
+    use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
+    use sled_agent_types::early_networking::SwitchSlot;
+    use uuid::Uuid;
+
+    #[test]
+    fn select_forwarding_switch_ip_returns_none_when_empty() {
+        let group_id = MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
+        let switch_zone_addrs = HashMap::new();
+
+        assert_eq!(
+            select_forwarding_switch_ip(group_id, &switch_zone_addrs),
+            None
+        );
+    }
+
+    #[test]
+    fn select_forwarding_switch_ip_is_stable_across_map_order() {
+        let group_id = MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
+        let switch0 = Ipv6Addr::LOCALHOST;
+        let switch1 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2);
+
+        let mut first = HashMap::new();
+        first.insert(SwitchSlot::Switch0, switch0);
+        first.insert(SwitchSlot::Switch1, switch1);
+
+        let mut second = HashMap::new();
+        second.insert(SwitchSlot::Switch1, switch1);
+        second.insert(SwitchSlot::Switch0, switch0);
+
+        assert_eq!(
+            select_forwarding_switch_ip(group_id, &first),
+            select_forwarding_switch_ip(group_id, &second)
+        );
+    }
 }

@@ -1007,12 +1007,11 @@ impl super::Nexus {
         {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
+                && inner.vmm_gone()
             {
-                if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
-                        .await;
-                }
+                let _ = self
+                    .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                    .await;
             }
 
             return Err(e);
@@ -1097,20 +1096,6 @@ impl super::Nexus {
             )
             .await?;
 
-        // Update multicast member state for this instance to "Left" and clear
-        // `sled_id` - only if multicast is enabled
-        if self.multicast_enabled() {
-            self.db_datastore
-                .multicast_group_members_detach_by_instance(
-                    opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                )
-                .await?;
-        }
-
-        // Activate multicast reconciler to handle switch-level changes
-        self.background_tasks.task_multicast_reconciler.activate();
-
         if let Err(e) = self
             .instance_request_state(
                 opctx,
@@ -1122,15 +1107,28 @@ impl super::Nexus {
         {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
+                && inner.vmm_gone()
             {
-                if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
-                        .await;
-                }
+                let _ = self
+                    .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                    .await;
             }
 
             return Err(e);
+        }
+
+        // Detach multicast members (state -> "Left", clear `sled_id`) only
+        // after sled-agent has acknowledged the Stop request. Doing it
+        // before the request would tear down M2P/forwarding for a guest
+        // that is still running if the request fails.
+        if self.multicast_enabled() {
+            self.db_datastore
+                .multicast_group_members_detach_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                )
+                .await?;
+            self.background_tasks.task_multicast_reconciler.activate();
         }
 
         self.db_datastore

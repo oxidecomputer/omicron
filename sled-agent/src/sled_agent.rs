@@ -56,7 +56,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
-    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+    GenericUuid, InstanceUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
@@ -583,6 +583,7 @@ impl SledAgent {
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
+            &underlay_nics,
         );
 
         // The VMM reservoir is configured with respect to what's left after
@@ -1037,30 +1038,54 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Subscribe a VMM's OPTE port to a multicast group.
+    /// Subscribe an instance's active VMM OPTE port to a multicast group.
+    ///
+    /// The active Propolis ID is resolved inside the instance manager so
+    /// that resolution and dispatch are serialized with other per-instance
+    /// state changes. A no-active-VMM result is treated as a successful
+    /// no-op since the OPTE port no longer exists.
     pub async fn instance_join_multicast_group(
         &self,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .join_multicast_group(propolis_id, membership)
+            .join_multicast_group_by_instance(instance_id, membership)
             .await
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Unsubscribe a VMM's OPTE port from a multicast group.
+    /// Unsubscribe an instance's active VMM OPTE port from a multicast group.
+    ///
+    /// See [`Self::instance_join_multicast_group`] for the resolution and
+    /// no-active-VMM semantics.
     pub async fn instance_leave_multicast_group(
         &self,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .leave_multicast_group(propolis_id, membership)
+            .leave_multicast_group_by_instance(instance_id, membership)
             .await
             .map_err(|e| Error::Instance(e))
+    }
+
+    /// Resolve a Propolis ID to its registered instance ID.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(None)` if no instance is registered with that Propolis ID.
+    pub async fn instance_id_for_propolis(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<Option<InstanceUuid>, Error> {
+        self.inner
+            .instances
+            .instance_id_for_propolis(propolis_id)
+            .await
+            .map_err(Error::Instance)
     }
 
     /// Returns the state of the instance with the provided ID.

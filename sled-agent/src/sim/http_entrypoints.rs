@@ -57,9 +57,10 @@ use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
-    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+    InstancePathParam, VmmIssueDiskSnapshotRequestBody,
+    VmmIssueDiskSnapshotRequestPathParam, VmmIssueDiskSnapshotRequestResponse,
+    VmmPathParam, VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
+    VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::multicast::ClearMcast2Phys;
@@ -88,6 +89,7 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
+use sled_agent_types_versions::v7;
 use sled_agent_types_versions::v20;
 use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
@@ -192,28 +194,46 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn vmm_join_multicast_group(
+    async fn instance_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
+        path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let propolis_id = path_params.into_inner().propolis_id;
+        let instance_id = path_params.into_inner().instance_id;
         let membership = body.into_inner();
-        sa.instance_join_multicast_group(propolis_id, &membership).await?;
+        sa.instance_join_multicast_group(instance_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn vmm_leave_multicast_group(
+    async fn instance_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
+        path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let propolis_id = path_params.into_inner().propolis_id;
+        let instance_id = path_params.into_inner().instance_id;
         let membership = body.into_inner();
-        sa.instance_leave_multicast_group(propolis_id, &membership).await?;
+        sa.instance_leave_multicast_group(instance_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    // v7 shims exist on the trait for spec compatibility. The sim has no
+    // caller for them.
+    async fn vmm_join_multicast_group_v7(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v1::instance::VmmPathParam>,
+        _body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        unimplemented!()
+    }
+
+    async fn vmm_leave_multicast_group_v7(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v1::instance::VmmPathParam>,
+        _body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        unimplemented!()
     }
 
     async fn disk_put(

@@ -21,10 +21,12 @@
 //!   - Instance reconfigure adding SSM: Must specify sources for new SSM groups
 //!   - SSM sources are per-member (S,G subscription model)
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use http::{Method, StatusCode};
 
+use nexus_db_model::MulticastGroupMemberState;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
@@ -136,7 +138,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         "group-lifecycle-1",
         instances[0].identity.id,
         // Instance is stopped, so should be "Left"
-        nexus_db_model::MulticastGroupMemberState::Left,
+        MulticastGroupMemberState::Left,
     )
     .await;
 
@@ -162,16 +164,15 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Verify both instances are attached to group-lifecycle-2
-    for i in 0..2 {
-        wait_for_member_state(
-            cptestctx,
-            "group-lifecycle-2",
-            instances[i + 1].identity.id,
-            nexus_db_model::MulticastGroupMemberState::Left, // Stopped instances
-        )
+    // Verify both instances are attached to group-lifecycle-2 (Left state
+    // because the instances are stopped).
+    let expected_left: Vec<_> = (0..2)
+        .map(|i| {
+            (instances[i + 1].identity.id, MulticastGroupMemberState::Left)
+        })
+        .collect();
+    wait_for_members_state(cptestctx, "group-lifecycle-2", &expected_left)
         .await;
-    }
 
     // Multi-group attachment (instance to multiple groups)
     // Attach instance-multi-groups to group-lifecycle-3 (implicitly creates the group)
@@ -204,7 +205,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             cptestctx,
             group_name,
             instances[3].identity.id,
-            nexus_db_model::MulticastGroupMemberState::Left, // Stopped instance
+            MulticastGroupMemberState::Left, // Stopped instance
         )
         .await;
     }
@@ -425,7 +426,7 @@ async fn test_multicast_group_attach_multiple(
             cptestctx,
             group_name,
             instance.identity.id,
-            nexus_db_model::MulticastGroupMemberState::Left,
+            MulticastGroupMemberState::Left,
         )
         .await;
     }
@@ -524,17 +525,13 @@ async fn test_multicast_concurrent_operations(
     )
     .await;
 
-    // Verify all members reached correct state despite concurrent operations
-    for instance in instances.iter() {
-        wait_for_member_state(
-            cptestctx,
-            "concurrent-test-group",
-            instance.identity.id,
-            // create_instance() starts instances, so they should be Joined
-            nexus_db_model::MulticastGroupMemberState::Joined,
-        )
-        .await;
-    }
+    // Verify all members reached correct state despite concurrent operations.
+    // create_instance() starts instances, so they should all be Joined.
+    let expected: Vec<_> = instances
+        .iter()
+        .map(|i| (i.identity.id, MulticastGroupMemberState::Joined))
+        .collect();
+    wait_for_members_state(cptestctx, "concurrent-test-group", &expected).await;
 
     // Verify final member count matches expected (all 4 instances)
     let members =
@@ -604,16 +601,12 @@ async fn test_multicast_concurrent_operations(
     let post_rapid_members =
         list_multicast_group_members(client, "concurrent-test-group").await;
 
-    // Wait for all remaining members to reach "Joined" state
-    for member in &post_rapid_members {
-        wait_for_member_state(
-            cptestctx,
-            "concurrent-test-group",
-            member.instance_id,
-            nexus_db_model::MulticastGroupMemberState::Joined,
-        )
-        .await;
-    }
+    // Wait for all remaining members to reach "Joined" state.
+    let expected: Vec<_> = post_rapid_members
+        .iter()
+        .map(|m| (m.instance_id, MulticastGroupMemberState::Joined))
+        .collect();
+    wait_for_members_state(cptestctx, "concurrent-test-group", &expected).await;
 
     // Cleanup and delete instances (group is implicitly deleted when last member removed)
     cleanup_instances(cptestctx, client, PROJECT_NAME, &instance_names).await;
@@ -686,7 +679,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         cptestctx,
         group_name,
         instance.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Left,
+        MulticastGroupMemberState::Left,
     )
     .await;
 
@@ -808,16 +801,15 @@ async fn test_multicast_migration_scenarios(
         cptestctx,
         group1_name,
         instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
+        MulticastGroupMemberState::Joined,
     )
     .await;
 
-    // Verify DPD before migration
-    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
-    dpd_client
-        .multicast_group_get(&multicast_ip)
-        .await
-        .expect("Group should exist in DPD before migration");
+    for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
+        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
+            panic!("{slot:?}: group should exist in DPD before migration: {e}")
+        });
+    }
 
     // Migrate instance
     let source_sled = nexus
@@ -867,22 +859,22 @@ async fn test_multicast_migration_scenarios(
         .sled_id;
     assert_eq!(post_sled, target_sled, "Instance should be on target sled");
 
-    wait_for_multicast_reconciler(lockstep_client).await;
     wait_for_member_state(
         cptestctx,
         group1_name,
         instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
+        MulticastGroupMemberState::Joined,
     )
     .await;
 
     verify_inventory_based_port_mapping(cptestctx, &instance1_id)
         .await
         .expect("Port mapping should be updated");
-    dpd_client
-        .multicast_group_get(&multicast_ip)
-        .await
-        .expect("Group should exist in DPD after migration");
+    for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
+        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
+            panic!("{slot:?}: group should exist in DPD after migration: {e}")
+        });
+    }
 
     // Verify sled-agent state after migration: the target sled should
     // have the VMM subscription and M2P mapping. The source sled should
@@ -918,12 +910,6 @@ async fn test_multicast_migration_scenarios(
         // Target sled should have the VMM subscription after the
         // reconciler pushes it via verify_members. Poll because the
         // reconciler may still be propagating state to the sled-agent.
-        let post_info = nexus
-            .active_instance_info(&instance1_id, None)
-            .await
-            .unwrap()
-            .unwrap();
-
         let target_agent = cptestctx
             .sled_agents
             .iter()
@@ -931,24 +917,26 @@ async fn test_multicast_migration_scenarios(
             .unwrap()
             .sled_agent();
 
-        wait_for_condition_with_reconciler(
+        activate_then_wait_for_condition(
             &cptestctx.lockstep_client,
             || async {
-                let groups = target_agent.multicast_groups.lock().unwrap();
-                let has_sub =
-                    groups.get(&post_info.propolis_id).map_or(false, |g| {
-                        g.iter().any(|m| m.group_ip == multicast_ip)
-                    });
+                let groups =
+                    target_agent.instance_multicast_groups.lock().unwrap();
+                let has_sub = groups.get(&instance1_id).map_or(false, |g| {
+                    g.iter().any(|m| m.group_ip == multicast_ip)
+                });
                 if has_sub { Ok(()) } else { Err(CondCheckError::NotYet::<()>) }
             },
             &POLL_INTERVAL,
             &POLL_TIMEOUT,
         )
         .await
-        .expect("Target sled should have VMM subscription after migration");
+        .expect(
+            "Target sled should have instance subscription after migration",
+        );
 
         // Target sled should have M2P mapping.
-        wait_for_condition_with_reconciler(
+        activate_then_wait_for_condition(
             &cptestctx.lockstep_client,
             || async {
                 let m2p = target_agent.m2p_mappings.lock().unwrap();
@@ -1003,21 +991,18 @@ async fn test_multicast_migration_scenarios(
         .map(|i| InstanceUuid::from_untyped_uuid(i.identity.id))
         .collect();
 
-    // Start all instances via simulation
-    for &instance_id in &instance_ids {
+    // Start all instances via simulation in parallel.
+    ops::join_all(instance_ids.iter().map(|&instance_id| async move {
         instance_simulate(nexus, &instance_id).await;
         instance_wait_for_state(client, instance_id, InstanceState::Running)
             .await;
-    }
-    for inst in &instances {
-        wait_for_member_state(
-            cptestctx,
-            group2_name,
-            inst.identity.id,
-            nexus_db_model::MulticastGroupMemberState::Joined,
-        )
-        .await;
-    }
+    }))
+    .await;
+    let expected_joined: Vec<_> = instances
+        .iter()
+        .map(|inst| (inst.identity.id, MulticastGroupMemberState::Joined))
+        .collect();
+    wait_for_members_state(cptestctx, group2_name, &expected_joined).await;
 
     // Get source/target sleds for each instance
     let mut source_sleds = Vec::new();
@@ -1052,30 +1037,39 @@ async fn test_multicast_migration_scenarios(
         r.expect("Migration should initiate");
     }
 
-    // Complete all migrations
-    for (i, &instance_id) in instance_ids.iter().enumerate() {
-        let info = nexus
-            .active_instance_info(&instance_id, None)
-            .await
-            .unwrap()
-            .unwrap();
-        vmm_simulate_on_sled(
-            cptestctx,
-            nexus,
-            source_sleds[i],
-            info.propolis_id,
-        )
-        .await;
-        vmm_simulate_on_sled(
-            cptestctx,
-            nexus,
-            target_sleds[i],
-            info.dst_propolis_id.unwrap(),
-        )
-        .await;
-        instance_wait_for_state(client, instance_id, InstanceState::Running)
+    // Complete all migrations in parallel.
+    ops::join_all(instance_ids.iter().enumerate().map(|(i, &instance_id)| {
+        let source_sled = source_sleds[i];
+        let target_sled = target_sleds[i];
+        async move {
+            let info = nexus
+                .active_instance_info(&instance_id, None)
+                .await
+                .unwrap()
+                .unwrap();
+            vmm_simulate_on_sled(
+                cptestctx,
+                nexus,
+                source_sled,
+                info.propolis_id,
+            )
             .await;
-    }
+            vmm_simulate_on_sled(
+                cptestctx,
+                nexus,
+                target_sled,
+                info.dst_propolis_id.unwrap(),
+            )
+            .await;
+            instance_wait_for_state(
+                client,
+                instance_id,
+                InstanceState::Running,
+            )
+            .await;
+        }
+    }))
+    .await;
 
     // Verify all on target sleds
     for (i, &instance_id) in instance_ids.iter().enumerate() {
@@ -1093,8 +1087,6 @@ async fn test_multicast_migration_scenarios(
         );
     }
 
-    wait_for_multicast_reconciler(lockstep_client).await;
-
     let post_members = list_multicast_group_members(client, group2_name).await;
     assert_eq!(
         post_members.len(),
@@ -1102,15 +1094,12 @@ async fn test_multicast_migration_scenarios(
         "Both members should persist after concurrent migration"
     );
 
-    for inst in &instances {
-        wait_for_member_state(
-            cptestctx,
-            group2_name,
-            inst.identity.id,
-            nexus_db_model::MulticastGroupMemberState::Joined,
-        )
+    let post_migration_joined: Vec<_> = instances
+        .iter()
+        .map(|inst| (inst.identity.id, MulticastGroupMemberState::Joined))
+        .collect();
+    wait_for_members_state(cptestctx, group2_name, &post_migration_joined)
         .await;
-    }
 
     // Cleanup
     cleanup_instances(
@@ -1708,18 +1697,31 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
 ///
 /// This tests the invariant that `multicast_group_member_delete_by_group_and_instance`
 /// filters by both `group_id` and `instance_id`, not just `group_id`. This is
-/// important for saga undo correctness: if Instance B's create saga fails after
-/// joining a group, the undo must not affect Instance A's existing membership
+/// important for saga undo correctness: if instance B's create saga fails after
+/// joining a group, the undo must not affect instance A's existing membership
 /// in the same group.
-#[nexus_test]
+///
+/// This also verifies the shared-sled underlay invariant. Underlay membership
+/// is port-scoped, not member-scoped, as members on the same sled share a
+/// single rear-port entry in the underlay group. To exercise this, the test
+/// forces a multi-sled layout via migration:
+///
+/// - instances A and B sit on the same sled (sharing one rear port).
+/// - instance C sits on the other sled (its own rear port).
+///
+/// Deleting instance B must leave the rear-port set in the underlay group
+/// unchanged, since A still needs the shared port and C still needs its own.
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_delete_preserves_other_memberships(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
     let project_name = "delete-preserve-project";
     let group_name = "delete-preserve-group";
 
-    // Setup: create project and multicast pool
     ops::join3(
         create_default_ip_pools(client),
         create_project(client, project_name),
@@ -1732,53 +1734,194 @@ async fn test_instance_delete_preserves_other_memberships(
     )
     .await;
 
-    // Create Instance A and join it to the multicast group
-    create_instance(client, project_name, "instance-a").await;
-    multicast_group_attach(cptestctx, project_name, "instance-a", group_name)
-        .await;
+    let available_sleds =
+        [cptestctx.first_sled_id(), cptestctx.second_sled_id()];
+
+    // Bring up A, B, C as "Running" with the group attached.
+    let instances = ["instance-a", "instance-b", "instance-c"].iter().map(
+        |name| async move {
+            let inst = instance_for_multicast_groups(
+                cptestctx,
+                project_name,
+                name,
+                true,
+                &[group_name],
+            )
+            .await;
+            let id = InstanceUuid::from_untyped_uuid(inst.identity.id);
+            instance_simulate(nexus, &id).await;
+            instance_wait_for_state(client, id, InstanceState::Running).await;
+            (inst, id)
+        },
+    );
+    let started: Vec<(Instance, InstanceUuid)> = ops::join_all(instances).await;
+    let (instance_a, instance_a_uuid) = &started[0];
+    let (_instance_b, instance_b_uuid) = &started[1];
+    let (instance_c, instance_c_uuid) = &started[2];
+
     wait_for_group_active(client, group_name).await;
+    let initial_joined: Vec<_> = started
+        .iter()
+        .map(|(inst, _)| (inst.identity.id, MulticastGroupMemberState::Joined))
+        .collect();
+    wait_for_members_state(cptestctx, group_name, &initial_joined).await;
 
-    // Verify Instance A is a member
+    // Pick a "shared" sled (where A and B will live) and a "solo" sled
+    // (where C will live), based on A's current placement.
+    let shared_sled = nexus
+        .active_instance_info(instance_a_uuid, None)
+        .await
+        .unwrap()
+        .expect("instance A should be on a sled")
+        .sled_id;
+    let solo_sled = *available_sleds
+        .iter()
+        .find(|&&s| s != shared_sled)
+        .expect("two distinct sleds expected");
+
+    migrate_instance_to(cptestctx, *instance_b_uuid, shared_sled).await;
+    migrate_instance_to(cptestctx, *instance_c_uuid, solo_sled).await;
+
+    // After migration, the reconciler must observe each member's new
+    // sled_id before the rear-port snapshot. We explicitly
+    // poll until the DB row matches the post-migration placement for
+    // every member.
+    let expected_placement = [
+        (instance_a.identity.id, shared_sled),
+        (instance_b_uuid.into_untyped_uuid(), shared_sled),
+        (instance_c.identity.id, solo_sled),
+    ];
+    wait_for_member_sled_ids(cptestctx, group_name, &expected_placement).await;
+
     let members_before = list_multicast_group_members(client, group_name).await;
-    assert_eq!(members_before.len(), 1, "Instance A should be a member");
-    let instance_a_id = members_before[0].instance_id;
+    assert_eq!(
+        members_before.len(),
+        3,
+        "all three instances should be members"
+    );
 
-    // Create Instance B and join it to the same group
-    create_instance(client, project_name, "instance-b").await;
-    multicast_group_attach(cptestctx, project_name, "instance-b", group_name)
-        .await;
+    let group_view = get_multicast_group(client, group_name).await;
+    let multicast_ip = group_view.multicast_ip;
+    let underlay_admin_ip =
+        fetch_underlay_admin_ip(cptestctx, multicast_ip).await;
 
-    // Verify both instances are now members
-    let members_with_b = list_multicast_group_members(client, group_name).await;
-    assert_eq!(members_with_b.len(), 2, "Both instances should be members");
+    // Each switch independently programs the full set of rear ports for the
+    // group's underlay members. Read every switch's underlay group so a
+    // missing-on-one-switch fanout regression is caught.
+    let collect_rear_ports_by_switch = || {
+        let admin_ip = underlay_admin_ip.clone();
+        let dpd_clients = nexus_test_utils::dpd_clients_by_switch(cptestctx);
+        async move {
+            let mut by_switch: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+            for (slot, dpd) in dpd_clients {
+                let resp = dpd
+                    .multicast_group_get_underlay(&admin_ip)
+                    .await
+                    .expect("underlay group should exist in DPD")
+                    .into_inner();
+                // Key on (port_id, link_id) so breakout-link members are
+                // distinguished and any link/direction drift would be
+                // visible as a set difference.
+                let ports: BTreeSet<_> = resp
+                    .members
+                    .into_iter()
+                    .filter(|m| {
+                        matches!(m.port_id, dpd_client::types::PortId::Rear(_))
+                            && m.direction
+                                == dpd_client::types::Direction::Underlay
+                    })
+                    .map(|m| (m.port_id, m.link_id))
+                    .collect();
+                by_switch.insert(slot, ports);
+            }
+            by_switch
+        }
+    };
 
-    // Delete Instance B, only removing B's membership, not A's
+    // The DB sled_id update precedes DPD programming, and switches are
+    // updated independently per pass. Poll until every switch has both
+    // rear-port entries (shared sled + solo sled) before snapshotting.
+    let rear_ports_before = wait_for_condition(
+        || async {
+            let by_switch = collect_rear_ports_by_switch().await;
+            if by_switch.values().all(|ports| ports.len() == 2) {
+                Ok(by_switch)
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!(
+            "underlay group did not converge to one rear-port entry per \
+             occupied sled (shared by A+B, plus C's own) on every switch: \
+             {e:?}"
+        )
+    });
+
+    // Delete instance B. A still occupies the shared sled, so the
+    // shared rear port must remain; C's separate rear port must also
+    // remain.
     cleanup_instances(cptestctx, client, project_name, &["instance-b"]).await;
 
-    // Verify that Instance A's membership must still exist
-    let members_after_b_delete =
+    let members_after_b =
         list_multicast_group_members(client, group_name).await;
-
-    assert_eq!(
-        members_after_b_delete.len(),
-        1,
-        "Instance A's membership should survive Instance B's deletion"
+    assert_eq!(members_after_b.len(), 2, "A and C must survive B's deletion");
+    let remaining_instance_ids: BTreeSet<_> =
+        members_after_b.iter().map(|m| m.instance_id).collect();
+    assert!(
+        remaining_instance_ids.contains(&instance_a.identity.id),
+        "A's membership must remain"
     );
-    assert_eq!(
-        members_after_b_delete[0].instance_id, instance_a_id,
-        "The remaining member should be Instance A"
+    assert!(
+        remaining_instance_ids.contains(&instance_c.identity.id),
+        "C's membership must remain"
     );
 
-    // Verify the group is still active (not deleted due to last member leaving)
     let group = get_multicast_group(client, group_name).await;
-    assert_eq!(
-        group.state, "Active",
-        "Group should still be active since Instance A is still a member"
-    );
+    assert_eq!(group.state, "Active");
 
-    // Cleanup: delete Instance A, which should trigger group deletion
-    cleanup_instances(cptestctx, client, project_name, &["instance-a"]).await;
+    // Per-switch DPD updates lag the member-list change. Poll until
+    // every switch returns to its pre-delete state: A still on the
+    // shared sled, C on its own.
+    let rear_ports_after = wait_for_condition(
+        || async {
+            let by_switch = collect_rear_ports_by_switch().await;
+            if by_switch == rear_ports_before {
+                Ok(by_switch)
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!(
+            "per-switch rear-port set diverged from pre-deletion snapshot \
+             (expected {rear_ports_before:?}): {e:?}"
+        )
+    });
+    assert_eq!(rear_ports_after, rear_ports_before);
+
+    assert_mrib_route_exists(cptestctx, multicast_ip).await;
+
+    // Cleanup: deleting A and C drops both rear ports and tears down
+    // the group.
+    cleanup_instances(
+        cptestctx,
+        client,
+        project_name,
+        &["instance-a", "instance-c"],
+    )
+    .await;
     wait_for_group_deleted(cptestctx, group_name).await;
+    wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
+    assert_mrib_route_absent(cptestctx, multicast_ip).await;
 }
 
 /// Test IPv6 multicast group lifecycle: create, start, stop, delete.
@@ -1863,13 +2006,12 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
     .expect("Start should succeed");
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     wait_for_member_state(
         cptestctx,
         group_name,
         instance.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
+        MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1888,13 +2030,12 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     wait_for_member_state(
         cptestctx,
         group_name,
         instance.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Left,
+        MulticastGroupMemberState::Left,
     )
     .await;
 
@@ -1960,7 +2101,7 @@ async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
         cptestctx,
         group_name,
         instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
+        MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1991,7 +2132,7 @@ async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
         cptestctx,
         group_name,
         instance2.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
+        MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -2013,21 +2154,14 @@ async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
         instance_wait_for_state(client, id, InstanceState::Stopped).await;
     }
 
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
     // Verify both members are "Left"
-    wait_for_member_state(
+    wait_for_members_state(
         cptestctx,
         group_name,
-        instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Left,
-    )
-    .await;
-    wait_for_member_state(
-        cptestctx,
-        group_name,
-        instance2.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Left,
+        &[
+            (instance1.identity.id, MulticastGroupMemberState::Left),
+            (instance2.identity.id, MulticastGroupMemberState::Left),
+        ],
     )
     .await;
 
@@ -2053,13 +2187,12 @@ async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
 
     instance_simulate(nexus, &id1).await;
     instance_wait_for_state(client, id1, InstanceState::Running).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     wait_for_member_state(
         cptestctx,
         group_name,
         instance1.identity.id,
-        nexus_db_model::MulticastGroupMemberState::Joined,
+        MulticastGroupMemberState::Joined,
     )
     .await;
 

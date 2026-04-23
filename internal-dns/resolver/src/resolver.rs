@@ -345,6 +345,75 @@ impl Resolver {
         }
     }
 
+    /// Returns the SRV targets paired with their resolved IPv6 sockets.
+    ///
+    /// Like [`Resolver::lookup_all_socket_v6`], but preserves the SRV
+    /// target name so callers can correlate sockets back to their
+    /// source. Per-target IPv6 lookups are best-effort: failures for a
+    /// given target are logged and the entry is dropped from the result.
+    pub async fn lookup_all_socket_v6_by_target(
+        &self,
+        service: ServiceName,
+    ) -> Result<Vec<(String, SocketAddrV6)>, ResolveError> {
+        let name = service.srv_name();
+        trace!(self.log, "lookup_all_socket_v6_by_target srv"; "dns_name" => &name);
+        let response = self.resolver.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_all_socket_v6_by_target srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
+
+        let futs = std::iter::repeat((self.log.clone(), self.resolver.clone()))
+            .zip(response.into_iter())
+            .map(|((log, resolver), srv)| async move {
+                let target = srv.target().to_string();
+                let port = srv.port();
+                trace!(
+                    log,
+                    "lookup_all_socket_v6_by_target: looking up SRV target";
+                    "name" => &target,
+                );
+                resolver
+                    .ipv6_lookup(target.clone())
+                    .await
+                    .map(|ips| (target.clone(), ips, port))
+                    .map_err(|err| (target, err))
+            });
+
+        let log = self.log.clone();
+        let pairs: Vec<(String, SocketAddrV6)> = futures::future::join_all(
+            futs,
+        )
+        .await
+        .into_iter()
+        .flat_map(move |res| match res {
+            Ok((target, ips, port)) => ips
+                .into_iter()
+                .map(|ip| {
+                    (target.clone(), SocketAddrV6::new(ip.into(), port, 0, 0))
+                })
+                .collect::<Vec<_>>(),
+            Err((target, err)) => {
+                error!(
+                    log,
+                    "lookup_all_socket_v6_by_target: failed looking up target";
+                    "name" => %target,
+                    "error" => ?err,
+                );
+                Vec::new()
+            }
+        })
+        .collect();
+
+        if pairs.is_empty() {
+            Err(ResolveError::NotFound(service))
+        } else {
+            Ok(pairs)
+        }
+    }
+
     // Returns an iterator of SocketAddrs for the specified SRV name.
     //
     // Acts on a raw string for compatibility with the reqwest::dns::Resolve

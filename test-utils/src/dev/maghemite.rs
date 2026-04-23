@@ -163,6 +163,167 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
     }
 }
 
+/// Simulated DDM admin API instance for integration tests.
+///
+/// `ddmd` only runs on real switch zones (requires `libnet`,
+/// `opte-ioctl`, and physical network interfaces), so it is not
+/// available in the test toolchain like `mgd` is. This provides a
+/// dropshot server implementing the DDM admin API endpoints that
+/// omicron consumes, backed by in-memory state.
+///
+/// Peers can be provided at construction time and updated at runtime
+/// via `set_peers`.
+pub struct DdmInstance {
+    pub port: u16,
+    server: Option<dropshot::HttpServer<DdmSimContext>>,
+}
+
+/// Server-side peer info type for the DDM sim.
+///
+/// Mirrors the wire format of the progenitor-generated
+/// `ddm_admin_client::types::PeerInfo` but derives `JsonSchema` so
+/// dropshot can serve it directly.
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct SimPeerInfo {
+    pub addr: std::net::Ipv6Addr,
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub if_name: Option<String>,
+    pub kind: i64,
+    pub status: SimPeerStatus,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    PartialEq,
+)]
+pub enum SimPeerStatus {
+    NoContact,
+    Active,
+    Expired,
+}
+
+pub type PeerMap = std::collections::HashMap<String, SimPeerInfo>;
+
+pub struct DdmSimContext {
+    peers: std::sync::Mutex<PeerMap>,
+}
+
+/// Configuration for starting a `DdmInstance`.
+pub struct DdmInstanceConfig {
+    /// Initial peers to serve from `GET /peers`.
+    pub initial_peers: PeerMap,
+    /// Port to bind on (0 for auto-assign).
+    pub port: u16,
+    /// Logger for the dropshot server.
+    pub log: slog::Logger,
+}
+
+impl Default for DdmInstanceConfig {
+    fn default() -> Self {
+        Self {
+            initial_peers: PeerMap::new(),
+            port: 0,
+            log: slog::Logger::root(slog::Discard, slog::o!()),
+        }
+    }
+}
+
+impl DdmInstance {
+    /// Start a DDM sim server with default configuration (no peers,
+    /// auto-assigned port).
+    pub async fn start() -> Result<Self, anyhow::Error> {
+        Self::start_with_config(DdmInstanceConfig::default()).await
+    }
+
+    /// Start a DDM sim server with the provided configuration.
+    pub async fn start_with_config(
+        config: DdmInstanceConfig,
+    ) -> Result<Self, anyhow::Error> {
+        let context = DdmSimContext {
+            peers: std::sync::Mutex::new(config.initial_peers),
+        };
+
+        let dropshot_config = dropshot::ConfigDropshot {
+            bind_address: std::net::SocketAddr::V6(
+                std::net::SocketAddrV6::new(
+                    std::net::Ipv6Addr::LOCALHOST,
+                    config.port,
+                    0,
+                    0,
+                ),
+            ),
+            ..Default::default()
+        };
+
+        let mut api = dropshot::ApiDescription::new();
+        api.register(ddm_get_peers).unwrap();
+
+        let server = dropshot::HttpServerStarter::new(
+            &dropshot_config,
+            api,
+            context,
+            &config.log,
+        )
+        .map_err(|e| anyhow::anyhow!("failed to start DDM sim server: {e}"))?
+        .start();
+
+        let port = server.local_addr().port();
+        Ok(Self { port, server: Some(server) })
+    }
+
+    /// Replace the peers returned by `GET /peers`.
+    pub fn set_peers(&self, peers: PeerMap) {
+        let server = self.server.as_ref().expect("DDM sim server not running");
+        *server.app_private().peers.lock().unwrap() = peers;
+    }
+
+    pub async fn cleanup(&mut self) {
+        if let Some(server) = self.server.take() {
+            server.close().await.expect("failed to close DDM sim server");
+        }
+    }
+}
+
+/// Build a `SimPeerInfo` for a sled connected through the specified
+/// switch port interface.
+///
+/// `host` identifies the peer in DDM (typically the sled hostname).
+/// `if_name` is the switch port interface (e.g., `"tfportrear0_0"`).
+/// `kind` is the DDM router kind (0 = server, 1 = transit).
+pub fn sim_peer_info(
+    addr: std::net::Ipv6Addr,
+    host: &str,
+    if_name: &str,
+    kind: i64,
+    status: SimPeerStatus,
+) -> SimPeerInfo {
+    SimPeerInfo {
+        addr,
+        host: host.to_string(),
+        if_name: Some(if_name.to_string()),
+        kind,
+        status,
+    }
+}
+
+#[dropshot::endpoint {
+    method = GET,
+    path = "/peers",
+}]
+async fn ddm_get_peers(
+    rqctx: dropshot::RequestContext<DdmSimContext>,
+) -> Result<dropshot::HttpResponseOk<PeerMap>, dropshot::HttpError> {
+    let peers = rqctx.context().peers.lock().unwrap().clone();
+    Ok(dropshot::HttpResponseOk(peers))
+}
+
 #[cfg(test)]
 mod tests {
     use super::find_mgd_port_in_log;

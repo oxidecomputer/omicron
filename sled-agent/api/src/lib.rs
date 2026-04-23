@@ -637,30 +637,30 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = PUT,
-        path = "/vmms/{propolis_id}/multicast-group",
+        path = "/instances/{instance_id}/multicast-group",
         versions = VERSION_MCAST_M2P_FORWARDING..,
     }]
-    async fn vmm_join_multicast_group(
+    async fn instance_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<latest::instance::InstancePathParam>,
         body: TypedBody<latest::instance::InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = DELETE,
-        path = "/vmms/{propolis_id}/multicast-group",
+        path = "/instances/{instance_id}/multicast-group",
         versions = VERSION_MCAST_M2P_FORWARDING..,
     }]
-    async fn vmm_leave_multicast_group(
+    async fn instance_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
+        path_params: Path<latest::instance::InstancePathParam>,
         body: TypedBody<latest::instance::InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Join a multicast group.
-    ///
-    /// Accepts a tagged `InstanceMulticastBody` request.
-    /// Superseded in MCAST_M2P_FORWARDING.
+    //
+    // Deprecated. This was keyed by the active VMM's Propolis ID, while
+    // newer versions use an instance-scoped endpoint.
     #[endpoint {
         operation_id = "vmm_join_multicast_group",
         method = PUT,
@@ -671,23 +671,12 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v7::instance::InstanceMulticastBody>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(|b| match b {
-            v7::instance::InstanceMulticastBody::Join(m) => Ok(m),
-            v7::instance::InstanceMulticastBody::Leave(_) => {
-                Err(HttpError::for_bad_request(
-                    None,
-                    "Join endpoint cannot process Leave operations".to_string(),
-                ))
-            }
-        })?;
-        Self::vmm_join_multicast_group(rqctx, path_params, body).await
-    }
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Leave a multicast group.
-    ///
-    /// Accepts a tagged `InstanceMulticastBody` request.
-    /// Superseded in MCAST_M2P_FORWARDING.
+    //
+    // Deprecated. This was keyed by the active VMM's Propolis ID, while
+    // newer versions use an instance-scoped endpoint.
     #[endpoint {
         operation_id = "vmm_leave_multicast_group",
         method = DELETE,
@@ -698,18 +687,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v7::instance::InstanceMulticastBody>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(|b| match b {
-            v7::instance::InstanceMulticastBody::Leave(m) => Ok(m),
-            v7::instance::InstanceMulticastBody::Join(_) => {
-                Err(HttpError::for_bad_request(
-                    None,
-                    "Leave endpoint cannot process Join operations".to_string(),
-                ))
-            }
-        })?;
-        Self::vmm_leave_multicast_group(rqctx, path_params, body).await
-    }
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = PUT,

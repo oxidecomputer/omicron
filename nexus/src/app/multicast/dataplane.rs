@@ -40,6 +40,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::time::Duration;
 
 use futures::future::try_join_all;
 use oxnet::MulticastMac;
@@ -139,7 +140,7 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 /// - Group-level uplink configuration (which front ports to use)
 /// - Uplink members with [`dpd_client::types::Direction::External`] added to
 ///   underlay groups
-/// - Integration with existing `switch_ports_with_uplinks()` for port discovery
+/// - Integration with existing `switch_ports_with_uplinks` for port discovery
 pub(crate) struct MulticastDataplaneClient {
     dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
     log: Logger,
@@ -154,6 +155,15 @@ pub(crate) struct GroupUpdateParams<'a> {
     pub source_filter: &'a SourceFilterState,
 }
 
+/// Bound DPD client construction. On timeout (or DNS failure) we yield
+/// an empty client map rather than failing the pass: group operations
+/// skip with no switches, but DB-only member-state transitions
+/// ("Joining" → "Left" when the instance is stopped) still proceed.
+const DPD_CLIENT_BUILD_TIMEOUT: Duration =
+    // Caps the internal-DNS retry budget for `_dendrite._tcp` so a DPD
+    // outage doesn't starve the bg task's idle window.
+    Duration::from_secs(5);
+
 impl MulticastDataplaneClient {
     /// Create a new client - builds fresh DPD clients for current switch
     /// topology.
@@ -161,29 +171,48 @@ impl MulticastDataplaneClient {
         resolver: Resolver,
         log: Logger,
     ) -> MulticastDataplaneResult<Self> {
-        let dpd_clients = dpd_clients(&resolver, &log).await.map_err(|e| {
-            error!(
-                log,
-                "failed to build DPD clients";
-                "error" => %e
-            );
-            Error::internal_error("failed to build DPD clients")
-        })?;
+        let dpd_clients = match tokio::time::timeout(
+            DPD_CLIENT_BUILD_TIMEOUT,
+            dpd_clients(&resolver, &log),
+        )
+        .await
+        {
+            Ok(Ok(clients)) => clients,
+            Ok(Err(e)) => {
+                error!(
+                    log,
+                    "failed to build DPD clients, continuing with empty \
+                     client map";
+                    "error" => %e,
+                );
+                HashMap::new()
+            }
+            Err(_) => {
+                error!(
+                    log,
+                    "timed out building DPD clients, continuing with empty \
+                     client map";
+                    "timeout" => ?DPD_CLIENT_BUILD_TIMEOUT,
+                );
+                HashMap::new()
+            }
+        };
         Ok(Self { dpd_clients, log })
     }
 
-    /// Select a single switch deterministically for read operations.
+    /// Iterate switches in deterministic (sorted by `SwitchSlot`) order.
     ///
-    /// Used when all switches should have identical state and we only need
-    /// to query one. Selects the first switch in sorted order by location
-    /// for consistency across invocations.
-    fn select_one_switch(
+    /// Used by read paths that need data from any one switch (since all
+    /// switches hold identical state for that read). Callers walk this
+    /// iterator and short-circuit on the first success, falling through
+    /// to subsequent switches on per-switch failure so a single
+    /// unhealthy switch doesn't fail the whole operation.
+    fn switches_in_order(
         &self,
-    ) -> MulticastDataplaneResult<(&SwitchSlot, &dpd_client::Client)> {
-        self.dpd_clients
-            .iter()
-            .min_by_key(|(loc, _)| *loc)
-            .ok_or_else(|| Error::internal_error("no DPD clients available"))
+    ) -> impl Iterator<Item = (&SwitchSlot, &dpd_client::Client)> {
+        let mut entries: Vec<_> = self.dpd_clients.iter().collect();
+        entries.sort_by_key(|(slot, _)| *slot);
+        entries.into_iter()
     }
 
     /// Compute DPD source filter from aggregated member source state.
@@ -1003,9 +1032,13 @@ impl MulticastDataplaneClient {
 
     /// Detect and log cross-switch drift for multicast groups.
     ///
-    /// We logs errors if:
+    /// Detection-only. Logs errors when:
     /// - Group is present on some switches but missing on others (presence drift)
     /// - Group has different configurations across switches (config drift)
+    ///
+    /// Drift correction is handled separately by the active-group reconciler
+    /// (`groups.rs::reconcile_active_groups`), which re-pushes the
+    /// authoritative DB state to all switches on the next pass.
     fn log_drift_issues<'a>(
         &self,
         group_ip: IpAddr,
@@ -1052,9 +1085,11 @@ impl MulticastDataplaneClient {
     /// Fetch external multicast group DPD state for RPW drift detection.
     ///
     /// Queries all switches to detect configuration drift. If any switch has
-    /// different state (missing group, different config), it will return the
-    /// found state, so the reconciler can initiate an UPDATE
-    /// saga that will fix all switches atomically.
+    /// different state (missing group, different config), returns the found
+    /// state so the reconciler can re-issue the dataplane operations on the
+    /// next pass and converge to the intended configuration. Drift repair
+    /// follows the RPW convergence model rather than an atomic cross-switch
+    /// saga, so callers should expect N-pass convergence on partial failure.
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
         group_ip: IpAddr,
@@ -1165,63 +1200,65 @@ impl MulticastDataplaneClient {
             dpd_client::types::BackplaneLink,
         >,
     > {
-        let (switch_slot, client) = self.select_one_switch()?;
+        let mut errors: Vec<(SwitchSlot, String)> = Vec::new();
+        for (switch_slot, client) in self.switches_in_order() {
+            debug!(
+                self.log,
+                "fetching backplane map from DPD for topology validation";
+                "switch" => ?switch_slot,
+                "dpd_operation" => "fetch_backplane_map"
+            );
 
-        debug!(
-            self.log,
-            "fetching backplane map from DPD for topology validation";
-            "switch" => ?switch_slot,
-            "query_scope" => "single_switch",
-            "dpd_operation" => "fetch_backplane_map"
-        );
+            match client.backplane_map().await {
+                Ok(response) => {
+                    let backplane_map_raw = response.into_inner();
 
-        match client.backplane_map().await {
-            Ok(response) => {
-                let backplane_map_raw = response.into_inner();
-
-                // Convert HashMap<String, BackplaneLink> to BTreeMap<PortId, BackplaneLink>
-                // DPD returns string keys like "rear0", "rear1" - parse them to PortId
-                let backplane_map: std::collections::BTreeMap<_, _> = backplane_map_raw
-                    .into_iter()
-                    .filter_map(|(port_str, link)| {
-                        match dpd_client::types::PortId::try_from(port_str.as_str()) {
-                            Ok(port_id) => Some((port_id, link)),
-                            Err(e) => {
-                                error!(
-                                    self.log,
-                                    "failed to parse port ID from backplane map";
-                                    "port_str" => %port_str,
-                                    "error" => %e,
-                                    "dpd_operation" => "fetch_backplane_map"
-                                );
-                                None
+                    // Convert HashMap<String, BackplaneLink> to BTreeMap<PortId, BackplaneLink>.
+                    // DPD returns string keys like "rear0", "rear1"; parse them to PortId.
+                    let backplane_map: std::collections::BTreeMap<_, _> = backplane_map_raw
+                        .into_iter()
+                        .filter_map(|(port_str, link)| {
+                            match dpd_client::types::PortId::try_from(port_str.as_str()) {
+                                Ok(port_id) => Some((port_id, link)),
+                                Err(e) => {
+                                    error!(
+                                        self.log,
+                                        "failed to parse port ID from backplane map";
+                                        "port_str" => %port_str,
+                                        "error" => %e,
+                                        "dpd_operation" => "fetch_backplane_map"
+                                    );
+                                    None
+                                }
                             }
-                        }
-                    })
-                    .collect();
+                        })
+                        .collect();
 
-                debug!(
-                    self.log,
-                    "backplane map fetched from DPD";
-                    "switch" => ?switch_slot,
-                    "port_count" => backplane_map.len(),
-                    "dpd_operation" => "fetch_backplane_map"
-                );
-                Ok(backplane_map)
-            }
-            Err(e) => {
-                error!(
-                    self.log,
-                    "backplane map fetch failed";
-                    "switch" => ?switch_slot,
-                    "error" => %e,
-                    "dpd_operation" => "fetch_backplane_map"
-                );
-                Err(Error::internal_error(&format!(
-                    "failed to fetch backplane map from DPD: {e}"
-                )))
+                    debug!(
+                        self.log,
+                        "backplane map fetched from DPD";
+                        "switch" => ?switch_slot,
+                        "port_count" => backplane_map.len(),
+                        "dpd_operation" => "fetch_backplane_map"
+                    );
+                    return Ok(backplane_map);
+                }
+                Err(e) => {
+                    warn!(
+                        self.log,
+                        "backplane map fetch failed on switch, trying next";
+                        "switch" => ?switch_slot,
+                        "error" => %e,
+                        "dpd_operation" => "fetch_backplane_map"
+                    );
+                    errors.push((*switch_slot, format!("{e}")));
+                }
             }
         }
+
+        Err(Error::internal_error(&format!(
+            "failed to fetch backplane map from any switch: {errors:?}",
+        )))
     }
 
     /// Fetch current underlay group members from a single switch.
@@ -1236,60 +1273,63 @@ impl MulticastDataplaneClient {
         &self,
         underlay_ip: IpAddr,
     ) -> MulticastDataplaneResult<Option<Vec<MulticastGroupMember>>> {
-        let (switch_slot, client) = self.select_one_switch()?;
+        let mut errors: Vec<(SwitchSlot, String)> = Vec::new();
+        for (switch_slot, client) in self.switches_in_order() {
+            debug!(
+                self.log,
+                "fetching underlay group members from DPD for drift detection";
+                "underlay_ip" => %underlay_ip,
+                "switch" => ?switch_slot,
+                "dpd_operation" => "fetch_underlay_members"
+            );
 
-        debug!(
-            self.log,
-            "fetching underlay group members from DPD for drift detection";
-            "underlay_ip" => %underlay_ip,
-            "switch" => ?switch_slot,
-            "dpd_operation" => "fetch_underlay_members"
-        );
-
-        match client
-            .multicast_group_get_underlay(
-                &underlay_ip.into_underlay_multicast()?,
-            )
-            .await
-        {
-            Ok(response) => {
-                let members = response.into_inner().members;
-                debug!(
-                    self.log,
-                    "underlay group members fetched from DPD";
-                    "underlay_ip" => %underlay_ip,
-                    "switch" => ?switch_slot,
-                    "member_count" => members.len(),
-                    "dpd_operation" => "fetch_underlay_members"
-                );
-                Ok(Some(members))
-            }
-            Err(DpdError::ErrorResponse(resp))
-                if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+            match client
+                .multicast_group_get_underlay(
+                    &underlay_ip.into_underlay_multicast()?,
+                )
+                .await
             {
-                debug!(
-                    self.log,
-                    "underlay group not found on switch";
-                    "underlay_ip" => %underlay_ip,
-                    "switch" => ?switch_slot,
-                    "dpd_operation" => "fetch_underlay_members"
-                );
-                Ok(None)
-            }
-            Err(e) => {
-                error!(
-                    self.log,
-                    "underlay group fetch failed";
-                    "underlay_ip" => %underlay_ip,
-                    "switch" => ?switch_slot,
-                    "error" => %e,
-                    "dpd_operation" => "fetch_underlay_members"
-                );
-                Err(Error::internal_error(&format!(
-                    "failed to fetch underlay group from DPD: {e}"
-                )))
+                Ok(response) => {
+                    let members = response.into_inner().members;
+                    debug!(
+                        self.log,
+                        "underlay group members fetched from DPD";
+                        "underlay_ip" => %underlay_ip,
+                        "switch" => ?switch_slot,
+                        "member_count" => members.len(),
+                        "dpd_operation" => "fetch_underlay_members"
+                    );
+                    return Ok(Some(members));
+                }
+                Err(DpdError::ErrorResponse(resp))
+                    if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+                {
+                    debug!(
+                        self.log,
+                        "underlay group not found on switch";
+                        "underlay_ip" => %underlay_ip,
+                        "switch" => ?switch_slot,
+                        "dpd_operation" => "fetch_underlay_members"
+                    );
+                    return Ok(None);
+                }
+                Err(e) => {
+                    warn!(
+                        self.log,
+                        "underlay group fetch failed on switch, trying next";
+                        "underlay_ip" => %underlay_ip,
+                        "switch" => ?switch_slot,
+                        "error" => %e,
+                        "dpd_operation" => "fetch_underlay_members"
+                    );
+                    errors.push((*switch_slot, format!("{e}")));
+                }
             }
         }
+
+        Err(Error::internal_error(&format!(
+            "failed to fetch underlay group from any switch: {errors:?}",
+        )))
     }
 
     pub(crate) async fn remove_groups(
