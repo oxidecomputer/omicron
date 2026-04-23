@@ -41,7 +41,7 @@ Dendrite DPD (client: dpd-client)
     consumed by: lldpd (lldp/lldpd) via 2 paths
     consumed by: mgd (maghemite/mgd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
     consumed by: tfportd (dendrite/tfportd) via 2 paths
     consumed by: wicketd (omicron/wicketd) via 2 paths
 
@@ -52,7 +52,7 @@ Management Gateway Service (client: gateway-client)
     consumed by: lldpd (lldp/lldpd) via 1 path
     consumed by: mgd (maghemite/mgd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 4 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
     consumed by: wicketd (omicron/wicketd) via 3 paths
 
 Wicketd Installinator (client: installinator-client)
@@ -64,7 +64,7 @@ LLDP daemon (client: lldpd-client)
 
 Maghemite MG Admin (client: mg-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 Nexus Internal API (client: nexus-client)
     consumed by: crucible-pantry (crucible/pantry) via 1 path

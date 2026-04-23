@@ -100,6 +100,7 @@ sled-agent-measurements.workspace = true
 sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
 sled-agent-resolvable-files.workspace = true
+sled-agent-scrimlet-reconcilers.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
