@@ -1852,7 +1852,7 @@ pub struct VpcFirewallRulePriority(pub u16);
 pub const VPC_FIREWALL_RULE_MAX_FILTER_LEN: usize = 256;
 
 /// Filters reduce the scope of a firewall rule. Without filters, the rule
-/// applies to all packets to the targets (or from the targets, if it’s an
+/// applies to all packets to the targets (or from the targets, if it's an
 /// outbound rule). With multiple filters, the rule applies only to packets
 /// matching ALL filters. The maximum number of each type of filter is 256.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
