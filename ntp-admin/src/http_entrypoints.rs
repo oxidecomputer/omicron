@@ -42,12 +42,16 @@ impl From<TimeSyncError> for HttpError {
 const TIMESYNC_STRATUM_MAX: u8 = 9;
 const TIMESYNC_REFTIME_MIN: f64 = 1234567890.0;
 const TIMESYNC_CORRECTION_MAX: f64 = 0.05;
+// CockroachDB panics if any node's clock is more than 500ms from at least half
+// of its peers. If all nodes have max_error <= 200ms, the worst-case
+// inter-node difference is 400ms, keeping us within CRDB's 500ms threshold.
+const TIMESYNC_MAX_ERROR_MAX: f64 = 0.2;
 const TIMESYNC_REF_IDS_NO_PEER_SYNC: [u32; 2] = [0, 0x7f7f0101];
 
 fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
     let v: Vec<&str> = stdout.split(',').collect();
 
-    if v.len() < 10 {
+    if v.len() < 12 {
         return Err(TimeSyncError::FailedToParse {
             reason: "too few fields",
             stdout: stdout.to_string(),
@@ -80,6 +84,32 @@ fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
             stdout: stdout.to_string(),
         });
     };
+    let Ok(last_offset) = f64::from_str(v[5]) else {
+        return Err(TimeSyncError::FailedToParse {
+            reason: "bad last_offset",
+            stdout: stdout.to_string(),
+        });
+    };
+    let Ok(rms_offset) = f64::from_str(v[6]) else {
+        return Err(TimeSyncError::FailedToParse {
+            reason: "bad rms_offset",
+            stdout: stdout.to_string(),
+        });
+    };
+    let Ok(root_delay) = f64::from_str(v[10]) else {
+        return Err(TimeSyncError::FailedToParse {
+            reason: "bad root_delay",
+            stdout: stdout.to_string(),
+        });
+    };
+    let Ok(root_dispersion) = f64::from_str(v[11]) else {
+        return Err(TimeSyncError::FailedToParse {
+            reason: "bad root_dispersion",
+            stdout: stdout.to_string(),
+        });
+    };
+
+    let max_error = root_delay / 2.0 + root_dispersion;
 
     // Per `chronyc waitsync`'s implementation, if either the
     // reference IP address is not unspecified or the reference
@@ -90,9 +120,22 @@ fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
     let sync = stratum <= TIMESYNC_STRATUM_MAX
         && TIMESYNC_REFTIME_MIN < ref_time
         && peer_sync
-        && correction.abs() <= TIMESYNC_CORRECTION_MAX;
+        && correction.abs() <= TIMESYNC_CORRECTION_MAX
+        && max_error <= TIMESYNC_MAX_ERROR_MAX;
 
-    Ok(TimeSync { sync, ref_id, ip_addr, stratum, ref_time, correction })
+    Ok(TimeSync {
+        sync,
+        ref_id,
+        ip_addr,
+        stratum,
+        ref_time,
+        correction,
+        last_offset,
+        rms_offset,
+        root_delay,
+        root_dispersion,
+        max_error,
+    })
 }
 
 enum NtpAdminImpl {}
@@ -133,45 +176,61 @@ mod tests {
     use super::*;
     use std::net::Ipv4Addr;
 
+    // Standard field values used across tests. chronyc -c tracking fields are:
+    // ref_id, ip_addr, stratum, ref_time, correction (v[4]),
+    // last_offset (v[5]), rms_offset (v[6]), freq_ppm (v[7]),
+    // resid_freq_ppm (v[8]), skew_ppm (v[9]),
+    // root_delay (v[10]), root_dispersion (v[11]), ...
+    const GOOD_FIELDS_5_TO_11: &str = "0.001,0.001,x,x,x,0.01,0.001";
+
     #[test]
     fn test_parse_timesync_result_success() {
-        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,192.168.0.1,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.ref_id, 0xC0A80001);
         assert_eq!(result.ip_addr, IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)));
         assert_eq!(result.stratum, 2);
         assert_eq!(result.ref_time, 1234567891.123456);
         assert_eq!(result.correction, 0.001);
+        assert_eq!(result.last_offset, 0.001);
+        assert_eq!(result.rms_offset, 0.001);
+        assert_eq!(result.root_delay, 0.01);
+        assert_eq!(result.root_dispersion, 0.001);
+        assert_eq!(result.max_error, 0.01 / 2.0 + 0.001);
         assert!(result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_not_synced_high_stratum() {
         let stratum = TIMESYNC_STRATUM_MAX + 1;
-        let input = &format!(
-            "C0A80001,192.168.0.1,{stratum},1234567891.123456,0.001,x,x,x,x,x"
+        let input = format!(
+            "C0A80001,192.168.0.1,{stratum},1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
         );
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert!(!result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_not_synced_old_ref_time() {
         let ref_time = TIMESYNC_REFTIME_MIN - 0.01;
-        let input = &format!(
-            "C0A80001,192.168.0.1,2,{ref_time},0.001,0.000001,x,x,x,x,x"
+        let input = format!(
+            "C0A80001,192.168.0.1,2,{ref_time},0.001,{GOOD_FIELDS_5_TO_11}"
         );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert!(!result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_boundary_correction() {
-        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.05,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,192.168.0.1,2,1234567891.123456,0.05,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.correction, 0.05);
         assert!(result.sync);
     }
@@ -179,65 +238,103 @@ mod tests {
     #[test]
     fn test_parse_timesync_result_not_synced_high_correction() {
         let correction = TIMESYNC_CORRECTION_MAX + 0.01;
-        let input = &format!(
-            "C0A80001,192.168.0.1,2,1234567891.123456,{correction},x,x,x,x,x"
+        let input = format!(
+            "C0A80001,192.168.0.1,2,1234567891.123456,{correction},{GOOD_FIELDS_5_TO_11}"
         );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert!(!result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_negative_correction() {
-        let input = "C0A80001,192.168.0.1,2,1234567891.123456,-0.01,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,192.168.0.1,2,1234567891.123456,-0.01,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.correction, -0.01);
         assert!(result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_not_synced_no_peer() {
-        let input = "0,::/0,2,1234567891.123456,0.001,x,x,x,x,x";
+        let input =
+            format!("0,::/0,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}");
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert!(!result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_special_ref_id() {
-        let input = "0,::/0,2,1234567891.123456,0.001,x,x,x,x,x";
-        let result = parse_timesync_result(input).unwrap();
+        let input =
+            format!("0,::/0,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}");
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.ref_id, TIMESYNC_REF_IDS_NO_PEER_SYNC[0]);
         assert!(!result.sync);
 
-        let input = "7f7f0101,::/0,2,1234567891.123456,0.001,x,x,x,x,x";
-        let result = parse_timesync_result(input).unwrap();
+        let input = format!(
+            "7f7f0101,::/0,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.ref_id, TIMESYNC_REF_IDS_NO_PEER_SYNC[1]);
         assert!(!result.sync);
 
-        let input = "7f7f0102,192.168.0.1,2,1234567891.123456,0.001,x,x,x,x,x";
-        let result = parse_timesync_result(input).unwrap();
+        let input = format!(
+            "7f7f0102,192.168.0.1,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.ref_id, 0x7f7f0102);
         assert!(result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_ipv6_address() {
-        let input = "C0A80001,2001:db8::1,2,1234567891.123456,0.001,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,2001:db8::1,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.ip_addr, "2001:db8::1".parse::<IpAddr>().unwrap());
         assert!(result.sync);
     }
 
     #[test]
     fn test_parse_timesync_result_invalid_ip_fallback() {
-        let input = "C0A80001,invalid_ip,2,1234567891.123456,0.001,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,invalid_ip,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input).unwrap();
+        let result = parse_timesync_result(&input).unwrap();
         assert_eq!(result.ip_addr, IpAddr::V6(Ipv6Addr::UNSPECIFIED));
         // Still syncs if ref_id is not in TIMESYNC_REF_IDS_NO_PEER_SYNC
+        assert!(result.sync);
+    }
+
+    #[test]
+    fn test_parse_timesync_result_not_synced_high_max_error() {
+        // root_delay/2 + root_dispersion > TIMESYNC_MAX_ERROR_MAX
+        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,0.001,x,x,x,0.3,0.1";
+
+        let result = parse_timesync_result(input).unwrap();
+        assert_eq!(result.root_delay, 0.3);
+        assert_eq!(result.root_dispersion, 0.1);
+        assert_eq!(result.max_error, 0.3 / 2.0 + 0.1);
+        assert!(!result.sync);
+    }
+
+    #[test]
+    fn test_parse_timesync_result_boundary_max_error() {
+        // root_delay/2 + root_dispersion == TIMESYNC_MAX_ERROR_MAX exactly
+        let root_delay = 0.2;
+        let root_dispersion = 0.1;
+        let input = format!(
+            "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,0.001,x,x,x,{root_delay},{root_dispersion}"
+        );
+
+        let result = parse_timesync_result(&input).unwrap();
+        assert_eq!(result.max_error, TIMESYNC_MAX_ERROR_MAX);
         assert!(result.sync);
     }
 
@@ -257,9 +354,11 @@ mod tests {
 
     #[test]
     fn test_parse_timesync_result_invalid_ref_id() {
-        let input = "INVALID,192.168.0.1,2,1234567891.123456,0.001,x,x,x,x,x";
+        let input = format!(
+            "INVALID,192.168.0.1,2,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input);
+        let result = parse_timesync_result(&input);
         assert!(result.is_err());
         match result.unwrap_err() {
             TimeSyncError::FailedToParse { reason, .. } => {
@@ -271,10 +370,11 @@ mod tests {
 
     #[test]
     fn test_parse_timesync_result_invalid_stratum() {
-        let input =
-            "C0A80001,192.168.0.1,invalid,1234567891.123456,0.001,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,192.168.0.1,invalid,1234567891.123456,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input);
+        let result = parse_timesync_result(&input);
         assert!(result.is_err());
         match result.unwrap_err() {
             TimeSyncError::FailedToParse { reason, .. } => {
@@ -286,9 +386,11 @@ mod tests {
 
     #[test]
     fn test_parse_timesync_result_invalid_ref_time() {
-        let input = "C0A80001,192.168.0.1,2,invalid,0.001,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,192.168.0.1,2,invalid,0.001,{GOOD_FIELDS_5_TO_11}"
+        );
 
-        let result = parse_timesync_result(input);
+        let result = parse_timesync_result(&input);
         assert!(result.is_err());
         match result.unwrap_err() {
             TimeSyncError::FailedToParse { reason, .. } => {
@@ -300,14 +402,71 @@ mod tests {
 
     #[test]
     fn test_parse_timesync_result_invalid_correction() {
-        let input =
-            "C0A80001,192.168.0.1,2,1234567891.123456,invalid,x,x,x,x,x";
+        let input = format!(
+            "C0A80001,192.168.0.1,2,1234567891.123456,invalid,{GOOD_FIELDS_5_TO_11}"
+        );
+
+        let result = parse_timesync_result(&input);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            TimeSyncError::FailedToParse { reason, .. } => {
+                assert_eq!(reason, "bad correction");
+            }
+            _ => panic!("Expected FailedToParse error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_timesync_result_invalid_last_offset() {
+        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,invalid,0.001,x,x,x,0.01,0.001";
 
         let result = parse_timesync_result(input);
         assert!(result.is_err());
         match result.unwrap_err() {
             TimeSyncError::FailedToParse { reason, .. } => {
-                assert_eq!(reason, "bad correction");
+                assert_eq!(reason, "bad last_offset");
+            }
+            _ => panic!("Expected FailedToParse error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_timesync_result_invalid_rms_offset() {
+        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,invalid,x,x,x,0.01,0.001";
+
+        let result = parse_timesync_result(input);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            TimeSyncError::FailedToParse { reason, .. } => {
+                assert_eq!(reason, "bad rms_offset");
+            }
+            _ => panic!("Expected FailedToParse error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_timesync_result_invalid_root_delay() {
+        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,0.001,x,x,x,invalid,0.001";
+
+        let result = parse_timesync_result(input);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            TimeSyncError::FailedToParse { reason, .. } => {
+                assert_eq!(reason, "bad root_delay");
+            }
+            _ => panic!("Expected FailedToParse error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_timesync_result_invalid_root_dispersion() {
+        let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,0.001,x,x,x,0.01,invalid";
+
+        let result = parse_timesync_result(input);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            TimeSyncError::FailedToParse { reason, .. } => {
+                assert_eq!(reason, "bad root_dispersion");
             }
             _ => panic!("Expected FailedToParse error"),
         }

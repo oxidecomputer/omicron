@@ -723,15 +723,7 @@ impl ServiceInner {
     ) -> Result<TimeSync, SetupServiceError> {
         info!(client.inner(), "Checking time synchronization");
 
-        let ts = client.timesync().await?.into_inner();
-        Ok(TimeSync {
-            sync: ts.sync,
-            ref_id: ts.ref_id,
-            ip_addr: ts.ip_addr,
-            stratum: ts.stratum,
-            ref_time: ts.ref_time,
-            correction: ts.correction,
-        })
+        Ok(client.timesync().await?.into_inner())
     }
 
     async fn wait_for_timesync(

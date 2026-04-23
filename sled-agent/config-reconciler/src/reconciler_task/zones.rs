@@ -532,7 +532,19 @@ impl OmicronZones {
         match &self.timesync_config {
             TimeSyncConfig::Normal => {
                 match self.timesync_status_from_ntp_zone(log).await {
-                    Ok(timesync) => TimeSyncStatus::TimeSync(timesync),
+                    Ok(timesync) => {
+                        if !timesync.sync {
+                            warn!(
+                                log,
+                                "time is not yet synchronized";
+                                "correction_s" => timesync.correction,
+                                "max_error_s" => timesync.max_error,
+                                "root_dispersion_s" => timesync.root_dispersion,
+                                "stratum" => timesync.stratum,
+                            );
+                        }
+                        TimeSyncStatus::TimeSync(timesync)
+                    }
                     Err(err) => {
                         TimeSyncStatus::FailedToGetSyncStatus(Arc::new(err))
                     }
