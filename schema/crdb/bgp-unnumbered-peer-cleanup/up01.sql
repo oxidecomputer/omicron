@@ -2,7 +2,7 @@
 --
 -- Normalize "unnumbered peer" addr representations: the sentinel values
 -- 0.0.0.0 and :: must be replaced with NULL. Where a
--- (port_settings_id, bgp_config_id, interface_name) group has multiple
+-- (port_settings_id, interface_name) group has multiple
 -- sentinel rows, keep only one (preferring NULL, then 0.0.0.0).
 -- Also enforce router_lifetime invariants that will be added as CHECK
 -- constraints in later migration steps.
@@ -18,8 +18,6 @@ WHERE (host(addr) = '0.0.0.0' OR host(addr) = '::')
       FROM omicron.public.switch_port_settings_bgp_peer_config AS other
      WHERE other.port_settings_id IS NOT DISTINCT FROM
            switch_port_settings_bgp_peer_config.port_settings_id
-       AND other.bgp_config_id =
-           switch_port_settings_bgp_peer_config.bgp_config_id
        AND other.interface_name IS NOT DISTINCT FROM
            switch_port_settings_bgp_peer_config.interface_name
        AND other.addr IS NULL
@@ -35,8 +33,6 @@ WHERE host(addr) = '::'
       FROM omicron.public.switch_port_settings_bgp_peer_config AS other
      WHERE other.port_settings_id IS NOT DISTINCT FROM
            switch_port_settings_bgp_peer_config.port_settings_id
-       AND other.bgp_config_id =
-           switch_port_settings_bgp_peer_config.bgp_config_id
        AND other.interface_name IS NOT DISTINCT FROM
            switch_port_settings_bgp_peer_config.interface_name
        AND host(other.addr) = '0.0.0.0'
