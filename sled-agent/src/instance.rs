@@ -3644,7 +3644,10 @@ mod tests {
                 multicast_groups: local_config.multicast_groups,
                 firewall_rules: local_config.firewall_rules,
                 dhcp_config,
-                state: InstanceStates::new(vmm_runtime, migration_id),
+                state: Arc::new(RwLock::new(InstanceStates::new(
+                    vmm_runtime,
+                    migration_id,
+                ))),
                 running_state: None,
                 nexus_client,
                 available_datasets_rx,
