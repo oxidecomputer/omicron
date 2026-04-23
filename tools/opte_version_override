@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
-# only set this if you want to override the version of opte/xde installed by the
-# install_opte.sh script
-OPTE_COMMIT=""
+# Override for using an unpublished OPTE version. When OPTE_COMMIT is set,
+# the override p5p package is downloaded from buildomat and used instead of
+# the version published in the helios pkg repo. The p5p is built by the
+# opte-p5p buildomat job and published at:
+#   https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo/{commit}/opte.p5p
+#
+# Consumers:
+#   - install_opte.sh installs directly from the override p5p
+#   - releng image builds use extra_packages with the p5p as a pkg source
+#   - deploy.sh installs from the override p5p on the running system
+#   - ci_check_opte_ver.sh skips version consistency checks
+#
+# To activate: set OPTE_COMMIT to the git commit hash of the OPTE build.
+#
+# To deactivate (once the new version is published): set OPTE_COMMIT to "".
+OPTE_COMMIT="c570ac2126dbbebbd8e98e73b580c5be6b7e460e"

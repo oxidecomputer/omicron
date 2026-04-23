@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "35.0.0"
+    "version": "36.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -371,6 +371,162 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/WriteNetworkConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/networking/mcast-fwd": {
+      "get": {
+        "summary": "List multicast forwarding entries present on this sled.",
+        "operationId": "list_mcast_fwd",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_McastForwardingEntry",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McastForwardingEntry"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set multicast forwarding entries for an underlay address.",
+        "operationId": "set_mcast_fwd",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McastForwardingEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear multicast forwarding entries for an underlay address.",
+        "operationId": "clear_mcast_fwd",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearMcastForwarding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/networking/mcast-m2p": {
+      "get": {
+        "summary": "List M2P mappings present on this sled.",
+        "operationId": "list_mcast_m2p",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Mcast2PhysMapping",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Mcast2PhysMapping"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set a multicast-to-physical (M2P) mapping in OPTE.",
+        "operationId": "set_mcast_m2p",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Mcast2PhysMapping"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear a multicast-to-physical (M2P) mapping in OPTE.",
+        "operationId": "clear_mcast_m2p",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearMcast2Phys"
               }
             }
           },
@@ -2310,7 +2466,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastBody"
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
               }
             }
           },
@@ -2344,7 +2500,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastBody"
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
               }
             }
           },
@@ -3990,6 +4146,40 @@
           {
             "$ref": "#/components/schemas/Duration"
           }
+        ]
+      },
+      "ClearMcast2Phys": {
+        "description": "Clear a mapping from an overlay multicast group to an underlay multicast address.",
+        "type": "object",
+        "properties": {
+          "group": {
+            "description": "Overlay multicast group address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "underlay": {
+            "description": "Underlay IPv6 multicast address. See [`Mcast2PhysMapping::underlay`].",
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "group",
+          "underlay"
+        ]
+      },
+      "ClearMcastForwarding": {
+        "description": "Clear all forwarding entries for an underlay multicast address.",
+        "type": "object",
+        "properties": {
+          "underlay": {
+            "description": "Underlay IPv6 multicast address. See [`Mcast2PhysMapping::underlay`].",
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "underlay"
         ]
       },
       "CombineError": {
@@ -5781,35 +5971,6 @@
           "src_propolis_addr"
         ]
       },
-      "InstanceMulticastBody": {
-        "description": "Request body for multicast group operations.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "join": {
-                "$ref": "#/components/schemas/InstanceMulticastMembership"
-              }
-            },
-            "required": [
-              "join"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "leave": {
-                "$ref": "#/components/schemas/InstanceMulticastMembership"
-              }
-            },
-            "required": [
-              "leave"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "InstanceMulticastMembership": {
         "description": "Represents a multicast group membership for an instance.\n\nIntroduced in v7.",
         "type": "object",
@@ -6630,6 +6791,151 @@
         "format": "uint8",
         "minimum": 1,
         "maximum": 32
+      },
+      "Mcast2PhysMapping": {
+        "description": "Mapping from an overlay multicast group to an underlay multicast address.\n\nThe underlay address must be within the underlay multicast subnet (ff04::/64). This invariant is enforced by mapping in Nexus, not validated at this layer.",
+        "type": "object",
+        "properties": {
+          "group": {
+            "description": "Overlay multicast group address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "underlay": {
+            "description": "Underlay IPv6 multicast address (ff04::/64).",
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "group",
+          "underlay"
+        ]
+      },
+      "McastFilterMode": {
+        "description": "Filter mode for multicast source filtering.",
+        "oneOf": [
+          {
+            "description": "Accept only packets from listed sources (SSM).",
+            "type": "string",
+            "enum": [
+              "include"
+            ]
+          },
+          {
+            "description": "Accept packets from all sources except those listed. With an empty sources list this is any-source multicast (ASM).",
+            "type": "string",
+            "enum": [
+              "exclude"
+            ]
+          }
+        ]
+      },
+      "McastForwardingEntry": {
+        "description": "Forwarding entry for an underlay multicast address, specifying which next hops should receive replicated packets.",
+        "type": "object",
+        "properties": {
+          "next_hops": {
+            "description": "Next hops with replication and source filter configuration.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McastForwardingNextHop"
+            }
+          },
+          "underlay": {
+            "description": "Underlay IPv6 multicast address. See [`Mcast2PhysMapping::underlay`].",
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "next_hops",
+          "underlay"
+        ]
+      },
+      "McastForwardingNextHop": {
+        "description": "A forwarding next hop with replication mode and aggregated source filter.",
+        "type": "object",
+        "properties": {
+          "filter": {
+            "description": "Aggregated source filter for this destination.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/McastSourceFilter"
+              }
+            ]
+          },
+          "next_hop": {
+            "description": "Unicast IPv6 address of the destination sled.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "replication": {
+            "description": "Replication mode for this next hop.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/McastReplication"
+              }
+            ]
+          }
+        },
+        "required": [
+          "filter",
+          "next_hop",
+          "replication"
+        ]
+      },
+      "McastReplication": {
+        "description": "Replication mode for multicast forwarding.",
+        "oneOf": [
+          {
+            "description": "Replicate to front panel ports (egress to external networks).",
+            "type": "string",
+            "enum": [
+              "external"
+            ]
+          },
+          {
+            "description": "Replicate to sled underlay ports.",
+            "type": "string",
+            "enum": [
+              "underlay"
+            ]
+          },
+          {
+            "description": "Replicate to both external and underlay ports.",
+            "type": "string",
+            "enum": [
+              "both"
+            ]
+          }
+        ]
+      },
+      "McastSourceFilter": {
+        "description": "Source filter for multicast forwarding.",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "description": "Filter mode.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/McastFilterMode"
+              }
+            ]
+          },
+          "sources": {
+            "description": "Source addresses to include or exclude.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "sources"
+        ]
       },
       "Measurement": {
         "description": "An RoT provided measurement which represents a digest of some component in the trusted computing base (TCB) for the attestor.",

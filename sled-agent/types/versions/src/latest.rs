@@ -89,6 +89,18 @@ pub mod firewall_rules {
     pub use crate::v31::firewall_rules::VpcFirewallRulesEnsureBody;
 }
 
+pub mod multicast {
+    pub use crate::v36::multicast::ClearMcast2Phys;
+    pub use crate::v36::multicast::ClearMcastForwarding;
+    pub use crate::v36::multicast::Mcast2PhysMapping;
+    pub use crate::v36::multicast::McastFilterMode;
+    pub use crate::v36::multicast::McastForwardingEntry;
+    pub use crate::v36::multicast::McastForwardingNextHop;
+    pub use crate::v36::multicast::McastReplication;
+    pub use crate::v36::multicast::McastSourceFilter;
+    pub use crate::v36::multicast::MulticastGroupCfg;
+}
+
 pub mod instance {
     pub use crate::v1::instance::InstanceExternalIpBody;
     pub use crate::v1::instance::InstanceMetadata;

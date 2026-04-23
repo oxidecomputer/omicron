@@ -56,12 +56,16 @@ use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::multicast::ClearMcast2Phys;
+use sled_agent_types::multicast::ClearMcastForwarding;
+use sled_agent_types::multicast::Mcast2PhysMapping;
+use sled_agent_types::multicast::McastForwardingEntry;
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -191,52 +195,24 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
-
-        match body_args {
-            InstanceMulticastBody::Join(membership) => {
-                sa.instance_join_multicast_group(propolis_id, &membership)
-                    .await?;
-            }
-            InstanceMulticastBody::Leave(_) => {
-                // This endpoint is for joining - reject leave operations
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "Join endpoint cannot process Leave operations".to_string(),
-                ));
-            }
-        }
-
+        let membership = body.into_inner();
+        sa.instance_join_multicast_group(propolis_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
-
-        match body_args {
-            InstanceMulticastBody::Leave(membership) => {
-                sa.instance_leave_multicast_group(propolis_id, &membership)
-                    .await?;
-            }
-            InstanceMulticastBody::Join(_) => {
-                // This endpoint is for leaving - reject join operations
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "Leave endpoint cannot process Join operations".to_string(),
-                ));
-            }
-        }
-
+        let membership = body.into_inner();
+        sa.instance_leave_multicast_group(propolis_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -388,6 +364,66 @@ impl SledAgentApi for SledAgentSimImpl {
         let vnics = sa.list_virtual_nics().map_err(HttpError::from)?;
 
         Ok(HttpResponseOk(vnics))
+    }
+
+    async fn set_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<Mcast2PhysMapping>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.set_mcast_m2p(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn clear_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcast2Phys>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.clear_mcast_m2p(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn set_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<McastForwardingEntry>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.set_mcast_fwd(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn clear_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcastForwarding>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.clear_mcast_fwd(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn list_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Mcast2PhysMapping>>, HttpError> {
+        let sa = rqctx.context();
+        let m2p = sa
+            .list_mcast_m2p()
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseOk(m2p))
+    }
+
+    async fn list_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<McastForwardingEntry>>, HttpError> {
+        let sa = rqctx.context();
+        let fwd = sa
+            .list_mcast_fwd()
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseOk(fwd))
     }
 
     async fn uplink_ensure(

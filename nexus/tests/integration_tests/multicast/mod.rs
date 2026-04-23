@@ -69,6 +69,7 @@ mod pool_selection;
 
 // Timeout constants for test operations
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const POLL_TIMEOUT: Duration = Duration::from_secs(30);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Generic helper for PUT upsert requests that return 201 Created.
@@ -211,6 +212,11 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     pool
 }
 
+/// The reconciler can take longer than the default 10s timeout under
+/// parallel test load, especially after the CRDB graceful-shutdown
+/// change (eb8ae2f8f). 30s matches other heavy background task timeouts.
+const RECONCILER_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Waits for the multicast group reconciler to complete.
 ///
 /// This wraps wait_background_task with the correct task name.
@@ -231,9 +237,10 @@ pub(crate) async fn wait_for_multicast_reconciler(
 pub(crate) async fn activate_multicast_reconciler(
     lockstep_client: &ClientTestContext,
 ) -> nexus_lockstep_client::types::BackgroundTask {
-    nexus_test_utils::background::activate_background_task(
+    nexus_test_utils::background::activate_background_task_with_timeout(
         lockstep_client,
         "multicast_reconciler",
+        RECONCILER_ACTIVATION_TIMEOUT,
     )
     .await
 }
@@ -307,8 +314,8 @@ where
 /// This function verifies that inventory has SP data for EVERY in-service sled,
 /// not just that inventory completed.
 ///
-/// This is required for multicast member operations which map `sled_id` → `sp_slot`
-/// → switch ports via inventory.
+/// This is required for multicast member operations which map `sled_id` to
+/// `sp_slot` to switch ports via inventory.
 pub(crate) async fn ensure_inventory_ready(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -358,9 +365,8 @@ pub(crate) async fn ensure_inventory_ready(
             let mut missing_sleds = Vec::new();
             for sled in &sleds {
                 let has_sp = inventory.sps.iter().any(|(bb, _)| {
-                    (bb.serial_number == sled.serial_number()
-                        && bb.part_number == sled.part_number())
-                        || bb.serial_number == sled.serial_number()
+                    bb.serial_number == sled.serial_number()
+                        && bb.part_number == sled.part_number()
                 });
 
                 if !has_sp {
@@ -385,8 +391,8 @@ pub(crate) async fn ensure_inventory_ready(
                 Err(CondCheckError::<String>::NotYet)
             }
         },
-        &Duration::from_millis(500), // Check every 500ms
-        &Duration::from_secs(120),   // Wait up to 120s
+        &Duration::from_millis(500),
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -448,8 +454,8 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                 }
             }
         },
-        &Duration::from_millis(200), // Check every 200ms
-        &Duration::from_secs(30),    // Wait up to 30 seconds for switches
+        &Duration::from_millis(200),
+        &POLL_TIMEOUT,
     )
     .await
     {
@@ -1067,19 +1073,16 @@ pub(crate) async fn wait_for_group_deleted(
         lockstep_client,
         || async {
             let group_url = mcast_group_url(group_name);
-            match NexusRequest::object_get(client, &group_url)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-            {
-                Ok(response) => {
-                    if response.status == StatusCode::NOT_FOUND {
-                        Ok(())
-                    } else {
-                        Err(CondCheckError::<()>::NotYet)
-                    }
-                }
-                Err(_) => Ok(()), // Assume 404 or similar error means deleted
+            let response = NexusRequest::new(
+                RequestBuilder::new(client, Method::GET, &group_url)
+                    .expect_status(Some(StatusCode::NOT_FOUND)),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await;
+            match response {
+                Ok(_) => Ok(()),
+                Err(_) => Err(CondCheckError::<()>::NotYet),
             }
         },
         &POLL_INTERVAL,

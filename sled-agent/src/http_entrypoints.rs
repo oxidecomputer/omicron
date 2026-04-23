@@ -45,12 +45,16 @@ use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::multicast::{
+    ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
+    McastForwardingEntry,
+};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -710,14 +714,14 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
+        let membership = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.instance_join_multicast_group(id, &body_args).await?;
+                sa.instance_join_multicast_group(id, &membership).await?;
                 Ok(HttpResponseUpdatedNoContent())
             })
             .await
@@ -726,14 +730,14 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
+        let membership = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.instance_leave_multicast_group(id, &body_args).await?;
+                sa.instance_leave_multicast_group(id, &membership).await?;
                 Ok(HttpResponseUpdatedNoContent())
             })
             .await
@@ -928,6 +932,86 @@ impl SledAgentApi for SledAgentImpl {
                 let vnics =
                     sa.list_virtual_nics().await.map_err(Error::from)?;
                 Ok(HttpResponseOk(vnics))
+            })
+            .await
+    }
+
+    async fn set_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<Mcast2PhysMapping>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_mcast_m2p(&body_args).await.map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn clear_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcast2Phys>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.clear_mcast_m2p(&body_args).await.map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn set_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<McastForwardingEntry>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_mcast_fwd(&body_args).await.map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn clear_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcastForwarding>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.clear_mcast_fwd(&body_args).await.map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn list_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Mcast2PhysMapping>>, HttpError> {
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let m2p = sa.list_mcast_m2p().await.map_err(Error::from)?;
+                Ok(HttpResponseOk(m2p))
+            })
+            .await
+    }
+
+    async fn list_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<McastForwardingEntry>>, HttpError> {
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let fwd = sa.list_mcast_fwd().await.map_err(Error::from)?;
+                Ok(HttpResponseOk(fwd))
             })
             .await
     }

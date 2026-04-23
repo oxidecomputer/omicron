@@ -13,6 +13,7 @@ use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use slog::info;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -70,6 +71,11 @@ pub enum Error {
         "Tried to update attached subnets on non-existent port ({0}, {1:?})"
     )]
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error(
+        "address {0} is not within the underlay multicast subnet (ff04::/64)"
+    )]
+    InvalidMcastUnderlay(Ipv6Addr),
 }
 
 /// Delete all xde devices on the system.
