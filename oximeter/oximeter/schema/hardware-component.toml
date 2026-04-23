@@ -92,7 +92,8 @@ description = """
 Which kind of sensor could not be read due to a sensor error.
 
 This will be one of 'temperature', 'current', 'power', 'voltage', \
-'input_current', 'input_voltage', 'fan_speed', or 'amd_cpu_tctl' (the same \
+'input_current', 'input_voltage', 'fan_speed', 'amd_cpu_tctl', 'pwm', \
+'input_power', 'output_energy', or 'input_energy' (the same \
 names as the metrics emitted by these sensors when they are read \
 successfully)."""
 
@@ -202,6 +203,50 @@ notable thresholds:
 
 1. At a value of 95, the CPU will begin internal thermal throttling.
 2. At a value of 100, the CPU will shut down."""
+units = "none"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "pwm"
+description = """
+TODO
+"""
+units = "none"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "input_power"
+description = """
+TODO
+"""
+units = "none"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "output_energy"
+description = """
+TODO
+"""
+units = "none"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "input_energy"
+description = """
+TODO
+"""
 units = "none"
 datum_type = "f32"
 versions = [
