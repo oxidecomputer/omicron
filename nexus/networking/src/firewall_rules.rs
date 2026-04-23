@@ -547,8 +547,8 @@ pub const MAX_ALLOWLIST_LENGTH: usize = 1000;
 /// Number of nexus-inbound rules used to cover the full allowlist.
 ///
 /// Because each firewall rule can carry at most
-/// [`VPC_FIREWALL_RULE_MAX_FILTER_LEN`] host-filter entries, a list of up to
-/// `MAX_ALLOWLIST_LENGTH` IPs is split across this many rules (named
+/// [`external::VPC_FIREWALL_RULE_MAX_FILTER_LEN`] host-filter entries, a list
+/// of up to `MAX_ALLOWLIST_LENGTH` IPs is split across this many rules (named
 /// `nexus-inbound-1`, `nexus-inbound-2`, …).
 const MAX_NEXUS_INBOUND_RULES: usize = 4;
 
