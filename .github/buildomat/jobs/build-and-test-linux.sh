@@ -42,5 +42,8 @@
 #: name = "nextest-chrome-trace.json"
 #: from_output = "/tmp/nextest-chrome-trace.json"
 
+# Mount tmpfs onto /var/tmp/omicron_tmp.
+sudo mount --mkdir -t tmpfs -o relatime,size=50%,mode=755 tmpfs /var/tmp/omicron_tmp
+
 sudo apt-get install -y jq
 exec .github/buildomat/build-and-test.sh linux
