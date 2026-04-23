@@ -28,6 +28,7 @@ use omicron_common::api::external::{DataPageParams, Error};
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_hardware_types::BaseboardId;
+use slog::info;
 use std::collections::BTreeMap;
 use std::iter;
 use tokio::sync::watch;
@@ -277,14 +278,46 @@ impl super::Nexus {
             )
             .await?;
 
-        // TODO-K: separate these to male sure they all run
-        let unhealthy = inventory.any_unhealhty_zpools()
-            || inventory.any_enabled_smf_services_not_online()
-            || !stale_active_sagas.is_empty();
+        let unhealthy_zpools = inventory.unhealthy_zpools();
+        let enabled_smf_services_not_online =
+            inventory.enabled_smf_services_not_online();
 
-        Ok(unhealthy)
+        let has_unhealthy_zpools = !unhealthy_zpools.is_empty();
+        let has_enabled_services_not_online =
+            !enabled_smf_services_not_online.is_empty();
+        let has_stale_sagas = !stale_active_sagas.is_empty();
+
+        if has_unhealthy_zpools {
+            info!(
+                opctx.log,
+                "found unhealthy zpools";
+                "zpools_by_sled" => ?unhealthy_zpools,
+            );
+        }
+        if has_enabled_services_not_online {
+            info!(
+                opctx.log,
+                "found enabled SMF services not online";
+                "svcs_by_sled" => ?enabled_smf_services_not_online,
+            );
+        }
+        if has_stale_sagas {
+            info!(
+                opctx.log,
+                "found stale sagas active for longer than {}",
+                omicron_common::format_time_delta(STALE_SAGA_THRESHOLD);
+                "sagas" => ?stale_active_sagas,
+            );
+        }
+
+        let contact_support = has_unhealthy_zpools
+            || has_enabled_services_not_online
+            || has_stale_sagas;
+
+        Ok(contact_support)
     }
 
+    // TODO-K: use this to check if an update is happening?
     /// Build a map of version strings to the number of components on that
     /// version
     async fn component_version_counts(
@@ -521,11 +554,18 @@ mod test {
 
     fn unhealthy_services() -> SvcsEnabledNotOnlineResult {
         SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
-            services: vec![SvcEnabledNotOnline {
-                fmri: "svc:/system/test:default".to_string(),
-                zone: "global".to_string(),
-                state: SvcEnabledNotOnlineState::Maintenance,
-            }],
+            services: vec![
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                },
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test2:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Offline,
+                },
+            ],
             errors: vec![],
             time_of_status: Utc::now(),
         })
