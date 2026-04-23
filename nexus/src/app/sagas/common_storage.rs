@@ -169,18 +169,10 @@ pub(crate) async fn call_pantry_detach(
     let gone_check =
         || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    match ProgenitorOperationRetry::new(detach_operation, gone_check)
+    ProgenitorOperationRetry::new(detach_operation, gone_check)
         .run(log)
         .await
-    {
-        Ok(_) => Ok(()),
-
-        // The pantry is stateless: if it is gone, then the Volume was
-        // destroyed, and we can proceed as if it was detached.
-        Err(e) if e.is_gone() => Ok(()),
-
-        Err(e) => Err(e),
-    }
+        .map(|_response| ())
 }
 
 pub(crate) fn find_only_new_region(
