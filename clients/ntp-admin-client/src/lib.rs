@@ -20,3 +20,25 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
 );
+
+pub mod v1 {
+    progenitor::generate_api!(
+        spec = {
+            path = "git-stub-vcs/openapi/ntp-admin/ntp-admin-1.0.0-aeffc2.json",
+            relative_to = OutDir,
+        },
+        interface = Positional,
+        inner_type = slog::Logger,
+        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
+            slog::debug!(log, "client request";
+                "method" => %request.method(),
+                "uri" => %request.url(),
+                "body" => ?&request.body(),
+            );
+        }),
+        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
+            slog::debug!(log, "client response"; "result" => ?result);
+        }),
+        derives = [schemars::JsonSchema],
+    );
+}
