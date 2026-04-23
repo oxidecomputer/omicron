@@ -67,7 +67,7 @@ use sled_agent_config_reconciler::{
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_scrimlet_reconcilers::{
-    ScrimletReconcilersPrereqs, ThisSledSwitchZoneUnderlayIpAddr,
+    SledAgentNetworkingInfo, ThisSledSwitchZoneUnderlayIpAddr,
 };
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
@@ -690,12 +690,12 @@ impl SledAgent {
         // have it available.
         let this_sled_switch_zone_ip =
             ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
-        long_running_task_handles.scrimlet_reconcilers.set_prereqs_once(
-            ScrimletReconcilersPrereqs {
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
                 system_networking_config_rx: network_config_rx.clone(),
                 switch_zone_underlay_ip: this_sled_switch_zone_ip,
-            },
-        );
+            });
 
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(

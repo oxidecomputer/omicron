@@ -20,8 +20,6 @@ pub enum ScrimletStatus {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ReconcilerInertReason {
-    WaitingForPrereqs,
-    WaitingToDetermineSwitchSlot,
     NoLongerAScrimlet,
     TaskExitedUnexpectedly,
 }
@@ -78,19 +76,42 @@ pub enum ReconcilerCurrentStatus {
     Inert(ReconcilerInertReason),
     /// The reconciler is currently running.
     Running(ReconcilerRunningStatus),
-    /// The reconciler has run but is currently idle, waiting for reactivation.
+    /// The reconciler is not currently running.
     Idle,
 }
 
 #[derive(Debug, Clone)]
 pub struct ReconcilerStatus<T> {
     pub current_status: ReconcilerCurrentStatus,
-    pub last_completion: Option<ReconciliationCompletedStatus<T>>,
+    // Box the inner status to avoid clippy complaining about
+    // `ScrimletReconcilersStatus::Running { ... }` being overly large.
+    pub last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ScrimletReconcilersStatus {
-    pub dpd_reconciler: ReconcilerStatus<DpdReconcilerStatus>,
-    pub mgd_reconciler: ReconcilerStatus<MgdReconcilerStatus>,
-    pub uplinkd_reconciler: ReconcilerStatus<UplinkdReconcilerStatus>,
+pub enum ScrimletReconcilersStatus {
+    /// `sled-agent` has not yet provided underlay networking information.
+    WaitingForSledAgentNetworkingInfo,
+
+    /// This sled is not a scrimlet.
+    ///
+    /// A "not scrimlet" sled could become a scrimlet at runtime if a switch is
+    /// later discovered.
+    NotScrimlet,
+
+    /// We are a scrimlet, but we haven't yet contacted MGS within our switch
+    /// zone to identify which switch slot we're in.
+    WaitingForSwitchSlotFromMgs,
+
+    /// We are a scrimlet and the individual reconcilers are running.
+    Running {
+        dpd_reconciler: ReconcilerStatus<DpdReconcilerStatus>,
+        mgd_reconciler: ReconcilerStatus<MgdReconcilerStatus>,
+        uplinkd_reconciler: ReconcilerStatus<UplinkdReconcilerStatus>,
+    },
+
+    /// All reconcilers have been shut down.
+    ///
+    /// This state should only exist in tests and is terminal.
+    Shutdown,
 }

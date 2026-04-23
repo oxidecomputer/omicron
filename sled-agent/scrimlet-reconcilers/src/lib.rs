@@ -51,7 +51,7 @@ pub use dpd_reconciler::DpdPortOperationFailure;
 pub use dpd_reconciler::DpdPortReconcilerStatus;
 pub use dpd_reconciler::DpdReconcilerStatus;
 pub use handle::ScrimletReconcilers;
-pub use handle::ScrimletReconcilersPrereqs;
+pub use handle::SledAgentNetworkingInfo;
 pub use mgd_reconciler::MgdBfdOperationFailure;
 pub use mgd_reconciler::MgdBfdReconcilerStatus;
 pub use mgd_reconciler::MgdBgpReconcilerApplyResult;

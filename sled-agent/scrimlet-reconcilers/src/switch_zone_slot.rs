@@ -13,12 +13,9 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::SetOnce;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
-use tokio::task::JoinHandle;
 
 /// Newtype wrapper around [`SwitchSlot`]. This type is always the physical slot
 /// of our own, local switch.
@@ -45,12 +42,11 @@ impl ThisSledSwitchSlot {
     #[cfg(test)]
     pub(crate) const TEST_FAKE: Self = Self(SwitchSlot::Switch0);
 
-    pub(crate) fn spawn_task_to_determine(
-        scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
+    pub(crate) async fn determine_retrying_forever(
+        scrimlet_status_rx: &mut watch::Receiver<ScrimletStatus>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
-        switch_slot_tx: Arc<SetOnce<Self>>,
         parent_log: &Logger,
-    ) -> JoinHandle<()> {
+    ) -> Result<Self, RecvError> {
         let baseurl = format!("http://[{switch_zone_underlay_ip}]:{MGS_PORT}");
         let client = Client::new(
             &baseurl,
@@ -60,32 +56,23 @@ impl ThisSledSwitchSlot {
         let log = parent_log
             .new(slog::o!("component" => "ThisSledSwitchSlotDetermination"));
 
-        tokio::spawn(async move {
-            match determine_switch_slot(client, scrimlet_status_rx, &log).await
-            {
-                Ok(slot) => {
-                    info!(
-                        log, "determined this sled's switch slot";
-                        "slot" => ?slot,
-                    );
-
-                    // `ThisSledSwitchSlot` cannot be constructed outside this
-                    // module, so it's not possible for `switch_slot_tx` to
-                    // already be set (unless someone calls this method twice
-                    // with the same `SetOnce<_>`, which is a programmer error).
-                    switch_slot_tx.set(slot).expect(
-                        "only ThisSledSwitchSlot can populate this SetOnce",
-                    );
-                }
-                Err(_recv_error) => {
-                    error!(
-                        log,
-                        "failed to determine this sled's switch slot: input \
-                         watch channel closed (unexpected except in tests)",
-                    );
-                }
+        match determine_switch_slot(client, scrimlet_status_rx, &log).await {
+            Ok(slot) => {
+                info!(
+                    log, "determined this sled's switch slot";
+                    "slot" => ?slot,
+                );
+                Ok(slot)
             }
-        })
+            Err(recv_error) => {
+                error!(
+                    log,
+                    "failed to determine this sled's switch slot: input \
+                         watch channel closed (unexpected except in tests)",
+                );
+                Err(recv_error)
+            }
+        }
     }
 }
 
@@ -93,7 +80,7 @@ const MGS_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
 
 async fn determine_switch_slot(
     client: Client,
-    mut scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
+    scrimlet_status_rx: &mut watch::Receiver<ScrimletStatus>,
     log: &Logger,
 ) -> Result<ThisSledSwitchSlot, RecvError> {
     loop {
@@ -213,10 +200,10 @@ mod tests {
                 .body(sp_identifier_json("switch", 0));
         });
 
-        let (_tx, rx) = watch::channel(ScrimletStatus::Scrimlet);
+        let (_tx, mut rx) = watch::channel(ScrimletStatus::Scrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
 
-        let result = determine_switch_slot(client, rx, &logctx.log).await;
+        let result = determine_switch_slot(client, &mut rx, &logctx.log).await;
         assert_eq!(result.unwrap(), ThisSledSwitchSlot(SwitchSlot::Switch0));
 
         logctx.cleanup_successful();
@@ -234,10 +221,10 @@ mod tests {
                 .body(sp_identifier_json("switch", 1));
         });
 
-        let (_tx, rx) = watch::channel(ScrimletStatus::Scrimlet);
+        let (_tx, mut rx) = watch::channel(ScrimletStatus::Scrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
 
-        let result = determine_switch_slot(client, rx, &logctx.log).await;
+        let result = determine_switch_slot(client, &mut rx, &logctx.log).await;
         assert_eq!(result.unwrap(), ThisSledSwitchSlot(SwitchSlot::Switch1));
 
         logctx.cleanup_successful();
@@ -256,12 +243,12 @@ mod tests {
                 .body(sp_identifier_json("switch", 0));
         });
 
-        let (tx, rx) = watch::channel(ScrimletStatus::NotScrimlet);
+        let (tx, mut rx) = watch::channel(ScrimletStatus::NotScrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
         let log = logctx.log.clone();
 
         let task = tokio::spawn(async move {
-            determine_switch_slot(client, rx, &log).await
+            determine_switch_slot(client, &mut rx, &log).await
         });
 
         // Sleep briefly to give the task a chance to start (and observe that
@@ -288,12 +275,12 @@ mod tests {
         );
         let server = MockServer::start();
 
-        let (tx, rx) = watch::channel(ScrimletStatus::NotScrimlet);
+        let (tx, mut rx) = watch::channel(ScrimletStatus::NotScrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
         let log = logctx.log.clone();
 
         let task = tokio::spawn(async move {
-            determine_switch_slot(client, rx, &log).await
+            determine_switch_slot(client, &mut rx, &log).await
         });
 
         // Let the task reach `changed().await`.
@@ -327,12 +314,12 @@ mod tests {
             );
         });
 
-        let (_tx, rx) = watch::channel(ScrimletStatus::Scrimlet);
+        let (_tx, mut rx) = watch::channel(ScrimletStatus::Scrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
         let log = logctx.log.clone();
 
         let task = tokio::spawn(async move {
-            determine_switch_slot(client, rx, &log).await
+            determine_switch_slot(client, &mut rx, &log).await
         });
 
         // Wait until the task contacts MGS and gets our 503.
@@ -368,12 +355,12 @@ mod tests {
                 .body(sp_identifier_json("sled", 0));
         });
 
-        let (_tx, rx) = watch::channel(ScrimletStatus::Scrimlet);
+        let (_tx, mut rx) = watch::channel(ScrimletStatus::Scrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
         let log = logctx.log.clone();
 
         let task = tokio::spawn(async move {
-            determine_switch_slot(client, rx, &log).await
+            determine_switch_slot(client, &mut rx, &log).await
         });
 
         // Let the task hit the unexpected identity and start sleeping.
@@ -416,12 +403,12 @@ mod tests {
             );
         });
 
-        let (tx, rx) = watch::channel(ScrimletStatus::Scrimlet);
+        let (tx, mut rx) = watch::channel(ScrimletStatus::Scrimlet);
         let client = mock_mgs_client(&server, &logctx.log);
         let log = logctx.log.clone();
 
         let task = tokio::spawn(async move {
-            determine_switch_slot(client, rx, &log).await
+            determine_switch_slot(client, &mut rx, &log).await
         });
 
         // Let the task hit the error and start the retry sleep.
