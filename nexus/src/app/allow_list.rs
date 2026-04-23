@@ -7,6 +7,7 @@
 //! Nexus methods for operating on source IP allowlists.
 
 use nexus_db_queries::context::OpContext;
+use nexus_networking::MAX_ALLOWLIST_LENGTH;
 use nexus_types::external_api::system;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
@@ -35,8 +36,6 @@ impl super::Nexus {
         params: system::AllowListUpdate,
     ) -> Result<system::AllowList, Error> {
         if let external::AllowedSourceIps::List(list) = &params.allowed_ips {
-            // Size limits on the allowlist.
-            const MAX_ALLOWLIST_LENGTH: usize = 1000;
             if list.len() > MAX_ALLOWLIST_LENGTH {
                 let message = format!(
                     "Source IP allowlist is limited to {} entries, found {}",

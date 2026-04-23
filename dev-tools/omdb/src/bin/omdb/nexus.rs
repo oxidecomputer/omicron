@@ -2831,9 +2831,11 @@ fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
                 eprintln!("    error looking up or resolving rules: {}", e);
             }
             if let Some(failures) = status.sled_push_errors {
+                let maybe_s = if failures.len() == 1 { "" } else { "s" };
                 eprintln!(
-                    "    failed to push rules to {} sled(s):",
-                    failures.len()
+                    "    failed to push rules to {} sled{}:",
+                    failures.len(),
+                    maybe_s,
                 );
                 for f in &failures {
                     eprintln!("        sled {}: {}", f.sled_id, f.error);

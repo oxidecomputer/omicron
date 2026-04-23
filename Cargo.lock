@@ -7344,6 +7344,7 @@ dependencies = [
  "sled-agent-client",
  "sled-hardware-types",
  "slog",
+ "static_assertions",
  "uuid",
 ]
 

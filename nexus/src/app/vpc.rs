@@ -329,7 +329,7 @@ impl super::Nexus {
                 error!(
                     self.log,
                     "failed to update sled-agents with new ICMP status";
-                    "error" => ?e,
+                    "error" => format!("{message}: {e:?}"),
                 );
                 Err(Error::unavail(message))
             }

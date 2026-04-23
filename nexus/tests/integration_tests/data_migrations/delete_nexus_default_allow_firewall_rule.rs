@@ -5,6 +5,7 @@
 use crate::integration_tests::schema::DataMigrationFns;
 use crate::integration_tests::schema::MigrationContext;
 use futures::future::BoxFuture;
+use nexus_networking::NEXUS_VPC_FW_RULE_NAME;
 use nexus_test_utils::sql::process_rows;
 use uuid::Uuid;
 
@@ -38,8 +39,8 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         vpc_id, status, direction,
                         targets, action, priority
                     ) VALUES (
-                        '{SVC_RULE}', 'nexus-inbound', 'default allow for nexus',
-                        now(), now(),
+                        '{SVC_RULE}', '{NEXUS_VPC_FW_RULE_NAME}',
+                        'default allow for nexus', now(), now(),
                         '{svc_vpc}', 'enabled', 'inbound',
                         ARRAY['subnet:nexus'], 'allow', 65534
                     );"
@@ -60,8 +61,8 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         vpc_id, status, direction,
                         targets, action, priority
                     ) VALUES (
-                        '{CUSTOMER_RULE}', 'nexus-inbound', 'customer rule',
-                        now(), now(),
+                        '{CUSTOMER_RULE}', '{NEXUS_VPC_FW_RULE_NAME}',
+                        'customer rule', now(), now(),
                         '{CUSTOMER_VPC}', 'enabled', 'inbound',
                         ARRAY['subnet:web'], 'allow', 100
                     );"
@@ -86,7 +87,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .query(
                 &format!(
                     "SELECT id FROM omicron.public.vpc_firewall_rule
-                     WHERE name = 'nexus-inbound'
+                     WHERE name = '{NEXUS_VPC_FW_RULE_NAME}'
                      AND vpc_id = '{svc_vpc}'
                      AND time_deleted IS NULL;"
                 ),
@@ -107,7 +108,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .query(
                 &format!(
                     "SELECT id FROM omicron.public.vpc_firewall_rule
-                     WHERE name = 'nexus-inbound'
+                     WHERE name = '{NEXUS_VPC_FW_RULE_NAME}'
                      AND vpc_id = '{svc_vpc}'
                      AND time_deleted IS NOT NULL;"
                 ),
@@ -128,7 +129,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .query(
                 &format!(
                     "SELECT id FROM omicron.public.vpc_firewall_rule
-                     WHERE name = 'nexus-inbound'
+                     WHERE name = '{NEXUS_VPC_FW_RULE_NAME}'
                      AND vpc_id = '{CUSTOMER_VPC}'
                      AND time_deleted IS NULL;"
                 ),

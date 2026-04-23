@@ -51,10 +51,18 @@ impl fmt::Display for ServiceFirewallRulesError {
                 write!(f, "failed to look up or resolve firewall rules: {e}")
             }
             ServiceFirewallRulesError::SledPush(failures) => {
+                let maybe_s = if failures.len() == 1 { "" } else { "s" };
+                let ids = failures
+                    .iter()
+                    .map(|(id, _e)| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 write!(
                     f,
-                    "failed to push firewall rules to {} sled(s)",
-                    failures.len()
+                    "failed to push firewall rules to {} sled{}: [{}]",
+                    failures.len(),
+                    maybe_s,
+                    ids,
                 )
             }
         }
@@ -493,9 +501,9 @@ pub async fn plumb_service_firewall_rules(
     let allowed_ips = lookup_allowed_source_ips(datastore, opctx, log)
         .await
         .map_err(ServiceFirewallRulesError::Lookup)?;
-    let nexus_rule = make_nexus_allowlist_rule(allowed_ips)
+    let mut nexus_rules = make_nexus_allowlist_rules(allowed_ips)
         .map_err(ServiceFirewallRulesError::Lookup)?;
-    svcs_fw_rules.push(nexus_rule);
+    svcs_fw_rules.append(&mut nexus_rules);
 
     send_sled_agents_firewall_rules(
         datastore,
@@ -509,27 +517,80 @@ pub async fn plumb_service_firewall_rules(
     .await
 }
 
-/// Build an inbound-allow firewall rule for the Nexus subnet from the given
+/// The base name for the VPC firewall rules for Nexus implementing the IP allowlist.
+pub const NEXUS_VPC_FW_RULE_NAME: &str = "nexus-inbound";
+
+/// Maximum number of entries in the IP allowlist.
+///
+/// This is enforced at the API layer in `allow_list_upsert` (which imports
+/// this constant). It must be kept consistent with
+/// `MAX_NEXUS_INBOUND_RULES * VPC_FIREWALL_RULE_MAX_FILTER_LEN`; see the
+/// static assertion below.
+pub const MAX_ALLOWLIST_LENGTH: usize = 1000;
+
+/// Number of nexus-inbound rules used to cover the full allowlist.
+///
+/// Because each firewall rule can carry at most
+/// [`VPC_FIREWALL_RULE_MAX_FILTER_LEN`] host-filter entries, a list of up to
+/// `MAX_ALLOWLIST_LENGTH` IPs is split across this many rules (named
+/// `nexus-inbound-1`, `nexus-inbound-2`, …).
+const MAX_NEXUS_INBOUND_RULES: usize = 4;
+
+// If this assertion fires, MAX_ALLOWLIST_LENGTH exceeds what
+// MAX_NEXUS_INBOUND_RULES rules of VPC_FIREWALL_RULE_MAX_FILTER_LEN hosts
+// each can represent. Either increase MAX_NEXUS_INBOUND_RULES or reduce
+// MAX_ALLOWLIST_LENGTH, and verify that sled-agent / OPTE can still handle
+// the resulting number of rules and hosts per rule.
+static_assertions::const_assert!(
+    MAX_ALLOWLIST_LENGTH
+        <= MAX_NEXUS_INBOUND_RULES * external::VPC_FIREWALL_RULE_MAX_FILTER_LEN
+);
+
+/// Build the inbound-allow firewall rules for the Nexus subnet from the given
 /// IP allowlist, to be propagated to sled-agents.
 ///
-/// The rule allows inbound TCP traffic on ports 80 and 443 from the allowed
-/// source IPs (or from any source if the allowlist is unrestricted). It targets
-/// the Nexus VPC subnet and is not stored in the database.
-fn make_nexus_allowlist_rule(
+/// Each rule allows inbound TCP traffic on ports 80 and 443 from a subset of
+/// the allowed source IPs (or from any source if the allowlist is
+/// unrestricted). Rules target the Nexus VPC subnet and are not stored in the
+/// database.
+///
+/// When the allowlist is a `List`, the IPs are split across up to
+/// `MAX_NEXUS_INBOUND_RULES` rules (named `nexus-inbound-1`,
+/// `nexus-inbound-2`, …) of at most `VPC_FIREWALL_RULE_MAX_FILTER_LEN`
+/// entries each. When the allowlist is `Any`, a single rule named
+/// `nexus-inbound` with no host filter is returned.
+fn make_nexus_allowlist_rules(
     allowed_ips: AllowedSourceIps,
+) -> Result<Vec<db::model::VpcFirewallRule>, Error> {
+    match allowed_ips {
+        AllowedSourceIps::Any => {
+            Ok(vec![make_one_nexus_inbound_rule(NEXUS_VPC_FW_RULE_NAME, None)?])
+        }
+        AllowedSourceIps::List(list) => list
+            .as_slice()
+            .chunks(external::VPC_FIREWALL_RULE_MAX_FILTER_LEN)
+            .enumerate()
+            .map(|(i, chunk)| {
+                let name = format!("{NEXUS_VPC_FW_RULE_NAME}-{}", i + 1);
+                let hosts = Some(
+                    chunk
+                        .iter()
+                        .copied()
+                        .map(external::VpcFirewallRuleHostFilter::IpNet)
+                        .collect(),
+                );
+                make_one_nexus_inbound_rule(&name, hosts)
+            })
+            .collect(),
+    }
+}
+
+fn make_one_nexus_inbound_rule(
+    name: &str,
+    hosts: Option<Vec<external::VpcFirewallRuleHostFilter>>,
 ) -> Result<db::model::VpcFirewallRule, Error> {
-    let hosts = match allowed_ips {
-        AllowedSourceIps::Any => None,
-        AllowedSourceIps::List(list) => Some(
-            list.as_slice()
-                .iter()
-                .copied()
-                .map(external::VpcFirewallRuleHostFilter::IpNet)
-                .collect(),
-        ),
-    };
     let update = external::VpcFirewallRuleUpdate {
-        name: "nexus-inbound".parse().unwrap(),
+        name: name.parse().expect("nexus-inbound rule names are always valid"),
         description: String::new(),
         status: external::VpcFirewallRuleStatus::Enabled,
         direction: external::VpcFirewallRuleDirection::Inbound,
