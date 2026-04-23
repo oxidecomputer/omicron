@@ -21,8 +21,8 @@ cfg_if::cfg_if! {
     }
 }
 
-pub mod logs;
-pub use logs::{LogError, LogsHandle};
+pub mod debug_data;
+pub use debug_data::{DebugDataHandle, LogError};
 
 mod queries;
 pub use crate::queries::{

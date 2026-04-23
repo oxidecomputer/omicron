@@ -12,6 +12,7 @@ use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
 use anyhow::Context;
 use anyhow::bail;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Future;
@@ -252,6 +253,54 @@ async fn collect_data_from_sled(
             error!(log, "failed to write logs output: {e}");
         }
     }
+
+    // Now collect debug dropbox data from the sled in the same fan-out
+    // shape. This relies on a sled-agent API version that supports the
+    // `/support/debug_dropbox` endpoints; older sleds will return an
+    // unsupported-version error, which we swallow after logging so that
+    // the rest of the bundle still collects.
+    let dropbox_zones_result = tokio::select! {
+        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        result = sled_client.support_debug_dropbox_zones() => result,
+    };
+
+    match dropbox_zones_result {
+        Ok(response) => {
+            let dropbox_zones = response.into_inner();
+            let mut dropbox_futs: FuturesUnordered<_> = dropbox_zones
+                .iter()
+                .map(|zone| {
+                    save_zone_debug_dropbox_zip_or_error(
+                        log,
+                        &sled_client,
+                        zone,
+                        &sled_path,
+                        cancellation_token,
+                    )
+                })
+                .collect();
+
+            while let Some(result) = dropbox_futs.next().await {
+                if let Err(e) = result {
+                    error!(
+                        log,
+                        "failed to write debug dropbox output: {e}"
+                    );
+                }
+            }
+        }
+        Err(err) => {
+            // An older sled-agent returns an error here; don't fail the
+            // whole bundle over missing dropbox data.
+            info!(
+                log,
+                "skipping debug dropbox collection for sled";
+                "sled" => %sled.id(),
+                InlineErrorChain::new(&err),
+            );
+        }
+    }
+
     Ok(CollectionStepOutput::None)
 }
 
@@ -328,21 +377,69 @@ async fn save_zone_log_zip_or_error(
         result = client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS) => result,
     };
 
+    download_and_extract_zip_or_error(
+        logger,
+        download_result,
+        &path.join(format!("logs/{zone}")),
+        "logs.zip",
+        path.join(format!("{zone}.logs.err")),
+    )
+    .await
+}
+
+// Download and extract a zone's debug dropbox data from a sled-agent.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe** in the same way as `save_zone_log_zip_or_error`: the
+// HTTP download is cancel-safe, but filesystem operations after the download
+// must complete.
+async fn save_zone_debug_dropbox_zip_or_error(
+    logger: &slog::Logger,
+    client: &sled_agent_client::Client,
+    zone: &str,
+    path: &Utf8Path,
+    cancellation_token: &CancellationToken,
+) -> anyhow::Result<()> {
+    let download_result = tokio::select! {
+        _ = cancellation_token.cancelled() => return Ok(()),
+        result = client.support_debug_dropbox_download(zone) => result,
+    };
+
+    download_and_extract_zip_or_error(
+        logger,
+        download_result,
+        &path.join(format!("debug_dropbox/{zone}")),
+        "debug_dropbox.zip",
+        path.join(format!("{zone}.debug_dropbox.err")),
+    )
+    .await
+}
+
+// Common logic for streaming a zip response from a sled-agent to disk,
+// extracting it into `output_dir`, and cleaning up the zip file afterwards.
+async fn download_and_extract_zip_or_error(
+    logger: &slog::Logger,
+    download_result: Result<
+        sled_agent_client::ResponseValue<sled_agent_client::ByteStream>,
+        sled_agent_client::Error<sled_agent_client::ByteStream>,
+    >,
+    output_dir: &Utf8Path,
+    zip_file_name: &str,
+    error_path: Utf8PathBuf,
+) -> anyhow::Result<()> {
     match download_result {
         Ok(res) => {
             let bytestream = res.into_inner();
-            let output_dir = path.join(format!("logs/{zone}"));
-            let zipfile_path = output_dir.join("logs.zip");
+            let zipfile_path = output_dir.join(zip_file_name);
 
-            // Ensure the logs output directory exists.
             tokio::fs::create_dir_all(&output_dir).await.with_context(
                 || format!("failed to create output directory: {output_dir}"),
             )?;
 
-            // Stream the log zip file to disk.
             let mut file =
                 tokio::fs::File::create(&zipfile_path).await.with_context(
-                    || format!("failed to create log zip file: {zipfile_path}"),
+                    || format!("failed to create zip file: {zipfile_path}"),
                 )?;
 
             let stream = bytestream
@@ -352,7 +449,7 @@ async fn save_zone_log_zip_or_error(
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
 
-            // Unzip the log file into the same directory.
+            let output_dir = output_dir.to_owned();
             let zip_path = zipfile_path.clone();
             tokio::task::spawn_blocking(move || {
                 extract_zip_file(&output_dir, &zip_path)
@@ -360,26 +457,20 @@ async fn save_zone_log_zip_or_error(
             .await
             .map_err(|join_error| {
                 anyhow::anyhow!(join_error)
-                    .context("unzipping support bundle logs zip panicked")
+                    .context("unzipping support bundle zip panicked")
             })??;
 
-            // Clean up the zip file that was written to disk.
             if let Err(e) = tokio::fs::remove_file(&zipfile_path).await {
                 error!(
                     logger,
-                    "failed to cleanup temporary logs zip file";
+                    "failed to cleanup temporary zip file";
                     InlineErrorChain::new(&e),
                     "file" => %zipfile_path,
-
                 );
             }
         }
         Err(err) => {
-            tokio::fs::write(
-                path.join(format!("{zone}.logs.err")),
-                err.to_string(),
-            )
-            .await?;
+            tokio::fs::write(&error_path, err.to_string()).await?;
         }
     };
 
@@ -394,7 +485,7 @@ fn extract_zip_file(
         .with_context(|| format!("failed to open zip file: {zip_file}"))?;
     let mut archive = zip::ZipArchive::new(&mut zip)?;
     archive.extract(&output_dir).with_context(|| {
-        format!("failed to extract log zip file to: {output_dir}")
+        format!("failed to extract zip file to: {output_dir}")
     })?;
     Ok(())
 }

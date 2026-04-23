@@ -38,6 +38,7 @@ use sled_agent_types::dataset::{
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
+    SledDiagnosticsDebugDropboxDownloadPathParam,
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
@@ -1412,8 +1413,8 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                sa.as_support_bundle_logs()
-                    .zones_list()
+                sa.as_support_bundle_data()
+                    .zones_with_logs()
                     .await
                     .map(HttpResponseOk)
                     .map_err(HttpError::from)
@@ -1433,8 +1434,40 @@ impl SledAgentApi for SledAgentImpl {
             query_params.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                sa.as_support_bundle_logs()
+                sa.as_support_bundle_data()
                     .get_logs_for_zone(zone, max_rotated)
+                    .await
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn support_debug_dropbox_zones(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_data()
+                    .zones_with_debug_dropbox()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn support_debug_dropbox_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsDebugDropboxDownloadPathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let SledDiagnosticsDebugDropboxDownloadPathParam { zone } =
+            path_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_data()
+                    .get_debug_dropbox_data_for_zone(zone)
                     .await
                     .map_err(HttpError::from)
             })

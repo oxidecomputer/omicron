@@ -50,6 +50,7 @@ use sled_agent_types::dataset::{
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
+    SledDiagnosticsDebugDropboxDownloadPathParam,
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
@@ -1007,6 +1008,20 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
         _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
         _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_debug_dropbox_zones(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        // Return an empty zone list for testing.
+        Ok(HttpResponseOk(Default::default()))
+    }
+
+    async fn support_debug_dropbox_download(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<SledDiagnosticsDebugDropboxDownloadPathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }

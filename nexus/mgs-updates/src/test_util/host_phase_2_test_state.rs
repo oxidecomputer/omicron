@@ -218,6 +218,7 @@ mod api_impl {
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
     use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
+    use sled_agent_types::diagnostics::SledDiagnosticsDebugDropboxDownloadPathParam;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::disk::DiskEnsureBody;
@@ -937,6 +938,19 @@ mod api_impl {
             _query_params: dropshot::Query<
                 SledDiagnosticsLogsDownloadQueryParam,
             >,
+        ) -> Result<http::Response<Body>, HttpError> {
+            unimplemented!()
+        }
+
+        async fn support_debug_dropbox_zones(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+            unimplemented!()
+        }
+
+        async fn support_debug_dropbox_download(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<SledDiagnosticsDebugDropboxDownloadPathParam>,
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }

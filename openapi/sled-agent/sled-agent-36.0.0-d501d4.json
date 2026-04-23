@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "35.0.0"
+    "version": "36.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -599,6 +599,63 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support/debug-dropbox/download/{zone}": {
+      "get": {
+        "summary": "This endpoint returns a zip file of a zone's debug dropbox data,",
+        "description": "organized as `<producer>/<filename>` inside the zip.",
+        "operationId": "support_debug_dropbox_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone",
+            "description": "The zone whose debug dropbox data should be collected",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/support/debug-dropbox/zones": {
+      "get": {
+        "summary": "This endpoint returns a list of known zones on a sled that have debug",
+        "description": "dropbox data (live or archived) that can be collected into a support bundle.",
+        "operationId": "support_debug_dropbox_zones",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

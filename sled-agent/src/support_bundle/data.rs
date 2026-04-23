@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Support Bundle interface to `sled-diagnostics` log collection.
+//! Support bundle interface to `sled-diagnostics` debug data collection
+//! (zone logs and debug dropbox files).
 
 use camino_tempfile::tempfile_in;
 use dropshot::HttpError;
@@ -43,12 +44,12 @@ impl From<Error> for HttpError {
     }
 }
 
-pub struct SupportBundleLogs<'a> {
+pub struct SupportBundleData<'a> {
     log: &'a Logger,
     available_datasets_rx: AvailableDatasetsReceiver,
 }
 
-impl<'a> SupportBundleLogs<'a> {
+impl<'a> SupportBundleData<'a> {
     pub fn new(
         log: &'a Logger,
         available_datasets_rx: AvailableDatasetsReceiver,
@@ -58,12 +59,23 @@ impl<'a> SupportBundleLogs<'a> {
 
     /// Get a list of zones on a sled containing logs that we want to include in
     /// a support bundle.
-    pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
+    pub async fn zones_with_logs(&self) -> Result<Vec<String>, Error> {
         tokio::task::spawn_blocking(move || {
             // We rely on sled-diagnostics to tell us about zones because other
             // methods within sled-agent usually do some sort of filtering and
             // we want all logs, even those in the global zone.
-            sled_diagnostics::LogsHandle::get_zones()
+            sled_diagnostics::DebugDataHandle::get_zones()
+        })
+        .await
+        .map_err(Error::Join)?
+        .map_err(Error::Logs)
+    }
+
+    /// Get a list of zones on a sled that have any debug dropbox data (live
+    /// or archived) to include in a support bundle.
+    pub async fn zones_with_debug_dropbox(&self) -> Result<Vec<String>, Error> {
+        tokio::task::spawn_blocking(move || {
+            sled_diagnostics::DebugDataHandle::get_zones_with_debug_dropbox()
         })
         .await
         .map_err(Error::Join)?
@@ -87,7 +99,7 @@ impl<'a> SupportBundleLogs<'a> {
         let zone = zone.into();
 
         let zip_file = {
-            let handle = sled_diagnostics::LogsHandle::new(log);
+            let handle = sled_diagnostics::DebugDataHandle::new(log);
             match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
             {
                 Ok(_) => Ok(tempfile),
@@ -96,6 +108,39 @@ impl<'a> SupportBundleLogs<'a> {
         }
         .map_err(Error::Logs)?;
 
+        Self::stream_zip_tempfile(zip_file).await
+    }
+
+    /// For a given zone, create a zip file of all dropbox data (live and
+    /// archived) and stream it out via an `HttpResponse`.
+    pub async fn get_debug_dropbox_data_for_zone<Z>(
+        &self,
+        zone: Z,
+    ) -> Result<http::Response<dropshot::Body>, Error>
+    where
+        Z: Into<String>,
+    {
+        let dataset_path = self.dataset_for_temporary_storage().await?;
+        let mut tempfile = tempfile_in(dataset_path)?;
+
+        let log = self.log.clone();
+        let zone = zone.into();
+
+        let zip_file = {
+            let handle = sled_diagnostics::DebugDataHandle::new(log);
+            match handle.get_debug_dropbox_data(&zone, &mut tempfile).await {
+                Ok(_) => Ok(tempfile),
+                Err(e) => Err(e),
+            }
+        }
+        .map_err(Error::Logs)?;
+
+        Self::stream_zip_tempfile(zip_file).await
+    }
+
+    async fn stream_zip_tempfile(
+        zip_file: std::fs::File,
+    ) -> Result<http::Response<dropshot::Body>, Error> {
         // Since we are using a tempfile and the file path has already been
         // unlinked we need to convert our existing handle.
         let mut zip_file_async = tokio::fs::File::from_std(zip_file);

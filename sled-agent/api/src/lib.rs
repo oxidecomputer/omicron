@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (36, ADD_DEBUG_DROPBOX_ENDPOINTS),
     (35, INLINE_ROUTER_PEER_IP_ADDR),
     (34, MODIFY_SVCS_TYPES),
     (33, BOOTSTORE_SERVICE_NAT),
@@ -1323,6 +1324,32 @@ pub trait SledAgentApi {
         >,
         query_params: Query<
             latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// This endpoint returns a list of known zones on a sled that have debug
+    /// dropbox data (live or archived) that can be collected into a support
+    /// bundle.
+    #[endpoint {
+        method = GET,
+        path = "/support/debug-dropbox/zones",
+        versions = VERSION_ADD_DEBUG_DROPBOX_ENDPOINTS..,
+    }]
+    async fn support_debug_dropbox_zones(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's debug dropbox data,
+    /// organized as `<producer>/<filename>` inside the zip.
+    #[endpoint {
+        method = GET,
+        path = "/support/debug-dropbox/download/{zone}",
+        versions = VERSION_ADD_DEBUG_DROPBOX_ENDPOINTS..,
+    }]
+    async fn support_debug_dropbox_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::diagnostics::SledDiagnosticsDebugDropboxDownloadPathParam,
         >,
     ) -> Result<http::Response<Body>, HttpError>;
 

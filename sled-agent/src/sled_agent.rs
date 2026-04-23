@@ -17,7 +17,7 @@ use crate::nexus::{
 use crate::probe_manager::ProbeManager;
 use crate::rot::{RotAttestationHandle, RotAttestationTask};
 use crate::services::{self, ServiceManager, SledAgentInfo};
-use crate::support_bundle::logs::SupportBundleLogs;
+use crate::support_bundle::data::SupportBundleData;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -472,7 +472,7 @@ impl SledAgent {
         info!(&log, "SledAgent::new(..) starting");
 
         // Cleanup any old sled-diagnostics ZFS snapshots
-        sled_diagnostics::LogsHandle::new(
+        sled_diagnostics::DebugDataHandle::new(
             log.new(o!("component" => "sled-diagnostics-cleanup")),
         )
         .cleanup_snapshots()
@@ -799,9 +799,9 @@ impl SledAgent {
         SupportBundleManager::new(&self.log, &*self.inner.config_reconciler)
     }
 
-    /// Accesses the [SupportBundleLogs] API.
-    pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
-        SupportBundleLogs::new(
+    /// Accesses the [SupportBundleData] API.
+    pub(crate) fn as_support_bundle_data(&self) -> SupportBundleData<'_> {
+        SupportBundleData::new(
             &self.log,
             self.inner.config_reconciler.available_datasets_rx(),
         )

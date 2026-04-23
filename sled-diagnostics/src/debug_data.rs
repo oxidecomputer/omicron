@@ -2,7 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled Diagnostics log collection.
+//! Sled Diagnostics debug data collection.
+//!
+//! This module is the engine behind the sled-agent support bundle endpoints
+//! that serve zone log files and debug dropbox files.  The shared machinery
+//! here takes a ZFS snapshot of each dataset containing a file of interest,
+//! locates the file in the snapshot's mount, and writes it into a caller-owned
+//! zip at a caller-supplied path.  Two drivers sit on top:
+//!
+//! - `DebugDataHandle::get_zone_logs` — collects a zone's SMF / extra logs.
+//! - `DebugDataHandle::get_debug_dropbox_data` — collects a zone's debug
+//!   dropbox files, grouped by producer.
 
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -297,11 +307,11 @@ impl std::fmt::Display for LogType {
 
 /// A type managing sled diagnostics log collection snapshots and cleanup.
 #[derive(Clone)]
-pub struct LogsHandle {
+pub struct DebugDataHandle {
     log: Logger,
 }
 
-impl LogsHandle {
+impl DebugDataHandle {
     pub fn new(logger: Logger) -> Self {
         Self { log: logger }
     }
@@ -404,40 +414,45 @@ impl LogsHandle {
             .map_err(|e| LogError::OxLog(e))
     }
 
-    async fn find_log_in_snapshot(
+    /// Find a path within the relevant ZFS snapshot, creating a snapshot for
+    /// the underlying dataset if we haven't already.
+    ///
+    /// This is shared between log collection and debug-dropbox collection, so
+    /// the parameter is named `path` rather than `logfile`.
+    async fn find_path_in_snapshot(
         &self,
         log_snapshots: &mut LogSnapshots,
-        logfile: &Utf8Path,
+        path: &Utf8Path,
     ) -> Result<Utf8PathBuf, LogError> {
         let diagnostics_snapshot =
-            log_snapshots.get_or_create(&self.log, logfile).await?;
+            log_snapshots.get_or_create(&self.log, path).await?;
 
         trace!(
             &self.log,
-            "using diagnostics snapshot {} for logfile {}",
+            "using diagnostics snapshot {} for file {}",
             diagnostics_snapshot.snapshot,
-            logfile;
+            path;
         );
 
-        // We need to reconstruct where the log file will be based on the
+        // We need to reconstruct where the file will be based on the
         // mount point of the snapshot. We do this by figuring out what the
         // common prefix is between the two paths and then combining with the
         // ".zfs/snapshot/<SNAP_NAME>" field in the right spot.
         //
         // Example:
-        // log file: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/oxz_switch/oxide-dendrite:default.log.1745518771"
+        // file: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/oxz_switch/oxide-dendrite:default.log.1745518771"
         // mount point: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/.zfs/snapshot/snapname"
         //
         // path_in_snapshot: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/.zfs/snapshot/snapname/oxz_switch/oxide-dendrite:default.log.1745518771"
 
         let mut path_in_snapshot =
             diagnostics_snapshot.snapshot_mountpoint().clone();
-        let prefix_len = logfile
+        let prefix_len = path
             .iter()
             .zip(path_in_snapshot.iter())
             .take_while(|(a, b)| a == b)
             .count();
-        path_in_snapshot.extend(logfile.iter().skip(prefix_len));
+        path_in_snapshot.extend(path.iter().skip(prefix_len));
 
         Ok(path_in_snapshot)
     }
@@ -458,7 +473,7 @@ impl LogsHandle {
         logtype: LogType,
     ) -> Result<(), LogError> {
         let snapshot_logfile =
-            self.find_log_in_snapshot(log_snapshots, &logfile.path).await?;
+            self.find_path_in_snapshot(log_snapshots, &logfile.path).await?;
 
         if logtype == LogType::Current {
             // Since we are processing the current log files in a zone we need
@@ -561,7 +576,7 @@ impl LogsHandle {
     /// necessary zfs snapshots along the way.
     ///
     /// NOTE: Cancelling this function may result in leaked log snapshots,
-    /// which will not be removed until "LogsHandle::cleanup_snapshots" is
+    /// which will not be removed until "DebugDataHandle::cleanup_snapshots" is
     /// invoked.
     pub async fn get_zone_logs<W: Write + Seek>(
         &self,
@@ -710,6 +725,166 @@ impl LogsHandle {
 
         Ok(())
     }
+
+    /// Get all zones on a sled that have any debug dropbox data (live or
+    /// archived).
+    pub fn get_zones_with_debug_dropbox() -> Result<Vec<String>, LogError> {
+        let zones = oxlog::Zones::load().map_err(LogError::OxLog)?;
+        let filter = oxlog::DropboxFilter {
+            live: true,
+            archived: true,
+            show_empty: false,
+            date_range: None,
+        };
+        Ok(zones
+            .zones
+            .keys()
+            .filter(|zone| {
+                !zones.zone_debug_dropbox_data(zone, filter).is_empty()
+            })
+            .cloned()
+            .collect())
+    }
+
+    /// For a given zone find all of its debug dropbox data (live and
+    /// archived) and write it to `writer` as a zip file.  The zip layout is
+    /// `<producer>/<original_filename>`.
+    ///
+    /// This takes and cleans up ZFS snapshots as needed, in the same way
+    /// `get_zone_logs` does.
+    ///
+    /// NOTE: Cancelling this function may result in leaked snapshots, which
+    /// will not be removed until `DebugDataHandle::cleanup_snapshots` is
+    /// invoked.
+    pub async fn get_debug_dropbox_data<W: Write + Seek>(
+        &self,
+        zone: &str,
+        writer: &mut W,
+    ) -> Result<(), LogError> {
+        let zones = oxlog::Zones::load().map_err(LogError::OxLog)?;
+        let filter = oxlog::DropboxFilter {
+            live: true,
+            archived: true,
+            show_empty: false,
+            date_range: None,
+        };
+        let dropbox_data = zones.zone_debug_dropbox_data(zone, filter);
+
+        let zip = zip::ZipWriter::new(writer);
+
+        let mut log_snapshots = LogSnapshots::new();
+
+        // Separated helper so snapshot cleanup always runs.
+        let result = self
+            .get_debug_dropbox_data_inner(
+                dropbox_data,
+                zip,
+                &mut log_snapshots,
+            )
+            .await;
+
+        log_snapshots.destroy().await;
+
+        result
+    }
+
+    async fn get_debug_dropbox_data_inner<W: Write + Seek>(
+        &self,
+        dropbox_data: BTreeMap<String, oxlog::DebugDropboxData>,
+        mut zip: zip::ZipWriter<W>,
+        log_snapshots: &mut LogSnapshots,
+    ) -> Result<(), LogError> {
+        for (producer, data) in dropbox_data {
+            let oxlog::DebugDropboxData { live, archived } = data;
+            for file in live.iter().chain(archived.iter()) {
+                let snapshot_path = self
+                    .find_path_in_snapshot(log_snapshots, &file.path)
+                    .await?;
+                let Some(name) = snapshot_path.file_name() else {
+                    warn!(
+                        &self.log,
+                        "sled-diagnostics unable to determine filename for \
+                        dropbox file";
+                        "file" => %snapshot_path,
+                    );
+                    continue;
+                };
+                if !snapshot_path.is_file() {
+                    error!(
+                        &self.log,
+                        "found dropbox file that is not a file, skipping \
+                        over it but this is likely a programming error";
+                        "file" => %snapshot_path,
+                    );
+                    continue;
+                }
+                let zip_path = format!("{producer}/{name}");
+                write_file_to_zip(
+                    &self.log,
+                    &mut zip,
+                    &snapshot_path,
+                    &zip_path,
+                    file.modified,
+                )?;
+            }
+        }
+
+        zip.finish()?;
+
+        Ok(())
+    }
+}
+
+/// Write a file from a ZFS snapshot into `zip` at `zip_path`.
+///
+/// This is the generic form shared by log collection and debug-dropbox
+/// collection.  The caller is responsible for computing the zip entry path.
+fn write_file_to_zip<W: Write + Seek>(
+    logger: &Logger,
+    zip: &mut zip::ZipWriter<W>,
+    source_path: &Utf8Path,
+    zip_path: &str,
+    mtime: Option<jiff::Timestamp>,
+) -> Result<(), LogError> {
+    let mut src = File::open(&source_path)?;
+
+    let zip_mtime = mtime
+        .and_then(|ts| {
+            let zoned = ts.in_tz("UTC").ok()?;
+            zip::DateTime::try_from(zoned.datetime()).ok()
+        })
+        .unwrap_or_else(zip::DateTime::default);
+
+    zip.start_file_from_path(
+        zip_path,
+        FullFileOptions::default()
+            .last_modified_time(zip_mtime)
+            .compression_method(zip::CompressionMethod::Zstd)
+            .compression_level(Some(3))
+            // NB: From the docs
+            // If set to false and the file exceeds the
+            // limit, an I/O error is thrown and the file is aborted. If set to
+            // true, readers will require ZIP64 support and if the file does not
+            // exceed the limit, 20 B are wasted.
+            .large_file(true),
+    )?;
+    if let Err(e) = std::io::copy(&mut src, zip) {
+        // If we fail here the `ZipWriter` is an unknown state and we are forced
+        // to bubble up an error.
+        zip.abort_file()?;
+
+        // We are only going to log this error and continue on in hopes that we
+        // are able to grab as many files as possible for debugging purposes.
+        error!(
+            logger,
+            "Failed to write file to zip file";
+            "source" => %source_path,
+            "zip_path" => zip_path,
+            InlineErrorChain::new(&e)
+        );
+    };
+
+    Ok(())
 }
 
 fn write_log_to_zip<W: Write + Seek>(
@@ -730,46 +905,8 @@ fn write_log_to_zip<W: Write + Seek>(
         return Ok(());
     };
 
-    let mut src = File::open(&snapshot_logfile)?;
-
-    let zip_mtime = mtime
-        .and_then(|ts| {
-            let zoned = ts.in_tz("UTC").ok()?;
-            zip::DateTime::try_from(zoned.datetime()).ok()
-        })
-        .unwrap_or_else(zip::DateTime::default);
-
     let zip_path = format!("{service}/{logtype}/{log_name}");
-    zip.start_file_from_path(
-        zip_path,
-        FullFileOptions::default()
-            .last_modified_time(zip_mtime)
-            .compression_method(zip::CompressionMethod::Zstd)
-            .compression_level(Some(3))
-            // NB: From the docs
-            // If set to false and the file exceeds the
-            // limit, an I/O error is thrown and the file is aborted. If set to
-            // true, readers will require ZIP64 support and if the file does not
-            // exceed the limit, 20 B are wasted.
-            .large_file(true),
-    )?;
-    if let Err(e) = std::io::copy(&mut src, zip) {
-        // If we fail here the `ZipWriter` is an unknown state and we are forced
-        // to bubble up an error.
-        zip.abort_file()?;
-
-        // We are only going to log this error and continue on in hopes that we
-        // are able to grab as many logs as possible for debugging purposes.
-        error!(
-            logger,
-            "Failed to write service log to zip file";
-            "service" => %service,
-            "log" => %snapshot_logfile,
-            InlineErrorChain::new(&e)
-        );
-    };
-
-    Ok(())
+    write_file_to_zip(logger, zip, snapshot_logfile, &zip_path, mtime)
 }
 
 /// A log file that is found in oxlog's "extra" bucket of service logs.
@@ -1132,7 +1269,7 @@ mod illumos_tests {
                 get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert_eq!(snapshots.len(), 1, "single snapshot created");
 
-            let handle = LogsHandle::new(log.clone());
+            let handle = DebugDataHandle::new(log.clone());
             handle.cleanup_snapshots().await;
 
             let snapshots =
@@ -1201,7 +1338,7 @@ mod illumos_tests {
         // Make sure an error in this block results in the correct drop ordering
         // for test cleanup
         {
-            let loghandle = LogsHandle::new(log.clone());
+            let loghandle = DebugDataHandle::new(log.clone());
             let mut log_snapshots = LogSnapshots::new();
 
             let zipfile_path = mountpoint.join("test.zip");
@@ -1292,7 +1429,7 @@ mod illumos_tests {
                 fs_err::tokio::File::create_new(&logfile).await.unwrap();
             logfile_handle.write_all(data1.as_bytes()).await.unwrap();
 
-            let loghandle = LogsHandle::new(log.clone());
+            let loghandle = DebugDataHandle::new(log.clone());
             let mut log_snapshots = LogSnapshots::new();
 
             // Create a snapshot first
@@ -1341,6 +1478,108 @@ mod illumos_tests {
     }
 
     #[tokio::test]
+    async fn collect_debug_dropbox_data() {
+        let logctx = test_setup_log("collect_debug_dropbox_data");
+        let log = &logctx.log;
+
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // A debug dataset is where archived dropbox files live.
+        let debug_mountpoint =
+            harness.configure_dataset(DatasetKind::Debug).await;
+
+        // Populate two producers with a couple of files each.
+        let zone = "oxz_foo";
+        let producer_a_files = [
+            ("a1.txt.1700000000.0", "aaa"),
+            ("a2.txt.1700000001.0", "aaaa"),
+        ];
+        let producer_b_files = [("b1.txt.1700000000.0", "bbb")];
+
+        let producer_a_dir = debug_mountpoint
+            .join(format!("{zone}/debug_dropbox/producer_a"));
+        let producer_b_dir = debug_mountpoint
+            .join(format!("{zone}/debug_dropbox/producer_b"));
+        fs_err::tokio::create_dir_all(&producer_a_dir).await.unwrap();
+        fs_err::tokio::create_dir_all(&producer_b_dir).await.unwrap();
+
+        for (name, data) in producer_a_files {
+            let path = producer_a_dir.join(name);
+            let mut fh = fs_err::tokio::File::create_new(&path).await.unwrap();
+            fh.write_all(data.as_bytes()).await.unwrap();
+        }
+        for (name, data) in producer_b_files {
+            let path = producer_b_dir.join(name);
+            let mut fh = fs_err::tokio::File::create_new(&path).await.unwrap();
+            fh.write_all(data.as_bytes()).await.unwrap();
+        }
+
+        {
+            let handle = DebugDataHandle::new(log.clone());
+            let mut log_snapshots = LogSnapshots::new();
+
+            let mut dropbox_data: BTreeMap<String, oxlog::DebugDropboxData> =
+                BTreeMap::new();
+            let mut a_entry = oxlog::DebugDropboxData::default();
+            for (name, _) in producer_a_files {
+                a_entry.archived.push(LogFile {
+                    path: producer_a_dir.join(name),
+                    size: None,
+                    modified: None,
+                });
+            }
+            dropbox_data.insert("producer_a".to_string(), a_entry);
+
+            let mut b_entry = oxlog::DebugDropboxData::default();
+            for (name, _) in producer_b_files {
+                b_entry.archived.push(LogFile {
+                    path: producer_b_dir.join(name),
+                    size: None,
+                    modified: None,
+                });
+            }
+            dropbox_data.insert("producer_b".to_string(), b_entry);
+
+            let zipfile_path = debug_mountpoint.join("dropbox.zip");
+            let zipfile = File::create_new(&zipfile_path).unwrap();
+            let zip = ZipWriter::new(zipfile);
+
+            handle
+                .get_debug_dropbox_data_inner(
+                    dropbox_data,
+                    zip,
+                    &mut log_snapshots,
+                )
+                .await
+                .unwrap();
+
+            let mut archive =
+                ZipArchive::new(File::open(&zipfile_path).unwrap()).unwrap();
+            for (name, data) in producer_a_files {
+                let mut f = archive
+                    .by_name(&format!("producer_a/{name}"))
+                    .expect("producer_a file in zip");
+                let mut contents = String::new();
+                f.read_to_string(&mut contents).unwrap();
+                assert_eq!(contents.as_str(), data);
+            }
+            for (name, data) in producer_b_files {
+                let mut f = archive
+                    .by_name(&format!("producer_b/{name}"))
+                    .expect("producer_b file in zip");
+                let mut contents = String::new();
+                f.read_to_string(&mut contents).unwrap();
+                assert_eq!(contents.as_str(), data);
+            }
+
+            log_snapshots.destroy().await;
+        }
+
+        harness.cleanup();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn log_paths_found_correctly_in_snapshot() {
         let logctx = test_setup_log("log_collection_comes_from_snapshot");
         let log = &logctx.log;
@@ -1367,10 +1606,10 @@ mod illumos_tests {
             logfile_handle.write_all(data.as_bytes()).await.unwrap();
 
             let mut log_snapshots = LogSnapshots::new();
-            let loghandle = LogsHandle::new(log.clone());
+            let loghandle = DebugDataHandle::new(log.clone());
 
             let snapshot_dendrite_log = loghandle
-                .find_log_in_snapshot(&mut log_snapshots, &logfile)
+                .find_path_in_snapshot(&mut log_snapshots, &logfile)
                 .await
                 .unwrap();
 

@@ -197,6 +197,7 @@ impl SvcLogs {
 // keys in maps a bit easier to read.
 type ZoneName = String;
 type ServiceName = String;
+pub type ProducerName = String;
 
 pub struct Paths {
     /// Links to the location of current and rotated log files for a given service
@@ -208,6 +209,16 @@ pub struct Paths {
     /// Links to directories containing extra files such as cockroachdb logs
     /// that reside outside our SMF log and debug service log paths.
     pub extra: Vec<(&'static str, Utf8PathBuf)>,
+
+    /// Path to the zone's live debug dropbox directory
+    /// (`<zone-root>/var/debug_dropbox`).  `None` for the global zone and
+    /// switch zone, which do not have a debug dropbox.
+    pub debug_dropbox_primary: Option<Utf8PathBuf>,
+
+    /// Links to archived debug dropbox roots in debug datasets
+    /// (`<debug-dataset>/<zone>/debug_dropbox/`).  One entry per U.2 that has
+    /// dropbox data for this zone.
+    pub debug_dropbox: Vec<Utf8PathBuf>,
 }
 
 pub struct Zones {
@@ -225,6 +236,8 @@ impl Zones {
                 primary: Utf8PathBuf::from("/var/svc/log"),
                 debug: vec![],
                 extra: vec![],
+                debug_dropbox_primary: None,
+                debug_dropbox: vec![],
             },
         );
 
@@ -238,6 +251,8 @@ impl Zones {
                     "dendrite",
                     "/zone/oxz_switch/root/var/dendrite".into(),
                 )],
+                debug_dropbox_primary: None,
+                debug_dropbox: vec![],
             },
         );
 
@@ -261,8 +276,20 @@ impl Zones {
                 let mut dir = zones_path.clone();
                 dir.push(zone);
                 dir.push("root/var/svc/log");
-                let mut paths =
-                    Paths { primary: dir, debug: vec![], extra: vec![] };
+
+                // Non-global, non-switch zones have a live debug dropbox
+                // directory at `<zone-root>/root/var/debug_dropbox`.
+                let mut dropbox_primary_dir = zones_path.clone();
+                dropbox_primary_dir.push(zone);
+                dropbox_primary_dir.push("root/var/debug_dropbox");
+
+                let mut paths = Paths {
+                    primary: dir,
+                    debug: vec![],
+                    extra: vec![],
+                    debug_dropbox_primary: Some(dropbox_primary_dir),
+                    debug_dropbox: vec![],
+                };
 
                 // Add the path to the extra logs for the zone
                 if zone.starts_with("oxz_cockroachdb") {
@@ -305,6 +332,12 @@ impl Zones {
 
                 // We only add debug paths if the zones have primary paths
                 if let Some(paths) = zones.get_mut(zone) {
+                    // If the zone has an archived debug dropbox directory
+                    // under this debug dataset, record it.
+                    let dropbox_dir = dir.join("debug_dropbox");
+                    if dropbox_dir.is_dir() {
+                        paths.debug_dropbox.push(dropbox_dir);
+                    }
                     paths.debug.push(dir);
                 }
             }
@@ -372,6 +405,174 @@ impl Zones {
             .filter(|(zone, _)| zone_pattern.matches(zone))
             .map(|(zone, _)| self.zone_logs(zone, filter))
             .collect()
+    }
+
+    /// Return debug dropbox files for the given zone, organized by producer.
+    ///
+    /// If `filter.live` is set, files from the zone's live dropbox directory
+    /// (`<zone-root>/var/debug_dropbox/<producer>/`) are included.  If
+    /// `filter.archived` is set, files from the debug datasets
+    /// (`<debug-dataset>/<zone>/debug_dropbox/<producer>/`) are included.
+    pub fn zone_debug_dropbox_data(
+        &self,
+        zone: &str,
+        filter: DropboxFilter,
+    ) -> BTreeMap<ProducerName, DebugDropboxData> {
+        let mut output: BTreeMap<ProducerName, DebugDropboxData> =
+            BTreeMap::new();
+        let Some(paths) = self.zones.get(zone) else {
+            return output;
+        };
+
+        if filter.live {
+            if let Some(dir) = &paths.debug_dropbox_primary {
+                load_dropbox_producers(
+                    dir,
+                    &mut output,
+                    DropboxSource::Live,
+                    filter.show_empty,
+                    filter.date_range,
+                );
+            }
+        }
+
+        if filter.archived {
+            for dir in &paths.debug_dropbox {
+                load_dropbox_producers(
+                    dir,
+                    &mut output,
+                    DropboxSource::Archived,
+                    filter.show_empty,
+                    filter.date_range,
+                );
+            }
+        }
+
+        for data in output.values_mut() {
+            data.live.sort_unstable_by(LogFile::file_name_cmp);
+            data.archived.sort_unstable_by(LogFile::file_name_cmp);
+        }
+
+        output
+    }
+
+    /// Return debug dropbox files for all zones whose names match
+    /// `zone_pattern`.
+    pub fn matching_zone_debug_dropbox_data(
+        &self,
+        zone_pattern: &Pattern,
+        filter: DropboxFilter,
+    ) -> Vec<(ZoneName, BTreeMap<ProducerName, DebugDropboxData>)> {
+        self.zones
+            .par_iter()
+            .filter(|(zone, _)| zone_pattern.matches(zone))
+            .map(|(zone, _)| {
+                (zone.clone(), self.zone_debug_dropbox_data(zone, filter))
+            })
+            .collect()
+    }
+}
+
+/// Debug dropbox files associated with a single producer inside a zone.
+#[derive(Debug, Clone, Default)]
+pub struct DebugDropboxData {
+    /// Files in the zone's live debug dropbox directory.
+    pub live: Vec<LogFile>,
+
+    /// Files in one of the zone's archived debug dropbox directories on a
+    /// debug dataset.
+    pub archived: Vec<LogFile>,
+}
+
+/// Filter applied when enumerating debug dropbox files.
+#[derive(Clone, Copy, Debug)]
+pub struct DropboxFilter {
+    /// Include files from the zone's live debug dropbox directory.
+    pub live: bool,
+
+    /// Include files from the zone's archived debug dropbox directories.
+    pub archived: bool,
+
+    /// Show a file even if its size is zero.
+    pub show_empty: bool,
+
+    /// Restrict to files whose `mtime` falls within this date range.
+    pub date_range: Option<DateRange>,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum DropboxSource {
+    Live,
+    Archived,
+}
+
+// Enumerate producer subdirectories under `dir` and populate `output`.
+//
+// The dropbox layout is `<dir>/<producer>/<file>`; non-directory entries at
+// the top level, and the reserved `tmp` subdirectory, are skipped.
+fn load_dropbox_producers(
+    dir: &Utf8Path,
+    output: &mut BTreeMap<ProducerName, DebugDropboxData>,
+    source: DropboxSource,
+    show_empty: bool,
+    date_range: Option<DateRange>,
+) {
+    let Ok(entries) = dir.read_dir_utf8() else {
+        return;
+    };
+
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let producer = entry.file_name();
+        if producer == "tmp" {
+            continue;
+        }
+
+        let producer_dir = dir.join(producer);
+        let Ok(files) = producer_dir.read_dir_utf8() else {
+            continue;
+        };
+
+        for file_entry in files {
+            let Ok(file_entry) = file_entry else {
+                continue;
+            };
+            let Ok(ft) = file_entry.file_type() else {
+                continue;
+            };
+            if !ft.is_file() {
+                continue;
+            }
+
+            let path = producer_dir.join(file_entry.file_name());
+            let mut logfile = LogFile::new(path);
+
+            if !show_empty || date_range.is_some() {
+                logfile.read_metadata(&file_entry);
+            }
+            if !show_empty && logfile.size == Some(0) {
+                continue;
+            }
+            if let Some(date_range) = date_range {
+                if !logfile.in_date_range(&date_range) {
+                    continue;
+                }
+            }
+
+            let data = output.entry(producer.to_string()).or_default();
+            match source {
+                DropboxSource::Live => data.live.push(logfile),
+                DropboxSource::Archived => data.archived.push(logfile),
+            }
+        }
     }
 }
 
@@ -697,5 +898,91 @@ mod tests {
         assert!(!old_log.in_date_range(&max_before_date_range));
         assert!(new_log.in_date_range(&max_before_date_range));
         assert!(matched_log.in_date_range(&max_before_date_range));
+    }
+
+    #[test]
+    fn test_zone_debug_dropbox_data() {
+        use super::{
+            DebugDropboxData, DropboxFilter, Paths, Zones,
+            load_dropbox_producers,
+        };
+        use camino::Utf8PathBuf;
+        use camino_tempfile::Utf8TempDir;
+        use std::collections::BTreeMap;
+
+        let tempdir = Utf8TempDir::new().unwrap();
+        let root = tempdir.path();
+
+        // Build a fake live dropbox dir and an archived dropbox dir.
+        let live_root = root.join("zone/var/debug_dropbox");
+        let archived_root = root.join("debug/oxz_foo/debug_dropbox");
+
+        for (producer, files) in [
+            ("producer_a", vec![("a.txt", "aaa"), ("b.txt", "bbb")]),
+            ("producer_b", vec![("c.txt", "ccc")]),
+        ] {
+            let live_prod = live_root.join(producer);
+            let archived_prod = archived_root.join(producer);
+            std::fs::create_dir_all(&live_prod).unwrap();
+            std::fs::create_dir_all(&archived_prod).unwrap();
+            for (name, data) in files {
+                std::fs::write(live_prod.join(name), data).unwrap();
+                std::fs::write(
+                    archived_prod.join(format!("{name}.1700000000.0")),
+                    data,
+                )
+                .unwrap();
+            }
+        }
+        // `tmp/` should be ignored in live dropbox.
+        std::fs::create_dir_all(live_root.join("tmp")).unwrap();
+        std::fs::write(live_root.join("tmp/pending"), "x").unwrap();
+        // Non-directory entries at the top-level should be ignored.
+        std::fs::write(live_root.join("ignored_top_level"), "x").unwrap();
+
+        // Empty file should be filtered out when show_empty = false.
+        let empty_prod = live_root.join("producer_empty");
+        std::fs::create_dir_all(&empty_prod).unwrap();
+        std::fs::write(empty_prod.join("empty.txt"), "").unwrap();
+
+        let filter = DropboxFilter {
+            live: true,
+            archived: true,
+            show_empty: false,
+            date_range: None,
+        };
+
+        // Construct a minimal Zones map and invoke the traversal directly.
+        let mut zones = BTreeMap::new();
+        zones.insert(
+            "oxz_foo".to_string(),
+            Paths {
+                primary: Utf8PathBuf::from("/unused"),
+                debug: vec![],
+                extra: vec![],
+                debug_dropbox_primary: Some(live_root.clone()),
+                debug_dropbox: vec![archived_root.clone()],
+            },
+        );
+        let zones = Zones { zones };
+        let data = zones.zone_debug_dropbox_data("oxz_foo", filter);
+
+        assert_eq!(data.keys().collect::<Vec<_>>(), vec!["producer_a", "producer_b"]);
+        assert_eq!(data["producer_a"].live.len(), 2);
+        assert_eq!(data["producer_a"].archived.len(), 2);
+        assert_eq!(data["producer_b"].live.len(), 1);
+        assert_eq!(data["producer_b"].archived.len(), 1);
+
+        // Cover the helper directly too, asserting that a missing directory
+        // doesn't panic.
+        let mut empty: BTreeMap<String, DebugDropboxData> = BTreeMap::new();
+        load_dropbox_producers(
+            &root.join("does/not/exist"),
+            &mut empty,
+            super::DropboxSource::Live,
+            false,
+            None,
+        );
+        assert!(empty.is_empty());
     }
 }

@@ -9,7 +9,7 @@ use glob::Pattern;
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
 use jiff::{Span, Timestamp};
-use oxlog::{DateRange, Filter, LogFile, Zones};
+use oxlog::{DateRange, DropboxFilter, Filter, LogFile, Zones};
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
@@ -62,6 +62,41 @@ enum Commands {
     Services {
         /// The glob pattern to match against zone names
         zone_glob: GlobPattern,
+    },
+
+    /// List debug dropbox files for matching zones (and optionally, a producer).
+    DebugDropbox {
+        /// The glob pattern to match against zone names
+        zone_glob: GlobPattern,
+
+        /// The name of the producer to list dropbox files for
+        producer: Option<String>,
+
+        /// Print available metadata
+        #[arg(short, long)]
+        metadata: bool,
+
+        /// Include live dropbox files from within each zone
+        #[arg(long)]
+        live: bool,
+
+        /// Include archived dropbox files from debug datasets
+        #[arg(long)]
+        archived: bool,
+
+        /// Show files even if they are empty
+        #[arg(short, long, action=ArgAction::SetTrue)]
+        show_empty: bool,
+
+        /// Show files with an `mtime` before this timestamp. May be absolute
+        /// or relative, e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
+        #[arg(short = 'B', long, value_parser = parse_timestamp_now)]
+        before: Option<Timestamp>,
+
+        /// Show files with an `mtime` after this timestamp. May be absolute
+        /// or relative, e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
+        #[arg(short = 'A', long, value_parser = parse_timestamp_now)]
+        after: Option<Timestamp>,
     },
 }
 
@@ -238,6 +273,77 @@ fn main() -> Result<(), anyhow::Error> {
 
             for svc in services {
                 println!("{}", svc);
+            }
+
+            Ok(())
+        }
+        Commands::DebugDropbox {
+            zone_glob,
+            producer,
+            metadata,
+            live,
+            archived,
+            show_empty,
+            before,
+            after,
+        } => {
+            let zones = Zones::load()?;
+            let date_range = match (before, after) {
+                (None, None) => None,
+                _ => Some(DateRange::new(
+                    before.unwrap_or(Timestamp::MAX),
+                    after.unwrap_or(Timestamp::MIN),
+                )),
+            };
+
+            // If the user passes no source flag, include both.
+            let (live, archived) = if !live && !archived {
+                (true, true)
+            } else {
+                (live, archived)
+            };
+
+            let filter =
+                DropboxFilter { live, archived, show_empty, date_range };
+
+            let print_metadata = |f: &LogFile| {
+                println!(
+                    "{}\t{}\t{}",
+                    f.path,
+                    f.size.map_or_else(|| "-".to_string(), |s| s.to_string()),
+                    f.modified
+                        .map_or_else(|| "-".to_string(), |s| s.to_string())
+                );
+            };
+
+            let results =
+                zones.matching_zone_debug_dropbox_data(&zone_glob.0, filter);
+            for (zone, producers) in results {
+                for (producer_name, data) in producers {
+                    if let Some(p) = &producer {
+                        if producer_name != *p {
+                            continue;
+                        }
+                    }
+                    let print_file = |f: &LogFile, source: &str| {
+                        if metadata {
+                            print!("{zone}\t{producer_name}\t{source}\t");
+                            print_metadata(f);
+                        } else {
+                            println!("{}", f.path);
+                        }
+                    };
+                    if filter.live {
+                        for f in &data.live {
+                            print_file(f, "live");
+                        }
+                    }
+                    if filter.archived {
+                        for f in &data.archived {
+                            print_file(f, "archived");
+                        }
+                    }
+                }
             }
 
             Ok(())
