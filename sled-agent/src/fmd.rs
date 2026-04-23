@@ -75,11 +75,14 @@ mod illumos {
         let cases = match adm.cases(None) {
             Ok(cases) => cases
                 .into_iter()
-                .map(|c| FmdCase {
-                    uuid: c.uuid,
-                    code: c.code,
-                    url: c.url,
-                    event: c.event.as_ref().map(nvlist_to_json),
+                .map(|c| {
+                    let fmd_adm::CaseInfo { uuid, code, url, event } = c;
+                    FmdCase {
+                        uuid,
+                        code,
+                        url,
+                        event: event.as_ref().map(nvlist_to_json),
+                    }
                 })
                 .collect(),
             Err(e) => {
@@ -92,13 +95,23 @@ mod illumos {
         let resources = match adm.resources(true) {
             Ok(resources) => resources
                 .into_iter()
-                .map(|r| FmdResource {
-                    fmri: r.fmri,
-                    uuid: r.uuid,
-                    case_id: r.case,
-                    faulty: r.faulty,
-                    unusable: r.unusable,
-                    invisible: r.invisible,
+                .map(|r| {
+                    let fmd_adm::ResourceInfo {
+                        fmri,
+                        uuid,
+                        case,
+                        faulty,
+                        unusable,
+                        invisible,
+                    } = r;
+                    FmdResource {
+                        fmri,
+                        uuid,
+                        case_id: case,
+                        faulty,
+                        unusable,
+                        invisible,
+                    }
                 })
                 .collect(),
             Err(e) => {
