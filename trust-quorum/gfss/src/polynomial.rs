@@ -60,7 +60,7 @@ impl Polynomial {
 
         // Overwrite the constant term
         inner[0] = constant_term;
-        
+
         Polynomial(inner)
     }
 
