@@ -60,7 +60,7 @@ progenitor::generate_api!(
         ExternalIpConfig = omicron_common::api::internal::shared::ExternalIpConfig,
         ExternalIpv4Config = omicron_common::api::internal::shared::ExternalIpv4Config,
         ExternalIpv6Config = omicron_common::api::internal::shared::ExternalIpv6Config,
-        FmdCase = sled_agent_types_versions::latest::inventory::FmdCase,
+        FmdHostCase = sled_agent_types_versions::latest::inventory::FmdHostCase,
         FmdInventory = sled_agent_types_versions::latest::inventory::FmdInventory,
         FmdInventoryResult = sled_agent_types_versions::latest::inventory::FmdInventoryResult,
         FmdResource = sled_agent_types_versions::latest::inventory::FmdResource,

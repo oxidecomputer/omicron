@@ -164,7 +164,7 @@ pub mod inventory {
     pub use crate::v34::inventory::SvcsEnabledNotOnline;
     pub use crate::v34::inventory::SvcsEnabledNotOnlineResult;
     pub use crate::v34::inventory::SvcsError;
-    pub use crate::v36::inventory::FmdCase;
+    pub use crate::v36::inventory::FmdHostCase;
     pub use crate::v36::inventory::FmdInventory;
     pub use crate::v36::inventory::FmdInventoryResult;
     pub use crate::v36::inventory::FmdResource;

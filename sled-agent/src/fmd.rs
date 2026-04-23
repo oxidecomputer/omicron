@@ -5,13 +5,19 @@
 //! Collects fault information from the illumos Fault Management Daemon (FMD).
 
 use sled_agent_types::inventory::FmdInventoryResult;
+use slog::Logger;
+#[cfg(target_os = "illumos")]
+use slog::warn;
 
 #[cfg(target_os = "illumos")]
 mod illumos {
     use fmd_adm::{FmdAdm, NvList, NvValue};
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid};
     use sled_agent_types::inventory::{
-        FmdCase, FmdInventory, FmdInventoryResult, FmdResource,
+        FmdHostCase, FmdInventory, FmdInventoryResult, FmdResource,
     };
+    use slog::Logger;
+    use slog::warn;
 
     pub(super) fn nvvalue_to_json(value: &NvValue) -> serde_json::Value {
         match value {
@@ -62,10 +68,11 @@ mod illumos {
         serde_json::Value::Object(map)
     }
 
-    pub(super) fn collect() -> FmdInventoryResult {
+    pub(super) fn collect(log: Logger) -> FmdInventoryResult {
         let adm = match FmdAdm::open() {
             Ok(adm) => adm,
             Err(e) => {
+                warn!(log, "failed to open fmd"; "error" => %e);
                 return FmdInventoryResult::Error {
                     error: format!("failed to open fmd: {e}"),
                 };
@@ -77,8 +84,8 @@ mod illumos {
                 .into_iter()
                 .map(|c| {
                     let fmd_adm::CaseInfo { uuid, code, url, event } = c;
-                    FmdCase {
-                        uuid,
+                    FmdHostCase {
+                        uuid: FmdHostCaseUuid::from_untyped_uuid(uuid),
                         code,
                         url,
                         event: event.as_ref().map(nvlist_to_json),
@@ -86,6 +93,7 @@ mod illumos {
                 })
                 .collect(),
             Err(e) => {
+                warn!(log, "failed to list fmd cases"; "error" => %e);
                 return FmdInventoryResult::Error {
                     error: format!("failed to list fmd cases: {e}"),
                 };
@@ -106,8 +114,8 @@ mod illumos {
                     } = r;
                     FmdResource {
                         fmri,
-                        uuid,
-                        case_id: case,
+                        uuid: FmdResourceUuid::from_untyped_uuid(uuid),
+                        case_id: FmdHostCaseUuid::from_untyped_uuid(case),
                         faulty,
                         unusable,
                         invisible,
@@ -115,6 +123,7 @@ mod illumos {
                 })
                 .collect(),
             Err(e) => {
+                warn!(log, "failed to list fmd resources"; "error" => %e);
                 return FmdInventoryResult::Error {
                     error: format!("failed to list fmd resources: {e}"),
                 };
@@ -125,20 +134,27 @@ mod illumos {
     }
 }
 
-pub(crate) async fn collect_fmd_inventory() -> FmdInventoryResult {
+pub(crate) async fn collect_fmd_inventory(log: &Logger) -> FmdInventoryResult {
     #[cfg(target_os = "illumos")]
     {
         // FMD queries go through door calls to fmd(1M) and can block, so run
         // them on a blocking-friendly thread rather than stalling the runtime.
-        match tokio::task::spawn_blocking(illumos::collect).await {
+        let task_log = log.clone();
+        match tokio::task::spawn_blocking(move || illumos::collect(task_log))
+            .await
+        {
             Ok(inv) => inv,
-            Err(e) => FmdInventoryResult::Error {
-                error: format!("fmd collection task failed: {e}"),
-            },
+            Err(e) => {
+                warn!(log, "fmd collection task failed"; "error" => %e);
+                FmdInventoryResult::Error {
+                    error: format!("fmd collection task failed: {e}"),
+                }
+            }
         }
     }
     #[cfg(not(target_os = "illumos"))]
     {
+        let _ = log;
         FmdInventoryResult::Error {
             error: "fmd not supported on this platform".to_string(),
         }

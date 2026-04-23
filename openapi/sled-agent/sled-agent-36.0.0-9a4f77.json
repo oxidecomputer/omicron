@@ -5366,8 +5366,8 @@
         ],
         "additionalProperties": false
       },
-      "FmdCase": {
-        "description": "A diagnosed fault case from the illumos Fault Management Daemon.",
+      "FmdHostCase": {
+        "description": "A diagnosed fault case from the illumos Fault Management Daemon on a sled.",
         "type": "object",
         "properties": {
           "code": {
@@ -5384,8 +5384,11 @@
           },
           "uuid": {
             "description": "Unique identifier for this case.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmdHostCaseUuid"
+              }
+            ]
           }
         },
         "required": [
@@ -5394,21 +5397,54 @@
           "uuid"
         ]
       },
+      "FmdHostCaseUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::FmdHostCaseUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "FmdInventory": {
         "description": "Successfully collected FMD fault data.",
         "type": "object",
         "properties": {
           "cases": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/FmdHostCase"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FmdCase"
-            }
+              "$ref": "#/components/schemas/FmdHostCase"
+            },
+            "uniqueItems": true
           },
           "resources": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/FmdResource"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/FmdResource"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -5473,8 +5509,11 @@
         "properties": {
           "case_id": {
             "description": "UUID of the case that diagnosed this fault.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmdHostCaseUuid"
+              }
+            ]
           },
           "faulty": {
             "description": "Whether the resource is marked faulty.",
@@ -5494,8 +5533,11 @@
           },
           "uuid": {
             "description": "Unique identifier for this resource entry.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmdResourceUuid"
+              }
+            ]
           }
         },
         "required": [
@@ -5506,6 +5548,15 @@
           "unusable",
           "uuid"
         ]
+      },
+      "FmdResourceUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::FmdResourceUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",

@@ -2,14 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::api::external::ByteCount;
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
@@ -22,11 +21,11 @@ use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v34;
 
-/// A diagnosed fault case from the illumos Fault Management Daemon.
+/// A diagnosed fault case from the illumos Fault Management Daemon on a sled.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct FmdCase {
+pub struct FmdHostCase {
     /// Unique identifier for this case.
-    pub uuid: Uuid,
+    pub uuid: FmdHostCaseUuid,
     /// Diagnostic code (e.g. "PCIEX-8000-DJ").
     pub code: String,
     /// URL for human-readable information about this fault
@@ -38,6 +37,16 @@ pub struct FmdCase {
     pub event: Option<serde_json::Value>,
 }
 
+impl IdOrdItem for FmdHostCase {
+    type Key<'a> = FmdHostCaseUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.uuid
+    }
+
+    id_upcast!();
+}
+
 /// A resource affected by a diagnosed fault.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct FmdResource {
@@ -45,15 +54,25 @@ pub struct FmdResource {
     /// (e.g. "dev:////pci@af,0/pci1022,1483@3,5").
     pub fmri: String,
     /// Unique identifier for this resource entry.
-    pub uuid: Uuid,
+    pub uuid: FmdResourceUuid,
     /// UUID of the case that diagnosed this fault.
-    pub case_id: Uuid,
+    pub case_id: FmdHostCaseUuid,
     /// Whether the resource is marked faulty.
     pub faulty: bool,
     /// Whether the resource is marked unusable.
     pub unusable: bool,
     /// Whether the resource is marked invisible.
     pub invisible: bool,
+}
+
+impl IdOrdItem for FmdResource {
+    type Key<'a> = FmdResourceUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.uuid
+    }
+
+    id_upcast!();
 }
 
 /// Result of querying FMD for fault information.
@@ -71,8 +90,8 @@ pub enum FmdInventoryResult {
     Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]
 pub struct FmdInventory {
-    pub cases: Vec<FmdCase>,
-    pub resources: Vec<FmdResource>,
+    pub cases: IdOrdMap<FmdHostCase>,
+    pub resources: IdOrdMap<FmdResource>,
 }
 
 /// Identity and basic status information about this sled agent
