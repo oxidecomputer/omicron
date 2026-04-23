@@ -25,6 +25,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+dropshot.workspace = true
 httpmock.workspace = true
 omicron-test-utils.workspace = true
 serde_json.workspace = true

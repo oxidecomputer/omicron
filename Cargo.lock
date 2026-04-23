@@ -13545,6 +13545,7 @@ dependencies = [
  "assert_matches",
  "chrono",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dropshot 0.16.7",
  "gateway-client",
  "gateway-types",
  "httpmock",

@@ -6,6 +6,9 @@ use std::time::Duration;
 
 use super::*;
 use assert_matches::assert_matches;
+use dropshot::ConfigLogging;
+use dropshot::ConfigLoggingLevel;
+use dropshot::test_util::LogContext;
 use httpmock::Mock;
 use httpmock::MockServer;
 use omicron_test_utils::dev;
@@ -134,8 +137,13 @@ impl Harness {
     expected = "set_sled_agent_networking_info_once() called more than once"
 )]
 async fn calling_set_sled_agent_networking_info_once_multiple_times_panics() {
-    let logctx = dev::test_setup_log(
+    // Set up a stderr logger - we're going to panic and won't have the
+    // opportunity to clean up a file-based one.
+    let log_config =
+        ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Trace };
+    let logctx = LogContext::new(
         "calling_set_sled_agent_networking_info_once_multiple_times_panics",
+        &log_config,
     );
     let harness = Harness::new(&logctx.log);
 
@@ -145,8 +153,6 @@ async fn calling_set_sled_agent_networking_info_once_multiple_times_panics() {
     harness.handle.set_sled_agent_networking_info_once(
         harness.sled_agent_networking_info(),
     );
-
-    logctx.cleanup_successful();
 }
 
 // Happy-path test for non-scrimlets.
