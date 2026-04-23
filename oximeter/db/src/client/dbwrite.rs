@@ -63,6 +63,12 @@ impl DbWrite for Client {
         debug!(self.log, "unrolling {} total samples", samples.len());
         let UnrolledSampleRows { new_schema, blocks } =
             self.unroll_samples(&mut handle, samples).await?;
+        // TODO-correctness: Inserting schema here only works with exactly one
+        // oximeter client. If there are conflicting schema on different
+        // clients, we'll insert both. This should probably be resolved by
+        // fixing https://github.com/oxidecomputer/omicron/issues/1294 and
+        // related issues, storing the schema in CRDB and doing checked,
+        // validated schema updates.
         self.insert_schema(&mut handle, new_schema).await?;
         self.insert_unrolled_samples(&mut handle, blocks).await
     }
