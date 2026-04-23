@@ -292,7 +292,14 @@ impl Collection {
                 let unhealthy: Vec<&Zpool> = sled_agent
                     .zpools
                     .iter()
-                    .filter(|z| z.health != ZpoolHealth::Online)
+                    .filter(|z| match z.health {
+                        ZpoolHealth::Online => false,
+                        ZpoolHealth::Degraded
+                        | ZpoolHealth::Faulted
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => true,
+                    })
                     .collect();
                 (!unhealthy.is_empty())
                     .then_some((sled_agent.sled_id, unhealthy))
@@ -310,18 +317,19 @@ impl Collection {
         self.sled_agents
             .iter()
             .filter_map(|sled_agent| {
-                let has_enabled_svcs_not_online =
-                    match &sled_agent.smf_services_enabled_not_online {
-                        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-                            svcs,
-                        ) => !svcs.services.is_empty(),
-                        SvcsEnabledNotOnlineResult::SvcsCmdError(_)
-                        | SvcsEnabledNotOnlineResult::DataUnavailable => true,
-                    };
-                has_enabled_svcs_not_online.then_some((
-                    sled_agent.sled_id,
-                    &sled_agent.smf_services_enabled_not_online,
-                ))
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                        if svcs.services.is_empty() =>
+                    {
+                        None
+                    }
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(_)
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_)
+                    | SvcsEnabledNotOnlineResult::DataUnavailable => Some((
+                        sled_agent.sled_id,
+                        &sled_agent.smf_services_enabled_not_online,
+                    )),
+                }
             })
             .collect()
     }
