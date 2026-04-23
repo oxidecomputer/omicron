@@ -29,13 +29,13 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::InvalidIpAddrError;
-use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterLifetimeConfigError;
-use sled_agent_types::early_networking::RouterPeerIpAddr;
-use sled_agent_types::early_networking::RouterPeerIpAddrError;
-use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
+use sled_agent_types_versions::v20::early_networking::RouterLifetimeConfig;
+use sled_agent_types_versions::v20::early_networking::RouterLifetimeConfigError;
+use sled_agent_types_versions::v30::early_networking::InvalidIpAddrError;
+use sled_agent_types_versions::v30::early_networking::RouterPeerIpAddr;
+use sled_agent_types_versions::v30::early_networking::RouterPeerIpAddrError;
+use sled_agent_types_versions::v30::early_networking::RouterPeerType;
 use std::net::IpAddr;
 
 /// A BGP peer configuration for an interface. Includes the set of announcements

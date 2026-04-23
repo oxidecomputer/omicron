@@ -7500,17 +7500,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- from sitreps, so the inventory collection records may not exist.
     inv_collection_id UUID NOT NULL,
 
-    -- These fields are not semantically meaningful and are intended
-    -- debugging purposes.
-
     -- The time at which this sitrep was created.
+    --
+    -- This field is not semantically meaningful and is intended for
+    -- debugging purposes.
     time_created TIMESTAMPTZ NOT NULL,
     -- The Omicron zone UUID of the Nexus instance that created this
     -- sitrep.
+    --
+    -- This field is not semantically meaningful and is intended for
+    -- debugging purposes.
     creator_id UUID NOT NULL,
     -- A human-readable description of the changes represented by this
     -- sitrep.
-    comment TEXT NOT NULL
+    --
+    -- This field is not semantically meaningful and is intended for
+    -- debugging purposes.
+    comment TEXT NOT NULL,
+
+    -- The earliest time at which an inventory collection may have started if
+    -- it is to be considered newer than the inventory collection that was used
+    -- to produce this sitrep.
+    next_inv_min_time_started TIMESTAMPTZ NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -7637,6 +7648,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     alert_class omicron.public.alert_class NOT NULL,
     -- Actual alert data. The structure of this depends on the alert class.
     payload JSONB NOT NULL,
+    -- A human-readable comment from the diagnosis engine explaining why it
+    -- requested this alert.
+    comment TEXT NOT NULL,
 
     PRIMARY KEY (sitrep_id, id)
 );
@@ -7656,6 +7670,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
     requested_sitrep_id UUID NOT NULL,
     -- UUID of the case to which this request belongs.
     case_id UUID NOT NULL,
+    -- A human-readable comment from the diagnosis engine explaining why it
+    -- requested this support bundle.
+    comment TEXT NOT NULL,
 
     PRIMARY KEY (sitrep_id, id)
 );
@@ -8537,7 +8554,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '251.0.0', NULL)
+    (TRUE, NOW(), NOW(), '253.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

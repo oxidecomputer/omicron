@@ -3138,6 +3138,7 @@ table! {
         time_created -> Timestamptz,
         creator_id -> Uuid,
         comment -> Text,
+        next_inv_min_time_started -> Timestamptz,
     }
 }
 
@@ -3252,6 +3253,7 @@ table! {
         case_id -> Uuid,
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
+        comment -> Text,
     }
 }
 
@@ -3262,6 +3264,7 @@ table! {
         sitrep_id -> Uuid,
         requested_sitrep_id -> Uuid,
         case_id -> Uuid,
+        comment -> Text,
     }
 }
 

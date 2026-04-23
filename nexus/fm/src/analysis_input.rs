@@ -4,10 +4,12 @@
 
 //! Inputs to fault management analysis.
 
+use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::inventory;
+use omicron_uuid_kinds::CollectionUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -65,14 +67,47 @@ impl Input {
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
-    ) -> Builder {
-        Builder {
+    ) -> Result<Builder, InvalidInputs> {
+        // Before preparing analysis inputs, check that the proposed input
+        // inventory collection is at least as new as the parent sitrep's
+        // inventory collection.
+        if let Some((_, ref parent)) = parent_sitrep.as_deref() {
+            let parent = &parent.metadata;
+            // It is always okay to produce a new sitrep based on the same
+            // inventory collection as the parent sitrep...
+            if parent.inv_collection_id != inv.id
+            // ...but if they are not equal, the new inventory collection must
+            // have started after the minimum start time to be considered
+            // newer than the parent's.
+                && inv.time_started < parent.next_inv_min_time_started
+            {
+                return Err(InvalidInputs::InventoryStale {
+                    parent_inv_id: parent.inv_collection_id,
+                    next_inv_min_time_started: parent.next_inv_min_time_started,
+                    input_inv_time_started: inv.time_started,
+                });
+            }
+        }
+        Ok(Builder {
             parent_sitrep,
             inv,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
-        }
+        })
     }
+}
+
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
+pub enum InvalidInputs {
+    #[error(
+        "inventory collection from {input_inv_time_started} is not new \
+         enough: must have started at {next_inv_min_time_started} or later"
+    )]
+    InventoryStale {
+        parent_inv_id: CollectionUuid,
+        next_inv_min_time_started: DateTime<Utc>,
+        input_inv_time_started: DateTime<Utc>,
+    },
 }
 
 #[must_use]
@@ -213,7 +248,7 @@ mod tests {
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
     use omicron_uuid_kinds::{
-        CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
+        CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
     };
     use std::sync::Arc;
 
@@ -404,10 +439,11 @@ mod tests {
                 metadata: fm::SitrepMetadata {
                     id: parent_sitrep_id,
                     parent_sitrep_id: Some(SitrepUuid::new_v4()),
-                    inv_collection_id: CollectionUuid::new_v4(),
+                    inv_collection_id: inv.id,
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "parent sitrep for test".to_string(),
                     time_created: chrono::Utc::now(),
+                    next_inv_min_time_started: inv.time_done,
                 },
                 cases,
                 ereports_by_id,
@@ -424,7 +460,8 @@ mod tests {
 
         // Build analysis input
         let (input, report) = {
-            let mut builder = Input::builder(Some(parent_sitrep), inv);
+            let mut builder = Input::builder(Some(parent_sitrep), inv)
+                .expect("collection start time check should always pass");
             // Pass in four ereports:
             //  - two that are in the open cases of the parent sitrep
             //  - one that is in the (to-be-copied-forward) closed case
@@ -549,6 +586,10 @@ mod tests {
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();
+            new_case.request_support_bundle(
+                nexus_types::support_bundle::BundleDataSelection::all(),
+                "requesting a support bundle",
+            );
             *new_case.id()
         };
 
@@ -589,6 +630,27 @@ mod tests {
         assert!(
             new_case.is_open(),
             "new case should be open in the output sitrep"
+        );
+        assert_eq!(
+            new_case.alerts_requested.len(),
+            1,
+            "new case should have the one requested alert"
+        );
+        assert_eq!(
+            new_case.support_bundles_requested.len(),
+            1,
+            "new case should have the one requested support bundle"
+        );
+        let bundle_req = new_case
+            .support_bundles_requested
+            .iter()
+            .next()
+            .expect("new case should have a support bundle request");
+        assert_eq!(bundle_req.comment, "requesting a support bundle");
+        assert_eq!(
+            bundle_req.requested_sitrep_id, output_sitrep.metadata.id,
+            "support bundle request should be tagged with the sitrep ID in \
+             which it was requested"
         );
 
         assert!(
