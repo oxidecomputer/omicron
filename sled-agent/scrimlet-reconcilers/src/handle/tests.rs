@@ -105,6 +105,28 @@ impl Harness {
             );
         })
     }
+
+    async fn wait_for_mock_to_be_called(&self, mock: &Mock<'_>) {
+        // Tricky bit: we use tokio's paused time in tests below both for
+        // consistency and test speed, but we need to wait for _real_ time for
+        // httpmock to receive requests. Use `std::time::Instant` here so we
+        // wait for 10 real seconds for a request to be received.
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            if mock.calls_async().await == 0 {
+                // advance paused time...
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                // and also _really_ sleep briefly to avoid spinning 100% CPU
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+
+            // We got at least 1 call; assert and return.
+            return mock.assert_async().await;
+        }
+
+        panic!("timed out wait for mock to be called");
+    }
 }
 
 #[tokio::test]
@@ -164,7 +186,7 @@ async fn scrimlet_three_phase_initialization_info_then_scrimlet() {
     let harness = Harness::new(&logctx.log);
 
     // Configure our mock MGS to claim to be switch slot 0.
-    harness.mock_mgs_set_switch_slot(0);
+    let success_mock = harness.mock_mgs_set_switch_slot(0);
 
     // initial status
     assert_matches!(
@@ -186,23 +208,8 @@ async fn scrimlet_three_phase_initialization_info_then_scrimlet() {
 
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
 
-    // becoming a scrimlet should cause us to transition to contacting MGS, but
-    // this happens in another tokio task so we have to wait for it.
-    harness
-        .wait_for_task_status(|status| {
-            matches!(
-                status,
-                ScrimletReconcilersStatus::DeterminingSwitchSlot(
-                    DetermineSwitchSlotStatus::ContactingMgs {
-                        prev_attempt_err: None
-                    }
-                )
-            )
-        })
-        .await;
-
-    // and we should transition through that to `Running` after contacting the
-    // mock MGS.
+    // We should contact MGS, then transition to the running state.
+    harness.wait_for_mock_to_be_called(&success_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(status, ScrimletReconcilersStatus::Running { .. })
@@ -222,7 +229,7 @@ async fn scrimlet_three_phase_initialization_scrimlet_then_info() {
     let harness = Harness::new(&logctx.log);
 
     // Configure our mock MGS to claim to be switch slot 0.
-    harness.mock_mgs_set_switch_slot(0);
+    let success_mock = harness.mock_mgs_set_switch_slot(0);
 
     // Become a scrimlet right away.
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
@@ -237,20 +244,8 @@ async fn scrimlet_three_phase_initialization_scrimlet_then_info() {
         harness.sled_agent_networking_info(),
     );
 
-    // We're already a scrimlet, so we should go through `ContactingMgs` and
-    // then to `Running`.
-    harness
-        .wait_for_task_status(|status| {
-            matches!(
-                status,
-                ScrimletReconcilersStatus::DeterminingSwitchSlot(
-                    DetermineSwitchSlotStatus::ContactingMgs {
-                        prev_attempt_err: None
-                    }
-                )
-            )
-        })
-        .await;
+    // We're already a scrimlet, so we contact MGS then transition to Running.
+    harness.wait_for_mock_to_be_called(&success_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(status, ScrimletReconcilersStatus::Running { .. })
@@ -289,6 +284,9 @@ async fn scrimlet_mgs_fails_first_attempt() {
 
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
 
+    // Wait for our mock to receive a request and return a 503; we should then
+    // see the `WaitingToRetry` state with an error.
+    harness.wait_for_mock_to_be_called(&error_mock).await;
     // We should first see the "waiting to retry" status...
     harness
         .wait_for_task_status(|status| {
@@ -303,24 +301,11 @@ async fn scrimlet_mgs_fails_first_attempt() {
         })
         .await;
 
-    // ... then the "contacting MGS" status with the previous error set.
-    harness
-        .wait_for_task_status(|status| {
-            matches!(
-                status,
-                ScrimletReconcilersStatus::DeterminingSwitchSlot(
-                    DetermineSwitchSlotStatus::ContactingMgs {
-                        prev_attempt_err: Some(err),
-                    }
-                ) if err.contains("status: 503")
-            )
-        })
-        .await;
-
     // Changing MGS to return success should transition us to `Running`.
     error_mock.delete();
-    harness.mock_mgs_set_switch_slot(0);
+    let success_mock = harness.mock_mgs_set_switch_slot(0);
 
+    harness.wait_for_mock_to_be_called(&success_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(status, ScrimletReconcilersStatus::Running { .. })
@@ -361,7 +346,8 @@ async fn scrimlet_mgs_fails_then_we_become_not_a_scrimlet() {
 
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
 
-    // We should first see the "waiting to retry" status...
+    // Wait until we've failed to determine our switch slot.
+    harness.wait_for_mock_to_be_called(&error_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(
@@ -371,20 +357,6 @@ async fn scrimlet_mgs_fails_then_we_become_not_a_scrimlet() {
                         prev_attempt_err,
                     }
                 ) if prev_attempt_err.contains("status: 503")
-            )
-        })
-        .await;
-
-    // ... then the "contacting MGS" status with the previous error set.
-    harness
-        .wait_for_task_status(|status| {
-            matches!(
-                status,
-                ScrimletReconcilersStatus::DeterminingSwitchSlot(
-                    DetermineSwitchSlotStatus::ContactingMgs {
-                        prev_attempt_err: Some(err),
-                    }
-                ) if err.contains("status: 503")
             )
         })
         .await;
@@ -405,23 +377,12 @@ async fn scrimlet_mgs_fails_then_we_become_not_a_scrimlet() {
 
     // Reconfigure MGS to succeed.
     error_mock.delete();
-    harness.mock_mgs_set_switch_slot(0);
+    let success_mock = harness.mock_mgs_set_switch_slot(0);
 
     // Become a scrimlet again - we should transition through `ContactingMgs`
     // (with no previous error) then to `Running`.
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
-    harness
-        .wait_for_task_status(|status| {
-            matches!(
-                status,
-                ScrimletReconcilersStatus::DeterminingSwitchSlot(
-                    DetermineSwitchSlotStatus::ContactingMgs {
-                        prev_attempt_err: None,
-                    }
-                )
-            )
-        })
-        .await;
+    harness.wait_for_mock_to_be_called(&success_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(status, ScrimletReconcilersStatus::Running { .. })
