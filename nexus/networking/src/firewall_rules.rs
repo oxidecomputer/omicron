@@ -84,8 +84,8 @@ pub async fn vpc_list_firewall_rules(
 /// This function does not inject any Nexus-specific allow rules (i.e., the
 /// inbound-allow rule derived from the IP allowlist). Callers that are
 /// propagating rules for the services VPC must inject that rule themselves
-/// before calling this function; see [`plumb_service_firewall_rules`]. All
-/// other current call sites operate on customer VPCs and are unaffected.
+/// before calling this function; see [`plumb_service_firewall_rules`]. An error
+/// is returned if this not the case.
 pub async fn resolve_firewall_rules_for_sled_agent(
     datastore: &DataStore,
     opctx: &OpContext,
@@ -93,6 +93,22 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     rules: &[db::model::VpcFirewallRule],
     log: &Logger,
 ) -> Result<Vec<ResolvedVpcFirewallRule>, Error> {
+    // Check the caller has added the rules implementing the IP allowlist if
+    // needed.
+    if vpc.id() == *SERVICES_VPC_ID
+        && !rules
+            .iter()
+            .any(|r| r.name().as_str().starts_with(NEXUS_VPC_FW_RULE_NAME))
+    {
+        return Err(Error::internal_error(
+            "These firewall rules target the Oxide services VPC, \
+            but do not include any rules implementing the IP allowlist \
+            for Nexus. Callers must inject these manually. See \
+            `plumb_service_firewall_rules` and `make_nexus_allowlist_rules` \
+            more details.",
+        ));
+    }
+
     // Collect the names of instances, subnets, and VPCs that are either
     // targets or host filters. We have to find the sleds for all the
     // targets, and we'll need information about the IP addresses or
