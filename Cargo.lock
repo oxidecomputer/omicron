@@ -13593,6 +13593,7 @@ dependencies = [
  "daft",
  "iddqd",
  "indent_write",
+ "ipnetwork",
  "itertools 0.14.0",
  "omicron-common",
  "omicron-ledger",
