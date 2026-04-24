@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [features]
+default = ["multicast"]
 multicast = []
 
 [build-dependencies]
@@ -99,7 +100,6 @@ ref-cast.workspace = true
 rdb-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
-reqwest012 = { workspace = true }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
