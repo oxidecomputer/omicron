@@ -28,7 +28,10 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(253, "drop-uninitialized-svc-enabled-not-online-state"),
+        KnownVersion::new(
+            253,
+            "drop-uninitialized-svc-enabled-not-online-state",
+        ),
         KnownVersion::new(252, "fm-support-bundle-and-alert-request-comments"),
         KnownVersion::new(251, "fm-sitrep-next-inv-min-time-started"),
         KnownVersion::new(250, "inv-svc-enabled-not-online"),
