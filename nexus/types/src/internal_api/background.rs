@@ -995,6 +995,11 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
+    /// Post-advance value of the `fm_rendezvous_progress` singleton tracker,
+    /// captured at the tail of this activation. `None` if the advance was
+    /// skipped (because some subtask recorded a per-request error) or the
+    /// advance call itself failed; both cases are logged separately.
+    pub latest_processed_sitrep_version: Option<i64>,
 }
 
 pub mod fm_rendezvous {
@@ -1024,6 +1029,12 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// The number of alert-creation attempts that the FM sitrep-version
+        /// guard rejected because this Nexus is processing a sitrep older than
+        /// the rendezvous progress tracker. These attempts are not errors:
+        /// they indicate that another (more current) Nexus has already moved
+        /// past this sitrep, so the insert is intentionally skipped.
+        pub stale_sitrep: usize,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }
@@ -1037,6 +1048,13 @@ pub mod fm_rendezvous {
         pub current_sitrep_bundles_requested: usize,
         /// The number of support bundles created by this activation.
         pub bundles_created: usize,
+        /// The number of support-bundle-creation attempts that the FM
+        /// sitrep-version guard rejected because this Nexus is processing a
+        /// sitrep older than the rendezvous progress tracker. These attempts
+        /// are not errors: they indicate that another (more current) Nexus
+        /// has already moved past this sitrep, so the insert is intentionally
+        /// skipped.
+        pub stale_sitrep: usize,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }

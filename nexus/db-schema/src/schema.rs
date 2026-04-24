@@ -1593,6 +1593,7 @@ table! {
         assigned_nexus -> Nullable<Uuid>,
         user_comment -> Nullable<Text>,
         fm_case_id -> Nullable<Uuid>,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
@@ -2882,6 +2883,7 @@ table! {
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
         case_id -> Nullable<Uuid>,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
@@ -3157,6 +3159,13 @@ table! {
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
 
 table! {
+    fm_rendezvous_progress (singleton) {
+        singleton -> Bool,
+        latest_processed_sitrep_version -> Int8,
+    }
+}
+
+table! {
     disk_type_local_storage (disk_id) {
         disk_id -> Uuid,
 
@@ -3343,3 +3352,22 @@ table! {
 
 allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
 joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
+
+// Cross-table queries used by the FM resource-deletion machinery: the
+// `SitrepVersionGuardedInsert` query (which reads `fm_rendezvous_progress`
+// inline with an INSERT into `alert` or `support_bundle`) and the
+// alert/support-bundle tombstone sweeps (which DELETE from `alert` /
+// `support_bundle` filtered by a `NOT EXISTS` over a `fm_case INNER JOIN
+// fm_sitrep_history` driven by the tracker in `fm_rendezvous_progress`).
+allow_tables_to_appear_in_same_query!(alert, fm_case);
+allow_tables_to_appear_in_same_query!(alert, fm_sitrep_history);
+allow_tables_to_appear_in_same_query!(alert, fm_rendezvous_progress);
+allow_tables_to_appear_in_same_query!(support_bundle, fm_case);
+allow_tables_to_appear_in_same_query!(support_bundle, fm_sitrep_history);
+allow_tables_to_appear_in_same_query!(support_bundle, fm_rendezvous_progress);
+allow_tables_to_appear_in_same_query!(fm_case, fm_sitrep_history);
+allow_tables_to_appear_in_same_query!(fm_case, fm_rendezvous_progress);
+allow_tables_to_appear_in_same_query!(
+    fm_sitrep_history,
+    fm_rendezvous_progress
+);

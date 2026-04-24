@@ -3727,6 +3727,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         alerts,
         support_bundles,
         ereport_marking: marking,
+        latest_processed_sitrep_version,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3738,7 +3739,36 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         Ok(status) => status,
     };
     match sitrep_id {
-        Some(id) => println!("    current sitrep: {id}"),
+        Some(id) => {
+            println!("    current sitrep: {id}");
+            // The tracker line only appears when a sitrep was processed
+            // — without one, the activation never reaches the advance
+            // call, and there is nothing meaningful to print.
+            match latest_processed_sitrep_version {
+                Some(v) => {
+                    println!("    latest fully-processed sitrep version: {v}",)
+                }
+                None => {
+                    // Disambiguate: a `None` here means either the advance
+                    // was skipped because at least one subtask recorded
+                    // per-request errors, or the advance call itself failed.
+                    // Both cases are also logged separately by Nexus.
+                    let any_subtask_errors = !alerts.details.errors.is_empty()
+                        || !support_bundles.details.errors.is_empty()
+                        || !marking.details.errors.is_empty();
+                    if any_subtask_errors {
+                        println!(
+                            "(i) tracker advance skipped: subtasks recorded \
+                             per-request errors"
+                        );
+                    } else {
+                        println!(
+                            "(i) tracker advance failed at this activation"
+                        );
+                    }
+                }
+            }
+        }
         None => println!(
             "(i) no FM situation report loaded, so rendezvous was not \
              performed",
@@ -3751,20 +3781,25 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_alerts_requested,
              current_sitrep_alerts_requested,
              alerts_created,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_alerts_requested - alerts_created - errors.len();
+            let already_created = total_alerts_requested
+                - alerts_created
+                - stale_sitrep
+                - errors.len();
             const REQUESTED: &str = "alerts requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
             const ALREADY_CREATED: &str = "  already created:";
+            const STALE_SITREP: &str = "  skipped (stale sitrep):";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
                 ALREADY_CREATED,
+                STALE_SITREP,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
@@ -3779,6 +3814,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             println!(
                 "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
             );
+            println!("      {STALE_SITREP:<WIDTH$}{stale_sitrep:>NUM_WIDTH$}");
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 warn_if_nonzero(errors.len()),
@@ -3796,20 +3832,25 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_bundles_requested,
              current_sitrep_bundles_requested,
              bundles_created,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_bundles_requested - bundles_created - errors.len();
+            let already_created = total_bundles_requested
+                - bundles_created
+                - stale_sitrep
+                - errors.len();
             const REQUESTED: &str = "support bundles requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
             const ALREADY_CREATED: &str = "  already created:";
+            const STALE_SITREP: &str = "  skipped (stale sitrep):";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
                 ALREADY_CREATED,
+                STALE_SITREP,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
@@ -3824,6 +3865,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             println!(
                 "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
             );
+            println!("      {STALE_SITREP:<WIDTH$}{stale_sitrep:>NUM_WIDTH$}");
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 warn_if_nonzero(errors.len()),

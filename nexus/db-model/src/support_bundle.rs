@@ -109,6 +109,7 @@ pub struct SupportBundle {
     pub assigned_nexus: Option<DbTypedUuid<OmicronZoneKind>>,
     pub user_comment: Option<String>,
     pub fm_case_id: Option<DbTypedUuid<CaseKind>>,
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl SupportBundle {
@@ -132,6 +133,7 @@ impl SupportBundle {
             assigned_nexus: Some(nexus_id.into()),
             user_comment,
             fm_case_id: fm_case_id.map(Into::into),
+            time_deleted: None,
         }
     }
 

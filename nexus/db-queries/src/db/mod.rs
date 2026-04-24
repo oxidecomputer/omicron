@@ -26,6 +26,7 @@ mod pool_connection;
 pub mod queries;
 mod raw_query_builder;
 mod sec_store;
+mod sitrep_version_guard;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 

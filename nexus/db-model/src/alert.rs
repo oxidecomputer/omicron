@@ -48,6 +48,12 @@ pub struct Alert {
 
     /// The ID of the fault management case that created this alert, if any.
     pub case_id: Option<DbTypedUuid<CaseKind>>,
+
+    /// Tombstone timestamp: set when an FM-created alert is soft-deleted.
+    ///
+    /// Only meaningful when `case_id` is `Some` (FM-created alerts).
+    /// Non-FM alerts continue to hard-delete and never have this set.
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl Alert {
@@ -69,6 +75,7 @@ impl Alert {
             payload: payload.into(),
             num_dispatched: 0,
             case_id: None,
+            time_deleted: None,
         }
     }
 

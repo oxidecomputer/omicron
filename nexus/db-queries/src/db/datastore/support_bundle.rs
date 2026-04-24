@@ -72,7 +72,11 @@ pub enum SupportBundleProvenance {
     User,
     /// Requested by the fault management subsystem. Uses a specific bundle ID
     /// for idempotent creation, and records the FM case association.
-    Fm { id: SupportBundleUuid, case_id: omicron_uuid_kinds::CaseUuid },
+    Fm {
+        id: SupportBundleUuid,
+        case_id: omicron_uuid_kinds::CaseUuid,
+        sitrep_version: i64,
+    },
 }
 
 /// Parameters for creating a support bundle.
@@ -105,12 +109,19 @@ impl DataStore {
     ///
     /// If the provenance is [`SupportBundleProvenance::Fm`] and a bundle
     /// with the given ID already exists, returns
-    /// [`Error::ObjectAlreadyExists`].
+    /// [`Error::ObjectAlreadyExists`]. If the FM rendezvous progress tracker
+    /// has advanced past `sitrep_version`, returns [`Error::Conflict`] with
+    /// a "stale sitrep" message — the caller's sitrep is older than the
+    /// tracker, so the request should be skipped rather than retried.
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
         params: SupportBundleCreateParams<'_>,
     ) -> CreateResult<SupportBundle> {
+        use crate::db::sitrep_version_guard::{
+            GuardedInsertError, SitrepVersionGuardedInsert,
+        };
+
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -118,6 +129,7 @@ impl DataStore {
         enum SupportBundleError {
             TooManyBundles,
             AlreadyExists,
+            StaleSitrep,
         }
 
         let SupportBundleCreateParams {
@@ -128,12 +140,12 @@ impl DataStore {
             data_selection,
         } = params;
 
-        let (bundle_id, fm_case_id, idempotent) = match provenance {
+        let (bundle_id, fm_case_id, fm_sitrep_version) = match provenance {
             SupportBundleProvenance::User => {
-                (SupportBundleUuid::new_v4(), None, false)
+                (SupportBundleUuid::new_v4(), None, None)
             }
-            SupportBundleProvenance::Fm { id, case_id } => {
-                (id, Some(case_id), true)
+            SupportBundleProvenance::Fm { id, case_id, sitrep_version } => {
+                (id, Some(case_id), Some(sitrep_version))
             }
         };
 
@@ -155,9 +167,16 @@ impl DataStore {
                     // have a support bundle allocated to it.
                     let free_dataset = dataset_dsl::rendezvous_debug_dataset
                         .filter(dataset_dsl::time_tombstoned.is_null())
-                        .left_join(support_bundle_dsl::support_bundle.on(
-                            dataset_dsl::id.eq(support_bundle_dsl::dataset_id),
-                        ))
+                        .left_join(
+                            support_bundle_dsl::support_bundle.on(
+                                dataset_dsl::id
+                                    .eq(support_bundle_dsl::dataset_id)
+                                    .and(
+                                        support_bundle_dsl::time_deleted
+                                            .is_null(),
+                                    ),
+                            ),
+                        )
                         .filter(support_bundle_dsl::dataset_id.is_null())
                         .select(RendezvousDebugDataset::as_select())
                         .first_async(&conn)
@@ -189,38 +208,62 @@ impl DataStore {
                         fm_case_id,
                     );
 
-                    // For idempotent creation (FM provenance), check if the
-                    // bundle already exists before inserting.
-                    if idempotent
-                        && diesel::select(diesel::dsl::exists(
-                            support_bundle_dsl::support_bundle.filter(
-                                support_bundle_dsl::id
-                                    .eq(bundle_id.into_untyped_uuid()),
-                            ),
-                        ))
-                        .get_result_async::<bool>(&conn)
-                        .await?
-                    {
+                    // The primary INSERT. For FM-provenance bundles we wrap
+                    // it in `SitrepVersionGuardedInsert` so that the row is
+                    // only written when the rendezvous tracker has not yet
+                    // moved past the sitrep that requested this bundle. Either
+                    // way `on_conflict_do_nothing()` lets us detect idempotent
+                    // FM retries (the row already exists) without a separate
+                    // pre-check round trip.
+                    let inserted: Option<SupportBundle> = {
+                        let insert = diesel::insert_into(
+                            support_bundle_dsl::support_bundle,
+                        )
+                        .values(bundle)
+                        .on_conflict_do_nothing()
+                        .returning(SupportBundle::as_returning());
+                        match fm_sitrep_version {
+                            None => insert
+                                .get_result_async(&conn)
+                                .await
+                                .optional()?,
+                            Some(v) => {
+                                let guarded =
+                                    SitrepVersionGuardedInsert::new(insert, v);
+                                match guarded
+                                    .insert_and_get_optional_result_async(
+                                        &conn,
+                                    )
+                                    .await
+                                {
+                                    Ok(row) => row,
+                                    Err(GuardedInsertError::StaleSitrep) => {
+                                        return Err(err.bail(
+                                            SupportBundleError::StaleSitrep,
+                                        ));
+                                    }
+                                    Err(GuardedInsertError::DatabaseError(
+                                        e,
+                                    )) => return Err(e),
+                                }
+                            }
+                        }
+                    };
+
+                    let Some(inserted) = inserted else {
                         return Err(
                             err.bail(SupportBundleError::AlreadyExists),
                         );
-                    }
-
-                    diesel::insert_into(
-                        support_bundle_dsl::support_bundle,
-                    )
-                    .values(bundle.clone())
-                    .execute_async(&conn)
-                    .await?;
+                    };
 
                     Self::support_bundle_data_selection_insert_on_conn(
                         &conn,
-                        bundle.id.into(),
+                        inserted.id.into(),
                         data_selection,
                     )
                     .await?;
 
-                    Ok(bundle)
+                    Ok(inserted)
                 }
             })
             .await
@@ -239,6 +282,12 @@ impl DataStore {
                                     external::ResourceType::SupportBundle,
                                 object_name: bundle_id.to_string(),
                             };
+                        }
+                        SupportBundleError::StaleSitrep => {
+                            return external::Error::conflict(
+                                "cannot create FM-originated support bundle \
+                                 for stale sitrep",
+                            );
                         }
                     }
                 }
@@ -393,9 +442,12 @@ impl DataStore {
                 async move {
                     use nexus_db_schema::schema::support_bundle::dsl;
 
-                    // Find all bundles without backing storage.
+                    // Find all live bundles without backing storage.
+                    // Tombstoned bundles are skipped: the FM tombstone sweep
+                    // handles their hard-deletion independently.
                     let bundles_with_bad_datasets = dsl::support_bundle
                         .filter(dsl::dataset_id.eq_any(invalid_datasets))
+                        .filter(dsl::time_deleted.is_null())
                         .select(SupportBundle::as_select())
                         .load_async(conn)
                         .await?;
@@ -771,15 +823,35 @@ impl DataStore {
                         }
                     }
 
-                    Self::support_bundle_data_selection_delete_on_conn(
-                        &conn,
-                        vec![id],
-                    )
-                    .await?;
-                    diesel::delete(dsl::support_bundle)
-                        .filter(dsl::id.eq(id))
-                        .execute_async(&conn)
-                        .await?;
+                    match bundle.fm_case_id {
+                        None => {
+                            // Non-FM bundle: hard delete, including the
+                            // child data-selection rows.
+                            Self::support_bundle_data_selection_delete_on_conn(
+                                &conn,
+                                vec![id],
+                            )
+                            .await?;
+                            diesel::delete(dsl::support_bundle)
+                                .filter(dsl::id.eq(id))
+                                .execute_async(&conn)
+                                .await?;
+                        }
+                        Some(_) => {
+                            // FM bundle: tombstone the row by setting
+                            // `time_deleted`. Child data-selection rows are
+                            // intentionally left in place — they describe the
+                            // frozen collection request and remain attached
+                            // through the tombstone lifetime, cascading out
+                            // when the eventual sweep hard-deletes the parent.
+                            diesel::update(dsl::support_bundle)
+                                .filter(dsl::id.eq(id))
+                                .filter(dsl::time_deleted.is_null())
+                                .set(dsl::time_deleted.eq(chrono::Utc::now()))
+                                .execute_async(&conn)
+                                .await?;
+                        }
+                    }
                     Ok(())
                 }
             })
@@ -817,6 +889,7 @@ mod test {
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
+    use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -2008,8 +2081,6 @@ mod test {
 
     #[tokio::test]
     async fn test_support_bundle_fm_idempotent_create() {
-        use omicron_uuid_kinds::CaseUuid;
-
         let logctx =
             dev::test_setup_log("test_support_bundle_fm_idempotent_create");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -2031,6 +2102,7 @@ mod test {
                     provenance: SupportBundleProvenance::Fm {
                         id: bundle_id,
                         case_id,
+                        sitrep_version: 0,
                     },
                     reason,
                     nexus_id: this_nexus_id,
@@ -2055,6 +2127,7 @@ mod test {
                     provenance: SupportBundleProvenance::Fm {
                         id: bundle_id,
                         case_id,
+                        sitrep_version: 0,
                     },
                     reason,
                     nexus_id: this_nexus_id,
@@ -2067,6 +2140,288 @@ mod test {
                 "Creating an existing FM bundle should return an error",
             );
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_support_bundle_create_stale_sitrep() {
+        let logctx =
+            dev::test_setup_log("test_support_bundle_create_stale_sitrep");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        test_create_rendezvous_dataset(datastore, opctx).await;
+
+        datastore.fm_rendezvous_progress_advance(opctx, 10).await.unwrap();
+
+        let case_id = CaseUuid::new_v4();
+        let err = datastore
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::Fm {
+                        id: SupportBundleUuid::new_v4(),
+                        case_id,
+                        sitrep_version: 5,
+                    },
+                    reason: "testing",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: Default::default(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err,
+            Error::Conflict { ref message }
+                if message.external_message().contains("stale sitrep")
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_support_bundle_time_deleted_roundtrip() {
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let logctx =
+            dev::test_setup_log("test_support_bundle_time_deleted_roundtrip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Build a minimal SupportBundle row directly (bypassing the
+        // datastore's allocation logic — we're just exercising the column).
+        let bundle = SupportBundle::new(
+            SupportBundleUuid::new_v4(),
+            "test bundle".to_string(),
+            ZpoolUuid::new_v4(),
+            DatasetUuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
+            None,
+            None,
+        );
+        let bundle_id = bundle.id.into_untyped_uuid();
+        diesel::insert_into(dsl::support_bundle)
+            .values(bundle)
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(bundle_id))
+            .set(dsl::time_deleted.eq(chrono::Utc::now()))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        let fetched: SupportBundle = dsl::support_bundle
+            .filter(dsl::id.eq(bundle_id))
+            .select(SupportBundle::as_select())
+            .first_async(&*conn)
+            .await
+            .unwrap();
+        assert!(
+            fetched.time_deleted.is_some(),
+            "time_deleted should round-trip as Some"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test helper: create a sled with a single zpool/debug dataset, returning
+    /// the dataset id.
+    async fn test_create_rendezvous_dataset(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> DatasetUuid {
+        let test_sled = create_sled_and_zpools(datastore, opctx, 1).await;
+        test_sled.pools[0].dataset
+    }
+
+    /// Test helper: allocate a support bundle. Asserts that the allocation
+    /// landed on `expected_dataset_id`.
+    async fn test_allocate_support_bundle(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        expected_dataset_id: DatasetUuid,
+    ) -> SupportBundle {
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let bundle = datastore
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "tombstone reuse test",
+                    nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("should allocate support bundle");
+        assert_eq!(
+            DatasetUuid::from(bundle.dataset_id),
+            expected_dataset_id,
+            "allocation should land on the only available dataset",
+        );
+        bundle
+    }
+
+    /// Test helper: directly tombstone a support bundle row by setting
+    /// `time_deleted`. The full delete flow lives in a later task.
+    /// Retains `_opctx` for parity with the `(datastore, opctx, ...)` shape
+    /// of helpers that touch the public datastore API.
+    async fn test_tombstone_support_bundle_row(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+    ) {
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .set(dsl::time_deleted.eq(chrono::Utc::now()))
+            .execute_async(&*conn)
+            .await
+            .expect("should tombstone support bundle row");
+    }
+
+    #[tokio::test]
+    async fn test_tombstoned_bundle_frees_dataset() {
+        let logctx =
+            dev::test_setup_log("test_tombstoned_bundle_frees_dataset");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let dataset_id = test_create_rendezvous_dataset(datastore, opctx).await;
+
+        // First allocation succeeds.
+        let bundle1 =
+            test_allocate_support_bundle(datastore, opctx, dataset_id).await;
+        // Mark the row as deleted directly via raw diesel; the delete flow is
+        // exercised in a later task.
+        test_tombstone_support_bundle_row(datastore, opctx, bundle1.id.into())
+            .await;
+
+        // Second allocation: must pick the same dataset.
+        let bundle2 =
+            test_allocate_support_bundle(datastore, opctx, dataset_id).await;
+        assert_eq!(
+            bundle2.dataset_id, bundle1.dataset_id,
+            "dataset should be reusable once tombstoned",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test helper: directly transition a bundle into a state where
+    /// `support_bundle_delete` is permitted (`Destroying`).
+    async fn test_put_bundle_in_deletable_state(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+    ) {
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .set(dsl::state.eq(SupportBundleState::Destroying))
+            .execute_async(&*conn)
+            .await
+            .expect("should transition bundle to Destroying state");
+    }
+
+    /// Test helper: fetch a support bundle row by id, ignoring `time_deleted`.
+    ///
+    /// Used by tests that need to inspect tombstoned rows that the normal
+    /// datastore read path filters out.
+    async fn test_support_bundle_raw(
+        datastore: &DataStore,
+        bundle_id: SupportBundleUuid,
+    ) -> Option<SupportBundle> {
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        dsl::support_bundle
+            .filter(dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .select(SupportBundle::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_support_bundle_delete_branches_on_fm_case_id() {
+        let logctx = dev::test_setup_log(
+            "test_support_bundle_delete_branches_on_fm_case_id",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        // The user bundle's allocation lands on the same dataset the FM
+        // bundle previously held — see test_tombstoned_bundle_frees_dataset
+        // for the standalone proof of that property.
+        test_create_rendezvous_dataset(datastore, opctx).await;
+
+        // FM bundle -> soft delete.
+        let case_id = CaseUuid::new_v4();
+        let fm_bundle = datastore
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::Fm {
+                        id: SupportBundleUuid::new_v4(),
+                        case_id,
+                        sitrep_version: 1,
+                    },
+                    reason: "fm",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
+        let fm_id: SupportBundleUuid = fm_bundle.id.into();
+        test_put_bundle_in_deletable_state(datastore, opctx, fm_id).await;
+        datastore
+            .support_bundle_delete(opctx, &authz_support_bundle_from_id(fm_id))
+            .await
+            .unwrap();
+        let row = test_support_bundle_raw(datastore, fm_id).await.unwrap();
+        assert!(row.time_deleted.is_some(), "FM bundle should be tombstoned");
+
+        // User bundle -> hard delete.
+        let user_bundle = datastore
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "user",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
+        let user_id: SupportBundleUuid = user_bundle.id.into();
+        test_put_bundle_in_deletable_state(datastore, opctx, user_id).await;
+        datastore
+            .support_bundle_delete(
+                opctx,
+                &authz_support_bundle_from_id(user_id),
+            )
+            .await
+            .unwrap();
+        assert!(test_support_bundle_raw(datastore, user_id).await.is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();

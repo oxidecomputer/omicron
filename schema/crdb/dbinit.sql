@@ -3156,16 +3156,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     user_comment TEXT,
 
     -- If this bundle was requested by an FM case, the case UUID.
-    fm_case_id UUID
+    fm_case_id UUID,
+
+    -- Tombstone timestamp: set when a bundle is soft-deleted. We currently
+    -- soft-delete only support bundles that were requested by fault management
+    -- (that is, when fm_case_id is set) so that they aren't accidentally
+    -- resurrected after deletion. Bundles created by operators (without
+    -- fm_case_id) can be hard-deleted.
+    time_deleted TIMESTAMPTZ
 
 );
 
--- The "UNIQUE" part of this index helps enforce that we allow one support bundle
--- per debug dataset. This constraint can be removed, if the query responsible
--- for allocation changes to allocate more intelligently.
+-- The "UNIQUE" part of this index helps enforce that we allow one support
+-- bundle per debug dataset; tombstoned rows are excluded from this index so a
+-- dataset may be reused once its previous bundle is soft-deleted. This
+-- constraint can be removed, if the query responsible for allocation changes to
+-- allocate more intelligently.
 CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.support_bundle (
     dataset_id
-);
+) WHERE time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bundle (
     assigned_nexus
@@ -7026,6 +7035,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     -- The ID of the fault management case that created this alert, if any.
     case_id UUID,
 
+    -- Tombstone timestamp: set when an alert is soft-deleted. We currently
+    -- soft-delete only alerts that were requested by fault management (that is,
+    -- when case_id is set) so that they aren't accidentally resurrected after
+    -- deletion. Other alerts (without case_id) can be hard-deleted.
+    time_deleted TIMESTAMPTZ,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),
@@ -7726,6 +7741,39 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     PRIMARY KEY (sitrep_id, request_id),
     CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
+
+-- Singleton tracker recording the highest sitrep version that the FM rendezvous
+-- background task has fully processed on any Nexus. This has two related uses:
+--
+-- * First, we use this to ensure forward progress. When executing a sitrep, its
+--   requested alerts and support bundles (we'll collectively refer to these
+--   here as "resources") are only created if the sitrep's version is at least
+--   as new as the tracker (see `SitrepVersionGuardedInsert`).
+--
+-- * Second, we use this to determine when it's safe to hard-delete tombstoned
+--   resources that had previously been created by FM. We know (from the above)
+--   that a stale sitrep can't inadvertently resurrect a deleted resource, so
+--   any resource referencing a case that is no longer present in any sitrep at
+--   least as new as this tracker can be safely garbage-collected.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_rendezvous_progress (
+    -- There should only be one row of this table for the whole DB.
+    -- Filter on "singleton = true" before querying or applying updates.
+    singleton BOOL NOT NULL PRIMARY KEY,
+    -- Effectively a foreign key into fm_sitrep_history (version). Not
+    -- enforced as such: the referenced row may be GC'd out of history
+    -- (#9384) while this tracker is still meaningful, and the bootstrap
+    -- value 0 precedes any real sitrep version.
+    latest_processed_sitrep_version INT8 NOT NULL,
+
+    CHECK (singleton = true)
+);
+
+INSERT INTO omicron.public.fm_rendezvous_progress (
+    singleton,
+    latest_processed_sitrep_version
+) VALUES
+    (TRUE, 0)
+ON CONFLICT DO NOTHING;
 
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
@@ -8557,7 +8605,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '256.0.0', NULL)
+    (TRUE, NOW(), NOW(), '257.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

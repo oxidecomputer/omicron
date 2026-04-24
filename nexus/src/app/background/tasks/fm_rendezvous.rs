@@ -78,6 +78,10 @@ impl FmRendezvous {
             return Status::default();
         };
 
+        let (ref version, ref current_sitrep) = *sitrep;
+        let sitrep_version = i64::from(version.version);
+        let sitrep_id = current_sitrep.id();
+
         let alerts = self.spawn_op(
             &sitrep,
             opctx,
@@ -105,12 +109,99 @@ impl FmRendezvous {
             indicating that they were aborted.
         ";
 
-        Status {
-            sitrep_id: Some(sitrep.1.id()),
-            alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
-            support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
-            ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+        let alerts = alerts.await.expect(TASKS_SHOULDNT_FAIL);
+        let support_bundles = support_bundles.await.expect(TASKS_SHOULDNT_FAIL);
+        let ereport_marking = marking.await.expect(TASKS_SHOULDNT_FAIL);
+
+        // Advance the rendezvous progress tracker to this sitrep's version, but
+        // only if every subtask completed without error. If there were any
+        // errors, we'll retry on the next activation.
+        //
+        // Note: holding the tracker back on errors is a conservative choice. If
+        // we advanced the tracker regardless, then `SitrepVersionGuardedInsert`
+        // would prevent future retries from executing, meaning that some
+        // requested alerts or support bundles would potentially be missed. The
+        // consequence is that, if there is a persistent failure here and the
+        // tracker never advances, the tombstone sweeps below may never be able
+        // to clean up resources.
+        let any_errors = !alerts.details.errors.is_empty()
+            || !support_bundles.details.errors.is_empty()
+            || !ereport_marking.details.errors.is_empty();
+        let latest_processed_sitrep_version = if any_errors {
+            slog::warn!(
+                &opctx.log,
+                "skipping rendezvous progress tracker advance: subtasks \
+                 recorded per-request errors";
+                "sitrep_version" => sitrep_version,
+                "sitrep_id" => ?sitrep_id,
+                "alert_errors" => alerts.details.errors.len(),
+                "support_bundle_errors" => support_bundles.details.errors.len(),
+                "ereport_marking_errors" => ereport_marking.details.errors.len(),
+            );
+            None
+        } else {
+            match self
+                .datastore
+                .fm_rendezvous_progress_advance(opctx, sitrep_version)
+                .await
+            {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    slog::warn!(
+                        &opctx.log,
+                        "failed to advance rendezvous progress tracker";
+                        "sitrep_version" => sitrep_version,
+                        "sitrep_id" => ?sitrep_id,
+                        "error" => InlineErrorChain::new(&e).to_string(),
+                    );
+                    None
+                }
+            }
+        };
+
+        let status = Status {
+            sitrep_id: Some(sitrep_id),
+            alerts,
+            support_bundles,
+            ereport_marking,
+            latest_processed_sitrep_version,
+        };
+
+        // Sweep eligible tombstoned alerts and support bundles.
+        match self.datastore.fm_alert_tombstone_sweep(opctx).await {
+            Ok(n) => {
+                if n > 0 {
+                    slog::info!(
+                        &opctx.log,
+                        "swept alert tombstones";
+                        "count" => n,
+                    );
+                }
+            }
+            Err(e) => slog::warn!(
+                &opctx.log,
+                "alert tombstone sweep failed";
+                "error" => InlineErrorChain::new(&e).to_string(),
+            ),
         }
+        match self.datastore.fm_support_bundle_tombstone_sweep(opctx).await {
+            Ok(n) => {
+                if n > 0 {
+                    slog::info!(
+                        &opctx.log,
+                        "swept support bundle tombstones";
+                        "count" => n,
+                    );
+                }
+            }
+            Err(e) => slog::warn!(
+                &opctx.log,
+                "support bundle tombstone sweep failed";
+                "error" => InlineErrorChain::new(&e).to_string(),
+            ),
+        }
+
+        status
     }
 
     fn spawn_op<F>(
@@ -148,7 +239,8 @@ impl FmRendezvous {
         sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> AlertCreationStatus {
-        let (_, ref sitrep) = *sitrep;
+        let (ref version, ref sitrep) = *sitrep;
+        let sitrep_version = i64::from(version.version);
         let mut status = AlertCreationStatus::default();
 
         // XXX(eliza): is it better to allocate all of these into a big array
@@ -157,15 +249,6 @@ impl FmRendezvous {
         // would need to use `ON CONFLICT DO NOTHING` rather than checking for
         // `Conflict` errors from individual inserts, since multiple Nexus
         // instances may run this task concurrently.
-        //
-        // TODO(#9592) Currently, these `alert_create` calls have no guard
-        // against a stale Nexus inserting alerts from an outdated sitrep. This
-        // is fine for now because alert requests are carried forward into newer
-        // sitreps, so a stale insert is redundant rather than incorrect.
-        // However, if alerts are ever hard-deleted (e.g. when a case is
-        // closed), a lagging Nexus could re-create "zombie" alert records after
-        // deletion. At that point, the INSERT should be guarded by a CTE that
-        // checks the sitrep generation matches the current one.
         for (case_id, req) in sitrep.alerts_requested() {
             let &AlertRequest { id, class, requested_sitrep_id, .. } = req;
             status.total_alerts_requested += 1;
@@ -177,13 +260,32 @@ impl FmRendezvous {
                 .alert_create(
                     &opctx,
                     db::model::Alert::for_fm_alert_request(req, case_id),
+                    Some(sitrep_version),
                 )
                 .await
             {
                 // Alert already exists --- this is expected, since multiple
                 // Nexus instances may run this task concurrently for the same
                 // sitrep, or a previous activation may have partially completed.
-                Err(Error::Conflict { .. }) => {}
+                Err(Error::ObjectAlreadyExists { .. }) => {}
+                Err(Error::Conflict { ref message })
+                    if message.external_message().contains("stale sitrep") =>
+                {
+                    // The FM sitrep-version guard rejected the insert
+                    // because the rendezvous progress tracker is already
+                    // ahead of this activation's sitrep. Some other (more
+                    // current) Nexus has moved past us; skipping the insert
+                    // is the correct behavior, not an error.
+                    slog::info!(
+                        opctx.log,
+                        "alert_create skipped: stale sitrep version";
+                        "sitrep_version" => sitrep_version,
+                        "case_id" => %case_id,
+                        "alert_id" => %id,
+                        "alert_class" => %class,
+                    );
+                    status.stale_sitrep += 1;
+                }
                 Err(e) => {
                     slog::warn!(
                         opctx.log,
@@ -197,7 +299,16 @@ impl FmRendezvous {
                         .errors
                         .push(format!("alert {id} (class: {class}): {e}"));
                 }
-                Ok(_) => status.alerts_created += 1,
+                Ok(_alert) => {
+                    slog::debug!(
+                        opctx.log,
+                        "published alert";
+                        "case_id" => %case_id,
+                        "alert_id" => %id,
+                        "alert_class" => %class,
+                    );
+                    status.alerts_created += 1;
+                }
             }
         }
 
@@ -211,6 +322,7 @@ impl FmRendezvous {
                 "sitrep_id" => %sitrep.id(),
                 "total_alerts_requested" => status.total_alerts_requested,
                 "alerts_created" => status.alerts_created,
+                "stale_sitrep" => status.stale_sitrep,
                 "errors" => n_errors,
             );
         } else if status.alerts_created > 0 {
@@ -221,15 +333,35 @@ impl FmRendezvous {
                 "sitrep_id" => %sitrep.id(),
                 "total_alerts_requested" => status.total_alerts_requested,
                 "alerts_created" => status.alerts_created,
+                "stale_sitrep" => status.stale_sitrep,
             );
         } else if status.total_alerts_requested > 0 {
-            slog::debug!(
-                opctx.log,
-                "all alerts requested by the current sitrep already exist";
-                "sitrep_id" => %sitrep.id(),
-                "total_alerts_requested" => status.total_alerts_requested,
-                "alerts_created" => status.alerts_created,
-            );
+            // No errors, nothing newly created, but we did process requests.
+            // Branch the human-readable message on whether any inserts were
+            // skipped because the sitrep was stale: those alerts may not
+            // exist yet (a more current Nexus might be racing with this one
+            // and hasn't created them either), so saying "already exist"
+            // would be misleading.
+            if status.stale_sitrep > 0 {
+                slog::debug!(
+                    opctx.log,
+                    "no alerts created from the current sitrep \
+                     (some skipped due to stale sitrep version)";
+                    "sitrep_id" => %sitrep.id(),
+                    "total_alerts_requested" => status.total_alerts_requested,
+                    "alerts_created" => status.alerts_created,
+                    "stale_sitrep" => status.stale_sitrep,
+                );
+            } else {
+                slog::debug!(
+                    opctx.log,
+                    "all alerts requested by the current sitrep already exist";
+                    "sitrep_id" => %sitrep.id(),
+                    "total_alerts_requested" => status.total_alerts_requested,
+                    "alerts_created" => status.alerts_created,
+                    "stale_sitrep" => status.stale_sitrep,
+                );
+            }
         } else {
             slog::debug!(
                 opctx.log,
@@ -328,18 +460,14 @@ impl FmRendezvous {
         sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> SupportBundleCreationStatus {
-        let (_, ref sitrep) = *sitrep;
+        let (ref version, ref sitrep) = *sitrep;
+        let sitrep_version = i64::from(version.version);
         let mut status = SupportBundleCreationStatus::default();
 
         // Like alert creation (see `create_requested_alerts`), we iterate all
         // bundle requests in the sitrep, not just new ones. Multiple Nexus
         // instances may run this concurrently. Bundle creation is idempotent,
         // so racing instances won't inadvertently create duplicates.
-        //
-        // TODO(#9592) Same stale-Nexus concern as alerts: if support bundle
-        // requests are ever removed from sitreps (e.g. when a case is closed),
-        // a lagging Nexus could re-create "zombie" bundles from an outdated
-        // sitrep. Currently safe because requests are carried forward.
         for (case, req) in sitrep.support_bundles_requested() {
             let case_id = case.id;
             let de = case.metadata.de;
@@ -380,6 +508,7 @@ impl FmRendezvous {
                         provenance: SupportBundleProvenance::Fm {
                             id: bundle_id,
                             case_id,
+                            sitrep_version,
                         },
                         reason: &reason,
                         nexus_id: self.nexus_id,
@@ -397,6 +526,23 @@ impl FmRendezvous {
                         "case_id" => %case_id,
                         "bundle_id" => %bundle_id,
                     );
+                }
+                // The FM sitrep-version guard rejected the insert because the
+                // rendezvous progress tracker is already ahead of this
+                // activation's sitrep. Some other (more current) Nexus has
+                // moved past us; skipping the insert is the correct behavior,
+                // not an error.
+                Err(Error::Conflict { ref message })
+                    if message.external_message().contains("stale sitrep") =>
+                {
+                    slog::info!(
+                        opctx.log,
+                        "support_bundle_create skipped: stale sitrep version";
+                        "sitrep_version" => sitrep_version,
+                        "case_id" => %case_id,
+                        "bundle_id" => %bundle_id,
+                    );
+                    status.stale_sitrep += 1;
                 }
                 // Other errors, unexpected.
                 Err(e) => {
@@ -425,6 +571,7 @@ impl FmRendezvous {
                 n_errors;
                 "total_bundles_requested" => status.total_bundles_requested,
                 "bundles_created" => status.bundles_created,
+                "stale_sitrep" => status.stale_sitrep,
                 "errors" => n_errors,
             );
         } else if status.bundles_created > 0 {
@@ -434,14 +581,31 @@ impl FmRendezvous {
                 status.bundles_created;
                 "total_bundles_requested" => status.total_bundles_requested,
                 "bundles_created" => status.bundles_created,
+                "stale_sitrep" => status.stale_sitrep,
             );
         } else if status.total_bundles_requested > 0 {
-            slog::debug!(
-                opctx.log,
-                "all support bundles requested by the current sitrep \
-                 already exist";
-                "total_bundles_requested" => status.total_bundles_requested,
-            );
+            // No errors, nothing newly created, but we did process requests.
+            // Same reasoning as `create_requested_alerts`'s aggregate log:
+            // if any inserts were skipped because the sitrep was stale,
+            // those bundles may not exist yet, so "already exist" would be
+            // misleading.
+            if status.stale_sitrep > 0 {
+                slog::debug!(
+                    opctx.log,
+                    "no support bundles created from the current sitrep \
+                     (some skipped due to stale sitrep version)";
+                    "total_bundles_requested" => status.total_bundles_requested,
+                    "stale_sitrep" => status.stale_sitrep,
+                );
+            } else {
+                slog::debug!(
+                    opctx.log,
+                    "all support bundles requested by the current sitrep \
+                     already exist";
+                    "total_bundles_requested" => status.total_bundles_requested,
+                    "stale_sitrep" => status.stale_sitrep,
+                );
+            }
         } else {
             slog::debug!(
                 opctx.log,
@@ -603,6 +767,7 @@ mod tests {
                 total_alerts_requested: 1,
                 current_sitrep_alerts_requested: 1,
                 alerts_created: 1,
+                stale_sitrep: 0,
                 errors: Vec::new()
             }
         );
@@ -694,6 +859,7 @@ mod tests {
                 total_alerts_requested: 3,
                 current_sitrep_alerts_requested: 2,
                 alerts_created: 2,
+                stale_sitrep: 0,
                 errors: Vec::new()
             }
         );
@@ -1597,6 +1763,505 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rendezvous_activation_advances_tracker() {
+        let logctx =
+            dev::test_setup_log("test_rendezvous_activation_advances_tracker");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+        } = make_activators();
+
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // Tracker bootstraps at 0 before any activation. `advance(0)` is
+        // the natural read idiom: GREATEST(0, 0) = 0.
+        assert_eq!(
+            datastore.fm_rendezvous_progress_advance(opctx, 0).await.unwrap(),
+            0,
+            "tracker should bootstrap at 0",
+        );
+
+        // Publish a sitrep with version=3 and no cases.
+        let sitrep_id = SitrepUuid::new_v4();
+        let sitrep = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: None,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep for tracker advance".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+            },
+            cases: iddqd::IdOrdMap::new(),
+            ereports_by_id: Default::default(),
+        };
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep_id,
+                    version: 3,
+                    time_made_current: Utc::now(),
+                },
+                sitrep,
+            ))))
+            .unwrap();
+
+        // One full activation against version=3.
+        let _ = dbg!(task.actually_activate(opctx).await);
+
+        // The tracker should have advanced to 3.
+        let v =
+            datastore.fm_rendezvous_progress_advance(opctx, 0).await.unwrap();
+        assert_eq!(
+            v, 3,
+            "tracker should advance to the activated sitrep's version",
+        );
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_rendezvous_activation_runs_sweep() {
+        let logctx =
+            dev::test_setup_log("test_rendezvous_activation_runs_sweep");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+        } = make_activators();
+
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // Build sitrep v=1 carrying a single case, and persist it (which
+        // assigns it a row in `fm_sitrep_history`). The sweep query joins
+        // `fm_case` to `fm_sitrep_history`, so the case must really exist
+        // in the DB at this version for the case-lifetime check to be
+        // meaningful.
+        let sitrep1_id = SitrepUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let sitrep1 = {
+            let case = fm::Case {
+                id: case_id,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep1_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "case in v1".to_string(),
+                },
+                alerts_requested: iddqd::IdOrdMap::new(),
+                ereports: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+            };
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(case).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep1_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: None,
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "test sitrep v1".to_string(),
+                    time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
+                },
+                cases,
+                ereports_by_id: Default::default(),
+            }
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1)
+            .await
+            .expect("insert sitrep v1");
+
+        // Read back the assigned version so we can later send it through
+        // the watch channel.
+        use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
+        let v1: i64 = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            history_dsl::fm_sitrep_history
+                .filter(
+                    history_dsl::sitrep_id.eq(sitrep1_id.into_untyped_uuid()),
+                )
+                .select(history_dsl::version)
+                .first_async::<i64>(&*conn)
+                .await
+                .expect("read v1")
+        };
+
+        // Insert an FM-originated alert tied to the case and tombstone it.
+        let alert_id = AlertUuid::new_v4();
+        {
+            let mut alert = nexus_db_model::Alert::new(
+                alert_id,
+                AlertClass::TestFoo,
+                serde_json::json!({}),
+            );
+            alert.case_id = Some(case_id.into());
+            alert.time_deleted = None;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(nexus_db_schema::schema::alert::table)
+                .values(alert)
+                .execute_async(&*conn)
+                .await
+                .expect("inserting fm alert");
+            diesel::update(alert_dsl::alert)
+                .filter(alert_dsl::id.eq(alert_id.into_untyped_uuid()))
+                .set(alert_dsl::time_deleted.eq(Utc::now()))
+                .execute_async(&*conn)
+                .await
+                .expect("tombstoning alert");
+        }
+
+        // Build sitrep v=2 that does NOT carry the case forward. Persist it
+        // so it gets a row in `fm_sitrep_history` at version 2.
+        let sitrep2_id = SitrepUuid::new_v4();
+        let sitrep2 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep2_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: Some(sitrep1_id),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep v2 (case dropped)".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+            },
+            cases: iddqd::IdOrdMap::new(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep2.clone())
+            .await
+            .expect("insert sitrep v2");
+
+        let v2: i64 = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            history_dsl::fm_sitrep_history
+                .filter(
+                    history_dsl::sitrep_id.eq(sitrep2_id.into_untyped_uuid()),
+                )
+                .select(history_dsl::version)
+                .first_async::<i64>(&*conn)
+                .await
+                .expect("read v2")
+        };
+        assert!(v2 > v1, "v2 ({v2}) must be greater than v1 ({v1})");
+
+        // Publish sitrep v2 through the watch channel and activate.
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep2_id,
+                    version: u32::try_from(v2).expect("v2 fits in u32"),
+                    time_made_current: Utc::now(),
+                },
+                sitrep2,
+            ))))
+            .unwrap();
+
+        let _ = dbg!(task.actually_activate(opctx).await);
+
+        // Tracker advanced to v2; sweep ran; the tombstoned alert should be
+        // gone (no `fm_case` row references this case at version >= v2).
+        let count: i64 = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            alert_dsl::alert
+                .filter(alert_dsl::id.eq(alert_id.into_untyped_uuid()))
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .expect("counting alerts")
+        };
+        assert_eq!(
+            count, 0,
+            "tombstoned FM alert should have been swept after activation",
+        );
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// When the rendezvous progress tracker is ahead of the sitrep this
+    /// activation is processing, `alert_create` should reject the insert via
+    /// the FM sitrep-version guard and the per-subtask status should record
+    /// the rejection in `stale_sitrep` (rather than treating it as an error
+    /// or silently counting it as created).
+    #[tokio::test]
+    async fn test_rendezvous_alert_stale_sitrep_is_recorded() {
+        let logctx = dev::test_setup_log(
+            "test_rendezvous_alert_stale_sitrep_is_recorded",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+        } = make_activators();
+
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // Advance the rendezvous progress tracker well past anything we'll
+        // publish on the watch channel, so the guarded insert that
+        // `alert_create` performs in the FM path will reject our v=1 sitrep.
+        datastore
+            .fm_rendezvous_progress_advance(opctx, 10)
+            .await
+            .expect("advance tracker");
+
+        // Build a sitrep at v=1 with a single case that requests one alert.
+        let sitrep_id = SitrepUuid::new_v4();
+        let alert_id = AlertUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let mut case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "stale-sitrep test case".to_string(),
+            },
+            alerts_requested: iddqd::IdOrdMap::new(),
+            ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
+        };
+        case.alerts_requested
+            .insert_unique(fm::case::AlertRequest {
+                id: alert_id,
+                class: AlertClass::TestFoo,
+                requested_sitrep_id: sitrep_id,
+                payload: serde_json::json!({}),
+                comment: String::new(),
+            })
+            .unwrap();
+        let sitrep = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(case).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: None,
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "stale-sitrep test sitrep".to_string(),
+                    time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
+                },
+                cases,
+                ereports_by_id: Default::default(),
+            }
+        };
+
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        let alerts = &status.alerts.details;
+        assert_eq!(
+            alerts.total_alerts_requested, 1,
+            "subtask should still observe the alert request",
+        );
+        assert_eq!(
+            alerts.current_sitrep_alerts_requested, 1,
+            "subtask should still observe the alert as new in this sitrep",
+        );
+        assert_eq!(
+            alerts.alerts_created, 0,
+            "no alert should be created when the guard rejects the insert",
+        );
+        assert_eq!(
+            alerts.stale_sitrep, 1,
+            "the stale-sitrep rejection should be recorded in the status",
+        );
+        assert!(
+            alerts.errors.is_empty(),
+            "stale-sitrep is not an error: {:?}",
+            alerts.errors,
+        );
+
+        // The alert row must NOT be present in the database.
+        let result = fetch_alert(&datastore, alert_id).await;
+        assert!(
+            result.is_err(),
+            "alert row should not exist when the guard rejected the insert",
+        );
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// When the rendezvous progress tracker is ahead of the sitrep this
+    /// activation is processing, `support_bundle_create` should reject the
+    /// insert via the FM sitrep-version guard and the per-subtask status
+    /// should record the rejection in `stale_sitrep` (rather than treating
+    /// it as an error or silently counting it as created).
+    #[tokio::test]
+    async fn test_rendezvous_bundle_stale_sitrep_is_recorded() {
+        let logctx = dev::test_setup_log(
+            "test_rendezvous_bundle_stale_sitrep_is_recorded",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+        } = make_activators();
+
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // Provide free debug datasets so allocation doesn't fail before the
+        // guarded insert has a chance to run.
+        create_sled_with_zpools(&datastore, &opctx, 3).await;
+
+        // Advance the rendezvous progress tracker well past anything we'll
+        // publish on the watch channel, so the guarded insert that
+        // `support_bundle_create` performs in the FM path will reject our
+        // v=1 sitrep.
+        datastore
+            .fm_rendezvous_progress_advance(opctx, 10)
+            .await
+            .expect("advance tracker");
+
+        // Build a sitrep at v=1 with a single case that requests one bundle.
+        let sitrep_id = SitrepUuid::new_v4();
+        let bundle_id = SupportBundleUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let mut case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "stale-sitrep test case".to_string(),
+            },
+            alerts_requested: iddqd::IdOrdMap::new(),
+            ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
+        };
+        case.support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: bundle_id,
+                requested_sitrep_id: sitrep_id,
+                data_selection: BundleDataSelection::all(),
+                comment: "stale-sitrep test bundle".to_string(),
+            })
+            .unwrap();
+        let sitrep = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(case).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: None,
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "stale-sitrep test sitrep".to_string(),
+                    time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
+                },
+                cases,
+                ereports_by_id: Default::default(),
+            }
+        };
+
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        let bundles = &status.support_bundles.details;
+        assert_eq!(
+            bundles.total_bundles_requested, 1,
+            "subtask should still observe the bundle request",
+        );
+        assert_eq!(
+            bundles.current_sitrep_bundles_requested, 1,
+            "subtask should still observe the bundle as new in this sitrep",
+        );
+        assert_eq!(
+            bundles.bundles_created, 0,
+            "no bundle should be created when the guard rejects the insert",
+        );
+        assert_eq!(
+            bundles.stale_sitrep, 1,
+            "the stale-sitrep rejection should be recorded in the status",
+        );
+        assert!(
+            bundles.errors.is_empty(),
+            "stale-sitrep is not an error: {:?}",
+            bundles.errors,
+        );
+
+        // The bundle row must NOT be present in the database.
+        let result = fetch_support_bundle(&datastore, bundle_id).await;
+        assert!(
+            result.is_err(),
+            "bundle row should not exist when the guard rejected the insert",
+        );
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_support_bundle_requests_capacity_error() {
         let logctx =
             dev::test_setup_log("test_support_bundle_requests_capacity_error");
@@ -1682,6 +2347,20 @@ mod tests {
         assert_eq!(support_bundles.bundles_created, 0);
         assert_eq!(support_bundles.total_bundles_requested, 1);
 
+        // Per-request errors hold the tracker still: the activation has not
+        // earned the right to advance, so `latest_processed_sitrep_version`
+        // stays at the bootstrap 0 and the `Status` field is `None`.
+        assert_eq!(
+            status.latest_processed_sitrep_version, None,
+            "tracker advance should be skipped when a subtask records errors",
+        );
+        assert_eq!(
+            datastore.fm_rendezvous_progress_advance(opctx, 0).await.unwrap(),
+            0,
+            "tracker should remain at the bootstrap value when the activation \
+             had per-request errors",
+        );
+
         // The bundle should NOT exist in the database.
         let result = fetch_support_bundle(&datastore, bundle_id).await;
         assert!(
@@ -1699,6 +2378,184 @@ mod tests {
             .is_err(),
             "collector should not be activated when no bundles were created"
         );
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// End-to-end concurrent-Nexus zombie-prevention test for alerts.
+    ///
+    /// This composes the primitives built in earlier tasks (the
+    /// `fm_rendezvous_progress` tracker, the `SitrepVersionGuardedInsert` CTE,
+    /// and the `alert_create` FM path that wraps the insert in that guard) and
+    /// asserts the spec-mandated race contract:
+    ///
+    /// "Concurrent Nexuses at adjacent sitreps. Nexus C is executing sitrep N.
+    /// Nexus A is executing sitrep N+1 (N+1 became current after C started). A
+    /// completes first, advancing the tracker and running the sweep — which
+    /// drops tombstones for cases that dropped out between N and N+1. C then
+    /// inserts one of those resources, creating a zombie. The CTE guard closes
+    /// both scenarios structurally by making the tracker read atomic with each
+    /// individual insert."
+    ///
+    /// Both directions are checked: the older sitrep's insert must surface
+    /// `StaleSitrep` (and not land a row); a fresh insert at the current
+    /// sitrep version must succeed.
+    #[tokio::test]
+    async fn test_concurrent_nexus_cannot_zombie_alert_after_sweep() {
+        use nexus_types::identity::Asset;
+
+        let logctx = dev::test_setup_log(
+            "test_concurrent_nexus_cannot_zombie_alert_after_sweep",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Simulate Nexus A's outcome: it has activated for sitrep v=N+1=2,
+        // advanced the tracker to 2, and run the sweep — so any case whose
+        // requested resources hadn't yet been inserted by N=1 has had its
+        // tombstones dropped.
+        datastore
+            .fm_rendezvous_progress_advance(opctx, 2)
+            .await
+            .expect("advance tracker to N+1");
+
+        // Nexus C is still holding sitrep v=N=1 and tries to insert an alert.
+        // The CTE guard must reject it as `StaleSitrep` — without this guard,
+        // C would create a zombie row whose case-lifetime tombstone has
+        // already been swept.
+        let stale_alert = nexus_db_model::Alert::new(
+            AlertUuid::new_v4(),
+            AlertClass::TestFoo,
+            json!({}),
+        );
+        let err = datastore
+            .alert_create(opctx, stale_alert.clone(), Some(1))
+            .await
+            .expect_err(
+                "the older Nexus's insert must surface a stale-sitrep error",
+            );
+        match err {
+            Error::Conflict { ref message }
+                if message.external_message().contains("stale sitrep") => {}
+            other => {
+                panic!("expected Conflict with stale sitrep, got {other:?}",)
+            }
+        }
+        let result = fetch_alert(&datastore, stale_alert.id()).await;
+        assert!(
+            result.is_err(),
+            "stale-sitrep insert must NOT have landed a row \
+             (would have been a zombie)",
+        );
+
+        // Bonus: an insert at the current sitrep version must still succeed.
+        // This verifies the guard isn't accidentally blocking everything.
+        let fresh_alert = nexus_db_model::Alert::new(
+            AlertUuid::new_v4(),
+            AlertClass::TestFoo,
+            json!({}),
+        );
+        let _ = datastore
+            .alert_create(opctx, fresh_alert.clone(), Some(2))
+            .await
+            .expect("an insert at the current sitrep version must succeed");
+        let row = fetch_alert(&datastore, fresh_alert.id())
+            .await
+            .expect("fresh alert row should exist");
+        assert_eq!(row.id(), fresh_alert.id());
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// End-to-end concurrent-Nexus zombie-prevention test for support bundles.
+    ///
+    /// Symmetric to `test_concurrent_nexus_cannot_zombie_alert_after_sweep`,
+    /// but exercising the same race for support-bundle creation. See that
+    /// test's doc-comment for the spec quote.
+    #[tokio::test]
+    async fn test_concurrent_nexus_cannot_zombie_bundle_after_sweep() {
+        use omicron_uuid_kinds::CaseUuid;
+
+        let logctx = dev::test_setup_log(
+            "test_concurrent_nexus_cannot_zombie_bundle_after_sweep",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Provide free debug datasets so allocation does not short-circuit
+        // before the guarded insert has a chance to run.
+        create_sled_with_zpools(&datastore, &opctx, 3).await;
+
+        // Simulate Nexus A having advanced the tracker to N+1 and swept.
+        datastore
+            .fm_rendezvous_progress_advance(opctx, 2)
+            .await
+            .expect("advance tracker to N+1");
+
+        // Nexus C, still holding sitrep v=N=1, tries to create a bundle.
+        // The guard must reject the insert as a stale-sitrep conflict.
+        let stale_bundle_id = SupportBundleUuid::new_v4();
+        let err = datastore
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::Fm {
+                        id: stale_bundle_id,
+                        case_id: CaseUuid::new_v4(),
+                        sitrep_version: 1,
+                    },
+                    reason: "concurrent-nexus zombie test (stale)",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect_err("support_bundle_create at stale sitrep must fail");
+        assert!(
+            matches!(
+                err,
+                Error::Conflict { ref message }
+                    if message.external_message().contains("stale sitrep")
+            ),
+            "expected stale-sitrep conflict, got {err:?}",
+        );
+        let result = fetch_support_bundle(&datastore, stale_bundle_id).await;
+        assert!(
+            result.is_err(),
+            "stale-sitrep insert must NOT have landed a row \
+             (would have been a zombie)",
+        );
+
+        // Bonus: a bundle insert at the current sitrep version must still
+        // succeed end-to-end (allocation + guarded insert).
+        let fresh_bundle_id = SupportBundleUuid::new_v4();
+        let bundle = datastore
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::Fm {
+                        id: fresh_bundle_id,
+                        case_id: CaseUuid::new_v4(),
+                        sitrep_version: 2,
+                    },
+                    reason: "concurrent-nexus zombie test (fresh)",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("support_bundle_create at current sitrep should succeed");
+        assert_eq!(bundle.id, fresh_bundle_id.into());
+        let row = fetch_support_bundle(&datastore, fresh_bundle_id)
+            .await
+            .expect("fresh bundle row should exist");
+        assert_eq!(row.id, fresh_bundle_id.into());
 
         // Cleanup
         db.terminate().await;

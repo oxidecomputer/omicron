@@ -974,6 +974,7 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
                 provenance: SupportBundleProvenance::Fm {
                     id: SupportBundleUuid::new_v4(),
                     case_id,
+                    sitrep_version: 0,
                 },
                 reason: "FM test bundle",
                 nexus_id: nexus.id(),

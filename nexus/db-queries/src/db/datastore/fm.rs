@@ -34,6 +34,7 @@ use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
+use nexus_db_schema::schema::fm_rendezvous_progress::dsl as rendezvous_progress_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
@@ -123,6 +124,88 @@ sitrep_child_tables! {
     Case => { table: "fm_case" },
 }
 
+/// Emits the body of an FM tombstone-sweep method. Invoked by
+/// [`DataStore::fm_alert_tombstone_sweep`] and
+/// [`DataStore::fm_support_bundle_tombstone_sweep`]. We use a macro here rather
+/// than a generic helper because the `where`-clause bounds would be awful.
+///
+/// A row can be hard-deleted iff:
+///   * `time_deleted IS NOT NULL` (it has been tombstoned), AND
+///   * the `case_id_column` is `NOT NULL` (it is FM-originated), AND
+///   * No row in `fm_case` (joined to `fm_sitrep_history` on `sitrep_id`)
+///     references this case at a sitrep `version >= tracker`.
+///
+/// Because `fm_case`'s primary key is `(sitrep_id, id)` -- that is, a single
+/// case appears as multiple rows, one per sitrep it is carried forward into --
+/// the inner join correctly fans out across all containing sitreps, and the
+/// `NOT EXISTS` filter checks whether the case still has a row at any version
+/// at or above the tracker.
+///
+// TODO(mergeconflict): I'm sad that this has to be a transaction. The `DELETE`
+// here is a single, atomic DML statement, so in principle it should be safe
+// without one. Trouble is, it looks for all tombstoned rows on the target
+// table, which -- no matter what tricks I tried with indexes and shuffling
+// around different parts of the query -- counts as a full scan from CRDB's
+// perspective. This requires us to use `ALLOW_FULL_TABLE_SCAN_SQL`, which in
+// turn requires a transaction.
+//
+// Every Nexus instance runs this sweep on each rendezvous activation, so,
+// depending on how CRDB decides to lock things, concurrent sweeps may
+// demonstrate some contention. Suggestions welcome.
+macro_rules! fm_tombstone_sweep_body {
+    (
+        $self:expr, $opctx:expr,
+        table: $table:ident,
+        case_id_column: $case_id:ident,
+        txn_name: $txn_name:literal $(,)?
+    ) => {{
+        use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+        use async_bb8_diesel::AsyncSimpleConnection;
+        use diesel::dsl::{exists, not};
+        use nexus_db_schema::schema::{
+            fm_case, fm_rendezvous_progress, fm_sitrep_history, $table,
+        };
+
+        $opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = $self.pool_connection_authorized($opctx).await?;
+
+        $self
+            .transaction_retry_wrapper($txn_name)
+            .transaction(&conn, |conn| async move {
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                let tracker = fm_rendezvous_progress::table
+                    .filter(fm_rendezvous_progress::singleton.eq(true))
+                    .select(
+                        fm_rendezvous_progress::latest_processed_sitrep_version,
+                    )
+                    .single_value();
+
+                diesel::delete($table::table)
+                    .filter($table::time_deleted.is_not_null())
+                    .filter($table::$case_id.is_not_null())
+                    .filter(not(exists(
+                        fm_case::table
+                            .inner_join(
+                                fm_sitrep_history::table
+                                    .on(fm_sitrep_history::sitrep_id
+                                        .eq(fm_case::sitrep_id)),
+                            )
+                            .filter(fm_case::id.nullable().eq($table::$case_id))
+                            .filter(
+                                fm_sitrep_history::version
+                                    .nullable()
+                                    .ge(tracker),
+                            ),
+                    )))
+                    .execute_async(&conn)
+                    .await
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }};
+}
+
 /// Per-child-table statistics from a single GC pass.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ChildTableGcStats {
@@ -140,6 +223,79 @@ pub struct GcOrphansResult {
 }
 
 impl DataStore {
+    /// Advances the `fm_rendezvous_progress` singleton tracker to at least
+    /// `version`, via `GREATEST(latest_processed_sitrep_version, version)`,
+    /// and returns the post-update tracker value.
+    ///
+    /// This is idempotent and commutative: a lower or equal `version` is a
+    /// no-op, so concurrent advances from multiple Nexuses compose without
+    /// ordering hazards.
+    ///
+    /// A cute byproduct of this design is that passing a version of `0` allows
+    /// callers to read the current tracker value without modifying it. This is
+    /// used in some tests.
+    pub async fn fm_rendezvous_progress_advance(
+        &self,
+        opctx: &OpContext,
+        version: i64,
+    ) -> Result<i64, Error> {
+        use diesel::sql_types::BigInt;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::update(rendezvous_progress_dsl::fm_rendezvous_progress)
+            .filter(rendezvous_progress_dsl::singleton.eq(true))
+            .set(
+                rendezvous_progress_dsl::latest_processed_sitrep_version.eq(
+                    diesel::dsl::sql::<BigInt>(
+                        "GREATEST(latest_processed_sitrep_version, ",
+                    )
+                    .bind::<BigInt, _>(version)
+                    .sql(")"),
+                ),
+            )
+            .returning(rendezvous_progress_dsl::latest_processed_sitrep_version)
+            .get_result_async::<i64>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Sweeps tombstoned FM-originated alerts whose case is no longer carried
+    /// forward in any sitrep at or above the rendezvous tracker. See also
+    /// [`Self::fm_support_bundle_tombstone_sweep`] below, and
+    /// `fm_tombstone_sweep_body!` for the shared deletion criteria.
+    ///
+    /// Returns the number of alert rows deleted.
+    pub async fn fm_alert_tombstone_sweep(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<usize, Error> {
+        fm_tombstone_sweep_body!(
+            self, opctx,
+            table: alert,
+            case_id_column: case_id,
+            txn_name: "fm_alert_tombstone_sweep",
+        )
+    }
+
+    /// Sweeps tombstoned FM-originated support bundles whose case is no longer
+    /// carried forward in any sitrep at or above the rendezvous tracker. See
+    /// also [`Self::fm_alert_tombstone_sweep`] above, and
+    /// `fm_tombstone_sweep_body!` for the shared deletion criteria.
+    ///
+    /// Returns the number of support_bundle rows deleted.
+    pub async fn fm_support_bundle_tombstone_sweep(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<usize, Error> {
+        fm_tombstone_sweep_body!(
+            self, opctx,
+            table: support_bundle,
+            case_id_column: fm_case_id,
+            txn_name: "fm_support_bundle_tombstone_sweep",
+        )
+    }
+
     /// Reads the current [sitrep version](fm::SitrepVersion) from CRDB.
     ///
     /// If no sitreps have been generated, this returns `None`.
@@ -1569,8 +1725,10 @@ mod tests {
     use nexus_types::fm::ereport::{EreportData, Reporter};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
@@ -3316,9 +3474,14 @@ mod tests {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
             // fm_* tables that are NOT children of fm_sitrep and are
-            // intentionally ignored.
+            // intentionally ignored. `fm_rendezvous_progress` is a singleton
+            // tracker (one row, never GC'd as a sitrep child); it lives
+            // outside the sitrep parent/child fanout and is managed by the
+            // FM rendezvous instead.
             let tables_ignored: BTreeSet<&str> =
-                ["fm_sitrep", "fm_sitrep_history"].into_iter().collect();
+                ["fm_sitrep", "fm_sitrep_history", "fm_rendezvous_progress"]
+                    .into_iter()
+                    .collect();
             let tables_checked = self.tables_checked();
 
             let mut query = QueryBuilder::new();
@@ -3708,6 +3871,312 @@ mod tests {
         }
 
         eprintln!("Stress test results: {stats}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_fm_rendezvous_progress_advance_monotonic() {
+        let logctx = dev::test_setup_log(
+            "test_fm_rendezvous_progress_advance_monotonic",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // `advance(0)` against a bootstrap-seeded tracker doubles as a
+        // bootstrap-is-zero check: GREATEST(0, 0) = 0.
+        let advance = |v| datastore.fm_rendezvous_progress_advance(opctx, v);
+        assert_eq!(advance(0).await.unwrap(), 0);
+        assert_eq!(advance(5).await.unwrap(), 5);
+        assert_eq!(advance(3).await.unwrap(), 5);
+        assert_eq!(advance(5).await.unwrap(), 5);
+        assert_eq!(advance(9).await.unwrap(), 9);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Insert an empty sitrep (no cases) optionally parented on the current
+    /// sitrep, returning its id and version.
+    async fn test_create_sitrep(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        parent: Option<SitrepUuid>,
+    ) -> (SitrepUuid, i64) {
+        let sitrep_id = SitrepUuid::new_v4();
+        let sitrep = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test_create_sitrep".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: parent,
+                next_inv_min_time_started: Utc::now(),
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep)
+            .await
+            .expect("inserting test sitrep");
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let version: i64 = history_dsl::fm_sitrep_history
+            .filter(history_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(history_dsl::version)
+            .first_async::<i64>(&*conn)
+            .await
+            .expect("reading fresh sitrep version");
+        (sitrep_id, version)
+    }
+
+    /// Directly insert an `fm_case` row into the given sitrep, returning the
+    /// case id.
+    async fn test_create_case(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        sitrep_id: SitrepUuid,
+    ) -> CaseUuid {
+        let case_id = CaseUuid::new_v4();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(case_dsl::fm_case)
+            .values(model::fm::CaseMetadata {
+                id: case_id.into(),
+                sitrep_id: sitrep_id.into(),
+                de: nexus_types::fm::DiagnosisEngineKind::PowerShelf.into(),
+                created_sitrep_id: sitrep_id.into(),
+                closed_sitrep_id: None,
+                comment: "test_create_case".to_string(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting test case");
+        case_id
+    }
+
+    /// Add an `fm_case` row carrying an existing case forward into the given
+    /// sitrep. The helper reuses `sitrep_id` for the `created_sitrep_id`
+    /// field — fine here because the sweep query does not consult
+    /// `created_sitrep_id`. DO NOT use this helper for tests exercising
+    /// case-creation lifecycles, where preserving the original
+    /// `created_sitrep_id` would matter.
+    async fn test_carry_case_forward(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        case_id: CaseUuid,
+        sitrep_id: SitrepUuid,
+    ) {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(case_dsl::fm_case)
+            .values(model::fm::CaseMetadata {
+                id: case_id.into(),
+                sitrep_id: sitrep_id.into(),
+                de: nexus_types::fm::DiagnosisEngineKind::PowerShelf.into(),
+                created_sitrep_id: sitrep_id.into(),
+                closed_sitrep_id: None,
+                comment: "test_carry_case_forward".to_string(),
+            })
+            .execute_async(&*conn)
+            .await
+            .expect("inserting carried-forward case row");
+    }
+
+    /// Insert an FM-originated `alert` row (with `case_id` set, not yet
+    /// tombstoned) and return its id.
+    async fn test_insert_fm_alert(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        case_id: CaseUuid,
+    ) -> AlertUuid {
+        let alert_id = AlertUuid::new_v4();
+        let mut alert = nexus_db_model::Alert::new(
+            alert_id,
+            AlertClass::TestFoo,
+            serde_json::json!({}),
+        );
+        alert.case_id = Some(case_id.into());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(nexus_db_schema::schema::alert::table)
+            .values(alert)
+            .execute_async(&*conn)
+            .await
+            .expect("inserting test fm alert");
+        alert_id
+    }
+
+    /// Tombstone an alert (soft-delete via direct diesel update).
+    async fn test_tombstone_alert(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        alert_id: AlertUuid,
+    ) {
+        use nexus_db_schema::schema::alert::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::update(dsl::alert)
+            .filter(dsl::id.eq(alert_id.into_untyped_uuid()))
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(&*conn)
+            .await
+            .expect("tombstoning test alert");
+    }
+
+    /// Returns whether an alert row exists (regardless of `time_deleted`).
+    async fn test_alert_exists(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        alert_id: AlertUuid,
+    ) -> bool {
+        use nexus_db_schema::schema::alert::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let count: i64 = dsl::alert
+            .filter(dsl::id.eq(alert_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("counting alerts");
+        count > 0
+    }
+
+    #[tokio::test]
+    async fn test_fm_alert_tombstone_sweep_respects_case_lifetime() {
+        let logctx = dev::test_setup_log(
+            "test_fm_alert_tombstone_sweep_respects_case_lifetime",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_a, _va) = test_create_sitrep(datastore, opctx, None).await;
+        let case_id = test_create_case(datastore, opctx, sitrep_a).await;
+        let (sitrep_b, vb) =
+            test_create_sitrep(datastore, opctx, Some(sitrep_a)).await;
+        test_carry_case_forward(datastore, opctx, case_id, sitrep_b).await;
+
+        let alert_id = test_insert_fm_alert(datastore, opctx, case_id).await;
+        test_tombstone_alert(datastore, opctx, alert_id).await;
+
+        // tracker=0: NOT deleted.
+        let deleted = datastore.fm_alert_tombstone_sweep(opctx).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert!(test_alert_exists(datastore, opctx, alert_id).await);
+
+        // tracker=vb: still NOT deleted (case still has a row at version vb).
+        datastore.fm_rendezvous_progress_advance(opctx, vb).await.unwrap();
+        let deleted = datastore.fm_alert_tombstone_sweep(opctx).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert!(test_alert_exists(datastore, opctx, alert_id).await);
+
+        // tracker=vb+1: DELETED (no case row has version >= vb+1).
+        datastore.fm_rendezvous_progress_advance(opctx, vb + 1).await.unwrap();
+        let deleted = datastore.fm_alert_tombstone_sweep(opctx).await.unwrap();
+        assert_eq!(deleted, 1);
+        assert!(!test_alert_exists(datastore, opctx, alert_id).await);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Insert an FM-originated `support_bundle` row (with `fm_case_id` set,
+    /// not yet tombstoned) and return its id. Bypasses the datastore's
+    /// allocation logic — fabricates a zpool/dataset/nexus id directly,
+    /// which is fine for a sweep-query test since the sweep only inspects
+    /// `fm_case_id` and `time_deleted`.
+    async fn test_insert_fm_support_bundle(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        case_id: CaseUuid,
+    ) -> SupportBundleUuid {
+        let bundle_id = SupportBundleUuid::new_v4();
+        let bundle = nexus_db_model::SupportBundle::new(
+            bundle_id,
+            "test fm support bundle".to_string(),
+            ZpoolUuid::new_v4(),
+            DatasetUuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
+            None,
+            Some(case_id),
+        );
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(nexus_db_schema::schema::support_bundle::table)
+            .values(bundle)
+            .execute_async(&*conn)
+            .await
+            .expect("inserting test fm support bundle");
+        bundle_id
+    }
+
+    /// Tombstone a support bundle (soft-delete via direct diesel update).
+    async fn test_tombstone_support_bundle(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+    ) {
+        use nexus_db_schema::schema::support_bundle::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(&*conn)
+            .await
+            .expect("tombstoning test support bundle");
+    }
+
+    /// Returns whether a support_bundle row exists (regardless of
+    /// `time_deleted`).
+    async fn test_support_bundle_exists(
+        datastore: &DataStore,
+        _opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+    ) -> bool {
+        use nexus_db_schema::schema::support_bundle::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let count: i64 = dsl::support_bundle
+            .filter(dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .count()
+            .get_result_async::<i64>(&*conn)
+            .await
+            .expect("counting support bundles");
+        count > 0
+    }
+
+    #[tokio::test]
+    async fn test_fm_support_bundle_tombstone_sweep_respects_case_lifetime() {
+        let logctx = dev::test_setup_log(
+            "test_fm_support_bundle_tombstone_sweep_respects_case_lifetime",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_a, _va) = test_create_sitrep(datastore, opctx, None).await;
+        let case_id = test_create_case(datastore, opctx, sitrep_a).await;
+        let (sitrep_b, vb) =
+            test_create_sitrep(datastore, opctx, Some(sitrep_a)).await;
+        test_carry_case_forward(datastore, opctx, case_id, sitrep_b).await;
+
+        let bundle_id =
+            test_insert_fm_support_bundle(datastore, opctx, case_id).await;
+        test_tombstone_support_bundle(datastore, opctx, bundle_id).await;
+
+        // tracker=0: NOT deleted.
+        let deleted =
+            datastore.fm_support_bundle_tombstone_sweep(opctx).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert!(test_support_bundle_exists(datastore, opctx, bundle_id).await);
+
+        // tracker=vb: still NOT deleted (case still has a row at version vb).
+        datastore.fm_rendezvous_progress_advance(opctx, vb).await.unwrap();
+        let deleted =
+            datastore.fm_support_bundle_tombstone_sweep(opctx).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert!(test_support_bundle_exists(datastore, opctx, bundle_id).await);
+
+        // tracker=vb+1: DELETED (no case row has version >= vb+1).
+        datastore.fm_rendezvous_progress_advance(opctx, vb + 1).await.unwrap();
+        let deleted =
+            datastore.fm_support_bundle_tombstone_sweep(opctx).await.unwrap();
+        assert_eq!(deleted, 1);
+        assert!(!test_support_bundle_exists(datastore, opctx, bundle_id).await);
 
         db.terminate().await;
         logctx.cleanup_successful();

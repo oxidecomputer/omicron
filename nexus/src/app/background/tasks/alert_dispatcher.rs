@@ -458,7 +458,7 @@ mod test {
             serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
         );
         datastore
-            .alert_create(&opctx, alert)
+            .alert_create(&opctx, alert, None)
             .await
             .expect("creating the event should work");
 

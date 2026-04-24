@@ -1211,6 +1211,7 @@ mod test {
             .alert_create(
                 opctx,
                 Alert::new(id, alert_class, serde_json::json!({})),
+                None,
             )
             .await
             .expect("cant create ye event");

@@ -188,14 +188,14 @@ impl Nexus {
         id: AlertUuid,
         class: impl Into<AlertClass>,
         event: serde_json::Value,
-    ) -> Result<Alert, Error> {
+    ) -> CreateResult<Alert> {
         let alert = self
             .datastore()
-            .alert_create(opctx, Alert::new(id, class, event))
+            .alert_create(opctx, Alert::new(id, class, event), None)
             .await?;
 
         // Once the alert has been inserted, activate the dispatcher task to
-        // ensure its propagated to receivers.
+        // ensure it's propagated to receivers.
         self.background_tasks.task_alert_dispatcher.activate();
 
         Ok(alert)

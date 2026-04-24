@@ -494,7 +494,7 @@ mod test {
             }),
         );
         datastore
-            .alert_create(&opctx, alert)
+            .alert_create(&opctx, alert, None)
             .await
             .expect("can't create ye alert");
 

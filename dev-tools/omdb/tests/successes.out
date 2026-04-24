@@ -725,6 +725,7 @@ task: "fm_rendezvous"
         requested in this sitrep:      0
         created in this activation:    0
         already created:               0
+        skipped (stale sitrep):        0
         errors:                        0
     creating requested support bundles:
 (i)   note: this operation was not executed
@@ -732,6 +733,7 @@ task: "fm_rendezvous"
         requested in this sitrep:      0
         created in this activation:    0
         already created:               0
+        skipped (stale sitrep):        0
         errors:                        0
     marking ereports as seen:
 (i)   note: this operation was not executed
@@ -1406,6 +1408,7 @@ task: "fm_rendezvous"
         requested in this sitrep:      0
         created in this activation:    0
         already created:               0
+        skipped (stale sitrep):        0
         errors:                        0
     creating requested support bundles:
 (i)   note: this operation was not executed
@@ -1413,6 +1416,7 @@ task: "fm_rendezvous"
         requested in this sitrep:      0
         created in this activation:    0
         already created:               0
+        skipped (stale sitrep):        0
         errors:                        0
     marking ereports as seen:
 (i)   note: this operation was not executed
