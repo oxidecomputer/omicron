@@ -2061,6 +2061,12 @@ impl super::Nexus {
     /// Update the runtime state of the VMM with the provided `propolis_id` to
     /// `new_runtime_state`, potentially spawning an instance update saga if
     /// the instance's state must change as a result of the VMM update.
+    ///
+    /// This method is called by [`Self::instance_request_state`] and
+    /// [`Self::instance_ensure_registered`] to write back the VMM state
+    /// received from sled-agent after requesting a change to an instance. In
+    /// addition, it's also called by [`Self::notify_vmm_updated`] when handling
+    /// a notification from a sled-agent that a VMM's state has changed.
     pub(crate) async fn update_vmm_state(
         &self,
         opctx: &OpContext,
