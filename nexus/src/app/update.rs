@@ -270,6 +270,18 @@ impl super::Nexus {
             return Ok(true);
         };
 
+        // TODO-K: check that the inventory collection is not too old. If it is
+        // then call support is true and log it. perhaps log that the information
+        // regarding zpools and services may be incorrect or don't log them at all
+        //
+        // check that if there's an update in progress, then
+        // time_last_step_planned is within the last 15 minutes. If those are
+        // true then call support is false and don't even check anything else.
+        // if time_last_step_planned is not within that threshold then call
+        // support is true and also do the rest of the checks
+        //
+        // Account for test system versions or if system is being mupdated
+
         let stale_active_sagas = self
             .datastore()
             .saga_list_running_or_unwinding_older_than_batched(

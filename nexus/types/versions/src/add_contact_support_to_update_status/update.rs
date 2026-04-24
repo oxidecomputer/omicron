@@ -25,7 +25,9 @@ pub struct UpdateStatus {
     pub target_release: Nullable<TargetRelease>,
 
     // TODO-K: Do I assume an update is in progress if there are components in various
-    // versions? Yes. See how the UI does it. check against the target release version
+    // versions? Yes and no, if the system has never been updated or is a test system.
+    // it could be in a mix of "unknown" and "install dataset". Otherwise, check against
+    // the target release version:
     // components_by_release_version	{ "19.2.0-0.ci+gite4b75dde134": 249 }
     /// Count of components running each release version
     ///
@@ -54,10 +56,9 @@ pub struct UpdateStatus {
 
     /// Whether the user should contact support
     ///
-    /// This is a rough high-level indicator of overall system health. When true,
-    /// a subset of components are operating normally. When false, one or more
-    /// components from that subset may be experiencing issues. If this field
-    /// is true, please contact support.
+    /// This is a rough high-level indicator of overall system health based on
+    /// a subset of components. When true, one or more components may be
+    /// experiencing issues and you should contact support.
     pub contact_support: bool,
 }
 

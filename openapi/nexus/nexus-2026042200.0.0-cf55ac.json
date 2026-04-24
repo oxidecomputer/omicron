@@ -29791,7 +29791,7 @@
             }
           },
           "contact_support": {
-            "description": "Whether the user should contact support\n\nThis is a rough high-level indicator of overall system health. When true, a subset of components are operating normally. When false, one or more components from that subset may be experiencing issues. If this field is true, please contact support.",
+            "description": "Whether the user should contact support\n\nThis is a rough high-level indicator of overall system health based on a subset of components. When true, one or more components may be experiencing issues and you should contact support.",
             "type": "boolean"
           },
           "suspended": {
