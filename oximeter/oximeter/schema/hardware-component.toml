@@ -236,7 +236,7 @@ name = "output_energy"
 description = """
 Sampled output energy.
 """
-units = "none" # actually joules - do we need to add that to oximeter Units?
+units = "joules"
 datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
@@ -247,7 +247,7 @@ name = "input_energy"
 description = """
 Sampled input energy.
 """
-units = "none" # actually joules - do we need to add that to oximeter Units?
+units = "joules"
 datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
