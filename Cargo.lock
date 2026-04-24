@@ -7348,6 +7348,8 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
+ "static_assertions",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
