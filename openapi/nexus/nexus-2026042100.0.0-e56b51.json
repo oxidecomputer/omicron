@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026041900.0.0"
+    "version": "2026042100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -7695,6 +7695,127 @@
         }
       }
     },
+    "/v1/system/hardware/disk-adoption-request": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Enable adoption of a physical disk for general use",
+        "operationId": "physical_disk_enable_adoption",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}": {
+      "delete": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Disable adoption of a physical disk for general use",
+        "operationId": "physical_disk_disable_adoption",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "physical_disk_adoption_req_id",
+            "description": "ID of the physical disk adoption request",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/disk-adoption-requests": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List physical disk adoption requests",
+        "operationId": "physical_disk_list_adoption_requests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskAdoptionRequestResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/hardware/disks": {
       "get": {
         "tags": [
@@ -7790,6 +7911,58 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/system/hardware/disks-unadopted": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List physical disks that have not yet been adopted for use",
+        "operationId": "physical_disk_list_unadopted",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnadoptedResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -25169,12 +25342,91 @@
           "vendor"
         ]
       },
+      "PhysicalDiskAdoptionRequest": {
+        "description": "A request to adopt a physical disk into the control plane",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/PhysicalDiskAdoptionRequestUuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "serial",
+          "time_created",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskAdoptionRequestResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhysicalDiskAdoptionRequest"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "PhysicalDiskAdoptionRequestUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
         "enum": [
           "m2",
           "u2"
+        ]
+      },
+      "PhysicalDiskManufacturerIdentity": {
+        "description": "The unique identity of a physical disk provided by the manufacturer",
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "vendor"
         ]
       },
       "PhysicalDiskPolicy": {
@@ -27871,6 +28123,15 @@
           }
         ]
       },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Snapshot": {
         "description": "View of a Snapshot",
         "type": "object",
@@ -29701,6 +29962,52 @@
             "format": "int32"
           }
         }
+      },
+      "Unadopted": {
+        "description": "A physical disk that has not yet been adopted by the control plane",
+        "type": "object",
+        "properties": {
+          "disk_id": {
+            "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          }
+        },
+        "required": [
+          "disk_id",
+          "sled_id",
+          "slot",
+          "variant"
+        ]
+      },
+      "UnadoptedResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Unadopted"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
