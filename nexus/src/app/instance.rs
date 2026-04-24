@@ -1766,7 +1766,7 @@ impl super::Nexus {
                         authz_instance,
                     },
                 )?;
-                // Unlike `notify_vmm_updated`, which spawns the update
+                // Unlike `update_vmm_state`, which spawns the update
                 // saga in a "fire and forget" fashion so that it can return a
                 // HTTP 200 OK as soon as the changed VMM records are persisted
                 // to the database, `mark_vmm_failed` performs the instance
@@ -1942,39 +1942,120 @@ impl super::Nexus {
             .await
     }
 
+    /// Process a VMM state change doorbell notification received from a
+    /// sled-agent.
+    ///
+    /// This function looks up the sled-agent for the sled on which the VMM
+    /// resides, requests the latest VMM state from that sled-agent, and then
+    /// calls [`Self::update_vmm_state`] to process the state change.
     pub(crate) async fn notify_vmm_updated(
         &self,
         opctx: &OpContext,
         vmm_id: PropolisUuid,
     ) -> Result<(), Error> {
-        slog::debug!(
+        info!(
             &opctx.log,
-            "ding, dong! received doorbell notification for VMM {vmm_id}";
+            "ding, dong! sled-agent rang the VMM doorbell for VMM {vmm_id}";
             "vmm_id" => %vmm_id,
         );
-        let (vmm, sled) =
-            match self.db_datastore.vmm_fetch_with_sled(opctx, &vmm_id).await {
-                Ok(vmm) => vmm,
-                Err(error) => {
-                    // Note that it would be quite weird if the VMM/sled-agent
-                    // lookup failed with `NotFound`, since...we just got a
-                    // notification *from* that sled-agent...
-                    slog::warn!(
-                        &opctx.log,
-                        "failed to look up VMM and sled-agent for updated VMM \
-                         {vmm_id}";
-                         "vmm_id" => %vmm_id,
-                         "error" => &InlineErrorChain::new(&error),
-                    );
-                    return Err(error);
+        let (vmm, sled) = self
+            .db_datastore
+            .vmm_fetch_with_sled(opctx, &vmm_id)
+            .await
+            .map_err(|e| {
+                // Note that it would be quite weird if the VMM/sled-agent
+                // lookup failed with `NotFound`, since...we just got a
+                // notification *from* that sled-agent...
+                e.internal_context(format!(
+                    "failed to look up sled-agent for updated VMM {vmm_id}"
+                ))
+            })?;
+
+        let sled_id = sled.id();
+        let instance_id = vmm.instance_id;
+        debug!(
+            &opctx.log,
+            "notify_vmm_updated: VMM {vmm_id} resides on sled {sled_id}";
+            "vmm_id" => %vmm_id,
+            "instance_id" => %instance_id,
+            "sled_id" => %sled_id,
+        );
+
+        let sled_agent = self.sled_client(&sled_id).await.map_err(|e| {
+            e.internal_context(format!(
+                "failed to get sled-agent client for sled {sled_id} \
+                 (updated VMM {vmm_id}, instance {instance_id})"
+            ))
+        })?;
+
+        // Ask the sled-agent for the latest state of the VMM, and transition
+        // its state.
+        let result = sled_agent
+            .vmm_get_state(&vmm_id)
+            .await
+            .map_err(SledAgentInstanceError);
+        match result {
+            Ok(rsp) => {
+                let state = rsp.into_inner();
+                self.update_vmm_state(opctx, vmm_id, &state).await
+            }
+            // If the sled-agent's response indicates the VMM has failed,
+            // transition it to the failed state.
+            Err(e) if e.vmm_gone() => {
+                info!(
+                    &opctx.log,
+                    "notify_vmm_updated: sled-agent response indicates VMM has \
+                     failed";
+                    "vmm_id" => %vmm_id,
+                    "instance_id" => %instance_id,
+                    "sled_id" => %sled_id,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                let lookup = LookupPath::new(opctx, &self.db_datastore)
+                    .instance_id(instance_id)
+                    .lookup_for(authz::Action::Modify)
+                    .await;
+                match lookup {
+                    Ok((_, _, authz_instance)) => {
+                        self.mark_vmm_failed(opctx, authz_instance, &vmm, &e)
+                            .await
+                    }
+
+                    // Okay, this is a bit odd: we are trying to handle a
+                    // notification from a sled-agent that a VMM's state has
+                    // changed. When we asked the sled-agent for the VMM's
+                    // state, it said the VMM does not exist. Then, when we
+                    // tried to look up the instance for that VMM, the
+                    // *instance* also doesn't exist. This would mean the
+                    // instance record has already been deleted. In that case,
+                    // well, there's nothing left for us to do here...
+                    Err(Error::ObjectNotFound { .. }) => {
+                        warn!(
+                            &opctx.log,
+                            "notify_vmm_updated: VMM has gone away, and its \
+                             instance appears to have already been deleted!";
+                            "vmm_id" => %vmm_id,
+                            "instance_id" => %instance_id,
+                            "sled_id" => %sled_id,
+                        );
+                        Ok(())
+                    }
+
+                    // Other errors are unanticipated here.
+                    Err(e) => Err(e.internal_context(format!(
+                        "failed to look up instance {instance_id} for failed \
+                         VMM {vmm_id}",
+                    ))),
                 }
-            };
-        slog::info!(&opctx.log, "found vmm and sled for updated vmm id {vmm_id}"; "vmm" => #?vmm, "sled" => #?sled);
-        let sled_agent = self.sled_client(&sled.id()).await?;
-        slog::info!(&opctx.log, "got client for sled");
-        let state = sled_agent.vmm_get_state(&vmm_id).await?.into_inner();
-        slog::info!(&opctx.log, "got state from sled"; "state" => #?state);
-        self.update_vmm_state(opctx, vmm_id, &state).await
+            }
+            Err(SledAgentInstanceError(e)) => {
+                let error = Error::from(e).internal_context(format!(
+                    "failed to request the state of VMM {vmm_id} from \
+                     sled-agent {sled_id}"
+                ));
+                Err(error)
+            }
+        }
     }
 
     /// Update the runtime state of the VMM with the provided `propolis_id` to
