@@ -192,7 +192,7 @@ mod test {
     use super::*;
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::fm::SitrepMetadata;
+    use nexus_types::fm::{SitrepData, SitrepMetadata};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -225,8 +225,10 @@ mod test {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone())
@@ -292,8 +294,10 @@ mod test {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone())

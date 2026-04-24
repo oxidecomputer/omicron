@@ -42,6 +42,66 @@ pub struct Sitrep {
     /// Metadata describing this sitrep, when it was created, its parent sitrep
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
+
+    /// The sitrep itself.
+    #[serde(flatten)]
+    pub data: SitrepData,
+}
+
+impl Sitrep {
+    pub fn id(&self) -> SitrepUuid {
+        self.metadata.id
+    }
+
+    pub fn parent_id(&self) -> Option<SitrepUuid> {
+        self.metadata.parent_sitrep_id
+    }
+
+    /// Returns a reference to the cases in this sitrep.
+    pub fn cases(&self) -> &IdOrdMap<Case> {
+        &self.data.cases
+    }
+
+    /// Returns a reference to the ereports-by-id map in this sitrep.
+    pub fn ereports_by_id(&self) -> &IdOrdMap<Arc<Ereport>> {
+        &self.data.ereports_by_id
+    }
+
+    /// Iterate over all the open cases in this sitrep.
+    ///
+    /// All cases returned by this iterator will be copied forward into any
+    /// child sitreps that descend from this one.
+    pub fn open_cases(&self) -> impl Iterator<Item = &Case> + '_ {
+        self.data.cases.iter().filter(|c| c.is_open())
+    }
+
+    /// Iterate over all alerts requested by cases in this sitrep.
+    pub fn alerts_requested(
+        &self,
+    ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
+        self.data.cases.iter().flat_map(|case| {
+            let case_id = *case.id();
+            case.alerts_requested.iter().map(move |alert| (case_id, alert))
+        })
+    }
+
+    /// Iterate over all support bundles requested by cases in this sitrep.
+    pub fn support_bundles_requested(
+        &self,
+    ) -> impl Iterator<Item = (&Case, &case::SupportBundleRequest)> {
+        self.data.cases.iter().flat_map(|case| {
+            case.support_bundles_requested.iter().map(move |req| (case, req))
+        })
+    }
+}
+
+/// The actual sitrep.
+///
+/// This struct contains the cases and ereports that make up the sitrep's
+/// content, separate from its [`SitrepMetadata`]. This makes it easy to compare
+/// whether two sitreps which have different metadata are otherwise equal.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepData {
     pub cases: IdOrdMap<Case>,
     /// A map of all ereports associated with cases in this sitrep.
     pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
@@ -57,43 +117,6 @@ pub struct Sitrep {
     //
     // Thank you for your cooperation!
     //
-}
-
-impl Sitrep {
-    pub fn id(&self) -> SitrepUuid {
-        self.metadata.id
-    }
-
-    pub fn parent_id(&self) -> Option<SitrepUuid> {
-        self.metadata.parent_sitrep_id
-    }
-
-    /// Iterate over all the open cases in this sitrep.
-    ///
-    /// All cases returned by this iterator will be copied forward into any
-    /// child sitreps that descend from this one.
-    pub fn open_cases(&self) -> impl Iterator<Item = &Case> + '_ {
-        self.cases.iter().filter(|c| c.is_open())
-    }
-
-    /// Iterate over all alerts requested by cases in this sitrep.
-    pub fn alerts_requested(
-        &self,
-    ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
-        self.cases.iter().flat_map(|case| {
-            let case_id = *case.id();
-            case.alerts_requested.iter().map(move |alert| (case_id, alert))
-        })
-    }
-
-    /// Iterate over all support bundles requested by cases in this sitrep.
-    pub fn support_bundles_requested(
-        &self,
-    ) -> impl Iterator<Item = (&Case, &case::SupportBundleRequest)> {
-        self.cases.iter().flat_map(|case| {
-            case.support_bundles_requested.iter().map(move |req| (case, req))
-        })
-    }
 }
 
 /// Metadata describing a sitrep.

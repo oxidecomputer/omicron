@@ -238,7 +238,8 @@ async fn cmd_db_sitrep_show(
         }
     };
 
-    let fm::Sitrep { metadata, cases, ereports_by_id } = sitrep;
+    let fm::Sitrep { metadata, data: fm::SitrepData { cases, ereports_by_id } } =
+        sitrep;
     let fm::SitrepMetadata {
         id,
         creator_id,

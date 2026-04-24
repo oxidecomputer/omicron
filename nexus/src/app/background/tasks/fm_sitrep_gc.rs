@@ -119,8 +119,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone())
@@ -144,8 +146,10 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.metadata.id),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone())
@@ -243,8 +247,10 @@ mod tests {
             // `nexus_db_queries::db::datastore::fm` module which ensures that
             // deleting a sitrep removes all the other records associated with
             // it, so it should be safe to trust that this works properly.
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         match datastore.fm_sitrep_insert(&opctx, sitrep).await {
             Ok(_) => {

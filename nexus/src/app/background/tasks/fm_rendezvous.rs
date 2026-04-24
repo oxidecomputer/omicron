@@ -258,12 +258,12 @@ impl FmRendezvous {
         let (_, ref sitrep) = *sitrep;
         let mut status = EreportMarkingStatus {
             batch_size: BATCH_SIZE,
-            total_ereports_in_sitrep: sitrep.ereports_by_id.len(),
+            total_ereports_in_sitrep: sitrep.ereports_by_id().len(),
             ..EreportMarkingStatus::default()
         };
 
         let mut ereport_ids = sitrep
-            .ereports_by_id
+            .ereports_by_id()
             .iter()
             // it is unfortunately necessary to clone the arc here, for if we do
             // not, the async block in `activate` is not valid for the requisite
@@ -578,8 +578,10 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id: Default::default(),
+                data: fm::SitrepData {
+                    cases,
+                    ereports_by_id: Default::default(),
+                },
             }
         };
 
@@ -669,8 +671,10 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id: Default::default(),
+                data: fm::SitrepData {
+                    cases,
+                    ereports_by_id: Default::default(),
+                },
             }
         };
 
@@ -966,8 +970,7 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id,
+                data: fm::SitrepData { cases, ereports_by_id },
             }
         };
 
@@ -1178,8 +1181,7 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id,
+                data: fm::SitrepData { cases, ereports_by_id },
             }
         };
 
@@ -1287,8 +1289,7 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id,
+                data: fm::SitrepData { cases, ereports_by_id },
             }
         };
 
@@ -1485,8 +1486,10 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id: Default::default(),
+                data: fm::SitrepData {
+                    cases,
+                    ereports_by_id: Default::default(),
+                },
             }
         };
 
@@ -1561,8 +1564,10 @@ mod tests {
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
                 },
-                cases,
-                ereports_by_id: Default::default(),
+                data: fm::SitrepData {
+                    cases,
+                    ereports_by_id: Default::default(),
+                },
             }
         };
 
@@ -1660,8 +1665,10 @@ mod tests {
                     comment: "test sitrep no capacity".to_string(),
                     time_created: Utc::now(),
                 },
-                cases,
-                ereports_by_id: Default::default(),
+                data: fm::SitrepData {
+                    cases,
+                    ereports_by_id: Default::default(),
+                },
             }
         };
 

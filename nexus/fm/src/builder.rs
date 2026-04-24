@@ -130,8 +130,7 @@ impl<'a> SitrepBuilder<'a> {
                 // inventory collection ended.
                 next_inv_min_time_started: self.inventory.time_done,
             },
-            cases,
-            ereports_by_id,
+            data: fm::SitrepData { cases, ereports_by_id },
         };
         (sitrep, report)
     }

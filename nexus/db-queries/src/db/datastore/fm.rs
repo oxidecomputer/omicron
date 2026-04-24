@@ -437,7 +437,10 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
+        Ok(Sitrep {
+            metadata,
+            data: fm::SitrepData { cases, ereports_by_id: ereports },
+        })
     }
 
     /// Fetch all alert requests belonging to cases in the given sitrep.
@@ -735,12 +738,12 @@ impl DataStore {
         // garbage collection is keyed on sitrep_id (which is inserted first
         // above). If we crash partway through, orphaned child records will be
         // cleaned up when the orphaned sitrep is garbage collected.
-        let mut cases = Vec::with_capacity(sitrep.cases.len());
+        let mut cases = Vec::with_capacity(sitrep.data.cases.len());
         let mut alerts_requested = Vec::new();
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
-        for case in sitrep.cases {
+        for case in sitrep.data.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
             case_ereports.extend(case.ereports.into_iter().map(|ereport| {
@@ -1782,8 +1785,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
 
         datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
@@ -1833,8 +1838,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1849,8 +1856,10 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -1892,8 +1901,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1909,8 +1920,10 @@ mod tests {
                 parent_sitrep_id: Some(nonexistent_id),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, sitrep2).await;
@@ -1946,8 +1959,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
@@ -1962,8 +1977,10 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.unwrap();
 
@@ -1979,8 +1996,10 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         let result = datastore.fm_sitrep_insert(&opctx, sitrep3.clone()).await;
 
@@ -2023,8 +2042,8 @@ mod tests {
         );
 
         // Verify all the expected cases exist in both sitreps
-        assert_eq!(this.cases.len(), that.cases.len());
-        for case in &that.cases {
+        assert_eq!(this.cases().len(), that.cases().len());
+        for case in that.cases() {
             let fm::Case {
                 id,
                 metadata:
@@ -2039,12 +2058,12 @@ mod tests {
                 support_bundles_requested,
             } = case;
             let case_id = id;
-            let Some(expected) = this.cases.get(&case_id) else {
+            let Some(expected) = this.cases().get(&case_id) else {
                 panic!(
                     "assertion failed: left == right\n  \
                     right sitrep contained case {case_id}\n  \
                     left sitrep contains only cases {:?}\n",
-                    this.cases.iter().map(|case| case.id).collect::<Vec<_>>(),
+                    this.cases().iter().map(|case| case.id).collect::<Vec<_>>(),
                 )
             };
             // N.B.: we must assert each bit of the case manually, as ereports
@@ -2310,8 +2329,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases,
-            ereports_by_id,
+            data: fm::SitrepData { cases, ereports_by_id },
         }
     }
 
@@ -2420,8 +2438,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases,
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData { cases, ereports_by_id: Default::default() },
         };
 
         datastore
@@ -2472,8 +2489,10 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
                     },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
+                    data: fm::SitrepData {
+                        cases: Default::default(),
+                        ereports_by_id: Default::default(),
+                    },
                 },
             )
             .await
@@ -2629,8 +2648,10 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
                     },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
+                    data: fm::SitrepData {
+                        cases: Default::default(),
+                        ereports_by_id: Default::default(),
+                    },
                 },
             )
             .await
@@ -2763,8 +2784,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(opctx, sitrep1)
@@ -3000,8 +3023,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(opctx, sitrep1)
@@ -3127,8 +3152,10 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
             },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
+            data: fm::SitrepData {
+                cases: Default::default(),
+                ereports_by_id: Default::default(),
+            },
         };
         datastore
             .fm_sitrep_insert(opctx, sitrep1)
@@ -3422,8 +3449,10 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
                     },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
+                    data: fm::SitrepData {
+                        cases: Default::default(),
+                        ereports_by_id: Default::default(),
+                    },
                 },
             )
             .await

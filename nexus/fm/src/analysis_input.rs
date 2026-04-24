@@ -142,7 +142,7 @@ impl Builder {
         self.new_ereports.extend(ereports.into_iter().filter_map(|ereport| {
             if let Some(sitrep) = parent_sitrep {
                 let id = ereport.id();
-                if sitrep.ereports_by_id.contains_key(&id) {
+                if sitrep.ereports_by_id().contains_key(&id) {
                     self.unmarked_seen_ereports.insert(*id);
                     return None;
                 }
@@ -190,7 +190,7 @@ impl Builder {
         // - The case has been closed, but it contains an ereport which has not
         //   yet been marked as "seen" in the database.
         let mut closed_cases_copied_forward = IdOrdMap::new();
-        for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
+        for case in parent_sitrep.iter().flat_map(|s| s.cases().iter()) {
             if case.is_open() {
                 report.open_cases.insert(case.id, case.metadata.clone());
                 open_cases.insert_unique(case.clone()).expect(
@@ -445,8 +445,7 @@ mod tests {
                     time_created: chrono::Utc::now(),
                     next_inv_min_time_started: inv.time_done,
                 },
-                cases,
-                ereports_by_id,
+                data: fm::SitrepData { cases, ereports_by_id },
             };
             Arc::new((
                 SitrepVersion {
@@ -606,7 +605,7 @@ mod tests {
         eprintln!("{}", report.display_multiline(0));
 
         let open_case1 = output_sitrep
-            .cases
+            .cases()
             .get(&open_case1_id)
             .expect("open case 1 should be in the output sitrep's cases");
         assert!(
@@ -615,7 +614,7 @@ mod tests {
         );
 
         let open_case2 = output_sitrep
-            .cases
+            .cases()
             .get(&open_case2_id)
             .expect("open case 2 should be in the output sitrep's cases");
         assert!(
@@ -624,7 +623,7 @@ mod tests {
         );
 
         let new_case = output_sitrep
-            .cases
+            .cases()
             .get(&new_case_id)
             .expect("new case should be in the output sitrep's cases");
         assert!(
@@ -654,17 +653,19 @@ mod tests {
         );
 
         assert!(
-            output_sitrep.cases.contains_key(&closed_case_with_unmarked_id),
+            output_sitrep.cases().contains_key(&closed_case_with_unmarked_id),
             "closed cases with unmarked ereports should be copied forward \
              into the output sitrep"
         );
         assert!(
-            !output_sitrep.cases.contains_key(&closed_case_without_unmarked_id),
+            !output_sitrep
+                .cases()
+                .contains_key(&closed_case_without_unmarked_id),
             "closed cases WITHOUT unmarked ereports should NOT be copied \
             forward into the output sitrep"
         );
         assert_eq!(
-            output_sitrep.cases.len(),
+            output_sitrep.cases().len(),
             4,
             "the output sitrep should have exactly 4 cases: the open case, \
              the newly-closed case, the closed-but-copied-forward case, and \

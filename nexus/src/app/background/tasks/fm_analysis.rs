@@ -378,8 +378,10 @@ mod tests {
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
                 },
-                cases: Default::default(),
-                ereports_by_id: Default::default(),
+                data: fm::SitrepData {
+                    cases: Default::default(),
+                    ereports_by_id: Default::default(),
+                },
             },
         ))
     }
