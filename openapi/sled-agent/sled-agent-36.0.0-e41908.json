@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "35.0.0"
+    "version": "36.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -9612,15 +9612,8 @@
         ]
       },
       "SvcEnabledNotOnlineState": {
-        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events.\n\nThis enum contains all possible states except `online`, `disabled` and `legacy_run`. We only want to represent states that represent some sort of \"unhealthy\" or \"unexpected\" state. See <https://illumos.org/man/7/smf> for more information.",
+        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events.\n\nThis enum contains all possible states except `online`, `disabled`, `uninitialized` and `legacy_run`. We only want to represent states that represent some sort of \"unhealthy\" or \"unexpected\" state. See <https://illumos.org/man/7/smf> for more information.",
         "oneOf": [
-          {
-            "description": "Initial state for all service instances.",
-            "type": "string",
-            "enum": [
-              "uninitialized"
-            ]
-          },
           {
             "description": "The instance is enabled, but not yet running or available to run.",
             "type": "string",
