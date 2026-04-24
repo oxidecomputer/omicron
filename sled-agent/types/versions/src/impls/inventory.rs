@@ -14,7 +14,6 @@ use indent_write::fmt::IndentWriter;
 use omicron_common::address::Ip;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
 use omicron_uuid_kinds::MupdateUuid;
@@ -26,11 +25,12 @@ use crate::latest::inventory::{
     HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
     ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
-    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
-    SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
+    NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
+    OmicronZonesConfig, RemoveMupdateOverrideBootSuccessInventory,
+    RemoveMupdateOverrideInventory, SingleMeasurementInventory,
+    SourceNatConfig, SourceNatConfigGeneric, SourceNatConfigV4,
+    SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
     SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 

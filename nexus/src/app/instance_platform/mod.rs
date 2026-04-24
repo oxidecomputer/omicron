@@ -81,7 +81,6 @@ use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::VirtioSocket;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
@@ -90,6 +89,7 @@ use sled_agent_client::types::{
     SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
     VmmSpec,
 };
+use sled_agent_types::inventory::NetworkInterface;
 use uuid::Uuid;
 
 /// Default `guest_cid` for a propolis guest.

@@ -128,6 +128,12 @@ impl std::ops::Deref for TimeseriesName {
     }
 }
 
+impl From<TimeseriesName> for String {
+    fn from(n: TimeseriesName) -> Self {
+        n.0
+    }
+}
+
 impl std::fmt::Display for TimeseriesName {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)

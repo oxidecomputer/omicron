@@ -17,7 +17,7 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -43,6 +43,7 @@ use sled_agent_types::diagnostics::{
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
@@ -877,9 +878,7 @@ impl SledAgentApi for SledAgentImpl {
         let body_args = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                let rules: Vec<_> =
-                    body_args.rules.into_iter().map(Into::into).collect();
-                sa.firewall_rules_ensure(body_args.vni, &rules)
+                sa.firewall_rules_ensure(body_args.vni, &body_args.rules)
                     .await
                     .map_err(Error::from)?;
                 Ok(HttpResponseUpdatedNoContent())

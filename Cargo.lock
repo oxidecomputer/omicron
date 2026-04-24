@@ -6802,6 +6802,8 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -7141,6 +7143,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types-versions",
  "uuid",
 ]
 
@@ -7342,6 +7345,7 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "sled-agent-client",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "static_assertions",
@@ -7802,7 +7806,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "serde_json",
- "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog-error-chain",
  "strum 0.27.2",
@@ -8724,6 +8728,7 @@ dependencies = [
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-async",

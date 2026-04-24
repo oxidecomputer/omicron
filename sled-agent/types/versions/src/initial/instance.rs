@@ -7,17 +7,19 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 
+use chrono::{DateTime, Utc};
 use omicron_common::api::external;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::{HostIdentifier, VmmRuntimeState};
+use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use propolis_api_types_versions::v1::instance_spec::InstanceSpec;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::inventory::NetworkInterface;
 use super::inventory::SourceNatConfig;
 
 /// Path parameters for VMM requests.
@@ -49,6 +51,100 @@ pub struct VmmIssueDiskSnapshotRequestResponse {
 #[derive(Deserialize, JsonSchema)]
 pub struct VpcPathParam {
     pub vpc_id: Uuid,
+}
+
+/// One of the states that a VMM can be in.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VmmState {
+    /// The VMM is initializing and has not started running guest CPUs yet.
+    Starting,
+    /// The VMM has finished initializing and may be running guest CPUs.
+    Running,
+    /// The VMM is shutting down.
+    Stopping,
+    /// The VMM's guest has stopped, and the guest will not run again, but the
+    /// VMM process may not have released all of its resources yet.
+    Stopped,
+    /// The VMM is being restarted or its guest OS is rebooting.
+    Rebooting,
+    /// The VMM is part of a live migration.
+    Migrating,
+    /// The VMM process reported an internal failure.
+    Failed,
+    /// The VMM process has been destroyed and its resources have been released.
+    Destroyed,
+}
+
+/// The dynamic runtime properties of an individual VMM process.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+pub struct VmmRuntimeState {
+    /// The last state reported by this VMM.
+    pub state: VmmState,
+    /// The generation number for this VMM's state.
+    #[serde(rename = "gen")]
+    pub generation: Generation,
+    /// Timestamp for the VMM's state.
+    pub time_updated: DateTime<Utc>,
+}
+
+/// A wrapper type containing a sled's total knowledge of the state of a VMM.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+pub struct SledVmmState {
+    /// The most recent state of the sled's VMM process.
+    pub vmm_state: VmmRuntimeState,
+
+    /// The current state of any inbound migration to this VMM.
+    pub migration_in: Option<MigrationRuntimeState>,
+
+    /// The state of any outbound migration from this VMM.
+    pub migration_out: Option<MigrationRuntimeState>,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Migrations<'state> {
+    pub migration_in: Option<&'state MigrationRuntimeState>,
+    pub migration_out: Option<&'state MigrationRuntimeState>,
+}
+
+/// An update from a sled regarding the state of a migration, indicating the
+/// role of the VMM whose migration state was updated.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+pub struct MigrationRuntimeState {
+    pub migration_id: Uuid,
+    pub state: MigrationState,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
+
+    /// Timestamp for the migration state update.
+    pub time_updated: DateTime<Utc>,
+}
+
+/// The state of an instance's live migration.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationState {
+    /// The migration has not started for this VMM.
+    #[default]
+    Pending,
+    /// The migration is in progress.
+    InProgress,
+    /// The migration has failed.
+    Failed,
+    /// The migration has completed.
+    Completed,
 }
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
@@ -151,8 +247,7 @@ pub struct VmmPutStateResponse {
     /// The current runtime state of the instance after handling the request to
     /// change its state. If the instance's state did not change, this field is
     /// `None`.
-    pub updated_runtime:
-        Option<omicron_common::api::internal::nexus::SledVmmState>,
+    pub updated_runtime: Option<SledVmmState>,
 }
 
 /// Requestable running state of an Instance.
@@ -179,8 +274,7 @@ pub struct VmmUnregisterResponse {
     /// The current state of the instance after handling the request to
     /// unregister it. If the instance's state did not change, this field is
     /// `None`.
-    pub updated_runtime:
-        Option<omicron_common::api::internal::nexus::SledVmmState>,
+    pub updated_runtime: Option<SledVmmState>,
 }
 
 /// Parameters used when directing Propolis to initialize itself via live

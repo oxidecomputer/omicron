@@ -32,7 +32,11 @@ impl Client {
         query: impl AsRef<str>,
     ) -> Result<String, Error> {
         let restricted = RestrictedQuery::new(query.as_ref())?;
-        restricted.to_oximeter_sql(&*self.schema.lock().await)
+        let mut handle = self.claim_connection().await?;
+        let schemas = self
+            .fetch_schema_from_db(&mut handle, restricted.timeseries())
+            .await?;
+        restricted.to_oximeter_sql(&schemas)
     }
 
     /// Run a SQL query against a timeseries.

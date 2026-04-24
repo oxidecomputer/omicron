@@ -29,9 +29,9 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_uuid_kinds::SledUuid;
 use slog_error_chain::InlineErrorChain;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use std::sync::Arc;
 use uuid::Uuid;
 

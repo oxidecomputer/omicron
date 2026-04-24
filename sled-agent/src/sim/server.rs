@@ -38,7 +38,6 @@ use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
 use nexus_types::internal_api::params::ExternalPortDiscovery;
-use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::FileKv;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
@@ -58,6 +57,8 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
 use std::collections::HashMap;
@@ -463,7 +464,7 @@ pub async fn run_standalone_server(
                         external_ip: from_ipaddr_to_external_floating_ip(
                             external_ip,
                         ),
-                        nic: nexus_types::inventory::NetworkInterface {
+                        nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),
@@ -518,7 +519,7 @@ pub async fn run_standalone_server(
                         dns_address: from_sockaddr_to_external_floating_addr(
                             SocketAddr::V6(external_dns_internal_addr),
                         ),
-                        nic: nexus_types::inventory::NetworkInterface {
+                        nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),

@@ -20,8 +20,6 @@ use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -29,6 +27,8 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
+use sled_agent_types::instance;
+use sled_agent_types::instance::SledVmmState;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -130,9 +130,9 @@ impl InstanceWatcher {
                 // TODO(eliza): it would be nicer if this used the same
                 // code path as `mark_instance_failed`...
                 SledVmmState {
-                    vmm_state: nexus::VmmRuntimeState {
+                    vmm_state: instance::VmmRuntimeState {
                         generation: vmm.generation.0.next(),
-                        state: nexus::VmmState::Failed,
+                        state: instance::VmmState::Failed,
                         time_updated: chrono::Utc::now(),
                     },
                     // It's fine to synthesize `None`s here because a `None`
@@ -149,7 +149,7 @@ impl InstanceWatcher {
                     .map_err(SledAgentInstanceError);
                 match rsp {
                     Ok(rsp) => {
-                        let state: SledVmmState = rsp.into_inner().into();
+                        let state = rsp.into_inner();
                         check.outcome =
                             CheckOutcome::Success(state.vmm_state.state.into());
                         state
@@ -169,9 +169,9 @@ impl InstanceWatcher {
                         // TODO(eliza): it would be nicer if this used the same
                         // code path as `mark_instance_failed`...
                         SledVmmState {
-                            vmm_state: nexus::VmmRuntimeState {
+                            vmm_state: instance::VmmRuntimeState {
                                 generation: vmm.generation.0.next(),
-                                state: nexus::VmmState::Failed,
+                                state: instance::VmmState::Failed,
                                 time_updated: chrono::Utc::now(),
                             },
                             // It's fine to synthesize `None`s here because a `None`

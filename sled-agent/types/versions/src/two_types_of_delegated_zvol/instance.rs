@@ -5,10 +5,8 @@
 use std::net::SocketAddr;
 
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::InstanceUuid;
 
 use schemars::JsonSchema;
@@ -16,10 +14,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::v1::instance::InstanceMetadata;
+use crate::v1::instance::VmmRuntimeState;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
 use crate::v9;
 use crate::v10::instance::ResolvedVpcFirewallRule;
+use crate::v10::inventory::NetworkInterface;
 use crate::v11;
 use crate::v11::instance::ExternalIpConfig;
 
