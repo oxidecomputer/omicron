@@ -98,8 +98,11 @@ impl Sitrep {
 /// The actual sitrep.
 ///
 /// This struct contains the cases and ereports that make up the sitrep's
-/// content, separate from its [`SitrepMetadata`]. This makes it easy to compare
-/// whether two sitreps which have different metadata are otherwise equal.
+/// content, separate from its [`SitrepMetadata`]. This is intended to
+/// facilitate testing whether two sitreps with different metadata are otherwise
+/// equivalent: if the `SitrepData` is equal, then the sitreps represent the
+/// same state of the system, even if they have different IDs or were created by
+/// different Nexii at different times.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepData {
     pub cases: IdOrdMap<Case>,
