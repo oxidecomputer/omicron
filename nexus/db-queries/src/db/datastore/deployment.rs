@@ -1643,6 +1643,7 @@ impl DataStore {
             external_dns_version,
             target_release_minimum_generation,
             nexus_generation,
+            external_networking_generation: Generation::new(), // TODO WRONG
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,

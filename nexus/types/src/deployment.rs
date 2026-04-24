@@ -257,6 +257,14 @@ pub struct Blueprint {
     /// control to the newer generation (see: RFD 588).
     pub nexus_generation: Generation,
 
+    /// The generation of the collective set of all external networking required
+    /// for in-service zones
+    ///
+    /// This generation number is bumped any time a zone with external
+    /// networking (currently: Nexus, external DNS, or boundary NTP) is added,
+    /// expunged, or changed in a way that involves its external connectivity.
+    pub external_networking_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -1436,6 +1444,10 @@ impl BlueprintDisplay<'_> {
                         .to_string(),
                 ),
                 (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
+                (
+                    EXTERNAL_NETWORKING_GENERATION,
+                    self.blueprint.external_networking_generation.to_string(),
+                ),
             ],
         )
     }
@@ -1465,6 +1477,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             sleds,
             pending_mgs_updates,
             parent_blueprint_id,
+            source,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
             cockroachdb_fingerprint: _,
@@ -1475,16 +1488,15 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These six fields are handled by `make_metadata_table()`, called
-            // below.
+            // Handled by `make_metadata_table()`, called below.
             target_release_minimum_generation: _,
             nexus_generation: _,
+            external_networking_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
             creator: _,
             comment: _,
-            source,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;

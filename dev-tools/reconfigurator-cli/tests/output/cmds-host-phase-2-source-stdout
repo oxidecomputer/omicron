@@ -550,13 +550,14 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-cli
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-cli
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1108,13 +1109,14 @@ parent:    af934083-59b5-4bf6-8966-6fb5292c29e1
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-cli
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-cli
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
