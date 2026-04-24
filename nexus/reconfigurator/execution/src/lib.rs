@@ -486,11 +486,7 @@ fn register_plumb_firewall_rules_step<'a>(
                     &opctx.log,
                 )
                 .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "failed to plumb service firewall rules to sleds: {e}"
-                    )
-                });
+                .context("failed to plumb service firewall rules to sleds");
                 Ok(map_err_to_step_warning(res))
             },
         )

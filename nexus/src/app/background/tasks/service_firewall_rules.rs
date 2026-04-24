@@ -15,6 +15,8 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
 pub struct ServiceRulePropagator {
@@ -42,6 +44,7 @@ impl BackgroundTask for ServiceRulePropagator {
                  propagation"
             );
             let start = std::time::Instant::now();
+            let mut status = ServiceFirewallRuleStatus::default();
             match nexus_networking::plumb_service_firewall_rules(
                 &self.datastore,
                 opctx,
@@ -59,38 +62,35 @@ impl BackgroundTask for ServiceRulePropagator {
                         "successfully propagated service firewall rules";
                         "elapsed" => ?start.elapsed()
                     );
-                    serde_json::json!({})
+                    serde_json::json!(status)
                 }
                 Err(nexus_networking::ServiceFirewallRulesError::Lookup(e)) => {
+                    let e = InlineErrorChain::new(&e);
                     error!(
                         log,
                         "failed to look up or resolve service firewall rules";
-                        "error" => ?e,
+                        "error" => &e,
                     );
-                    serde_json::json!({"lookup_error": e.to_string()})
+                    status.lookup_error.replace(e.to_string());
+                    serde_json::json!(status)
                 }
                 Err(nexus_networking::ServiceFirewallRulesError::SledPush(
                     failures,
                 )) => {
-                    for (sled_id, e) in &failures {
+                    let sled_push_errors =
+                        status.sled_push_errors.get_or_insert_default();
+                    for (sled_id, e) in failures {
+                        let e = InlineErrorChain::new(&e);
                         error!(
                             log,
                             "failed to push service firewall rules to \
                             sled-agent";
                             "sled_id" => %sled_id,
-                            "error" => ?e,
+                            "error" => &e,
                         );
+                        sled_push_errors.insert(sled_id, e.to_string());
                     }
-                    let sled_push_errors: Vec<_> = failures
-                        .iter()
-                        .map(|(sled_id, e)| {
-                            serde_json::json!({
-                                "sled_id": sled_id.to_string(),
-                                "error": e.to_string(),
-                            })
-                        })
-                        .collect();
-                    serde_json::json!({"sled_push_errors": sled_push_errors})
+                    serde_json::json!(status)
                 }
             }
         }

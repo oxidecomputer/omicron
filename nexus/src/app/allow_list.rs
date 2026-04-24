@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2026 Oxide Computer Company
 
 //! Nexus methods for operating on source IP allowlists.
 
@@ -134,51 +134,6 @@ impl super::Nexus {
                 to relevant sled agents. The request must be retried for them \
                 to take effect.";
                 Err(Error::unavail(message))
-            }
-        }
-    }
-
-    /// Attempt to apply the user-facing services allowlist on a best-effort
-    /// basis.
-    ///
-    /// This makes a single attempt to push the current IP allowlist to all
-    /// relevant sled-agents. Startup continues regardless of the outcome; the
-    /// background task that propagates service firewall rules will retry on
-    /// failure. This should only be called from Nexus startup.
-    pub(crate) async fn attempt_ip_allowlist_plumbing(&self) {
-        let opctx = self.opctx_for_internal_api();
-        match nexus_networking::plumb_service_firewall_rules(
-            self.datastore(),
-            &opctx,
-            &[],
-            &opctx,
-            &opctx.log,
-        )
-        .await
-        {
-            Ok(()) => {
-                info!(self.log, "plumbed initial IP allowlist");
-            }
-            Err(nexus_networking::ServiceFirewallRulesError::Lookup(e)) => {
-                error!(
-                    self.log,
-                    "failed to look up initial IP allowlist rules; \
-                    background task will retry";
-                    "error" => ?e,
-                );
-            }
-            Err(nexus_networking::ServiceFirewallRulesError::SledPush(
-                failures,
-            )) => {
-                for (sled_id, e) in &failures {
-                    error!(
-                        self.log,
-                        "failed to push initial IP allowlist to sled-agent; \
-                        background task will retry";
-                        "sled_id" => %sled_id,
-                        "error" => ?e,
-                    );
-                }
             }
         }
     }

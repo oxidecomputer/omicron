@@ -194,7 +194,7 @@ impl Server {
         // a default-deny policy, Nexus will be unreachable until this succeeds;
         // the background task that propagates service firewall rules will keep
         // retrying if this attempt fails.
-        apictx.context.nexus.attempt_ip_allowlist_plumbing().await;
+        apictx.context.nexus.activate_service_firewall_propagation();
 
         // Wait until Nexus has determined if sagas are supposed to be quiesced.
         // This is not strictly necessary.  The goal here is to prevent 503

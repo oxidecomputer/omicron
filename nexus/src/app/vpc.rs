@@ -30,6 +30,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_uuid_kinds::SledUuid;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -263,7 +264,9 @@ impl super::Nexus {
             &self.log,
         )
         .await
-        .map_err(|e| Error::internal_error(&e.to_string()))
+        .map_err(|e| {
+            Error::internal_error(&InlineErrorChain::new(&e).to_string())
+        })
     }
 
     pub(crate) async fn resolve_firewall_rules_for_sled_agent(

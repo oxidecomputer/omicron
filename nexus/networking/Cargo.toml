@@ -22,6 +22,7 @@ sled-agent-client.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 static_assertions.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true

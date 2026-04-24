@@ -73,6 +73,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
@@ -2809,18 +2810,6 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
-    #[derive(Deserialize)]
-    struct SledPushError {
-        sled_id: String,
-        error: String,
-    }
-
-    #[derive(Deserialize)]
-    struct ServiceFirewallRuleStatus {
-        lookup_error: Option<String>,
-        sled_push_errors: Option<Vec<SledPushError>>,
-    }
-
     match serde_json::from_value::<ServiceFirewallRuleStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
@@ -2837,8 +2826,8 @@ fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
                     failures.len(),
                     maybe_s,
                 );
-                for f in &failures {
-                    eprintln!("        sled {}: {}", f.sled_id, f.error);
+                for (sled_id, error) in failures {
+                    eprintln!("        sled {}: {}", sled_id, error);
                 }
             }
         }
