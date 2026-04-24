@@ -42,10 +42,16 @@ impl From<TimeSyncError> for HttpError {
 const TIMESYNC_STRATUM_MAX: u8 = 9;
 const TIMESYNC_REFTIME_MIN: f64 = 1234567890.0;
 const TIMESYNC_CORRECTION_MAX: f64 = 0.05;
-// CockroachDB panics if any node's clock is more than 500ms from at least half
-// of its peers. If all nodes have max_error <= 200ms, the worst-case
-// inter-node difference is 400ms, keeping us within CRDB's 500ms threshold.
-const TIMESYNC_MAX_ERROR_MAX: f64 = 0.2;
+// CockroachDB panics if any node's clock is more than 400ms from at least half
+// of its peers. See
+// https://www.cockroachlabs.com/docs/stable/recommended-production-settings#clock-synchronization
+// for more details.
+//
+// If all nodes have max_error <= 175ms, the worst-case
+// inter-node difference is 350ms, keeping us well within CRDB's threshold.
+//
+// This value is in seconds.
+const TIMESYNC_MAX_ERROR_MAX: f64 = 0.275;
 const TIMESYNC_REF_IDS_NO_PEER_SYNC: [u32; 2] = [0, 0x7f7f0101];
 
 fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
@@ -109,7 +115,7 @@ fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
         });
     };
 
-    let max_error = root_delay / 2.0 + root_dispersion;
+    let max_error = compute_max_error(correction, root_delay, root_dispersion);
 
     // Per `chronyc waitsync`'s implementation, if either the
     // reference IP address is not unspecified or the reference
@@ -136,6 +142,32 @@ fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
         root_dispersion,
         max_error,
     })
+}
+
+/// Compute the maximum clock error from the current offset, root delay, and
+/// dispersion.
+///
+/// The returned value is defined by:
+///
+/// ```ignore
+/// max_error <= |correction| + root_delay / 2 + root_dispersion.
+/// ```
+///
+/// See <https://chrony-project.org/doc/latest/chronyc.html> for a reference.
+///
+/// The term `root_delay / 2` comes from the assumption that the RTT delay from
+/// us to the root stratum is symmetric, i.e., on average the same going to the
+/// server as coming back from it. To that, we add the accumulated error at each
+/// layer from all sources (dispersion). Adding the correction gets us an
+/// estimate of how far off the _system clock_ is from the estimate of "true
+/// time", which is the maximum error that programs using `gettimeofday(3)` or
+/// similar would see.
+const fn compute_max_error(
+    correction: f64,
+    root_delay: f64,
+    root_dispersion: f64,
+) -> f64 {
+    correction.abs() + root_delay / 2.0 + root_dispersion
 }
 
 enum NtpAdminImpl {}
