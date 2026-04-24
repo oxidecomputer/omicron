@@ -29,9 +29,9 @@ use crate::v34::inventory::SvcsError;
 /// dependencies, the results of the execution of its methods, and its potential
 /// contracts events.
 ///
-/// This enum contains all possible states except `online`, `disabled` and
-/// `legacy_run`. We only want to represent states that represent some sort of
-/// "unhealthy" or "unexpected" state.
+/// This enum contains all possible states except `online`, `disabled`,
+/// `uninitialized` and `legacy_run`. We only want to represent states that
+/// represent some sort of "unhealthy" or "unexpected" state.
 /// See <https://illumos.org/man/7/smf> for more information.
 #[derive(
     Clone,
