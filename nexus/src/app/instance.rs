@@ -2004,8 +2004,8 @@ impl super::Nexus {
             Err(e) if e.vmm_gone() => {
                 info!(
                     &opctx.log,
-                    "notify_vmm_updated: sled-agent response indicates VMM has \
-                     failed";
+                    "notify_vmm_updated: sled-agent response indicates VMM \
+                     has failed";
                     "vmm_id" => %vmm_id,
                     "instance_id" => %instance_id,
                     "sled_id" => %sled_id,
@@ -2059,8 +2059,8 @@ impl super::Nexus {
     }
 
     /// Update the runtime state of the VMM with the provided `propolis_id` to
-    /// `new_runtime_state`, potentially spawning an instance update saga if the
-    /// instance's state must change as a result of the VMM update.
+    /// `new_runtime_state`, potentially spawning an instance update saga if
+    /// the instance's state must change as a result of the VMM update.
     pub(crate) async fn update_vmm_state(
         &self,
         opctx: &OpContext,
