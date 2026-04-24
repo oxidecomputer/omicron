@@ -11165,12 +11165,11 @@ dependencies = [
 [[package]]
 name = "progenitor-extras"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3bf56b338efdf90f218a4d6b3316a9c56faac4b7133bb8ecdc56d5db930d7ff"
+source = "git+https://github.com/oxidecomputer/progenitor-extras?rev=22e2e4e356a29a24583941d524cfe8ba2d8a43f2#22e2e4e356a29a24583941d524cfe8ba2d8a43f2"
 dependencies = [
  "backon",
  "http",
- "progenitor-client 0.13.0",
+ "progenitor-client 0.14.0",
  "tokio",
 ]
 

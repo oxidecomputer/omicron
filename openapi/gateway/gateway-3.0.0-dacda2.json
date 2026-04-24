@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "4.0.0"
+    "version": "3.0.0"
   },
   "paths": {
     "/ignition": {
@@ -982,14 +982,13 @@
           }
         ],
         "responses": {
-          "101": {
-            "description": "Negotiating protocol upgrade from HTTP/1.1 to WebSocket"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
           }
         },
         "x-dropshot-websocket": {}
