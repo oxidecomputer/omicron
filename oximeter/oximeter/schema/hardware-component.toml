@@ -212,7 +212,7 @@ versions = [
 [[metrics]]
 name = "pwm"
 description = """
-TODO
+Normalized PWM duty cycle.
 """
 units = "none"
 datum_type = "f32"
@@ -223,9 +223,9 @@ versions = [
 [[metrics]]
 name = "input_power"
 description = """
-TODO
+Input power.
 """
-units = "none"
+units = "watts"
 datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
@@ -234,9 +234,9 @@ versions = [
 [[metrics]]
 name = "output_energy"
 description = """
-TODO
+Sampled output energy.
 """
-units = "none"
+units = "none" # actually joules - do we need to add that to oximeter Units?
 datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
@@ -245,9 +245,9 @@ versions = [
 [[metrics]]
 name = "input_energy"
 description = """
-TODO
+Sampled input energy.
 """
-units = "none"
+units = "none" # actually joules - do we need to add that to oximeter Units?
 datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
