@@ -372,7 +372,7 @@ pub(crate) mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    const PROJECT_NAME: &str = "springfield-squidport";
+    const PROJECT_NAME: &str = "test-project";
 
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
@@ -407,7 +407,7 @@ pub(crate) mod test {
         }
     }
 
-    async fn create_disk<F>(
+    pub async fn create_disk<F>(
         cptestctx: &ControlPlaneTestContext,
         create_params: F,
     ) -> Disk
@@ -483,7 +483,7 @@ pub(crate) mod test {
         .await;
     }
 
-    struct ExpungeTestHarness<'a> {
+    pub struct ExpungeTestHarness<'a> {
         cptestctx: &'a ControlPlaneTestContext,
         zpool_id: ZpoolUuid,
         allocation: LocalStorageUnencryptedDatasetAllocation,
@@ -673,8 +673,8 @@ pub(crate) mod test {
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
 
-        // Manually create an allocation for that local storage on a pool, then
-        // expunge the sled backing the pool.
+        // Create a local storage disk, manually create an allocation for that
+        // local storage on a pool, then expunge the sled backing the pool.
 
         let zpool = disk_test.zpools().next().unwrap();
 
@@ -718,8 +718,8 @@ pub(crate) mod test {
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
 
-        // Manually create an allocation for that local storage on a pool, then
-        // expunge the physical disk backing the pool.
+        // Create a local storage disk, manually create an allocation for that
+        // local storage on a pool, then expunge the sled backing the pool.
 
         let zpool = disk_test.zpools().next().unwrap();
 
