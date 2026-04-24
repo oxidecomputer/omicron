@@ -2201,6 +2201,8 @@ table! {
         nexus_generation -> Int8,
 
         source -> crate::enums::BpSourceEnum,
+
+        external_networking_generation -> Int8,
     }
 }
 

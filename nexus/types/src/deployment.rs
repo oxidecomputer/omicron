@@ -314,6 +314,7 @@ impl Blueprint {
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
+            external_networking_generation: self.external_networking_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -3322,6 +3323,9 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::nexus_generation`].
     pub nexus_generation: Generation,
+    /// The current generation of the collective set of external networking
+    /// configuration across all in-service zones
+    pub external_networking_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to

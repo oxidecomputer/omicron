@@ -1618,6 +1618,8 @@ impl DataStore {
         let target_release_minimum_generation =
             *blueprint_row.target_release_minimum_generation;
         let nexus_generation = *blueprint_row.nexus_generation;
+        let external_networking_generation =
+            *blueprint_row.external_networking_generation;
         let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
         let cockroachdb_setting_preserve_downgrade =
             CockroachDbPreserveDowngrade::from_optional_string(
@@ -1643,7 +1645,7 @@ impl DataStore {
             external_dns_version,
             target_release_minimum_generation,
             nexus_generation,
-            external_networking_generation: Generation::new(), // TODO WRONG
+            external_networking_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
