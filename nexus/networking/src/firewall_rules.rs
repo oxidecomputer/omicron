@@ -35,10 +35,9 @@ use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use uuid::Uuid;
 
-/// Error returned when attempting to propagate service firewall rules to
-/// sled-agents.
+/// Error returned when attempting to propagate firewall rules to sled-agents.
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceFirewallRulesError {
+pub enum FirewallRulesError {
     #[error("Failed to look up or resolve firewall rules")]
     Lookup(#[source] Error),
     #[error("{}", summarize_sled_push_errors(.0))]
@@ -69,33 +68,32 @@ pub async fn vpc_list_firewall_rules(
 
 /// Resolve a set of VPC firewall rules into the form expected by sled-agents.
 ///
-/// This function does not inject any Nexus-specific allow rules (i.e., the
-/// inbound-allow rule derived from the IP allowlist). Callers that are
-/// propagating rules for the services VPC must inject that rule themselves
-/// before calling this function; see [`plumb_service_firewall_rules`]. An error
-/// is returned if this not the case.
+/// NOTE: This function injects the Nexus-specific allowlist rules, if the VPC
+/// provided is that reserved for Oxide services.
 pub async fn resolve_firewall_rules_for_sled_agent(
     datastore: &DataStore,
     opctx: &OpContext,
     vpc: &db::model::Vpc,
     rules: &[db::model::VpcFirewallRule],
     log: &Logger,
-) -> Result<Vec<ResolvedVpcFirewallRule>, Error> {
-    // Check the caller has added the rules implementing the IP allowlist if
-    // needed.
-    if vpc.id() == *SERVICES_VPC_ID
-        && !rules
-            .iter()
-            .any(|r| r.name().as_str().starts_with(NEXUS_VPC_FW_RULE_NAME))
-    {
-        return Err(Error::internal_error(
-            "These firewall rules target the Oxide services VPC, \
-            but do not include any rules implementing the IP allowlist \
-            for Nexus. Callers must inject these manually. See \
-            `plumb_service_firewall_rules` and `make_nexus_allowlist_rules` \
-            more details.",
-        ));
-    }
+) -> Result<Vec<ResolvedVpcFirewallRule>, FirewallRulesError> {
+    // Check if these firewall rules target the internal services VPC, and
+    // ensure we insert the one or more rules implementing the IP allowlist for
+    // Nexus.
+    let allowlist_rules = if vpc.id() == *SERVICES_VPC_ID {
+        // Construct a synthetic inbound-allow rule for the Nexus subnet based on
+        // the current IP allowlist. This rule is not stored in the DB; it is
+        // generated here and propagated to sled-agents on each invocation. The
+        // allowlist determines which source IPs are permitted; OPTE's default-deny
+        // policy blocks all other traffic.
+        let allowed_ips = lookup_allowed_source_ips(datastore, opctx, log)
+            .await
+            .map_err(FirewallRulesError::Lookup)?;
+        make_nexus_allowlist_rules(allowed_ips)
+            .map_err(FirewallRulesError::Lookup)?
+    } else {
+        Vec::new()
+    };
 
     // Collect the names of instances, subnets, and VPCs that are either
     // targets or host filters. We have to find the sleds for all the
@@ -115,8 +113,10 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                 }
                 external::VpcFirewallRuleTarget::Vpc(name) => {
                     if name != vpc.name() {
-                        return Err(Error::invalid_request(
-                            "cross-VPC firewall target unsupported",
+                        return Err(FirewallRulesError::Lookup(
+                            Error::invalid_request(
+                                "cross-VPC firewall target unsupported",
+                            ),
                         ));
                     }
                     vpcs.insert(name.clone().into());
@@ -138,8 +138,10 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                 }
                 external::VpcFirewallRuleHostFilter::Vpc(name) => {
                     if name != vpc.name() {
-                        return Err(Error::invalid_request(
-                            "cross-VPC firewall host filter unsupported",
+                        return Err(FirewallRulesError::Lookup(
+                            Error::invalid_request(
+                                "cross-VPC firewall host filter unsupported",
+                            ),
                         ));
                     }
                     vpcs.insert(name.clone().into());
@@ -170,7 +172,8 @@ pub async fn resolve_firewall_rules_for_sled_agent(
         {
             for iface in datastore
                 .derive_guest_network_interface_info(opctx, &authz_instance)
-                .await?
+                .await
+                .map_err(FirewallRulesError::Lookup)?
             {
                 instance_interfaces
                     .entry(instance_name.0.clone())
@@ -191,7 +194,8 @@ pub async fn resolve_firewall_rules_for_sled_agent(
         {
             for iface in datastore
                 .derive_vpc_network_interface_info(opctx, &authz_vpc)
-                .await?
+                .await
+                .map_err(FirewallRulesError::Lookup)?
             {
                 vpc_vni_map.insert(&vpc_name.0, iface.vni);
                 vpc_interfaces
@@ -213,7 +217,8 @@ pub async fn resolve_firewall_rules_for_sled_agent(
         {
             for iface in datastore
                 .derive_subnet_network_interface_info(opctx, &authz_subnet)
-                .await?
+                .await
+                .map_err(FirewallRulesError::Lookup)?
             {
                 subnet_interfaces
                     .entry(subnet_name.0.clone())
@@ -225,7 +230,8 @@ pub async fn resolve_firewall_rules_for_sled_agent(
 
     let subnet_networks: NetMap = datastore
         .resolve_vpc_subnets_to_ip_networks(vpc, subnets)
-        .await?
+        .await
+        .map_err(FirewallRulesError::Lookup)?
         .into_iter()
         .map(|(name, v)| (name.0, v))
         .collect();
@@ -240,8 +246,9 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     );
 
     // Compile resolved rules for the sled agents.
-    let mut sled_agent_rules = Vec::with_capacity(rules.len());
-    for rule in rules {
+    let mut sled_agent_rules =
+        Vec::with_capacity(rules.len() + allowlist_rules.len());
+    for rule in rules.iter().chain(allowlist_rules.iter()) {
         // TODO: what is the correct behavior when a name is not found?
         // Options:
         // (1) Fail update request (though note this can still arise
@@ -422,12 +429,11 @@ pub async fn send_sled_agents_firewall_rules(
     sleds_filter: &[SledUuid],
     sled_lookup_opctx: &OpContext,
     log: &Logger,
-) -> Result<(), ServiceFirewallRulesError> {
+) -> Result<(), FirewallRulesError> {
     let rules_for_sled = resolve_firewall_rules_for_sled_agent(
         datastore, opctx, &vpc, rules, log,
     )
-    .await
-    .map_err(ServiceFirewallRulesError::Lookup)?;
+    .await?;
     debug!(log, "resolved {} rules for sleds", rules_for_sled.len());
     let sled_rules_request =
         sled_agent_client::types::VpcFirewallRulesEnsureBody {
@@ -438,7 +444,7 @@ pub async fn send_sled_agents_firewall_rules(
     let vpc_to_sleds = datastore
         .vpc_resolve_to_sleds(vpc.id(), sleds_filter)
         .await
-        .map_err(ServiceFirewallRulesError::Lookup)?;
+        .map_err(FirewallRulesError::Lookup)?;
     debug!(
         log, "resolved sleds for vpc {}", vpc.name();
         "vpc_to_sled" => ?vpc_to_sleds,
@@ -476,7 +482,7 @@ pub async fn send_sled_agents_firewall_rules(
             "n_succesfully_updated" => vpc_to_sleds.len() - sled_failures.len(),
             "n_failed" => sled_failures.len(),
         );
-        Err(ServiceFirewallRulesError::SledPush(sled_failures))
+        Err(FirewallRulesError::SledPush(sled_failures))
     }
 }
 
@@ -493,28 +499,14 @@ pub async fn plumb_service_firewall_rules(
     sleds_filter: &[SledUuid],
     sled_lookup_opctx: &OpContext,
     log: &Logger,
-) -> Result<(), ServiceFirewallRulesError> {
+) -> Result<(), FirewallRulesError> {
     let svcs_vpc = LookupPath::new(opctx, datastore)
         .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
-    let mut svcs_fw_rules =
-        vpc_list_firewall_rules(datastore, opctx, &svcs_vpc)
-            .await
-            .map_err(ServiceFirewallRulesError::Lookup)?;
-    let (_, _, _, svcs_vpc) =
-        svcs_vpc.fetch().await.map_err(ServiceFirewallRulesError::Lookup)?;
-
-    // Construct a synthetic inbound-allow rule for the Nexus subnet based on
-    // the current IP allowlist. This rule is not stored in the DB; it is
-    // generated here and propagated to sled-agents on each invocation. The
-    // allowlist determines which source IPs are permitted; OPTE's default-deny
-    // policy blocks all other traffic.
-    let allowed_ips = lookup_allowed_source_ips(datastore, opctx, log)
+    let svcs_fw_rules = vpc_list_firewall_rules(datastore, opctx, &svcs_vpc)
         .await
-        .map_err(ServiceFirewallRulesError::Lookup)?;
-    let mut nexus_rules = make_nexus_allowlist_rules(allowed_ips)
-        .map_err(ServiceFirewallRulesError::Lookup)?;
-    svcs_fw_rules.append(&mut nexus_rules);
-
+        .map_err(FirewallRulesError::Lookup)?;
+    let (_, _, _, svcs_vpc) =
+        svcs_vpc.fetch().await.map_err(FirewallRulesError::Lookup)?;
     send_sled_agents_firewall_rules(
         datastore,
         opctx,

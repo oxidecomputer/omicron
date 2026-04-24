@@ -64,7 +64,7 @@ impl BackgroundTask for ServiceRulePropagator {
                     );
                     serde_json::json!(status)
                 }
-                Err(nexus_networking::ServiceFirewallRulesError::Lookup(e)) => {
+                Err(nexus_networking::FirewallRulesError::Lookup(e)) => {
                     let e = InlineErrorChain::new(&e);
                     error!(
                         log,
@@ -74,7 +74,7 @@ impl BackgroundTask for ServiceRulePropagator {
                     status.lookup_error.replace(e.to_string());
                     serde_json::json!(status)
                 }
-                Err(nexus_networking::ServiceFirewallRulesError::SledPush(
+                Err(nexus_networking::FirewallRulesError::SledPush(
                     failures,
                 )) => {
                     let sled_push_errors =
