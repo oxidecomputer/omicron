@@ -212,7 +212,7 @@ versions = [
 [[metrics]]
 name = "pwm"
 description = """
-Normalized PWM duty cycle.
+PWM duty cycle normalized to the 0.0-1.0 range.
 """
 units = "none"
 datum_type = "f32"
