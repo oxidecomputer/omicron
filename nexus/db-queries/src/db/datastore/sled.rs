@@ -50,7 +50,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::bail_unless;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -681,26 +680,27 @@ impl DataStore {
         Ok((sled, was_modified))
     }
 
-    /// Confirms that a sled exists and is in-service.
+    /// Returns true if a sled exists and is in-service, false if not.
     pub async fn check_sled_in_service(
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         Self::check_sled_in_service_on_connection(conn, sled_id)
             .await
             .map_err(|e| e.into_public_ignore_retries())
     }
 
-    /// Confirms that a sled exists and is in-service.
+    /// Returns true if a sled exists and is in-service, false if not.
     ///
     /// This function may be called from a transaction context.
     pub async fn check_sled_in_service_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: SledUuid,
-    ) -> Result<(), TransactionError<Error>> {
+    ) -> Result<bool, TransactionError<Error>> {
         use nexus_db_schema::schema::sled::dsl;
+
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
@@ -710,13 +710,7 @@ impl DataStore {
         .get_result_async::<bool>(conn)
         .await?;
 
-        bail_unless!(
-            sled_exists_and_in_service,
-            "Sled {} is not in service",
-            sled_id,
-        );
-
-        Ok(())
+        Ok(sled_exists_and_in_service)
     }
 
     // Return the rack id of a commissioned sled if it exists, given its
