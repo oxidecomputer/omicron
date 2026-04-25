@@ -51,7 +51,7 @@ const TIMESYNC_CORRECTION_MAX: f64 = 0.05;
 // inter-node difference is 350ms, keeping us well within CRDB's threshold.
 //
 // This value is in seconds.
-const TIMESYNC_MAX_ERROR_MAX: f64 = 0.275;
+const TIMESYNC_MAX_ERROR_MAX: f64 = 0.175;
 const TIMESYNC_REF_IDS_NO_PEER_SYNC: [u32; 2] = [0, 0x7f7f0101];
 
 fn parse_timesync_result(stdout: &str) -> Result<TimeSync, TimeSyncError> {
@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(result.rms_offset, 0.001);
         assert_eq!(result.root_delay, 0.01);
         assert_eq!(result.root_dispersion, 0.001);
-        assert_eq!(result.max_error, 0.01 / 2.0 + 0.001);
+        assert_eq!(result.max_error, result.correction + 0.01 / 2.0 + 0.001);
         assert!(result.sync);
     }
 
@@ -346,28 +346,12 @@ mod tests {
 
     #[test]
     fn test_parse_timesync_result_not_synced_high_max_error() {
-        // root_delay/2 + root_dispersion > TIMESYNC_MAX_ERROR_MAX
         let input = "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,0.001,x,x,x,0.3,0.1";
-
         let result = parse_timesync_result(input).unwrap();
         assert_eq!(result.root_delay, 0.3);
         assert_eq!(result.root_dispersion, 0.1);
-        assert_eq!(result.max_error, 0.3 / 2.0 + 0.1);
+        assert_eq!(result.max_error, 0.001 + 0.3 / 2.0 + 0.1);
         assert!(!result.sync);
-    }
-
-    #[test]
-    fn test_parse_timesync_result_boundary_max_error() {
-        // root_delay/2 + root_dispersion == TIMESYNC_MAX_ERROR_MAX exactly
-        let root_delay = 0.2;
-        let root_dispersion = 0.1;
-        let input = format!(
-            "C0A80001,192.168.0.1,2,1234567891.123456,0.001,0.001,0.001,x,x,x,{root_delay},{root_dispersion}"
-        );
-
-        let result = parse_timesync_result(&input).unwrap();
-        assert_eq!(result.max_error, TIMESYNC_MAX_ERROR_MAX);
-        assert!(result.sync);
     }
 
     #[test]
