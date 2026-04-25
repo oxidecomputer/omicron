@@ -4,7 +4,7 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use dropshot_api_manager_types::api_versions;
-use ntp_admin_types_versions::latest;
+use ntp_admin_types_versions::{latest, v1};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -18,6 +18,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, ADD_MAX_ERROR_AND_OFFSET),
     (1, INITIAL),
 ]);
 
@@ -41,8 +42,22 @@ pub trait NtpAdminApi {
     #[endpoint {
         method = GET,
         path = "/timesync",
+        versions = VERSION_ADD_MAX_ERROR_AND_OFFSET..
     }]
     async fn timesync(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::timesync::TimeSync>, HttpError>;
+
+    /// Query for the state of time synchronization
+    #[endpoint {
+        method = GET,
+        path = "/timesync",
+        operation_id = "timesync",
+        versions = VERSION_INITIAL..VERSION_ADD_MAX_ERROR_AND_OFFSET,
+    }]
+    async fn timesync_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::timesync::TimeSync>, HttpError> {
+        Ok(Self::timesync(rqctx).await?.map(|ts| ts.into()))
+    }
 }
