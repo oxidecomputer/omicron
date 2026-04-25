@@ -98,7 +98,7 @@ impl Sitrep {
     /// Returns a value which implements `PartialEq<Sitrep>` and can be used to
     /// test whether another sitrep represents the same state of the system as
     /// this sitrep.
-    /// 
+    ///
     /// This is distinct than comparing two `Sitrep`s directly using their
     /// `PartialEq` implementation, as that comparison will test whether *all
     /// fields of the sitreps* are exactly the same, while this comparison type
