@@ -88,6 +88,7 @@ define_enums! {
     PhysicalDiskStateEnum => "physical_disk_state",
     ProducerKindEnum => "producer_kind",
     ReadOnlyTargetReplacementTypeEnum => "read_only_target_replacement_type",
+    ReconfiguratorDisruptionPolicyEnum => "reconfigurator_disruption_policy",
     RegionReplacementStateEnum => "region_replacement_state",
     RegionReplacementStepTypeEnum => "region_replacement_step_type",
     RegionReservationPercentEnum => "region_reservation_percent",

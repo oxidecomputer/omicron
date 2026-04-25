@@ -4,7 +4,7 @@
 
 //! Types representing runtime configuration for reconfigurator
 
-use crate::SqlU32;
+use crate::{SqlU32, impl_enum_type};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::reconfigurator_config;
 use nexus_types::deployment;
@@ -17,6 +17,7 @@ pub struct ReconfiguratorConfig {
     pub time_modified: DateTime<Utc>,
     pub add_zones_with_mupdate_override: bool,
     pub tuf_repo_pruner_enabled: bool,
+    pub disruption_policy: DbReconfiguratorDisruptionPolicy,
 }
 
 impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
@@ -30,6 +31,7 @@ impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
                 .planner_config
                 .add_zones_with_mupdate_override,
             tuf_repo_pruner_enabled: value.config.tuf_repo_pruner_enabled,
+            disruption_policy: value.config.disruption_policy.into(),
         }
     }
 }
@@ -45,8 +47,63 @@ impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
                         .add_zones_with_mupdate_override,
                 },
                 tuf_repo_pruner_enabled: value.tuf_repo_pruner_enabled,
+                disruption_policy: value.disruption_policy.into(),
             },
             time_modified: value.time_modified,
+        }
+    }
+}
+
+impl_enum_type!(
+    ReconfiguratorDisruptionPolicyEnum:
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbReconfiguratorDisruptionPolicy;
+
+    Terminate => b"terminate"
+    MigrateOrTerminate => b"migrate_or_terminate"
+    MigrateOnly => b"migrate_only"
+);
+
+impl From<DbReconfiguratorDisruptionPolicy>
+    for deployment::ReconfiguratorDisruptionPolicy
+{
+    fn from(value: DbReconfiguratorDisruptionPolicy) -> Self {
+        match value {
+            DbReconfiguratorDisruptionPolicy::Terminate => {
+                deployment::ReconfiguratorDisruptionPolicy::Terminate
+            }
+            DbReconfiguratorDisruptionPolicy::MigrateOrTerminate => {
+                deployment::ReconfiguratorDisruptionPolicy::MigrateOrTerminate
+            }
+            DbReconfiguratorDisruptionPolicy::MigrateOnly => {
+                deployment::ReconfiguratorDisruptionPolicy::MigrateOnly
+            }
+        }
+    }
+}
+
+impl From<deployment::ReconfiguratorDisruptionPolicy>
+    for DbReconfiguratorDisruptionPolicy
+{
+    fn from(value: deployment::ReconfiguratorDisruptionPolicy) -> Self {
+        match value {
+            deployment::ReconfiguratorDisruptionPolicy::Terminate => {
+                DbReconfiguratorDisruptionPolicy::Terminate
+            }
+            deployment::ReconfiguratorDisruptionPolicy::MigrateOrTerminate => {
+                DbReconfiguratorDisruptionPolicy::MigrateOrTerminate
+            }
+            deployment::ReconfiguratorDisruptionPolicy::MigrateOnly => {
+                DbReconfiguratorDisruptionPolicy::MigrateOnly
+            }
         }
     }
 }

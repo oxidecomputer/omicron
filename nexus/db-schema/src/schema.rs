@@ -2150,6 +2150,7 @@ table! {
         time_modified -> Timestamptz,
         add_zones_with_mupdate_override -> Bool,
         tuf_repo_pruner_enabled -> Bool,
+        disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
     }
 }
 
