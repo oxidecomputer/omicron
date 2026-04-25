@@ -1,0 +1,35 @@
+# BEGIN @generated server-side deployment unit DAG edges.
+# To regenerate, run `EXPECTORATE=overwrite cargo nextest run -p omicron-ls-apis`.
+# YOU SHOULD STILL REVIEW CHANGES TO THIS FILE FOR CORRECTNESS.
+
+[[edges]]
+consumer = "Installinator"
+producer = "Host OS"
+
+[[edges]]
+consumer = "Nexus"
+producer = "ClickHouse"
+
+[[edges]]
+consumer = "Nexus"
+producer = "Cockroach"
+
+[[edges]]
+consumer = "Nexus"
+producer = "Crucible"
+
+[[edges]]
+consumer = "Nexus"
+producer = "Crucible Pantry"
+
+[[edges]]
+consumer = "Nexus"
+producer = "DNS Server"
+
+[[edges]]
+consumer = "Nexus"
+producer = "Host OS"
+
+[[edges]]
+consumer = "Nexus"
+producer = "Oximeter"

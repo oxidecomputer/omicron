@@ -9,6 +9,7 @@
 //!
 //! This isn't (supposed to be) a test for the `ls-apis` tool itself.
 
+use omicron_deployment_graph::DEPLOYMENT_UNIT_DAG_PATH;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
@@ -37,4 +38,15 @@ fn test_api_check() {
 
     println!("stderr:\n------\n{}\n-----", stderr_text);
     expectorate::assert_contents("tests/api_check.out", &stdout_text);
+}
+
+#[test]
+fn test_deployment_unit_dag_edges() {
+    let cmd_path = path_to_executable(CMD_LS_APIS);
+    let exec = subprocess::Exec::cmd(cmd_path).arg("dag-edges");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    println!("stderr:\n------\n{}\n-----", stderr_text);
+    expectorate::assert_contents(DEPLOYMENT_UNIT_DAG_PATH, &stdout_text);
 }

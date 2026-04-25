@@ -7485,6 +7485,7 @@ dependencies = [
  "nexus-reconfigurator-simulation",
  "nexus-types",
  "omicron-common",
+ "omicron-deployment-graph",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7506,6 +7507,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "toml 0.8.23",
  "transient-dns-server",
  "tufaceous",
  "tufaceous-artifact",
@@ -8376,6 +8378,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-deployment-graph"
+version = "0.1.0"
+dependencies = [
+ "newtype_derive",
+ "omicron-workspace-hack",
+ "serde",
+]
+
+[[package]]
 name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
@@ -8568,6 +8579,7 @@ dependencies = [
  "indent_write",
  "itertools 0.14.0",
  "newtype_derive",
+ "omicron-deployment-graph",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-display",
@@ -9374,6 +9386,7 @@ dependencies = [
  "predicates",
  "proc-macro2",
  "proptest",
+ "quote",
  "rand 0.8.5",
  "rand 0.9.2",
  "rand_chacha 0.3.1",
