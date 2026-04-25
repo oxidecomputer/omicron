@@ -72,6 +72,7 @@ use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
+use nexus_db_model::SqlU32;
 use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::HwM2SlotEnum;
@@ -102,6 +103,7 @@ use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -117,6 +119,7 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactKind;
@@ -2363,6 +2366,240 @@ impl DataStore {
 
         Ok(current_target.into())
     }
+
+    /// List a page of rows from `bp_target`
+    ///
+    /// Generally, only the last `bp_target` row is meaningful.  You only want
+    /// this if you're explicitly looking at history for debugging, cleanup,
+    /// etc.
+    pub async fn bp_target_list_page(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> ListResultVec<BpTarget> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+
+        use nexus_db_schema::schema::bp_target::dsl;
+        paginated(dsl::bp_target, dsl::version, pagparams)
+            .select(BpTarget::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch information about most recent target blueprints
+    ///
+    /// This looks at the most recent rows from the `bp_target` table and
+    /// determines which version(s) can be deleted, assuming we want to keep
+    /// `nkeep` distinct blueprints.
+    // This could arguably live in the pruner itself, which could build it atop
+    // a public `bp_target_list_page`.  It lives here instead because it goes
+    // with `bp_target_delete_up_to`, and that _can't_ be built atop a
+    // comparably safe interface.
+    pub async fn bp_target_determine_pruneable(
+        &self,
+        opctx: &OpContext,
+        nkeep: usize,
+        // XXX-dap consider removing this arg and applying it to an internal
+        // function with its own batch size testing
+        batch_size: NonZeroU32,
+    ) -> Result<BpTargetPruneable, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+
+        // There are lots of ways to do this.  We'll do it by paging backwards
+        // through the table until we identify MAX_NKEEP distinct blueprints.
+        //
+        // Alternative considered: take MAX(version) and subtract MAX_NKEEP.
+        // This is easy to do, but might result in keeping fewer blueprints if
+        // some of those rows just involve having enabled or disabled the
+        // target.  That's not a big deal while MAX_NKEEP = 1000, given how
+        // uncommon it is to enable/disable the target.  But it could also be
+        // *very* wrong if for whatever reason somebody has already removed rows
+        // near the end of the table.  This too should be impossible, but
+        // there's no need to rely on it.
+        //
+        // Alternative considered: have the database tell us the version that's
+        // `MAX_NKEEP` rows from the end.  e.g., something like
+        //
+        //   SELECT version FROM bp_target \
+        //       ORDER BY version DESC OFFSET `MAX_NKEEP`
+        //
+        // That query is somewhat expensive (well, proportional to `MAX_NKEEP`)
+        // and still has the problem of not keeping enough blueprints if some of
+        // these rows correspond to just enabling/disabling the current target.
+        //
+        // By comparison, the approach we pick here is just a paginated scan (no
+        // exotic SQL), each query's cost is proportional to the page size
+        // (rather than `MAX_NKEEP`), and it allows us to keep the right number
+        // of distinct blueprints.
+
+        let mut nscanned = 0;
+        let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> =
+            BTreeSet::new();
+        let mut paginator =
+            Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
+        let mut last_version_seen = None;
+        let mut latest_target_id = None;
+
+        while let Some(p) = paginator.next() {
+            let records_batch = self
+                .bp_target_list_page(opctx, &p.current_pagparams())
+                .await
+                .internal_context("fetching page of bp_target rows")?;
+            paginator =
+                p.found_batch(&records_batch, &|m: &BpTarget| m.version);
+            for row in records_batch {
+                nscanned += 1;
+                let blueprint_id = BlueprintUuid::from(row.blueprint_id);
+                if latest_target_id.is_none() {
+                    latest_target_id = Some(blueprint_id);
+                }
+
+                // This is pretty subtle: we don't want to stop as soon as we
+                // find the Nth distinct blueprint id.  That's because if we
+                // keep going, we might find more rows that refer to the same
+                // blueprint id (if someone toggled the enabled/disabled bit).
+                // If we stopped here, the caller would see those rows and
+                // erroneously determine they could prune this blueprint, but we
+                // were counting on it being one of the ones being kept.
+                //
+                // Instead, we need to go far enough back to see a different
+                // blueprint id.
+                if blueprint_ids_to_keep.len() >= nkeep
+                    && !blueprint_ids_to_keep.contains(&row.blueprint_id.into())
+                {
+                    // unwrap(): cannot have entries in `blueprint_ids_to_keep`
+                    // if we have not seen any versions or a target id.
+                    let version = last_version_seen.unwrap();
+                    let target_id = latest_target_id.unwrap();
+                    return Ok(BpTargetPruneable {
+                        nscanned,
+                        nfound: blueprint_ids_to_keep.len(),
+                        keep: KeepWhat::StartingFromVersion(version),
+                        target_id,
+                    });
+                }
+
+                blueprint_ids_to_keep.insert(row.blueprint_id.into());
+                last_version_seen = Some(*row.version);
+            }
+        }
+
+        return Ok(BpTargetPruneable {
+            nscanned,
+            nfound: blueprint_ids_to_keep.len(),
+            keep: KeepWhat::All,
+            target_id: latest_target_id.ok_or_else(|| {
+                // This should be impossible since we always have a target.
+                Error::internal_error("no bp_target rows found")
+            })?,
+        });
+    }
+
+    /// Delete `bp_target` rows not newer than the specified version
+    ///
+    /// The caller must have previously used `bp_target_determine_pruneable()`
+    /// to figure out what can be safely pruned and supply that here.
+    pub async fn bp_target_delete_up_to(
+        &self,
+        opctx: &OpContext,
+        pruneable: &BpTargetPruneable,
+        version: u32,
+    ) -> Result<usize, Error> {
+        opctx
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        match pruneable.keep {
+            KeepWhat::All => {
+                return Err(Error::internal_error(
+                    "cannot delete from bp_targets when determination \
+                     was to keep all rows",
+                ));
+            }
+            KeepWhat::StartingFromVersion(v) => {
+                if version >= v {
+                    return Err(Error::internal_error(&format!(
+                        "cannot delete up to bp_target version {version} \
+                         when determination was to keep starting at version \
+                         {v}"
+                    )));
+                }
+            }
+        }
+
+        #[derive(Debug, Error)]
+        enum TargetDeleteError {
+            #[error("database error")]
+            Diesel(#[from] DieselError),
+
+            #[error("cannot delete latest bp_target row")]
+            LastRow,
+        }
+
+        // Although the Rust interface makes it hard to invoke this in a way
+        // that would prune the last rows in the table, since the consequences
+        // would be so dire, we use a transaction to ensure that we're not
+        // doing that.
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        let ndeleted = self
+            .transaction_non_retry_wrapper("bp_target_delete")
+            .transaction(&conn, |conn| async move {
+                use nexus_db_schema::schema::bp_target::dsl;
+                let latest_version: SqlU32 = dsl::bp_target
+                    .select(dsl::version)
+                    .order_by(dsl::version.desc())
+                    .limit(1)
+                    .first_async(&conn)
+                    .await?;
+
+                if version >= *latest_version {
+                    return Err(TargetDeleteError::LastRow);
+                }
+
+                let ndeleted = diesel::delete(
+                    dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
+                )
+                .execute_async(&conn)
+                .await?;
+
+                Ok(ndeleted)
+            })
+            .await
+            .map_err(|e| match e {
+                TargetDeleteError::Diesel(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+                e @ TargetDeleteError::LastRow => {
+                    // This variant is always an internal error and has no
+                    // causes so we don't need to use InlineErrorChain here.
+                    Error::internal_error(&e.to_string())
+                }
+            })?;
+
+        Ok(ndeleted)
+    }
+}
+
+/// Summarizes the most recent rows of the `bp_target` table
+pub struct BpTargetPruneable {
+    /// how many rows we scanned (starting at the end of the table)
+    pub nscanned: usize,
+    /// how many distinct blueprint ids we found
+    pub nfound: usize,
+    /// which rows to keep
+    pub keep: KeepWhat,
+    /// id of the latest target blueprint
+    pub target_id: BlueprintUuid,
+}
+
+/// Describes which versions in `bp_target` to keep, based on how many were
+/// requested to be kept and what we actually found in the table
+pub enum KeepWhat {
+    /// Keep everything because there aren't more than the requested number
+    All,
+    /// Keep only rows after (and including) the provided version
+    StartingFromVersion(u32),
 }
 
 // Helper for reporting "should never happen" errors while inserting blueprints.

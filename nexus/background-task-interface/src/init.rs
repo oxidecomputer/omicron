@@ -26,6 +26,7 @@ pub struct BackgroundTasks {
     pub task_blueprint_planner: Activator,
     pub task_blueprint_executor: Activator,
     pub task_blueprint_rendezvous: Activator,
+    pub task_blueprint_pruner: Activator,
     pub task_crdb_node_id_collector: Activator,
     pub task_service_zone_nat_tracker: Activator,
     pub task_switch_port_settings_manager: Activator,
