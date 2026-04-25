@@ -5140,6 +5140,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5154,7 +5160,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     add_zones_with_mupdate_override BOOL NOT NULL,
 
     -- Enable the TUF repo pruner background task
-    tuf_repo_pruner_enabled BOOL NOT NULL
+    tuf_repo_pruner_enabled BOOL NOT NULL,
+
+    -- How to disrupt instances during updates.
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
 );
 
 /*
@@ -8475,7 +8484,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '253.0.0', NULL)
+    (TRUE, NOW(), NOW(), '254.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

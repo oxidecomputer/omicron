@@ -1116,6 +1116,7 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
@@ -1257,6 +1258,7 @@ mod test {
             planner_enabled = true
             planner_config.add_zones_with_mupdate_override = true
             tuf_repo_pruner_enabled = false
+            disruption_policy = "terminate"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1431,6 +1433,7 @@ mod test {
                             add_zones_with_mupdate_override: true,
                         },
                         tuf_repo_pruner_enabled: false,
+                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {

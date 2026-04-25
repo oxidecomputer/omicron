@@ -118,6 +118,7 @@ pub struct ReconfiguratorConfig {
     pub planner_enabled: bool,
     pub planner_config: PlannerConfig,
     pub tuf_repo_pruner_enabled: bool,
+    pub disruption_policy: ReconfiguratorDisruptionPolicy,
 }
 
 impl ReconfiguratorConfig {
@@ -132,6 +133,49 @@ impl Default for ReconfiguratorConfig {
             planner_enabled: true,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        }
+    }
+}
+
+/// Controls how instances are disrupted during updates.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconfiguratorDisruptionPolicy {
+    /// Terminate instances during updates -- do not attempt to migrate
+    /// instances. This is currently the default.
+    #[default]
+    Terminate,
+
+    /// Attempt to live-migrate instances, and terminate instances if migration
+    /// is not possible (XXX due to???).
+    MigrateOrTerminate,
+
+    /// Live-migrate (XXX migratable?) instances and don't ever terminate them.
+    MigrateOnly,
+}
+
+impl fmt::Display for ReconfiguratorDisruptionPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorDisruptionPolicy::Terminate => write!(f, "terminate"),
+            ReconfiguratorDisruptionPolicy::MigrateOrTerminate => {
+                write!(f, "live-migrate or terminate")
+            }
+            ReconfiguratorDisruptionPolicy::MigrateOnly => {
+                write!(f, "live-migrate only")
+            }
         }
     }
 }
@@ -149,9 +193,11 @@ impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
                     planner_enabled,
                     planner_config,
                     tuf_repo_pruner_enabled,
+                    disruption_policy,
                 },
         } = self;
         writeln!(f, "tuf repo pruner enabled: {}", tuf_repo_pruner_enabled)?;
+        writeln!(f, "disruption policy: {}", disruption_policy)?;
         writeln!(f, "planner enabled: {}", planner_enabled)?;
         writeln!(f, "planner config:")?;
         // planner_config does its own indentation, so it's not necessary to
@@ -179,6 +225,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
             planner_enabled,
             planner_config,
             tuf_repo_pruner_enabled,
+            disruption_policy,
         } = self.diff;
 
         let list = KvList::new(
@@ -186,6 +233,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
             vec![
                 diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
                 diff_row!(planner_enabled, "planner enabled"),
+                diff_row!(disruption_policy, "disruption policy"),
             ],
         );
         // No need for writeln! here because KvList adds its own newlines.
