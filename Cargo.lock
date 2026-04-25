@@ -7922,6 +7922,7 @@ name = "ntp-admin-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "git-stub-vcs",
  "omicron-workspace-hack",
  "progenitor 0.13.0",
  "reqwest 0.13.2",
