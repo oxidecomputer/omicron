@@ -204,6 +204,7 @@ pub enum Units {
     DegreesCelsius,
     /// Rotations per minute.
     Rpm,
+    Joules,
 }
 
 /// The schema for a timeseries.

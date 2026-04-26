@@ -686,6 +686,15 @@ impl SimSpUpdate {
             _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
+
+    pub(crate) fn component_get_persistent_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        // We don't simulate separate persistent/active slots yet, so just
+        // return the active slot.
+        self.component_get_active_slot(component)
+    }
 }
 
 /// Specifies what kind of device we're constructing caboose metadata for
