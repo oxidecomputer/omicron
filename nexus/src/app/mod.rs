@@ -36,6 +36,7 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
@@ -121,7 +122,9 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::BlueprintDebugAction;
 pub(crate) use self::deployment::SetTargetReleaseIntent;
+pub(crate) use self::deployment::blueprint_debug_filename;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
@@ -323,6 +326,9 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// dropbox producer for Reconfigurator
+    debug_dropbox_reconfigurator: Arc<omicron_debug_dropbox::Producer>,
 }
 
 impl Nexus {
@@ -340,6 +346,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<Arc<Nexus>, String> {
         let all_versions = config
             .pkg
@@ -534,6 +541,17 @@ impl Nexus {
 
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
+        let debug_dropbox_reconfigurator = Arc::new(
+            debug_dropbox.initialize_producer("reconfigurator").await.map_err(
+                |message| {
+                    format!(
+                        "failed to create reconfigurator dropbox \
+                         producer: {message}"
+                    )
+                },
+            )?,
+        );
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -598,6 +616,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            debug_dropbox_reconfigurator: debug_dropbox_reconfigurator.clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -694,6 +713,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    debug_dropbox: debug_dropbox_reconfigurator,
                     console_session_absolute_timeout,
                 },
             );

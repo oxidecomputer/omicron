@@ -8,8 +8,10 @@ use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::address::MGS_PORT;
+use omicron_debug_dropbox::DebugDropbox;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::time::Duration;
 use tokio::time::sleep;
 use tokio::time::timeout;
@@ -59,11 +61,16 @@ async fn test_nexus_boots_before_cockroach() {
     };
     let nexus_config = starter.config.clone();
     let nexus_log = log.clone();
+    let dropbox = Arc::new(DebugDropbox::for_tests_noop(&log));
     let nexus_handle = tokio::task::spawn(async move {
         info!(nexus_log, "Test: Trying to start Nexus (internal)");
-        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log)
-            .await
-            .unwrap();
+        omicron_nexus::Server::start_internal(
+            &nexus_config,
+            &nexus_log,
+            dropbox,
+        )
+        .await
+        .unwrap();
         info!(nexus_log, "Test: Started Nexus (internal)");
     });
 
@@ -137,11 +144,16 @@ async fn test_nexus_boots_before_dendrite() {
     };
     let nexus_config = starter.config.clone();
     let nexus_log = log.clone();
+    let dropbox = Arc::new(DebugDropbox::for_tests_noop(&log));
     let nexus_handle = tokio::task::spawn(async move {
         info!(nexus_log, "Test: Trying to start Nexus (internal)");
-        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log)
-            .await
-            .unwrap();
+        omicron_nexus::Server::start_internal(
+            &nexus_config,
+            &nexus_log,
+            dropbox,
+        )
+        .await
+        .unwrap();
         info!(nexus_log, "Test: Started Nexus (internal)");
     });
 

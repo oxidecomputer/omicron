@@ -4,12 +4,14 @@
 
 //! Configuration of the deployment system
 
+use anyhow::Context;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -32,6 +34,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -41,6 +44,7 @@ use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
+    target: BlueprintTarget,
     planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
@@ -99,6 +103,41 @@ impl super::Nexus {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
+    async fn assemble_state_for_new_target(
+        &self,
+        opctx: &OpContext,
+        new_target: BlueprintTarget,
+    ) -> Result<(Blueprint, String), Error> {
+        let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
+        let datastore = self.datastore();
+        let blueprint = self
+            .blueprint_view(opctx, *new_target.target_id.as_untyped_uuid())
+            .await?;
+        let debug = reconfigurator_state_assemble(
+            opctx,
+            datastore,
+            planning_context.planning_input,
+            vec![inventory],
+            vec![blueprint.clone()],
+            new_target,
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        })
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error assembling Reconfigurator state: {}",
+                InlineErrorChain::new(&*error),
+            ))
+        })?;
+        Ok((blueprint, debug))
+    }
+
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
@@ -110,9 +149,35 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
-        self.db_datastore
+        // Assemble a Reconfigurator state file so that we have a record of the
+        // new target blueprint.
+        let (blueprint, debug) =
+            self.assemble_state_for_new_target(opctx, new_target).await?;
+
+        // Archive the Reconfigurator state file.
+        let debug_name =
+            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Target);
+        let deposit = self
+            .debug_dropbox_reconfigurator
+            .deposit_file_str(&debug_name, &debug)
+            .await
+            .map_err(|error| {
+                Error::internal_error(&format!(
+                    "error saving Reconfigurator state: {}",
+                    InlineErrorChain::new(&error),
+                ))
+            })?;
+
+        if let Err(error) = self
+            .db_datastore
             .blueprint_target_set_current(opctx, new_target)
-            .await?;
+            .await
+        {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            deposit.cancel_and_attempt_delete().await;
+            return Err(error);
+        }
 
         // We have a new target: trigger the background task to load this
         // blueprint.
@@ -133,6 +198,9 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
+        // We don't need to create or archive a Reconfigurator state file here
+        // because one would have been created when this blueprint was made the
+        // target in the first place.
         self.db_datastore
             .blueprint_target_set_current_enabled(opctx, new_target)
             .await?;
@@ -152,7 +220,7 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let (_, parent_blueprint) =
+        let (target, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
 
         // Load up the planner config from the db directly (rather than from,
@@ -189,7 +257,7 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        Ok(PlanningContext { planning_input, creator, inventory })
+        Ok(PlanningContext { target, planning_input, creator, inventory })
     }
 
     async fn blueprint_add(
@@ -227,7 +295,52 @@ impl super::Nexus {
             ))
         })?;
 
-        self.blueprint_add(&opctx, &blueprint).await?;
+        // Assemble a Reconfigurator state file that we can archive for future
+        // debugging.
+        let parent = Blueprint::clone(
+            planning_context.planning_input.parent_blueprint(),
+        );
+        let debug = reconfigurator_state_assemble(
+            opctx,
+            self.datastore(),
+            planning_context.planning_input,
+            vec![inventory],
+            vec![parent, blueprint.clone()],
+            planning_context.target,
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        })
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error assembling Reconfigurator state: {}",
+                InlineErrorChain::new(&*error),
+            ))
+        })?;
+
+        // Archive the Reconfigurator state file.
+        let debug_name =
+            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Plan);
+        let deposit = self
+            .debug_dropbox_reconfigurator
+            .deposit_file_str(&debug_name, &debug)
+            .await
+            .map_err(|error| {
+                Error::internal_error(&format!(
+                    "error saving Reconfigurator state: {}",
+                    InlineErrorChain::new(&error),
+                ))
+            })?;
+
+        if let Err(error) = self.blueprint_add(&opctx, &blueprint).await {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            deposit.cancel_and_attempt_delete().await;
+            return Err(error);
+        }
+
         Ok(blueprint)
     }
 
@@ -236,6 +349,15 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
+        // We do not save a Reconfigurator state file for import.  The only
+        // reason to do so is for the historical record to contain this specific
+        // blueprint.  If it's made the target, the record will contain another
+        // state file for that operation and that will contain the blueprint.
+        // If not, it's not that important.  (We could generate one anyway, but
+        // most of the state in the state file would be useless: most of it is
+        // oriented around understanding a planning decision, but the state we
+        // would construct would not be associated with planning this
+        // blueprint.)
         let _ = self.blueprint_add(&opctx, &blueprint).await?;
         Ok(())
     }
@@ -762,6 +884,33 @@ impl SledUpdateStatus {
             Self::PreviousUpdatePending
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BlueprintDebugAction {
+    /// the autoplanner generated this blueprint and will try to make it the
+    /// target
+    Autoplan,
+    /// someone explicitly ran the planner using the Nexus internal API
+    /// (likely a person running `omdb`)
+    Plan,
+    /// someone explicit set the target blueprint using the Nexus internal API
+    /// (likely a person running `omdb`)
+    Target,
+}
+
+/// Returns the filename for a debug drop file related to blueprint planning
+pub fn blueprint_debug_filename(
+    blueprint: &Blueprint,
+    action: BlueprintDebugAction,
+) -> String {
+    let action_str = match action {
+        BlueprintDebugAction::Autoplan => "autoplan",
+        BlueprintDebugAction::Plan => "plan",
+        BlueprintDebugAction::Target => "target",
+    };
+    let time_str = blueprint.time_created.format("%Y%m%dT%H%MZ");
+    format!("{time_str}-{action_str}-{}.json", blueprint.id)
 }
 
 #[cfg(test)]
