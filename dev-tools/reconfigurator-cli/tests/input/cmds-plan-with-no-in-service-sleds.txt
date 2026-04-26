@@ -1,0 +1,14 @@
+# Test for planning without any in-service sleds.
+
+load-example --seed test-basic --nsleds 1
+
+# Expunge the only sled. Now no sleds match SledFilter::InService.
+sled-set 89d02b1b-478c-401a-8e28-7a26f74fa41b policy expunged
+
+# Generate a fresh inventory so the planner sees a state matching the
+# system description.
+inventory-generate
+
+# Plan a new blueprint. Expected: success, with a planning report that
+# names "no in-service sleds to plan against" as the blocker.
+blueprint-plan latest 972ca69a-384c-4a9c-a87d-c2cf21e114e0

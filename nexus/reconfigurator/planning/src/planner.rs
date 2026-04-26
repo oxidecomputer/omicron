@@ -46,6 +46,7 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::{
@@ -269,13 +270,31 @@ impl<'a> Planner<'a> {
         let add_update_blocked_reasons =
             self.should_plan_add_or_update(&actions_by_sled)?;
 
-        // We need to finish mupdate overrides before updating measurements
-        // This also ensures we do not plan measurement updates until
-        // all measurements are artifacts
-        let measurement_updates = if add_update_blocked_reasons.is_empty() {
-            self.do_plan_measurements()?
-        } else {
+        // We need to finish mupdate overrides before updating measurements.
+        // This also ensures we do not plan measurement updates until all
+        // measurements are artifacts.
+        //
+        // Measurement planning has a stricter precondition than zone adds: it
+        // also requires a TUF repo to be set. We check that explicitly here so
+        // that `do_plan_measurements` can treat `(Initial, Initial)` as an
+        // unreachable invariant violation (see
+        // `crate::measurements::plan_measurement_updates`). On a freshly
+        // initialized rack, or any other state where every visible blueprint
+        // zone is on the install dataset and no TUF repo has been configured,
+        // there's simply nothing to plan.
+        let no_target_release = matches!(
+            self.input.tuf_repo().description(),
+            TargetReleaseDescription::Initial,
+        ) && matches!(
+            self.input.old_repo().description(),
+            TargetReleaseDescription::Initial,
+        );
+        let measurement_updates = if !add_update_blocked_reasons.is_empty() {
             PlanningMeasurementUpdatesStepReport::BlockedAddUpdate
+        } else if no_target_release {
+            PlanningMeasurementUpdatesStepReport::NoTargetRelease
+        } else {
+            self.do_plan_measurements()?
         };
 
         // Only plan MGS-based updates once we've finished updating our
@@ -301,10 +320,18 @@ impl<'a> Planner<'a> {
         let target_release_generation_is_one =
             self.input.tuf_repo().target_release_generation
                 == Generation::from_u32(1);
-        let mut add = if add_update_blocked_reasons.is_empty()
-            || add_zones_with_mupdate_override
-            || target_release_generation_is_one
-            || measurement_updates.all_sleds_updated()
+        // If there are no in-service sleds, there's nothing to plan adds
+        // against and downstream allocators (e.g. the rack-subnet lookup in
+        // `available_internal_dns_subnets`) will fail. Short-circuit here.
+        // The corresponding blocker reason was already accumulated by
+        // `should_plan_add_or_update` (Condition 5).
+        let has_in_service_sleds =
+            self.input.all_sled_ids(SledFilter::InService).next().is_some();
+        let mut add = if has_in_service_sleds
+            && (add_update_blocked_reasons.is_empty()
+                || add_zones_with_mupdate_override
+                || target_release_generation_is_one
+                || measurement_updates.all_sleds_updated())
         {
             self.do_plan_add(&mgs_updates)?
         } else {
@@ -2120,6 +2147,13 @@ impl<'a> Planner<'a> {
         //    Again, this is driven primarily by the desire to minimize the
         //    number of versions of system software running at any time.
         //
+        // 5. If there are no in-service sleds at all, there's nothing to plan
+        //    against. This is a degenerate state (on a production system, where
+        //    is the Nexus running code making these decisions?) but it must
+        //    be made explicit here: several downstream steps, including
+        //    `do_plan_add`'s call to `available_internal_dns_subnets`,
+        //    implicitly assume the loops over in-service sleds are non-empty..
+        //
         // What does "any sleds" mean in this context? We don't need to care
         // about decommissioned or expunged sleds, so we consider in-service
         // sleds.
@@ -2275,6 +2309,11 @@ impl<'a> Planner<'a> {
 
                 reasons.push(reason);
             }
+        }
+
+        // Condition 5 above.
+        if self.input.all_sled_ids(SledFilter::InService).next().is_none() {
+            reasons.push("no in-service sleds to plan against".to_owned());
         }
 
         Ok(reasons)
