@@ -6,6 +6,7 @@
 
 use crate::app::background::LoadedTargetBlueprint;
 use bytes::Bytes;
+use chrono::TimeDelta;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
@@ -27,6 +28,7 @@ use omicron_common::api::external::{DataPageParams, Error};
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_hardware_types::BaseboardId;
+use slog::info;
 use std::collections::BTreeMap;
 use std::iter;
 use tokio::sync::watch;
@@ -34,6 +36,10 @@ use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
 use uuid::Uuid;
+
+// TODO-K: Set back to an hour
+/// Threshold at which we consider an active saga stale
+const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(1);
 
 /// Used to pull data out of the channels
 #[derive(Clone)]
@@ -234,14 +240,96 @@ impl super::Nexus {
         let suspended = *db_target_release.generation
             < blueprint_target.blueprint.target_release_minimum_generation;
 
+        // We want a rough idea of whether the system is in a healthy state or
+        // not. We do this by retrieving the latest inventory collection and
+        // performing a series of checks.
+        let contact_support = self.contact_support(opctx).await?;
+
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
             time_last_step_planned,
             suspended,
+            contact_support,
         })
     }
 
+    /// Let the customer know whether they should call support based on whether
+    /// the system is in a roughly healthy state based a few health checks.
+    ///
+    /// The system is considered relatively healthy when:
+    /// - All zpools are online.
+    /// - All enabled SMF services are in an online state.
+    /// - No sagas have been running for longer than an hour.
+    async fn contact_support(&self, opctx: &OpContext) -> Result<bool, Error> {
+        let Some(inventory) =
+            self.datastore().inventory_get_latest_collection(opctx).await?
+        else {
+            // There should always be an inventory collection before or after an
+            // update
+            return Ok(true);
+        };
+
+        // TODO-K: check that the inventory collection is not too old. If it is
+        // then call support is true and log it. perhaps log that the information
+        // regarding zpools and services may be incorrect or don't log them at all
+        //
+        // check that if there's an update in progress, then
+        // time_last_step_planned is within the last 15 minutes. If those are
+        // true then call support is false and don't even check anything else.
+        // if time_last_step_planned is not within that threshold then call
+        // support is true and also do the rest of the checks
+        //
+        // Account for test system versions or if system is being mupdated
+
+        let stale_active_sagas = self
+            .datastore()
+            .saga_list_running_or_unwinding_older_than_batched(
+                opctx,
+                STALE_SAGA_THRESHOLD,
+            )
+            .await?;
+
+        let unhealthy_zpools = inventory.unhealthy_zpools();
+        let enabled_smf_services_not_online =
+            inventory.enabled_smf_services_not_online();
+
+        let has_unhealthy_zpools = !unhealthy_zpools.is_empty();
+        let has_enabled_services_not_online =
+            !enabled_smf_services_not_online.is_empty();
+        let has_stale_sagas = !stale_active_sagas.is_empty();
+
+        if has_unhealthy_zpools {
+            info!(
+                opctx.log,
+                "found unhealthy zpools";
+                "zpools_by_sled" => ?unhealthy_zpools,
+            );
+        }
+        if has_enabled_services_not_online {
+            info!(
+                opctx.log,
+                "found enabled SMF services not online";
+                "svcs_by_sled" => ?enabled_smf_services_not_online,
+            );
+        }
+        if has_stale_sagas {
+            info!(
+                opctx.log,
+                "found stale sagas active for longer than {}",
+                omicron_common::format_time_delta(STALE_SAGA_THRESHOLD);
+                "sagas" => ?stale_active_sagas,
+            );
+        }
+
+        let contact_support = has_unhealthy_zpools
+            || has_enabled_services_not_online
+            || has_stale_sagas;
+
+        Ok(contact_support)
+    }
+
+    // TODO-K: use this to check if an update is happening?
     /// Build a map of version strings to the number of components on that
     /// version
     async fn component_version_counts(
@@ -384,5 +472,241 @@ impl super::Nexus {
             *counts.entry(version).or_insert(0) += 1;
         }
         Ok(counts)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use chrono::Utc;
+    use nexus_db_model::saga_types::Saga;
+    use nexus_db_model::saga_types::SecId;
+    use nexus_inventory::CollectionBuilder;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::ByteCount;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::Baseboard;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::Inventory;
+    use sled_agent_types::inventory::InventoryZpool;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
+    use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::SvcEnabledNotOnline;
+    use sled_agent_types::inventory::SvcEnabledNotOnlineState;
+    use sled_agent_types::inventory::SvcsEnabledNotOnline;
+    use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::inventory::ZpoolHealth;
+    use slog::o;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    fn fake_sled_inventory(
+        zpools: Vec<InventoryZpool>,
+        smf_services: SvcsEnabledNotOnlineResult,
+    ) -> Inventory {
+        Inventory {
+            baseboard: Baseboard::Pc {
+                identifier: "test-pc".to_string(),
+                model: "test-model".to_string(),
+            },
+            reservoir_size: ByteCount::from(1024),
+            sled_role: SledRole::Gimlet,
+            sled_agent_address: "[::1]:56792".parse().unwrap(),
+            sled_id: SledUuid::new_v4(),
+            usable_hardware_threads: 10,
+            usable_physical_ram: ByteCount::from(1024 * 1024),
+            cpu_family: SledCpuFamily::AmdMilan,
+            disks: vec![],
+            zpools,
+            datasets: vec![],
+            ledgered_sled_config: None,
+            reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+            last_reconciliation: None,
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
+            smf_services_enabled_not_online: smf_services,
+            reference_measurements: iddqd::IdOrdMap::new(),
+        }
+    }
+
+    fn healthy_zpools() -> Vec<InventoryZpool> {
+        vec![InventoryZpool {
+            id: ZpoolUuid::new_v4(),
+            total_size: ByteCount::from(1024 * 1024),
+            health: ZpoolHealth::Online,
+        }]
+    }
+
+    fn unhealthy_zpools() -> Vec<InventoryZpool> {
+        vec![
+            InventoryZpool {
+                id: ZpoolUuid::new_v4(),
+                total_size: ByteCount::from(1024 * 1024),
+                health: ZpoolHealth::Online,
+            },
+            InventoryZpool {
+                id: ZpoolUuid::new_v4(),
+                total_size: ByteCount::from(1024 * 1024),
+                health: ZpoolHealth::Degraded,
+            },
+        ]
+    }
+
+    fn healthy_services() -> SvcsEnabledNotOnlineResult {
+        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
+            services: vec![],
+            errors: vec![],
+            time_of_status: Utc::now(),
+        })
+    }
+
+    fn unhealthy_services() -> SvcsEnabledNotOnlineResult {
+        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
+            services: vec![
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                },
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test2:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Offline,
+                },
+            ],
+            errors: vec![],
+            time_of_status: Utc::now(),
+        })
+    }
+
+    fn fake_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.server_context().nexus.datastore().clone(),
+        )
+    }
+
+    // Build an inventory collection with fake health statuses and insert it
+    // as the latest collection.
+    async fn insert_fake_collection(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        zpools: Vec<InventoryZpool>,
+        smf_services: SvcsEnabledNotOnlineResult,
+    ) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let mut builder = CollectionBuilder::new("test");
+        builder
+            .found_sled_inventory(
+                "test",
+                fake_sled_inventory(zpools, smf_services),
+            )
+            .unwrap();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(opctx, &collection)
+            .await
+            .expect("inserted inventory collection");
+    }
+
+    // Insert a running saga whose `time_created` is older than
+    // `STALE_SAGA_THRESHOLD`.
+    async fn insert_stale_running_saga(cptestctx: &ControlPlaneTestContext) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let params = steno::SagaCreateParams {
+            id: steno::SagaId(Uuid::new_v4()),
+            name: steno::SagaName::new("test stale saga"),
+            dag: serde_json::Value::Null,
+            state: steno::SagaCachedState::Running,
+        };
+        let mut saga = Saga::new(SecId(Uuid::new_v4()), params);
+        saga.time_created =
+            Utc::now() - STALE_SAGA_THRESHOLD - TimeDelta::seconds(10);
+        datastore.saga_create(&saga).await.expect("inserted stale saga");
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_healthy_system(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            healthy_services(),
+        )
+        .await;
+        assert!(!nexus.contact_support(&opctx).await.unwrap());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_unhealthy_zpools_healthy_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            healthy_services(),
+        )
+        .await;
+        assert!(nexus.contact_support(&opctx).await.unwrap());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_healthy_zpools_unhealthy_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+        assert!(nexus.contact_support(&opctx).await.unwrap());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_unhealthy_zpools_and_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+        assert!(nexus.contact_support(&opctx).await.unwrap());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_healthy_system_with_stale_saga(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            healthy_services(),
+        )
+        .await;
+        insert_stale_running_saga(cptestctx).await;
+        assert!(nexus.contact_support(&opctx).await.unwrap());
     }
 }

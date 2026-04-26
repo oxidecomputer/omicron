@@ -282,6 +282,58 @@ impl Collection {
             .map(|membership| membership.clone())
     }
 
+    /// Return all zpools across all sleds whose health is not `Online`,
+    /// grouped by the id of the sled that reported them. Sleds with no
+    /// unhealthy zpools are omitted.
+    pub fn unhealthy_zpools(&self) -> BTreeMap<SledUuid, Vec<&Zpool>> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                let unhealthy: Vec<&Zpool> = sled_agent
+                    .zpools
+                    .iter()
+                    .filter(|z| match z.health {
+                        ZpoolHealth::Online => false,
+                        ZpoolHealth::Degraded
+                        | ZpoolHealth::Faulted
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => true,
+                    })
+                    .collect();
+                (!unhealthy.is_empty())
+                    .then_some((sled_agent.sled_id, unhealthy))
+            })
+            .collect()
+    }
+
+    /// Return per-sled SMF service status for any sled that reports an issue:
+    /// either an enabled service not in the `online` state, or a failure to
+    /// determine status (`svcs` command error or data unavailable). Sleds
+    /// reporting no issues on this dimension are omitted.
+    pub fn enabled_smf_services_not_online(
+        &self,
+    ) -> BTreeMap<SledUuid, &SvcsEnabledNotOnlineResult> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                        if svcs.services.is_empty() =>
+                    {
+                        None
+                    }
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(_)
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_)
+                    | SvcsEnabledNotOnlineResult::DataUnavailable => Some((
+                        sled_agent.sled_id,
+                        &sled_agent.smf_services_enabled_not_online,
+                    )),
+                }
+            })
+            .collect()
+    }
+
     /// Return a type which can be used to display a collection in a
     /// human-readable format.
     ///

@@ -819,6 +819,8 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
+    // TODO-K: add a test for contact support
+
     cptestctx.teardown().await;
     Ok(())
 }
