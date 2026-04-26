@@ -409,7 +409,7 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=06f05ee0fb26ed63f33dde79a7e0e7e766fd124c#06f05ee0fb26ed63f33dde79a7e0e7e766fd124c"
 dependencies = [
  "const-oid",
  "der",
@@ -447,10 +447,10 @@ dependencies = [
 [[package]]
 name = "attest-mock"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=06f05ee0fb26ed63f33dde79a7e0e7e766fd124c#06f05ee0fb26ed63f33dde79a7e0e7e766fd124c"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=06f05ee0fb26ed63f33dde79a7e0e7e766fd124c)",
  "clap",
  "hex",
  "hubpack",
