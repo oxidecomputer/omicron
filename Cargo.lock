@@ -11164,8 +11164,9 @@ dependencies = [
 
 [[package]]
 name = "progenitor-extras"
-version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/progenitor-extras?rev=22e2e4e356a29a24583941d524cfe8ba2d8a43f2#22e2e4e356a29a24583941d524cfe8ba2d8a43f2"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21a674beb05f5de307ba7a3a6cddeffb262ab4a7712e620112d6f53c3259f328"
 dependencies = [
  "backon",
  "http",

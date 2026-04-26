@@ -711,7 +711,7 @@ prettyplease = { version = "0.2.36", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.14.0"
 progenitor-client = "0.14.0"
-progenitor-extras = "0.1.1"
+progenitor-extras = "0.2.0"
 progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
@@ -1062,9 +1062,6 @@ opt-level = 3
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
-# Temporarily pinned to progenitor-extras#4 (bump to progenitor-client 0.14).
-# Revert to the published crate once a release is cut.
-progenitor-extras = { git = "https://github.com/oxidecomputer/progenitor-extras", rev = "22e2e4e356a29a24583941d524cfe8ba2d8a43f2" }
 # steno = { path = "../steno" }
 
 # [patch."https://github.com/oxidecomputer/crucible"]
