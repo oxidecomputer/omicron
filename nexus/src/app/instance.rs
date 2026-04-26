@@ -39,6 +39,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
@@ -1399,7 +1400,7 @@ impl super::Nexus {
                 // Ok(None) here, in which case, there's nothing to write back.
                 match instance_put_result {
                     Ok(Some(ref state)) => self
-                        .notify_vmm_updated(opctx, propolis_id, state)
+                        .update_vmm_state(opctx, propolis_id, state)
                         .await
                         .map_err(Into::into),
                     Ok(None) => Ok(()),
@@ -1687,7 +1688,7 @@ impl super::Nexus {
 
         match instance_register_result {
             Ok(state) => {
-                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
+                self.update_vmm_state(opctx, *propolis_id, &state).await?;
                 let runtime: db::model::VmmRuntimeState =
                     state.vmm_state.into();
                 Ok(db::model::Vmm {
@@ -1765,7 +1766,7 @@ impl super::Nexus {
                         authz_instance,
                     },
                 )?;
-                // Unlike `notify_vmm_updated`, which spawns the update
+                // Unlike `update_vmm_state`, which spawns the update
                 // saga in a "fire and forget" fashion so that it can return a
                 // HTTP 200 OK as soon as the changed VMM records are persisted
                 // to the database, `mark_vmm_failed` performs the instance
@@ -1776,7 +1777,8 @@ impl super::Nexus {
                 // attempting to transition their instance's state, and then,
                 // upon fetching the instance, transiently see an instance state
                 // suggesting it's "doing fine" until the update saga completes.
-                self.update_instance(&opctx.log, saga, instance_id).await;
+                self.run_instance_update_saga(&opctx.log, saga, instance_id)
+                    .await;
             }
             // XXX: It's not clear what to do with this error; should it be
             // bubbled back up to the caller?
@@ -1940,9 +1942,132 @@ impl super::Nexus {
             .await
     }
 
-    /// Invoked by a sled agent to publish an updated runtime state for an
-    /// Instance.
+    /// Process a VMM state change doorbell notification received from a
+    /// sled-agent.
+    ///
+    /// This function looks up the sled-agent for the sled on which the VMM
+    /// resides, requests the latest VMM state from that sled-agent, and then
+    /// calls [`Self::update_vmm_state`] to process the state change.
     pub(crate) async fn notify_vmm_updated(
+        &self,
+        opctx: &OpContext,
+        vmm_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        info!(
+            &opctx.log,
+            "ding, dong! sled-agent rang the VMM doorbell for VMM {vmm_id}";
+            "vmm_id" => %vmm_id,
+        );
+        let (vmm, sled) = self
+            .db_datastore
+            .vmm_fetch_with_sled(opctx, &vmm_id)
+            .await
+            .map_err(|e| {
+                // Note that it would be quite weird if the VMM/sled-agent
+                // lookup failed with `NotFound`, since...we just got a
+                // notification *from* that sled-agent...
+                e.internal_context(format!(
+                    "failed to look up sled-agent for updated VMM {vmm_id}"
+                ))
+            })?;
+
+        let sled_id = sled.id();
+        let instance_id = vmm.instance_id;
+        debug!(
+            &opctx.log,
+            "notify_vmm_updated: VMM {vmm_id} resides on sled {sled_id}";
+            "vmm_id" => %vmm_id,
+            "instance_id" => %instance_id,
+            "sled_id" => %sled_id,
+        );
+
+        let sled_agent = self.sled_client(&sled_id).await.map_err(|e| {
+            e.internal_context(format!(
+                "failed to get sled-agent client for sled {sled_id} \
+                 (updated VMM {vmm_id}, instance {instance_id})"
+            ))
+        })?;
+
+        // Ask the sled-agent for the latest state of the VMM, and transition
+        // its state.
+        let result = sled_agent
+            .vmm_get_state(&vmm_id)
+            .await
+            .map_err(SledAgentInstanceError);
+        match result {
+            Ok(rsp) => {
+                let state = rsp.into_inner();
+                self.update_vmm_state(opctx, vmm_id, &state).await
+            }
+            // If the sled-agent's response indicates the VMM has failed,
+            // transition it to the failed state.
+            Err(e) if e.vmm_gone() => {
+                info!(
+                    &opctx.log,
+                    "notify_vmm_updated: sled-agent response indicates VMM \
+                     has failed";
+                    "vmm_id" => %vmm_id,
+                    "instance_id" => %instance_id,
+                    "sled_id" => %sled_id,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                let lookup = LookupPath::new(opctx, &self.db_datastore)
+                    .instance_id(instance_id)
+                    .lookup_for(authz::Action::Modify)
+                    .await;
+                match lookup {
+                    Ok((_, _, authz_instance)) => {
+                        self.mark_vmm_failed(opctx, authz_instance, &vmm, &e)
+                            .await
+                    }
+
+                    // Okay, this is a bit odd: we are trying to handle a
+                    // notification from a sled-agent that a VMM's state has
+                    // changed. When we asked the sled-agent for the VMM's
+                    // state, it said the VMM does not exist. Then, when we
+                    // tried to look up the instance for that VMM, the
+                    // *instance* also doesn't exist. This would mean the
+                    // instance record has already been deleted. In that case,
+                    // well, there's nothing left for us to do here...
+                    Err(Error::ObjectNotFound { .. }) => {
+                        warn!(
+                            &opctx.log,
+                            "notify_vmm_updated: VMM has gone away, and its \
+                             instance appears to have already been deleted!";
+                            "vmm_id" => %vmm_id,
+                            "instance_id" => %instance_id,
+                            "sled_id" => %sled_id,
+                        );
+                        Ok(())
+                    }
+
+                    // Other errors are unanticipated here.
+                    Err(e) => Err(e.internal_context(format!(
+                        "failed to look up instance {instance_id} for failed \
+                         VMM {vmm_id}",
+                    ))),
+                }
+            }
+            Err(SledAgentInstanceError(e)) => {
+                let error = Error::from(e).internal_context(format!(
+                    "failed to request the state of VMM {vmm_id} from \
+                     sled-agent {sled_id}"
+                ));
+                Err(error)
+            }
+        }
+    }
+
+    /// Update the runtime state of the VMM with the provided `propolis_id` to
+    /// `new_runtime_state`, potentially spawning an instance update saga if
+    /// the instance's state must change as a result of the VMM update.
+    ///
+    /// This method is called by [`Self::instance_request_state`] and
+    /// [`Self::instance_ensure_registered`] to write back the VMM state
+    /// received from sled-agent after requesting a change to an instance. In
+    /// addition, it's also called by [`Self::notify_vmm_updated`] when handling
+    /// a notification from a sled-agent that a VMM's state has changed.
+    pub(crate) async fn update_vmm_state(
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
@@ -1970,7 +2095,11 @@ impl super::Nexus {
                 "vmm_state" => ?new_runtime_state.vmm_state,
                 "migration_state" => ?new_runtime_state.migrations(),
             );
-            tokio::spawn(self.update_instance(&opctx.log, saga, instance_id));
+            tokio::spawn(self.run_instance_update_saga(
+                &opctx.log,
+                saga,
+                instance_id,
+            ));
         }
 
         Ok(())
@@ -2554,7 +2683,7 @@ impl super::Nexus {
     /// using `tokio::spawn`.
     ///
     /// [instance-update saga]: crate::app::sagas::instance_update
-    fn update_instance(
+    fn run_instance_update_saga(
         &self,
         log: &slog::Logger,
         saga: steno::SagaDag,
