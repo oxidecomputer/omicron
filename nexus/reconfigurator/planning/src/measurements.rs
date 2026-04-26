@@ -48,7 +48,10 @@ pub(crate) fn plan_measurement_updates(
 ) -> Result<BlueprintArtifactMeasurements, MeasurementPlanError> {
     match (current_artifacts, previous_artifacts) {
         // Very first blueprint, we should never get here because planner logic
-        // should prevent us from proceding here until we have a TUF repo
+        // should prevent us from proceding here until we have a TUF repo.
+        // Specifically: `Planner::plan_impl` short-circuits to
+        // `PlanningMeasurementUpdatesStepReport::NoTargetRelease` before
+        // calling `do_plan_measurements` when both repos are `Initial`.
         (
             TargetReleaseDescription::Initial,
             TargetReleaseDescription::Initial,
