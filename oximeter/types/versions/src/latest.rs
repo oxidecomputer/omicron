@@ -12,13 +12,13 @@ pub mod histogram {
     pub use crate::v1::histogram::Bin;
     pub use crate::v1::histogram::BinRange;
     pub use crate::v1::histogram::Histogram;
+    pub use crate::v1::histogram::HistogramError;
+    pub use crate::v1::histogram::QuantizationError;
 
     pub use crate::impls::histogram::Bits;
     pub use crate::impls::histogram::HistogramAdditiveWidth;
-    pub use crate::impls::histogram::HistogramError;
     pub use crate::impls::histogram::HistogramSupport;
     pub use crate::impls::histogram::LogLinearBins;
-    pub use crate::impls::histogram::QuantizationError;
     pub use crate::impls::histogram::Record;
 }
 
@@ -32,8 +32,7 @@ pub mod producer {
 
 pub mod quantile {
     pub use crate::v1::quantile::Quantile;
-
-    pub use crate::impls::quantile::QuantileError;
+    pub use crate::v1::quantile::QuantileError;
 
     // Use by both type definition and impls, but not pub.
     pub(crate) use crate::v1::quantile::FILLED_MARKER_LEN;
@@ -72,13 +71,12 @@ pub mod types {
     pub use crate::v1::types::FieldType;
     pub use crate::v1::types::FieldValue;
     pub use crate::v1::types::Measurement;
+    pub use crate::v1::types::MetricsError;
     pub use crate::v1::types::MissingDatum;
     pub use crate::v1::types::ProducerRegistry;
     pub use crate::v1::types::ProducerResults;
     pub use crate::v1::types::ProducerResultsItem;
     pub use crate::v1::types::Sample;
-
-    pub use crate::impls::types::MetricsError;
 
     // Use by both type definition and impls, but not pub.
     pub(crate) use crate::v1::types::FieldSet;

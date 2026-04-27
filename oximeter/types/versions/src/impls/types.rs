@@ -5,7 +5,6 @@
 //! Functional code for the types.
 
 use crate::latest::histogram;
-use crate::latest::histogram::HistogramError;
 use crate::latest::traits;
 use crate::latest::traits::Producer;
 use crate::latest::types::Cumulative;
@@ -16,6 +15,7 @@ use crate::latest::types::FieldSet;
 use crate::latest::types::FieldType;
 use crate::latest::types::FieldValue;
 use crate::latest::types::Measurement;
+use crate::latest::types::MetricsError;
 use crate::latest::types::MissingDatum;
 use crate::latest::types::ProducerRegistry;
 use crate::latest::types::ProducerResults;
@@ -26,9 +26,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use num::traits::One;
 use num::traits::Zero;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -40,54 +37,6 @@ use std::ops::AddAssign;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
-
-/// Errors related to the generation or collection of metrics.
-#[derive(
-    Debug, Clone, thiserror::Error, JsonSchema, Serialize, Deserialize,
-)]
-#[serde(tag = "type", content = "content", rename_all = "snake_case")]
-pub enum MetricsError {
-    /// An error related to generating metric data points
-    #[error("Metric data error: {0}")]
-    DatumError(String),
-
-    /// An error running an `Oximeter` server
-    #[error("Error running oximeter: {0}")]
-    OximeterServer(String),
-
-    /// An error related to creating or sampling a [`histogram::Histogram`] metric.
-    #[error("{0}")]
-    HistogramError(#[from] HistogramError),
-
-    /// An error parsing a field or measurement from a string.
-    #[error("String '{src}' could not be parsed as type '{typ}'")]
-    ParseError { src: String, typ: String },
-
-    /// A field name is duplicated between the target and metric.
-    #[error("Field '{name}' is duplicated between the target and metric")]
-    DuplicateFieldName { name: String },
-
-    #[error("Missing datum of type {datum_type} requires a start time")]
-    MissingDatumRequiresStartTime { datum_type: DatumType },
-
-    #[error("Missing datum of type {datum_type} cannot have a start time")]
-    MissingDatumCannotHaveStartTime { datum_type: DatumType },
-
-    #[error("Invalid timeseries name")]
-    InvalidTimeseriesName,
-
-    #[error("TOML deserialization error: {0}")]
-    Toml(String),
-
-    #[error("Schema definition error: {0}")]
-    SchemaDefinition(String),
-
-    #[error("Target version {target} does not match metric version {metric}")]
-    TargetMetricVersionMismatch {
-        target: std::num::NonZeroU8,
-        metric: std::num::NonZeroU8,
-    },
-}
 
 impl FieldType {
     /// Return `true` if a field of this type is copyable.

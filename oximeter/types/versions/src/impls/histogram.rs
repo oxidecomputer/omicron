@@ -7,6 +7,8 @@
 use crate::latest::histogram::Bin;
 use crate::latest::histogram::BinRange;
 use crate::latest::histogram::Histogram;
+use crate::latest::histogram::HistogramError;
+use crate::latest::histogram::QuantizationError;
 use crate::latest::quantile::Quantile;
 use crate::latest::quantile::QuantileError;
 use chrono::DateTime;
@@ -22,7 +24,6 @@ use num::traits::Bounded;
 use num::traits::FromPrimitive;
 use num::traits::Num;
 use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
@@ -32,71 +33,6 @@ use std::ops::Range;
 use std::ops::RangeBounds;
 use std::ops::RangeFrom;
 use std::ops::RangeTo;
-
-/// Errors related to constructing histograms or adding samples into them.
-#[derive(
-    Debug, Clone, thiserror::Error, JsonSchema, Serialize, Deserialize,
-)]
-#[serde(tag = "type", content = "content", rename_all = "snake_case")]
-pub enum HistogramError {
-    /// An attempt to construct a histogram with an empty set of bins.
-    #[error("Bins may not be empty")]
-    EmptyBins,
-
-    /// An attempt to construct a histogram with non-monotonic bins.
-    #[error("Bins must be monotonically increasing")]
-    NonmonotonicBins,
-
-    /// A non-finite was encountered, either as a bin edge or a sample.
-    #[error("Bin edges and samples must be finite values, not Infinity or NaN")]
-    NonFiniteValue,
-
-    /// Error returned when two neighboring bins are not adjoining (there's space between them)
-    #[error("Neigboring bins {left} and {right} are not adjoining")]
-    NonAdjoiningBins { left: String, right: String },
-
-    /// Bin and count arrays are of different sizes.
-    #[error(
-        "Bin and count arrays must have the same size, found {n_bins} and {n_counts}"
-    )]
-    ArraySizeMismatch { n_bins: usize, n_counts: usize },
-
-    /// Error returned when a quantization error occurs.
-    #[error("Quantization error")]
-    Quantization(#[from] QuantizationError),
-
-    /// Error returned when a quantile error occurs.
-    #[error("Quantile error")]
-    Quantile(#[from] QuantileError),
-}
-
-/// Errors occurring during quantizated bin generation.
-#[derive(
-    Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize,
-)]
-#[serde(tag = "type", content = "content", rename_all = "snake_case")]
-pub enum QuantizationError {
-    #[error("Overflow during bin generation")]
-    Overflow,
-
-    #[error("Precision error during bin generation")]
-    Precision,
-
-    #[error("Base must in the range [1, 32]")]
-    InvalidBase,
-
-    #[error("Number of steps must be > 1 and fit in the output type")]
-    InvalidSteps,
-
-    #[error(
-        "Number of steps must be multiple of base and \
-        evenly divide a power of the base"
-    )]
-    UnevenStepsForBase,
-
-    #[error("Low power must be strictly less than high power")]
-    PowersOutOfOrder,
-}
 
 impl<T> std::fmt::Display for BinRange<T>
 where

@@ -19,6 +19,30 @@ use serde::Serialize;
 
 pub(crate) const FILLED_MARKER_LEN: usize = 5;
 
+/// Errors related to constructing a `Quantile` instance or estimating the
+/// p-quantile.
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
+#[serde(tag = "type", content = "content", rename_all = "snake_case")]
+pub enum QuantileError {
+    /// The p value must be in the range [0, 1].
+    #[error("The p value must be in the range [0, 1].")]
+    InvalidPValue,
+    /// Quantile estimation is not possible without samples.
+    #[error("Quantile estimation is not possible without any samples.")]
+    InsufficientSampleSize,
+    /// A non-finite was encountered, either as a bin edge or a sample.
+    #[error("Samples must be finite values, not Infinity or NaN.")]
+    NonFiniteValue,
+}
+
 /// Structure for estimating the p-quantile of a population.
 ///
 /// This is based on the P² algorithm for estimating quantiles using

@@ -7,7 +7,6 @@
 use super::histogram;
 use super::schema::TimeseriesName;
 use crate::impls::traits::Producer;
-use crate::latest::types::MetricsError;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;
@@ -24,6 +23,54 @@ use std::num::NonZeroU8;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
+
+/// Errors related to the generation or collection of metrics.
+#[derive(
+    Debug, Clone, thiserror::Error, JsonSchema, Serialize, Deserialize,
+)]
+#[serde(tag = "type", content = "content", rename_all = "snake_case")]
+pub enum MetricsError {
+    /// An error related to generating metric data points
+    #[error("Metric data error: {0}")]
+    DatumError(String),
+
+    /// An error running an `Oximeter` server
+    #[error("Error running oximeter: {0}")]
+    OximeterServer(String),
+
+    /// An error related to creating or sampling a [`histogram::Histogram`] metric.
+    #[error("{0}")]
+    HistogramError(#[from] histogram::HistogramError),
+
+    /// An error parsing a field or measurement from a string.
+    #[error("String '{src}' could not be parsed as type '{typ}'")]
+    ParseError { src: String, typ: String },
+
+    /// A field name is duplicated between the target and metric.
+    #[error("Field '{name}' is duplicated between the target and metric")]
+    DuplicateFieldName { name: String },
+
+    #[error("Missing datum of type {datum_type} requires a start time")]
+    MissingDatumRequiresStartTime { datum_type: DatumType },
+
+    #[error("Missing datum of type {datum_type} cannot have a start time")]
+    MissingDatumCannotHaveStartTime { datum_type: DatumType },
+
+    #[error("Invalid timeseries name")]
+    InvalidTimeseriesName,
+
+    #[error("TOML deserialization error: {0}")]
+    Toml(String),
+
+    #[error("Schema definition error: {0}")]
+    SchemaDefinition(String),
+
+    #[error("Target version {target} does not match metric version {metric}")]
+    TargetMetricVersionMismatch {
+        target: std::num::NonZeroU8,
+        metric: std::num::NonZeroU8,
+    },
+}
 
 /// The `FieldType` identifies the data type of a target or metric field.
 #[derive(
