@@ -9983,7 +9983,6 @@ version = "0.1.0"
 dependencies = [
  "dropshot 0.16.7",
  "omicron-workspace-hack",
- "oximeter-types 0.1.0",
  "oximeter-types-versions 0.1.0",
 ]
 
