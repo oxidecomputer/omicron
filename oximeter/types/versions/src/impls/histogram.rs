@@ -580,7 +580,7 @@ where
 }
 
 // Helper to ensure all values are comparable, i.e., not NaN.
-pub(super) fn ensure_finite<T>(value: T) -> Result<(), HistogramError>
+fn ensure_finite<T>(value: T) -> Result<(), HistogramError>
 where
     T: HistogramSupport,
 {
