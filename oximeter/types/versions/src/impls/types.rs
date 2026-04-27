@@ -38,6 +38,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
 
+impl From<MetricsError> for omicron_common::api::external::Error {
+    fn from(e: MetricsError) -> Self {
+        omicron_common::api::external::Error::internal_error(&e.to_string())
+    }
+}
+
 impl FieldType {
     /// Return `true` if a field of this type is copyable.
     ///

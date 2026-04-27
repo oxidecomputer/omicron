@@ -19,12 +19,6 @@ use crate::latest::schema::default_schema_version;
 use chrono::Utc;
 use std::collections::BTreeSet;
 
-impl From<MetricsError> for omicron_common::api::external::Error {
-    fn from(e: MetricsError) -> Self {
-        omicron_common::api::external::Error::internal_error(&e.to_string())
-    }
-}
-
 impl FieldSchema {
     /// Return `true` if this field is copyable.
     pub const fn is_copyable(&self) -> bool {
