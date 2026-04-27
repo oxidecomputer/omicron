@@ -4,6 +4,8 @@
 
 //! Re-exports of the latest versions of all published types.
 
+pub use crate::impls::timeseries_name;
+
 pub mod collector {
     pub use crate::v1::collector::CollectorInfo;
 }
