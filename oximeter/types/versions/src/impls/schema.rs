@@ -11,11 +11,11 @@ use crate::latest::schema::TIMESERIES_NAME_REGEX;
 use crate::latest::schema::TimeseriesName;
 use crate::latest::schema::TimeseriesSchema;
 use crate::latest::schema::Units;
+use crate::latest::schema::default_schema_version;
 use crate::latest::traits::Metric;
 use crate::latest::traits::Target;
 use crate::latest::types::MetricsError;
 use crate::latest::types::Sample;
-use crate::latest::schema::default_schema_version;
 use chrono::Utc;
 use std::collections::BTreeSet;
 
