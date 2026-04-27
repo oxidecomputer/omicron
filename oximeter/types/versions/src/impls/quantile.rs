@@ -39,19 +39,6 @@ impl Quantile {
     ///
     /// Returns [`QuantileError::InvalidPValue`] if the p value is not in the
     /// range [0, 1].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # // Rename the types crate so the doctests can refer to the public
-    /// # // `oximeter` crate, not the private impl.
-    /// # use oximeter_types as oximeter;
-    /// use oximeter::Quantile;
-    /// let q = Quantile::new(0.5).unwrap();
-    ///
-    /// assert_eq!(q.p(), 0.5);
-    /// assert_eq!(q.len(), 0);
-    /// ```
     pub fn new(p: f64) -> Result<Self, QuantileError> {
         if p < 0. || p > 1. {
             return Err(QuantileError::InvalidPValue);
@@ -78,20 +65,6 @@ impl Quantile {
 
     /// Create a new `Quantile` instance from the given a p-value, marker
     /// heights and positions.
-    ///
-    /// # Examples
-    /// ```
-    /// # // Rename the types crate so the doctests can refer to the public
-    /// # // `oximeter` crate, not the private impl.
-    /// # use oximeter_types as oximeter;
-    /// use oximeter::Quantile;
-    /// let q = Quantile::from_parts(
-    ///    0.5,
-    ///    [0., 1., 2., 3., 4.],
-    ///    [1, 2, 3, 4, 5],
-    ///    [1., 3., 5., 7., 9.],
-    /// );
-    /// ```
     pub fn from_parts(
         p: f64,
         marker_heights: [f64; FILLED_MARKER_LEN],
@@ -161,20 +134,6 @@ impl Quantile {
     ///
     /// Returns [`QuantileError::InsufficientSampleSize`] if the sample size
     /// is empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # // Rename the types crate so the doctests can refer to the public
-    /// # // `oximeter` crate, not the private impl.
-    /// # use oximeter_types as oximeter;
-    /// use oximeter::Quantile;
-    /// let mut q = Quantile::new(0.5).unwrap();
-    /// for o in 1..=100 {
-    ///    q.append(o).unwrap();
-    /// }
-    /// assert_eq!(q.estimate().unwrap(), 50.0);
-    /// ```
     pub fn estimate(&self) -> Result<f64, QuantileError> {
         if self.is_empty() {
             return Err(QuantileError::InsufficientSampleSize);
@@ -204,18 +163,6 @@ impl Quantile {
     ///
     /// Returns [`QuantileError::NonFiniteValue`] if the value is not finite
     /// when casting to a float.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # // Rename the types crate so the doctests can refer to the public
-    /// # // `oximeter` crate, not the private impl.
-    /// # use oximeter_types as oximeter;
-    /// use oximeter::Quantile;
-    /// let mut q = Quantile::new(0.9).unwrap();
-    /// q.append(10).unwrap();
-    /// assert_eq!(q.len(), 1);
-    /// ```
     pub fn append<T>(&mut self, value: T) -> Result<(), QuantileError>
     where
         T: HistogramSupport,

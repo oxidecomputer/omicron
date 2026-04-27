@@ -10073,6 +10073,7 @@ dependencies = [
 name = "oximeter-types"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "chrono",
  "criterion",
  "omicron-workspace-hack",
@@ -10081,6 +10082,7 @@ dependencies = [
  "rand 0.9.2",
  "rand_distr",
  "trybuild",
+ "uuid",
 ]
 
 [[package]]
