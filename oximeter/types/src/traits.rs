@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+pub use oximeter_types_versions::latest::histogram::HistogramSupport;
 pub use oximeter_types_versions::latest::traits::*;
 
 // These tests live here instead of in `oximeter_types_versions` because
