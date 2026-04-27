@@ -189,8 +189,13 @@ pub use oximeter_types_versions::latest::histogram::HistogramSupport;
 pub use oximeter_types_versions::latest::traits::*;
 
 // These tests live here instead of in `oximeter_types_versions` because
-// `oximeter_macro_impl` wants to use paths from this crate, not
-// `oximeter_types_versions`.
+// `oximeter_macro_impl` expects to find a crate named `oximeter` that actually
+// points to _this_ crate (`oximeter-types`).
+//
+// This is also why we have doc tests in this crate instead of more closely
+// attached to the types in `oximeter-types-versions`; all the doc tests have a
+// (hidden) `extern crate oximeter_types as oximeter;` at the top which allows
+// the code emitted by `oximeter_macro_impl` to work.
 #[cfg(test)]
 mod tests {
     use crate::types;
