@@ -81,7 +81,7 @@ pub trait Target {
 /// safety, ensuring that the produced measurements are of the correct type for
 /// a metric.
 ///
-/// Users should derive the [`oximeter::Metric`] trait on a struct. The struct's
+/// Users should derive the [`Metric`] trait on a struct. The struct's
 /// fields are the fields (names and types) of the metric itself. This generates
 /// the trait implementation from the type's declaration.
 ///
