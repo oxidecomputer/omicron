@@ -115,7 +115,6 @@ pub trait Target {
 /// The value of the metric's data is _measured_ by using the `measure()`
 /// method, which returns a [`Measurement`]. This describes a timestamped data
 /// point for the metric.
-/// ```
 pub trait Metric {
     /// The type of datum produced by this metric.
     type Datum: Datum;
