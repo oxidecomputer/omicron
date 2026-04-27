@@ -19,6 +19,18 @@ use crate::latest::types::Sample;
 use chrono::Utc;
 use std::collections::BTreeSet;
 
+/// Construct the timeseries name for a Target and Metric.
+pub(crate) fn timeseries_name<T, M>(
+    target: &T,
+    metric: &M,
+) -> Result<TimeseriesName, MetricsError>
+where
+    T: Target,
+    M: Metric,
+{
+    TimeseriesName::try_from(format!("{}:{}", target.name(), metric.name()))
+}
+
 impl FieldSchema {
     /// Return `true` if this field is copyable.
     pub const fn is_copyable(&self) -> bool {
@@ -130,7 +142,7 @@ impl TimeseriesSchema {
         T: Target,
         M: Metric,
     {
-        let timeseries_name = crate::impls::timeseries_name(target, metric)?;
+        let timeseries_name = timeseries_name(target, metric)?;
         let mut field_schema = BTreeSet::new();
         for field in target.fields() {
             let schema = FieldSchema {

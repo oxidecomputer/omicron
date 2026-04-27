@@ -40,5 +40,3 @@ pub use types::FieldValue;
 pub use types::Measurement;
 pub use types::MetricsError;
 pub use types::Sample;
-
-pub use oximeter_types_versions::latest::timeseries_name;

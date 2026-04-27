@@ -639,7 +639,8 @@ impl Sample {
         let target_fields = FieldSet::from_target(target);
         let metric_fields = FieldSet::from_metric(metric);
         Self::verify_field_names(&target_fields, &metric_fields)?;
-        let timeseries_name = crate::impls::timeseries_name(target, metric)?;
+        let timeseries_name =
+            crate::impls::schema::timeseries_name(target, metric)?;
         Ok(Self {
             timeseries_name,
             timeseries_version: target.version(),
@@ -670,7 +671,8 @@ impl Sample {
         let metric_fields = FieldSet::from_metric(metric);
         Self::verify_field_names(&target_fields, &metric_fields)?;
         let datum = Datum::Missing(MissingDatum::from(metric));
-        let timeseries_name = crate::impls::timeseries_name(target, metric)?;
+        let timeseries_name =
+            crate::impls::schema::timeseries_name(target, metric)?;
         Ok(Self {
             timeseries_name,
             timeseries_version: target.version(),
