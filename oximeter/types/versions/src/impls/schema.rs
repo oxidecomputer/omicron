@@ -15,9 +15,9 @@ use crate::latest::traits::Metric;
 use crate::latest::traits::Target;
 use crate::latest::types::MetricsError;
 use crate::latest::types::Sample;
+use crate::latest::schema::default_schema_version;
 use chrono::Utc;
 use std::collections::BTreeSet;
-use std::num::NonZeroU8;
 
 impl From<MetricsError> for omicron_common::api::external::Error {
     fn from(e: MetricsError) -> Self {
@@ -88,11 +88,6 @@ fn validate_timeseries_name(s: &str) -> Result<&str, MetricsError> {
     } else {
         Err(MetricsError::InvalidTimeseriesName)
     }
-}
-
-/// Default version for timeseries schema, 1.
-pub const fn default_schema_version() -> NonZeroU8 {
-    unsafe { NonZeroU8::new_unchecked(1) }
 }
 
 impl From<&Sample> for TimeseriesSchema {

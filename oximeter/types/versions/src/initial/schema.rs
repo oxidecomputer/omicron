@@ -15,7 +15,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
+
 pub type TimeseriesKey = u64;
+
+/// Default version for timeseries schema, 1.
+pub const fn default_schema_version() -> NonZeroU8 {
+    unsafe { NonZeroU8::new_unchecked(1) }
+}
 
 /// The name and type information for a field of a timeseries schema.
 #[derive(

@@ -452,7 +452,7 @@ impl From<MissingDatum> for Datum {
     }
 }
 
-impl<M: crate::impls::traits::Metric> From<&M> for MissingDatum {
+impl<M: traits::Metric> From<&M> for MissingDatum {
     fn from(metric: &M) -> Self {
         MissingDatum {
             datum_type: metric.datum_type(),

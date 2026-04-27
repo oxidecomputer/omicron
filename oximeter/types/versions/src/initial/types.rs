@@ -278,7 +278,7 @@ pub struct Sample {
     /// The version of the timeseries this sample belongs to
     //
     // TODO-cleanup: This should be removed once schema are tracked in CRDB.
-    #[serde(default = "crate::latest::schema::default_schema_version")]
+    #[serde(default = "super::schema::default_schema_version")]
     pub timeseries_version: NonZeroU8,
 
     // Target name and fields
