@@ -3441,7 +3441,7 @@ pub(in crate::db::datastore) mod test {
         // (Note: This isn't really enough DB fakery to actually provision e.g.
         // Crucible regions, but it creates enough of a control plane object to
         // be associated with the Sled by UUID)
-        let disk1 = PhysicalDisk::new(
+        let disk1 = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             "vendor1".to_string(),
             "serial1".to_string(),
@@ -3449,7 +3449,7 @@ pub(in crate::db::datastore) mod test {
             PhysicalDiskKind::U2,
             sled_id,
         );
-        let disk2 = PhysicalDisk::new(
+        let disk2 = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             "vendor2".to_string(),
             "serial2".to_string(),
@@ -3891,7 +3891,7 @@ pub(in crate::db::datastore) mod test {
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");
 
             for u2 in &sled_config.u2s {
-                let physical_disk = db::model::PhysicalDisk::new(
+                let physical_disk = db::model::PhysicalDisk::from_parts(
                     u2.physical_disk_id,
                     String::from("vendor"),
                     u2.physical_disk_serial.clone(),

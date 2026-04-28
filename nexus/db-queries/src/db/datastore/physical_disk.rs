@@ -795,7 +795,7 @@ mod test {
         let sled_id = sled.id();
 
         // Insert a disk
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
@@ -836,7 +836,7 @@ mod test {
         let sled_id = sled.id();
 
         // Insert a disk
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
@@ -850,7 +850,7 @@ mod test {
             .expect("Failed first attempt at upserting disk");
 
         // Insert a second disk
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             String::from("Noxide"),
             String::from("456"),
@@ -884,7 +884,7 @@ mod test {
 
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             disk_id,
             String::from("Oxide"),
             String::from("123"),
@@ -942,7 +942,7 @@ mod test {
 
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             disk_id,
             String::from("Oxide"),
             String::from("123"),
@@ -984,7 +984,7 @@ mod test {
 
         // Attach the disk to the second sled
         let disk_id = PhysicalDiskUuid::new_v4();
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             disk_id,
             String::from("Oxide"),
             String::from("123"),
@@ -1031,7 +1031,7 @@ mod test {
 
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             disk_id,
             String::from("Oxide"),
             String::from("123"),
@@ -1062,7 +1062,7 @@ mod test {
             .expect("Failed to delete disk");
 
         // "Report the disk" from the second sled
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
@@ -1181,7 +1181,7 @@ mod test {
         sled_id: SledUuid,
         inv_disk: &InventoryDisk,
     ) -> (PhysicalDisk, Zpool) {
-        let disk = PhysicalDisk::new(
+        let disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             inv_disk.identity.vendor.clone(),
             inv_disk.identity.serial.clone(),

@@ -1013,7 +1013,7 @@ mod test {
         kind: PhysicalDiskKind,
         serial: String,
     ) -> PhysicalDiskUuid {
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             TEST_VENDOR.into(),
             serial,

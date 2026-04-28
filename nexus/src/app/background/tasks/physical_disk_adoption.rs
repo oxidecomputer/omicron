@@ -24,7 +24,6 @@ use nexus_types::inventory::Collection;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -83,18 +82,12 @@ impl PhysicalDiskAdoption {
         };
 
         for inv_disk in adoptable {
-            let disk = PhysicalDisk::new(
-                PhysicalDiskUuid::new_v4(),
-                inv_disk.vendor,
-                inv_disk.serial,
-                inv_disk.model,
-                inv_disk.variant,
-                inv_disk.sled_id.into(),
-            );
+            let sled_id = inv_disk.sled_id.into();
+            let disk = PhysicalDisk::new(inv_disk);
 
             let zpool = Zpool::new(
                 ZpoolUuid::new_v4(),
-                inv_disk.sled_id.into(),
+                sled_id,
                 disk.id(),
                 CONTROL_PLANE_STORAGE_BUFFER.into(),
             );

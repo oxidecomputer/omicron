@@ -6,6 +6,7 @@ use super::{
     Generation, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
 };
 use crate::DbTypedUuid;
+use crate::InvPhysicalDisk;
 use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -39,8 +40,20 @@ pub struct PhysicalDisk {
 }
 
 impl PhysicalDisk {
-    /// Creates a new in-service, active disk
-    pub fn new(
+    /// Creates a new in-service, active disk from an inventory disk
+    pub fn new(inv_disk: InvPhysicalDisk) -> Self {
+        Self::from_parts(
+            PhysicalDiskUuid::new_v4(),
+            inv_disk.vendor,
+            inv_disk.serial,
+            inv_disk.model,
+            inv_disk.variant,
+            inv_disk.sled_id.into(),
+        )
+    }
+
+    /// Creates a new in-service, active disk from individual fields
+    pub fn from_parts(
         id: PhysicalDiskUuid,
         vendor: String,
         serial: String,

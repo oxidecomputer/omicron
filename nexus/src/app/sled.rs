@@ -365,7 +365,7 @@ impl super::Nexus {
             Err(err) => return Err(err),
         }
 
-        let disk = db::model::PhysicalDisk::new(
+        let disk = db::model::PhysicalDisk::from_parts(
             request.id,
             request.vendor,
             request.serial,
