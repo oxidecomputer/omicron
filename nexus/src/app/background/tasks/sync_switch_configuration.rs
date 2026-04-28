@@ -1325,7 +1325,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let desired_config = SystemNetworkingConfig {
+                // The construction here is slightly weird - we start with
+                // `blueprint_external_networking_config: None` and then
+                // immediately fill it in. This gives us a non-optional
+                // reference to the config we supplied, which we need below to
+                // call `does_bootstore_need_update()`.
+                let mut desired_config = SystemNetworkingConfig {
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: subnet,
                         infra_ip_first,
@@ -1334,13 +1339,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         bgp,
                         bfd,
                     },
-                    blueprint_external_networking_config: Some(
+                    blueprint_external_networking_config: None,
+                };
+                let desired_blueprint_networking_config = desired_config
+                    .blueprint_external_networking_config
+                    .insert(
                         BlueprintExternalNetworkingConfig {
                             blueprint_external_networking_generation,
                             service_zone_nat_entries,
                         },
-                    ),
-                };
+                    );
 
                 // bootstore_needs_update is a boolean value that determines
                 // whether or not we need to increment the bootstore version and
@@ -1372,12 +1380,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 does_bootstore_need_update(
                                     &config,
                                     &desired_config.rack_network_config,
-                                    // We always fill this with `Some(_)` above,
-                                    // making `unwrap()` safe here.
-                                    desired_config
-                                        .blueprint_external_networking_config
-                                        .as_ref()
-                                        .unwrap(),
+                                    desired_blueprint_networking_config,
                                     &log,
                                 )
                             },
