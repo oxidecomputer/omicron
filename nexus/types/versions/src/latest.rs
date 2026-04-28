@@ -404,10 +404,11 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
-    pub use crate::v2025_11_20_00::update::UpdateStatus;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
+
+    pub use crate::v2026_04_22_00::update::UpdateStatus;
 }
 
 pub mod vpc {

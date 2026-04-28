@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026041900.0.0"
+    "version": "2026042200.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -29790,6 +29790,10 @@
               "minimum": 0
             }
           },
+          "contact_support": {
+            "description": "Whether the user should contact support\n\nThis is a rough high-level indicator of overall system health based on a subset of components. When true, one or more components may be experiencing issues and you should contact support.",
+            "type": "boolean"
+          },
           "suspended": {
             "description": "Whether automatic update is suspended due to manual update activity\n\nAfter a manual support procedure that changes the system software, automatic update activity is suspended to avoid undoing the change. To resume automatic update, first upload the TUF repository matching the manually applied update, then set that as the target release.",
             "type": "boolean"
@@ -29811,6 +29815,7 @@
         },
         "required": [
           "components_by_release_version",
+          "contact_support",
           "suspended",
           "target_release",
           "time_last_step_planned"

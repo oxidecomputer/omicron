@@ -26,6 +26,7 @@ dropshot.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
+humantime.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
