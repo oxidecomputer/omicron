@@ -38,7 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (36, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
+    (36, DROPSHOT_FREEFORM_BODY_DESC),
     (35, INLINE_ROUTER_PEER_IP_ADDR),
     (34, MODIFY_SVCS_TYPES),
     (33, BOOTSTORE_SERVICE_NAT),
