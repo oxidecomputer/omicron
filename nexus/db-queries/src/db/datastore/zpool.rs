@@ -303,6 +303,37 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns true if a zpool exists and is in-service, false if not.
+    pub async fn check_zpool_in_service(
+        &self,
+        opctx: &OpContext,
+        id: ZpoolUuid,
+    ) -> Result<bool, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        let zpool_exists_and_in_service =
+            diesel::select(diesel::dsl::exists(
+                zpool_dsl::zpool
+                    .filter(zpool_dsl::id.eq(to_db_typed_uuid(id)))
+                    .filter(zpool_dsl::time_deleted.is_null())
+                    .inner_join(physical_disk_dsl::physical_disk.on(
+                        zpool_dsl::physical_disk_id.eq(physical_disk_dsl::id),
+                    ))
+                    .filter(
+                        physical_disk_dsl::disk_policy
+                            .eq(PhysicalDiskPolicy::InService),
+                    ),
+            ))
+            .get_result_async::<bool>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(zpool_exists_and_in_service)
+    }
+
     pub async fn zpool_get_sled_if_in_service(
         &self,
         opctx: &OpContext,

@@ -921,19 +921,29 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
+    use crate::fm::analysis_reports;
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         pub errors: Vec<String>,
-        pub report: crate::fm::analysis_reports::InputReport,
+        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
-        /// Fault management analysis was not performed as no inventory
+        /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,
+
+        /// Fault management analysis was not performed, as the currently-loaded
+        /// inventory collection was collected prior to the earliest newer start
+        /// time indicated by the current sitrep.
+        WaitingForNewerInventory {
+            parent_inv_id: CollectionUuid,
+            next_inv_min_time_started: DateTime<Utc>,
+            input_inv_time_started: DateTime<Utc>,
+        },
 
         /// Preparing analysis input failed.
         PreparationError(String),
@@ -1145,6 +1155,15 @@ pub struct SessionCleanupStatus {
     pub limit: u32,
     /// Errors encountered during this activation.
     pub error: Option<String>,
+}
+
+/// Status of the background task pushing service firewall rules.
+#[derive(Default, Deserialize, Serialize)]
+pub struct ServiceFirewallRuleStatus {
+    /// An error encountered looking firewall rules up in the database.
+    pub lookup_error: Option<String>,
+    /// Errors encountered pushing the set of rules to each sled.
+    pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
 }
 
 #[cfg(test)]

@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2026 Oxide Computer Company
 
 //! Nexus methods for operating on source IP allowlists.
 
 use nexus_db_queries::context::OpContext;
+use nexus_networking::MAX_ALLOWLIST_LENGTH;
 use nexus_types::external_api::system;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
@@ -35,8 +36,6 @@ impl super::Nexus {
         params: system::AllowListUpdate,
     ) -> Result<system::AllowList, Error> {
         if let external::AllowedSourceIps::List(list) = &params.allowed_ips {
-            // Size limits on the allowlist.
-            const MAX_ALLOWLIST_LENGTH: usize = 1000;
             if list.len() > MAX_ALLOWLIST_LENGTH {
                 let message = format!(
                     "Source IP allowlist is limited to {} entries, found {}",
@@ -135,39 +134,6 @@ impl super::Nexus {
                 to relevant sled agents. The request must be retried for them \
                 to take effect.";
                 Err(Error::unavail(message))
-            }
-        }
-    }
-
-    /// Wait until we've applied the user-facing services allowlist.
-    ///
-    /// This will block until we've plumbed this allowlist and passed it to the
-    /// sled-agents responsible. This should only be called from
-    /// rack-initialization handling.
-    pub(crate) async fn await_ip_allowlist_plumbing(&self) {
-        let opctx = self.opctx_for_internal_api();
-        loop {
-            match nexus_networking::plumb_service_firewall_rules(
-                self.datastore(),
-                &opctx,
-                &[],
-                &opctx,
-                &opctx.log,
-            )
-            .await
-            {
-                Ok(_) => {
-                    info!(self.log, "plumbed initial IP allowlist");
-                    return;
-                }
-                Err(e) => {
-                    error!(
-                        self.log,
-                        "failed to plumb initial IP allowlist";
-                        "error" => ?e
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                }
             }
         }
     }

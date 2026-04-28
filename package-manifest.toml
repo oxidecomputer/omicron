@@ -122,7 +122,7 @@ source.type = "local"
 source.rust.binary_names = ["nexus", "schema-updater"]
 source.rust.release = true
 source.paths = [
-  { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
+  { from = "/opt/ooce/pgsql-18/lib/amd64", to = "/opt/ooce/pgsql-18/lib/amd64" },
   { from = "smf/nexus/manifest.xml", to = "/var/svc/manifest/site/nexus/manifest.xml" },
   { from = "smf/nexus/{{rack-topology}}", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
@@ -132,7 +132,8 @@ source.paths = [
 output.type = "zone"
 setup_hint = """
 - Run `cargo xtask download console` to download the web console assets
-- Run `pkg install library/postgresql-13` to download Postgres libraries
+- Run `pkg install library/postgresql-18` to download Postgres libraries
+- Run `pkg set-mediator -V 18 postgresql` to select the library version
 """
 output.intermediate_only = true
 
@@ -540,10 +541,14 @@ source.type = "local"
 source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
-  { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
+  { from = "/opt/ooce/pgsql-18/lib/amd64", to = "/opt/ooce/pgsql-18/lib/amd64" },
 ]
 output.type = "zone"
 output.intermediate_only = true
+setup_hint = """
+- Run `pkg install library/postgresql-18` to download Postgres libraries
+- Run `pkg set-mediator -V 18 postgresql` to select the library version
+"""
 
 [package.sp-sim]
 service_name = "sp-sim"
@@ -678,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "506862636920f5e9ebf0b931e77baafcec7460faa77770e94fcb18fd1e1ca194"
+source.sha256 = "ce52b9094adf0ed567bd3ed1e3ac48ac1c983cc7859adacf4f392e415a1189ad"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -694,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "01cf23b6fee8643263ff7e435c8f58f47976f22a48343ab0b04b417eff6a40cd"
+source.sha256 = "23950a4e73a07fa7f087ba3312e4bc5a8981fd9ebad54af2350baaa86ad6bbf3"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -709,10 +714,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "c5a642abf324cc3a4c3539996825b21ce6b3ffa193ce646dbc9185754a20f599"
+source.sha256 = "301d31ca481e4822f69484feacca31dd08a7c4aae87d96641d384bda3178d2f3"
 output.type = "zone"
 output.intermediate_only = true
 

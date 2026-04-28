@@ -10,13 +10,11 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
 use omicron_common::{
-    api::{
-        external::{self, ByteCount, Generation},
-        internal::shared::{
-            NetworkInterface, external_ip::v1::SourceNatConfig,
-        },
-    },
+    api::external::{self, ByteCount, Generation, Name, Vni},
     disk::{DatasetConfig, OmicronPhysicalDiskConfig},
     zpool_name::ZpoolName,
 };
@@ -24,15 +22,18 @@ use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{Baseboard, SledCpuFamily};
+use uuid::Uuid;
 
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
+    NetworkInterfaceKind, OmicronZoneDataset, OmicronZoneImageSource,
+    OrphanedDataset, RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
+    ZoneImageResolverInventory,
 };
 use crate::v4;
 
@@ -642,6 +643,142 @@ impl TryFrom<v4::inventory::OmicronZonesConfig> for OmicronZonesConfig {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+/// Information required to construct a virtual network interface
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    daft::Diffable,
+)]
+pub struct NetworkInterface {
+    pub id: Uuid,
+    pub kind: NetworkInterfaceKind,
+    pub name: Name,
+    pub ip_config: PrivateIpConfig,
+    pub mac: external::MacAddr,
+    pub vni: Vni,
+    pub primary: bool,
+    pub slot: u8,
+}
+
+impl TryFrom<crate::v1::inventory::NetworkInterface> for NetworkInterface {
+    type Error = external::Error;
+
+    fn try_from(
+        value: crate::v1::inventory::NetworkInterface,
+    ) -> Result<Self, Self::Error> {
+        let crate::v1::inventory::NetworkInterface {
+            id,
+            kind,
+            name,
+            ip,
+            mac,
+            subnet,
+            vni,
+            primary,
+            slot,
+            transit_ips,
+        } = value;
+        let ip_config = match (ip, subnet) {
+            (IpAddr::V4(ip), IpNet::V4(subnet)) => {
+                let transit_ips = transit_ips
+                    .into_iter()
+                    .map(|net| {
+                        let IpNet::V4(subnet) = net else {
+                            return Err(external::Error::invalid_request(
+                                "Expected an IPv4 transit IP subnet, but found IPv6",
+                            ));
+                        };
+                        Ok(subnet)
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
+                    ip,
+                    subnet,
+                    transit_ips,
+                )?)
+            }
+            (IpAddr::V6(ip), IpNet::V6(subnet)) => {
+                let transit_ips = transit_ips
+                    .into_iter()
+                    .map(|net| {
+                        let IpNet::V6(subnet) = net else {
+                            return Err(external::Error::invalid_request(
+                                "Expected an IPv6 transit IP subnet, but found IPv4",
+                            ));
+                        };
+                        Ok(subnet)
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
+                    ip,
+                    subnet,
+                    transit_ips,
+                )?)
+            }
+            (IpAddr::V4(_), IpNet::V6(_)) | (IpAddr::V6(_), IpNet::V4(_)) => {
+                return Err(external::Error::invalid_request(
+                    "IP address and subnet must have the same IP version",
+                ));
+            }
+        };
+        Ok(Self { id, kind, name, ip_config, mac, vni, primary, slot })
+    }
+}
+
+impl TryFrom<NetworkInterface> for crate::v1::inventory::NetworkInterface {
+    type Error = external::Error;
+
+    fn try_from(value: NetworkInterface) -> Result<Self, Self::Error> {
+        let NetworkInterface {
+            id,
+            kind,
+            name,
+            ip_config: ip,
+            mac,
+            vni,
+            primary,
+            slot,
+        } = value;
+        let (ip, subnet, transit_ips) = match ip {
+            PrivateIpConfig::V4(v4) => (
+                IpAddr::V4(*v4.ip()),
+                IpNet::V4(*v4.subnet()),
+                v4.transit_ips.into_iter().map(IpNet::V4).collect(),
+            ),
+            PrivateIpConfig::V6(v6) => (
+                IpAddr::V6(*v6.ip()),
+                IpNet::V6(*v6.subnet()),
+                v6.transit_ips.into_iter().map(IpNet::V6).collect(),
+            ),
+            PrivateIpConfig::DualStack { .. } => {
+                return Err(external::Error::invalid_request(
+                    "Cannot convert dual-stack v2 NetworkInterface to v1",
+                ));
+            }
+        };
+        Ok(Self {
+            id,
+            kind,
+            name,
+            ip,
+            mac,
+            subnet,
+            vni,
+            primary,
+            slot,
+            transit_ips,
         })
     }
 }

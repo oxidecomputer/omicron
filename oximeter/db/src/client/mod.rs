@@ -4,7 +4,7 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2025 Oxide Computer Company
+// Copyright 2026 Oxide Computer Company
 
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
@@ -40,7 +40,6 @@ use omicron_common::backoff::Backoff as _;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
 use oximeter::schema::TimeseriesKey;
-use oximeter::types::Sample;
 use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
@@ -56,7 +55,6 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::btree_map::Entry;
 use std::convert::TryFrom;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -68,7 +66,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::fs;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -94,7 +91,6 @@ pub struct Client {
     _id: Uuid,
     log: Logger,
     pool: DebugIgnore<native::connection::Pool>,
-    schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
     request_timeout: Duration,
 }
 
@@ -103,15 +99,22 @@ impl Client {
     /// connection pool.
     pub fn new_with_resolver(
         native_resolver: BoxedResolver,
+        pool_name: &str,
         log: &Logger,
     ) -> Self {
-        Self::new_with_pool_policy(native_resolver, Default::default(), log)
+        Self::new_with_pool_policy(
+            native_resolver,
+            pool_name,
+            Default::default(),
+            log,
+        )
     }
 
     /// Construct a ClickHouse client with a specific qorb connection pool
     /// policy.
     pub fn new_with_pool_policy(
         native_resolver: BoxedResolver,
+        pool_name: &str,
         policy: Policy,
         log: &Logger,
     ) -> Self {
@@ -120,10 +123,9 @@ impl Client {
             "component" => "clickhouse-client",
             "id" => id.to_string(),
         ));
-        let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
         let native_pool = match Pool::new(
-            "clickhouse".to_string(),
+            pool_name.to_string(),
             native_resolver,
             Arc::new(native::connection::Connector),
             policy,
@@ -137,13 +139,7 @@ impl Client {
                 err.into_inner()
             }
         };
-        Self {
-            _id: id,
-            log,
-            pool: DebugIgnore(native_pool),
-            schema,
-            request_timeout,
-        }
+        Self { _id: id, log, pool: DebugIgnore(native_pool), request_timeout }
     }
 
     /// Construct a new ClickHouse client of the database at `address`.
@@ -167,7 +163,6 @@ impl Client {
             "component" => "clickhouse-client",
             "id" => id.to_string(),
         ));
-        let schema = Mutex::new(BTreeMap::new());
         let native_pool = match Pool::new(
             "clickhouse".to_string(),
             Box::new(FixedResolver::new([address])),
@@ -183,13 +178,7 @@ impl Client {
                 err.into_inner()
             }
         };
-        Self {
-            _id: id,
-            log,
-            pool: DebugIgnore(native_pool),
-            schema,
-            request_timeout,
-        }
+        Self { _id: id, log, pool: DebugIgnore(native_pool), request_timeout }
     }
 
     /// Return the url the client is trying to connect to.
@@ -353,23 +342,16 @@ impl Client {
         .unwrap())
     }
 
-    /// Return the schema for a timeseries by name.
-    ///
-    /// Note
-    /// ----
-    /// This method may translate into a call to the database, if the requested metric cannot be
-    /// found in an internal cache.
+    /// Return the schema for a timeseries by name, querying the database.
     pub async fn schema_for_timeseries(
         &self,
         name: &TimeseriesName,
     ) -> Result<Option<TimeseriesSchema>, Error> {
-        let mut schema = self.schema.lock().await;
-        if let Some(s) = schema.get(name) {
-            return Ok(Some(s.clone()));
-        }
         let mut handle = self.claim_connection().await?;
-        self.get_schema_locked(&mut handle, &mut schema).await?;
-        Ok(schema.get(name).map(Clone::clone))
+        let mut schemas = self
+            .fetch_schema_from_db(&mut handle, std::iter::once(name))
+            .await?;
+        Ok(schemas.remove(name))
     }
 
     /// List timeseries schema, paginated.
@@ -972,60 +954,6 @@ impl Client {
             })
     }
 
-    // Verifies that the schema for a sample matches the schema in the database,
-    // or cache a new one internally.
-    //
-    // If the schema exists in the database, and the sample matches that schema, `None` is
-    // returned. If the schema does not match, an Err is returned (the caller skips the sample in
-    // this case). If the schema does not _exist_ in the database,
-    // Some((timeseries_name, schema)) is returned, so that the caller can
-    // insert it into the database at the appropriate time. Note that the schema
-    // is added to the internal cache, but not inserted into the DB at this
-    // time.
-    async fn verify_or_cache_sample_schema(
-        &self,
-        handle: &mut Handle,
-        sample: &Sample,
-    ) -> Result<Option<TimeseriesSchema>, Error> {
-        let sample_schema = TimeseriesSchema::from(sample);
-        let name = sample_schema.timeseries_name.clone();
-        let mut schema = self.schema.lock().await;
-
-        // We've taken the lock before we do any checks for schema. First, we
-        // check if we've already got one in the cache. If not, we update all
-        // the schema from the database, and then check the map again. If we
-        // find a schema (which now either came from the cache or the latest
-        // read of the DB), then we check that the derived schema matches. If
-        // not, we can insert it in the cache and the DB.
-        if !schema.contains_key(&name) {
-            self.get_schema_locked(handle, &mut schema).await?;
-        }
-        match schema.entry(name) {
-            Entry::Occupied(entry) => {
-                let existing_schema = entry.get();
-                if existing_schema == &sample_schema {
-                    Ok(None)
-                } else {
-                    error!(
-                        self.log,
-                        "timeseries schema mismatch, sample will be skipped";
-                        "expected" => ?existing_schema,
-                        "actual" => ?sample_schema,
-                        "sample" => ?sample,
-                    );
-                    Err(Error::SchemaMismatch {
-                        expected: Box::new(existing_schema.clone()),
-                        actual: Box::new(sample_schema),
-                    })
-                }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(sample_schema.clone());
-                Ok(Some(sample_schema))
-            }
-        }
-    }
-
     // Select the timeseries, including keys and field values, that match the given field-selection
     // query.
     async fn select_matching_timeseries_info(
@@ -1188,58 +1116,43 @@ impl Client {
         }
     }
 
-    // Get timeseries schema from the database.
+    // Fetch timeseries schema from the database for the given set of names.
     //
-    // Can only be called after acquiring the lock around `self.schema`.
-    async fn get_schema_locked(
+    // Returns a map from name to schema for only those names that exist in the
+    // database. Returns an error if the database query fails or if the query
+    // returns no data block (which is always a bug, even for an empty result).
+    pub(super) async fn fetch_schema_from_db(
         &self,
         handle: &mut Handle,
-        schema: &mut BTreeMap<TimeseriesName, TimeseriesSchema>,
-    ) -> Result<(), Error> {
-        debug!(self.log, "retrieving timeseries schema from database");
-        let sql = {
-            if schema.is_empty() {
-                format!(
-                    "SELECT * FROM {db_name}.timeseries_schema FORMAT Native;",
-                    db_name = crate::DATABASE_NAME,
-                )
-            } else {
-                // Only collect schema that we've not already cached.
-                format!(
-                    concat!(
-                        "SELECT * ",
-                        "FROM {db_name}.timeseries_schema ",
-                        "WHERE timeseries_name NOT IN ",
-                        "({current_keys}) ",
-                        "FORMAT Native;",
-                    ),
-                    db_name = crate::DATABASE_NAME,
-                    current_keys = schema
-                        .keys()
-                        .map(|key| format!("'{}'", key))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-        };
-        let body = self.execute_with_block(handle, &sql).await?;
-        let Some(data) = body.data.as_ref() else {
-            trace!(self.log, "no new timeseries schema in database");
-            return Ok(());
+        names: impl Iterator<Item = &TimeseriesName>,
+    ) -> Result<BTreeMap<TimeseriesName, TimeseriesSchema>, Error> {
+        let quoted: Vec<String> = names.map(|n| format!("'{n}'")).collect();
+        if quoted.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let sql = format!(
+            "SELECT * FROM {db}.timeseries_schema \
+             WHERE timeseries_name IN ({names}) FORMAT Native",
+            db = crate::DATABASE_NAME,
+            names = quoted.join(", "),
+        );
+        debug!(self.log, "fetching timeseries schema from database");
+        let result = self.execute_with_block(handle, &sql).await?;
+        let Some(data) = result.data.as_ref() else {
+            return Err(Error::QueryMissingData { query: sql });
         };
         if data.n_rows() == 0 {
-            trace!(self.log, "no new timeseries schema in database");
-            return Ok(());
+            return Ok(BTreeMap::new());
         }
         trace!(
             self.log,
-            "retrieved new timeseries schema";
+            "fetched timeseries schema from database";
             "n_schema" => data.n_rows(),
         );
-        for new_schema in TimeseriesSchema::from_block(data, &())?.into_iter() {
-            schema.insert(new_schema.timeseries_name.clone(), new_schema);
-        }
-        Ok(())
+        Ok(TimeseriesSchema::from_block(data, &())?
+            .into_iter()
+            .map(|s| (s.timeseries_name.clone(), s))
+            .collect())
     }
 
     /// Given a list of timeseries by name, delete their schema and any
@@ -1492,7 +1405,6 @@ fn schema_validation_regex() -> &'static Regex {
 
 #[cfg(test)]
 mod tests {
-    use super::dbwrite::UnrolledSampleRows;
     use super::*;
     use crate::model;
     use crate::model::OXIMETER_VERSION;
@@ -1513,6 +1425,7 @@ mod tests {
     use oximeter::Target;
     use oximeter::histogram::Histogram;
     use oximeter::types::MissingDatum;
+    use oximeter::types::Sample;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::path::PathBuf;
@@ -1733,12 +1646,6 @@ mod tests {
                 }),
             ),
             (
-                "test_get_schema_no_new_values_replicated",
-                Box::new(move |db, client| {
-                    Box::pin(test_get_schema_no_new_values_impl(db, client))
-                }),
-            ),
-            (
                 "test_timeseries_schema_list_replicated",
                 Box::new(move |db, client| {
                     Box::pin(test_timeseries_schema_list_impl(db, client))
@@ -1781,9 +1688,9 @@ mod tests {
                 }),
             ),
             (
-                "test_update_schema_cache_on_new_sample_replicated",
+                "test_do_not_duplicate_schema_on_new_samples_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_update_schema_cache_on_new_sample_impl(
+                    Box::pin(test_do_not_duplicate_schema_on_new_samples_impl(
                         db, client,
                     ))
                 }),
@@ -1795,9 +1702,9 @@ mod tests {
                 }),
             ),
             (
-                "test_new_schema_removed_when_not_inserted_replicated",
+                "test_schema_reinserted_after_redeployment_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_new_schema_removed_when_not_inserted_impl(
+                    Box::pin(test_schema_reinserted_after_redeployment_impl(
                         db, client,
                     ))
                 }),
@@ -1942,8 +1849,13 @@ mod tests {
         _: &ClickHouseDeployment,
         client: Client,
     ) {
+        // Insert a sample to establish the schema in the DB.
         let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample]).await.unwrap();
+
+        // Construct a sample with the same timeseries name but different fields
+        // (a schema mismatch). Inserting should succeed at the API level, but
+        // the mismatched sample should be silently skipped.
         let bad_name = name_mismatch::TestTarget {
             name: "first_name".into(),
             name2: "second_name".into(),
@@ -1954,11 +1866,12 @@ mod tests {
             good: true,
             datum: 1,
         };
-        let sample = Sample::new(&bad_name, &metric).unwrap();
-        let mut handle = client.claim_connection().await.unwrap();
-        let result =
-            client.verify_or_cache_sample_schema(&mut handle, &sample).await;
-        assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
+        let bad_sample = Sample::new(&bad_name, &metric).unwrap();
+        client.insert_samples(&[bad_sample]).await.unwrap();
+
+        // Schema count should remain 1: the mismatched schema was not inserted.
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 1, "Mismatched schema should not be inserted");
     }
 
     #[tokio::test]
@@ -1978,71 +1891,30 @@ mod tests {
         client: Client,
     ) {
         let sample = oximeter_test_utils::make_sample();
+        let expected_schema = TimeseriesSchema::from(&sample);
 
-        // Verify that this sample is considered new, i.e., we return rows to update the timeseries
-        // schema table.
-        let mut handle = client.claim_connection().await.unwrap();
-        let result = client
-            .verify_or_cache_sample_schema(&mut handle, &sample)
-            .await
-            .unwrap();
-        assert!(
-            matches!(result, Some(_)),
-            "When verifying a new sample, the rows to be inserted should be returned"
-        );
-
-        // Clear the internal caches of seen schema
-        client.schema.lock().await.clear();
-
-        // Insert the new sample
+        // Inserting a new sample should write its schema to the DB.
         client.insert_samples(std::slice::from_ref(&sample)).await.unwrap();
 
-        // The internal map should now contain both the new timeseries schema
-        let actual_schema = TimeseriesSchema::from(&sample);
-        let timeseries_name =
-            TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
-        let expected_schema = client
-            .schema
-            .lock()
-            .await
-            .get(&timeseries_name)
-            .expect(
-                "After inserting a new sample, its schema should be included",
-            )
-            .clone();
-        assert_eq!(
-            actual_schema, expected_schema,
-            "The timeseries schema for a new sample was not correctly inserted into internal cache",
-        );
-
-        // This should no longer return a new row to be inserted for the schema of this sample, as
-        // any schema have been included above.
+        // Verify the schema is in the database.
         let mut handle = client.claim_connection().await.unwrap();
+        let sql = "SELECT * FROM oximeter.timeseries_schema FORMAT Native;";
         let result = client
-            .verify_or_cache_sample_schema(&mut handle, &sample)
+            .execute_with_block(&mut handle, sql)
             .await
-            .unwrap();
-        assert!(
-            matches!(result, None),
-            "After inserting new schema, it should no longer be considered new"
-        );
-
-        // Verify that it's actually in the database!
-        let sql =
-            "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;";
+            .expect("Failed to select schema");
         let schema = TimeseriesSchema::from_block(
-            client
-                .execute_with_block(&mut handle, sql)
-                .await
-                .expect("Failed to select schema")
-                .data
-                .as_ref()
-                .expect("Query should have returned data"),
+            result.data.as_ref().expect("Query should have returned data"),
             &(),
         )
         .expect("Failed to convert timeseries schema from block");
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
+
+        // Inserting the same sample again should not create duplicate schema.
+        client.insert_samples(std::slice::from_ref(&sample)).await.unwrap();
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 1, "Duplicate schema should not be inserted");
     }
 
     #[tokio::test]
@@ -2816,35 +2688,6 @@ mod tests {
             desc_limit_1.first().unwrap(),
             timeseries_asc.last().unwrap()
         );
-    }
-
-    #[tokio::test]
-    async fn test_get_schema_no_new_values() {
-        let logctx = test_setup_log("test_get_schema_no_new_values");
-        let mut db =
-            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.native_address().into(), &logctx.log);
-        init_db(&db, &client).await;
-        test_get_schema_no_new_values_impl(&db, client).await;
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    async fn test_get_schema_no_new_values_impl(
-        _: &ClickHouseDeployment,
-        client: Client,
-    ) {
-        let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await.unwrap();
-
-        let original_schema = client.schema.lock().await.clone();
-        let mut schema = client.schema.lock().await;
-        let mut handle = client.claim_connection().await.unwrap();
-        client
-            .get_schema_locked(&mut handle, &mut schema)
-            .await
-            .expect("Failed to get timeseries schema");
-        assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
     }
 
     #[tokio::test]
@@ -3647,44 +3490,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_schema_cache_on_new_sample() {
-        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+    async fn test_do_not_duplicate_schema_on_new_samples() {
+        let logctx =
+            test_setup_log("test_do_not_duplicate_schema_on_new_samples");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
-        test_update_schema_cache_on_new_sample_impl(&db, client).await;
+        test_do_not_duplicate_schema_on_new_samples_impl(&db, client).await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
-    async fn test_update_schema_cache_on_new_sample_impl(
+    async fn test_do_not_duplicate_schema_on_new_samples_impl(
         _: &ClickHouseDeployment,
         client: Client,
     ) {
         let samples = [oximeter_test_utils::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
-        // Get the count of schema directly from the DB, which should have just
-        // one.
+        // After inserting, exactly one schema should be in the DB.
         let count = get_schema_count(&client, None).await;
         assert_eq!(count, 1, "Expected exactly 1 schema");
-        assert_eq!(client.schema.lock().await.len(), 1);
 
-        // Clear the internal cache, and insert the sample again.
-        //
-        // This should cause us to look up the schema in the DB again, but _not_
-        // insert a new one.
-        client.schema.lock().await.clear();
-        assert!(client.schema.lock().await.is_empty());
-
+        // Inserting the same sample again should not create a duplicate schema.
         client.insert_samples(&samples).await.unwrap();
-
-        // Get the count of schema directly from the DB, which should still have
-        // only the one schema.
         let count = get_schema_count(&client, None).await;
-        assert_eq!(count, 1, "Expected exactly 1 schema again");
-        assert_eq!(client.schema.lock().await.len(), 1);
+        assert_eq!(count, 1, "Duplicate schema should not be inserted");
     }
 
     #[tokio::test]
@@ -3718,51 +3550,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_new_schema_removed_when_not_inserted() {
+    async fn test_schema_reinserted_after_redeployment() {
         let logctx =
-            test_setup_log("test_new_schema_removed_when_not_inserted");
+            test_setup_log("test_schema_reinserted_after_redeployment");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
-        test_new_schema_removed_when_not_inserted_impl(&db, client).await;
+        test_schema_reinserted_after_redeployment_impl(&db, client).await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
-    // Regression test for https://github.com/oxidecomputer/omicron/issues/4335.
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/10292.
     //
-    // This tests that, when cache new schema but _fail_ to insert them, we also
-    // remove them from the internal cache.
-    async fn test_new_schema_removed_when_not_inserted_impl(
+    // When Reconfigurator deploys a new ClickHouse zone with no data, inserting
+    // samples for a previously-seen timeseries must re-insert the schema into
+    // the fresh DB. The old schema cache prevented this: if the schema was
+    // already in the cache, insertion was skipped even when the new DB had no
+    // schema.
+    async fn test_schema_reinserted_after_redeployment_impl(
         db: &ClickHouseDeployment,
         client: Client,
     ) {
         let samples = [oximeter_test_utils::make_sample()];
 
-        // We're using the components of the `insert_samples()` method here,
-        // which has been refactored explicitly for this test. We need to insert
-        // the schema for this sample into the internal cache, which relies on
-        // access to the database (since they don't exist).
-        //
-        // First, insert the sample into the local cache. This method also
-        // checks the DB, since this schema doesn't exist in the cache.
-        let mut handle = client.claim_connection().await.unwrap();
-        let UnrolledSampleRows { new_schema, .. } =
-            client.unroll_samples(&mut handle, &samples).await;
-        assert_eq!(client.schema.lock().await.len(), 1);
+        // Insert samples to establish the schema in the DB.
+        client.insert_samples(&samples).await.unwrap();
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 1, "Expected exactly 1 schema after initial insert");
 
-        // Next, we'll kill the database, and then try to insert the schema.
-        // That will fail, since the DB is now inaccessible.
-        wipe_db(&db, &client).await;
-        let res =
-            client.save_new_schema_or_remove(&mut handle, new_schema).await;
-        assert!(res.is_err(), "Should have failed since the DB is gone");
-        assert!(
-            client.schema.lock().await.is_empty(),
-            "Failed to remove new schema from the cache when \
-            they could not be inserted into the DB"
-        );
+        // Simulate Reconfigurator deploying a new ClickHouse zone: wipe and
+        // re-initialize the DB so it starts fresh.
+        wipe_db(db, &client).await;
+        init_db(db, &client).await;
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 0, "Expected 0 schema after DB wipe");
+
+        // Insert the same samples again. Because we always query the DB rather
+        // than relying on an in-memory cache, the schema must be re-inserted.
+        client.insert_samples(&samples).await.unwrap();
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 1, "Schema must be re-inserted after redeployment");
     }
 
     // Testing helper functions
@@ -5082,8 +4911,12 @@ mod tests {
             claim_timeout: Duration::from_secs(1),
             ..Default::default()
         };
-        let new_client =
-            Client::new_with_pool_policy(resolver, policy, &logctx.log);
+        let new_client = Client::new_with_pool_policy(
+            resolver,
+            "oximeter-test",
+            policy,
+            &logctx.log,
+        );
 
         // And then assert that when we try to insert samples, we _fail_ rather
         // than timeout. Timing out here would only happen if we tried to do

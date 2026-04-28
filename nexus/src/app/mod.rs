@@ -449,7 +449,11 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
-                oximeter_db::Client::new_with_resolver(native_resolver, &log)
+                oximeter_db::Client::new_with_resolver(
+                    native_resolver,
+                    "nexus-oximeter-reader",
+                    &log,
+                )
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };
@@ -777,6 +781,12 @@ impl Nexus {
     pub(crate) fn activate_inventory_collection(&self) {
         self.background_tasks
             .activate(&self.background_tasks.task_inventory_collection);
+    }
+
+    // Called to trigger propagation of service firewall rules.
+    pub(crate) fn activate_service_firewall_propagation(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_service_firewall_propagation);
     }
 
     // Called to hand off management of external servers to Nexus.

@@ -15,9 +15,9 @@ use chrono::Utc;
 use ereport_types::Ena;
 use ereport_types::EreportId;
 use futures::future::BoxFuture;
-use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_networking::GatewayClient;
 use nexus_types::fm::ereport::EreportData;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
@@ -25,8 +25,8 @@ use nexus_types::internal_api::background::SpEreporterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::net::SocketAddrV6;
 use std::sync::Arc;
 
 pub struct SpEreportIngester {
@@ -89,37 +89,20 @@ impl SpEreportIngester {
         }
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
-        let mgs_clients = {
-            let lookup = self
-                .resolver
-                .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
-                .await;
-            let addrs = match lookup {
-                Err(error) => {
-                    const MSG: &str = "failed to resolve MGS addresses";
-                    error!(opctx.log, "{MSG}"; "error" => ?error);
-                    status.errors.push(format!("{MSG}: {error}"));
-                    return status;
-                }
-                Ok(addrs) => addrs,
-            };
-
-            addrs
-                .into_iter()
-                .map(|addr| {
-                    let url = format!("http://{addr}");
-                    let log = opctx.log.new(o!("gateway_url" => url.clone()));
-                    let client = gateway_client::Client::new(&url, log);
-                    GatewayClient { addr, client }
-                })
-                .collect::<Arc<[_]>>()
-        };
-
-        if mgs_clients.is_empty() {
-            const MSG: &str = "no MGS addresses resolved";
-            error!(opctx.log, "{MSG}");
-            status.errors.push(MSG.to_string());
-            return status;
+        let mgs_clients = match GatewayClient::resolve_all_gateways(
+            &opctx.log,
+            &self.resolver,
+        )
+        .await
+        {
+            Err(error) => {
+                const MSG: &str = "no MGS successfully returned SP ID list";
+                let error = InlineErrorChain::new(&*error);
+                error!(opctx.log, "{MSG}"; "error" => &error);
+                status.errors.push(format!("{MSG}: {error}"));
+                return status;
+            }
+            Ok(clients) => clients.collect::<Arc<[_]>>(),
         };
 
         // Ask MGS for the list of all present SP identifiers. If a request to
@@ -239,11 +222,6 @@ impl SpEreportIngester {
 
         status
     }
-}
-
-struct GatewayClient {
-    addr: SocketAddrV6,
-    client: gateway_client::Client,
 }
 
 const LIMIT: std::num::NonZeroU32 = match std::num::NonZeroU32::new(255) {

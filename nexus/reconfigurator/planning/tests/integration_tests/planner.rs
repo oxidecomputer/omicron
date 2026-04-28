@@ -54,10 +54,7 @@ use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::TufRepoMeta;
 use omicron_common::api::external::Vni;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -77,7 +74,10 @@ use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use semver::Version;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -3039,8 +3039,8 @@ fn create_measurement_artifacts_at_version(
     version: &ArtifactVersion,
     measurement_hash: ArtifactHash,
 ) -> Vec<TufArtifactMeta> {
-    let zone_version = ArtifactVersion::new_static("0.0.1").unwrap();
-    let zones = create_zone_artifacts_at_version(&zone_version);
+    let zones =
+        create_artifacts_for_version(WhichVersion::InitialSystemVersion);
 
     let corpus = vec![
         TufArtifactMeta {
@@ -3070,9 +3070,46 @@ fn create_measurement_artifacts_at_version(
     zones.into_iter().chain(corpus).collect()
 }
 
-fn create_zone_artifacts_at_version(
-    version: &ArtifactVersion,
-) -> Vec<TufArtifactMeta> {
+/// Selects a canned set of version strings and host OS hashes for
+/// [`create_artifacts_for_version`].
+#[derive(Clone, Copy, Debug)]
+enum WhichVersion {
+    /// Use a version and host OS hashes that match the initial system state
+    /// (set up by `with_target_release_0_0_1`), so the planner does not issue
+    /// host OS MGS updates.
+    InitialSystemVersion,
+}
+
+impl WhichVersion {
+    fn version(self) -> ArtifactVersion {
+        match self {
+            WhichVersion::InitialSystemVersion => {
+                ArtifactVersion::new_static("1.0.0-freeform")
+                    .expect("parsed artifact version")
+            }
+        }
+    }
+
+    /// Returns the host phase 1 and 2 hashes.
+    fn host_phase_hashes(self) -> (ArtifactHash, ArtifactHash) {
+        match self {
+            WhichVersion::InitialSystemVersion => (
+                ArtifactHash([1; 32]),
+                // This hash is the same as that set in the example system, so
+                // that we simulate an environment that does not need SP
+                // component updates.
+                ArtifactHash(hex_literal::hex!(
+                    "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
+                )),
+            ),
+        }
+    }
+}
+
+fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
+    let version = which.version();
+    let (host_phase_1_hash, host_phase_2_hash) = which.host_phase_hashes();
+
     vec![
         // Omit `BoundaryNtp` because it has the same artifact name as
         // `InternalNtp`.
@@ -3087,16 +3124,13 @@ fn create_zone_artifacts_at_version(
         fake_zone_artifact!(InternalNtp, version.clone()),
         fake_zone_artifact!(Nexus, version.clone()),
         fake_zone_artifact!(Oximeter, version.clone()),
-        // We create artifacts with the versions (or hash) set to those of
-        // the example system to simulate an environment that does not need
-        // SP component updates.
         TufArtifactMeta {
             id: ArtifactId {
                 name: "host-os-phase-1".to_string(),
                 version: version.clone(),
                 kind: ArtifactKind::GIMLET_HOST_PHASE_1,
             },
-            hash: ArtifactHash([1; 32]),
+            hash: host_phase_1_hash,
             size: 0,
             board: None,
             sign: None,
@@ -3107,9 +3141,7 @@ fn create_zone_artifacts_at_version(
                 version: version.clone(),
                 kind: ArtifactKind::HOST_PHASE_2,
             },
-            hash: ArtifactHash(hex_literal::hex!(
-                "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
-            )),
+            hash: host_phase_2_hash,
             size: 0,
             board: None,
             sign: None,
@@ -3197,8 +3229,8 @@ fn test_update_crucible_pantry_before_nexus() {
     )));
 
     // Manually specify a TUF repo with fake zone images.
-    let version = ArtifactVersion::new_static("1.0.0-freeform")
-        .expect("can't parse artifact version");
+    let which = WhichVersion::InitialSystemVersion;
+    let version = which.version();
     let fake_hash = ArtifactHash([0; 32]);
     let image_source = BlueprintZoneImageSource::Artifact {
         version: BlueprintArtifactVersion::Available {
@@ -3206,7 +3238,7 @@ fn test_update_crucible_pantry_before_nexus() {
         },
         hash: fake_hash,
     };
-    let artifacts = create_zone_artifacts_at_version(&version);
+    let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
         repo: TufRepoMeta {
             hash: fake_hash,
@@ -3569,8 +3601,8 @@ fn test_update_cockroach() {
     // The planner should avoid doing this update until it has confirmation
     // from inventory that the cluster is healthy.
 
-    let version = ArtifactVersion::new_static("1.0.0-freeform")
-        .expect("can't parse artifact version");
+    let which = WhichVersion::InitialSystemVersion;
+    let version = which.version();
     let fake_hash = ArtifactHash([0; 32]);
     let image_source = BlueprintZoneImageSource::Artifact {
         version: BlueprintArtifactVersion::Available {
@@ -3578,7 +3610,7 @@ fn test_update_cockroach() {
         },
         hash: fake_hash,
     };
-    let artifacts = create_zone_artifacts_at_version(&version);
+    let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
         repo: TufRepoMeta {
             hash: fake_hash,
@@ -3939,8 +3971,8 @@ fn test_update_boundary_ntp() {
     // The planner should avoid doing this update until it has confirmation
     // from inventory that the cluster is healthy.
 
-    let version = ArtifactVersion::new_static("1.0.0-freeform")
-        .expect("can't parse artifact version");
+    let which = WhichVersion::InitialSystemVersion;
+    let version = which.version();
     let fake_hash = ArtifactHash([0; 32]);
     let image_source = BlueprintZoneImageSource::Artifact {
         version: BlueprintArtifactVersion::Available {
@@ -3948,7 +3980,7 @@ fn test_update_boundary_ntp() {
         },
         hash: fake_hash,
     };
-    let artifacts = create_zone_artifacts_at_version(&version);
+    let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
         repo: TufRepoMeta {
             hash: fake_hash,
@@ -4329,8 +4361,8 @@ fn test_update_internal_dns() {
     // The planner should avoid doing this update until it has confirmation
     // from inventory that the Internal DNS servers are ready.
 
-    let version = ArtifactVersion::new_static("1.0.0-freeform")
-        .expect("can't parse artifact version");
+    let which = WhichVersion::InitialSystemVersion;
+    let version = which.version();
     let fake_hash = ArtifactHash([0; 32]);
     let image_source = BlueprintZoneImageSource::Artifact {
         version: BlueprintArtifactVersion::Available {
@@ -4338,7 +4370,7 @@ fn test_update_internal_dns() {
         },
         hash: fake_hash,
     };
-    let artifacts = create_zone_artifacts_at_version(&version);
+    let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
         repo: TufRepoMeta {
             hash: fake_hash,
@@ -4576,8 +4608,8 @@ fn test_update_all_zones() {
 
     // Manually specify a TUF repo with fake images for all zones.
     // Only the name and kind of the artifacts matter.
-    let version = ArtifactVersion::new_static("2.0.0-freeform")
-        .expect("can't parse artifact version");
+    let which = WhichVersion::InitialSystemVersion;
+    let version = which.version();
     let fake_hash = ArtifactHash([0; 32]);
     let image_source = BlueprintZoneImageSource::Artifact {
         version: BlueprintArtifactVersion::Available {
@@ -4595,7 +4627,7 @@ fn test_update_all_zones() {
             system_version: Version::new(1, 0, 0),
             file_name: String::from(""),
         },
-        artifacts: create_zone_artifacts_at_version(&version),
+        artifacts: create_artifacts_for_version(which),
     });
 
     sim.change_description("set new target release", |desc| {

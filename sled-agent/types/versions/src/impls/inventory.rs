@@ -11,8 +11,9 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
+use omicron_common::address::Ip;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
 use omicron_uuid_kinds::MupdateUuid;
@@ -24,10 +25,12 @@ use crate::latest::inventory::{
     HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
     ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
-    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcEnabledNotOnlineState, SvcState,
+    NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
+    OmicronZonesConfig, RemoveMupdateOverrideBootSuccessInventory,
+    RemoveMupdateOverrideInventory, SingleMeasurementInventory,
+    SourceNatConfig, SourceNatConfigGeneric, SourceNatConfigV4,
+    SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
     SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 
@@ -982,4 +985,85 @@ impl fmt::Display for SvcEnabledNotOnlineState {
 
         write!(f, "{state}")
     }
+}
+
+impl<T: Ip> SourceNatConfig<T> {
+    /// Get the port range.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range(&self) -> std::ops::RangeInclusive<u16> {
+        self.first_port..=self.last_port
+    }
+
+    /// Get the port range as a raw tuple; both values are inclusive.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range_raw(&self) -> (u16, u16) {
+        self.port_range().into_inner()
+    }
+}
+
+impl SourceNatConfigGeneric {
+    /// Try to convert this to a concrete IPv4 configuration.
+    ///
+    /// Return None if this is an IPv6 configuration.
+    pub fn try_as_ipv4(&self) -> Option<SourceNatConfigV4> {
+        let IpAddr::V4(ip) = self.ip else {
+            return None;
+        };
+        Some(SourceNatConfig {
+            ip,
+            first_port: self.first_port,
+            last_port: self.last_port,
+        })
+    }
+
+    /// Try to convert this to a concrete IPv6 configuration.
+    ///
+    /// Return None if this is an IPv4 configuration.
+    pub fn try_as_ipv6(&self) -> Option<SourceNatConfigV6> {
+        let IpAddr::V6(ip) = self.ip else {
+            return None;
+        };
+        Some(SourceNatConfig {
+            ip,
+            first_port: self.first_port,
+            last_port: self.last_port,
+        })
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
+where
+    T: Ip + proptest::arbitrary::Arbitrary,
+    T::Strategy: 'static,
+{
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        let num_possible_first_ports = u16::MAX / NUM_SOURCE_NAT_PORTS + 1;
+        let first_port_strategy = (0u16..num_possible_first_ports)
+            .prop_map(|i| i * NUM_SOURCE_NAT_PORTS);
+
+        (T::arbitrary(), first_port_strategy)
+            .prop_map(|(ip, first_port)| {
+                let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+                Self::new(ip, first_port, last_port)
+                    .expect("Arbitrary impl produces aligned port pairs")
+            })
+            .boxed()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SourceNatConfigError {
+    #[error(
+        "snat port range is not aligned to {NUM_SOURCE_NAT_PORTS}: \
+         ({first_port}, {last_port})"
+    )]
+    UnalignedPortPair { first_port: u16, last_port: u16 },
 }
