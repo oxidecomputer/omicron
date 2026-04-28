@@ -455,7 +455,7 @@ pub mod physical_disk {
     pub use crate::v2026_04_21_00::physical_disk::PhysicalDiskAdoptionRequest;
     pub use crate::v2026_04_21_00::physical_disk::PhysicalDiskAdoptionRequestPath;
     pub use crate::v2026_04_21_00::physical_disk::PhysicalDiskManufacturerIdentity;
-    pub use crate::v2026_04_21_00::physical_disk::Unadopted;
+    pub use crate::v2026_04_21_00::physical_disk::UnadoptedPhysicalDisk;
 }
 
 pub mod rack {

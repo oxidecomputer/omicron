@@ -100,7 +100,7 @@ impl PhysicalDiskAdoption {
             if let Err(err) = result {
                 // Skip reporting the error if we get back a `NotFound`.
                 // This means that another nexus concurrently added the
-                // disk or that the adoptable request was deleted. We
+                // disk or that the adoption request was deleted. We
                 // don't want to report mistakenly one way or another and
                 // so we just continue here.
                 if let external::Error::NotFound { .. } = err {

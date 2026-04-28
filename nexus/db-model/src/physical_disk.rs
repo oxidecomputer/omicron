@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, zpool};
 use nexus_types::external_api::physical_disk as physical_disk_types;
+use nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::PhysicalDiskAdoptionRequestKind;
 use omicron_uuid_kinds::PhysicalDiskKind as PhysicalDiskUuidKind;
@@ -129,9 +130,11 @@ impl From<PhysicalDiskAdoptionRequest>
     fn from(req: PhysicalDiskAdoptionRequest) -> Self {
         Self {
             id: req.id.into(),
-            vendor: req.vendor,
-            serial: req.serial,
-            model: req.model,
+            disk_id: PhysicalDiskManufacturerIdentity {
+                vendor: req.vendor,
+                serial: req.serial,
+                model: req.model,
+            },
             time_created: req.time_created,
         }
     }

@@ -6749,7 +6749,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<latest::physical_disk::Unadopted>>,
+        HttpResponseOk<ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>>,
         HttpError,
     >;
 

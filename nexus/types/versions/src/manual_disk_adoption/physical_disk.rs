@@ -14,7 +14,7 @@ use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
 
 /// A physical disk that has not yet been adopted by the control plane
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct Unadopted {
+pub struct UnadoptedPhysicalDisk {
     pub sled_id: SledUuid,
     pub slot: i64,
     pub variant: PhysicalDiskKind,
@@ -41,9 +41,7 @@ impl From<omicron_common::disk::DiskIdentity>
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PhysicalDiskAdoptionRequest {
     pub id: PhysicalDiskAdoptionRequestUuid,
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
+    pub disk_id: PhysicalDiskManufacturerIdentity,
     pub time_created: chrono::DateTime<chrono::Utc>,
 }
 

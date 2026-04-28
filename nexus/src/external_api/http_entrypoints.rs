@@ -58,7 +58,7 @@ use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
 use nexus_types::external_api::physical_disk::{
     PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskAdoptionRequestPath,
-    PhysicalDiskManufacturerIdentity, Unadopted,
+    PhysicalDiskManufacturerIdentity, UnadoptedPhysicalDisk,
 };
 use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::external_api::project::Project;
@@ -6708,7 +6708,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn physical_disk_list_unadopted(
         rqctx: RequestContext<ApiContext>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
-    ) -> Result<HttpResponseOk<ResultsPage<Unadopted>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<UnadoptedPhysicalDisk>>, HttpError>
+    {
         let apictx = rqctx.context();
         let pag_params = query.into_inner();
         if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
@@ -6726,7 +6727,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .physical_disk_list_unadopted(&opctx)
                 .await?
                 .into_iter()
-                .map(|d| Unadopted {
+                .map(|d| UnadoptedPhysicalDisk {
                     sled_id: d.sled_id.into(),
                     slot: d.slot,
                     variant: d.variant.into(),

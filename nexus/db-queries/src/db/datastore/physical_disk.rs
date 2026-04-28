@@ -708,14 +708,22 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         let now = Utc::now();
         use nexus_db_schema::schema::physical_disk_adoption_request::dsl;
-        diesel::update(dsl::physical_disk_adoption_request)
+        let rows_modified = diesel::update(dsl::physical_disk_adoption_request)
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if rows_modified != 1 {
+            return Err(Error::non_resourcetype_not_found(format!(
+                "No active adoption request found for id: {id}"
+            ))
+            .into());
+        }
+
+        Ok(())
     }
 
     // Delete an adoption request from the database when given a connection
@@ -1751,7 +1759,7 @@ mod test {
         let new = datastore
             .physical_disk_list_new_inventory_on_connection(
                 &conn,
-                CollectionUuid::new_v4(),
+                collection_id,
             )
             .await
             .expect("failed to list new disks");
@@ -1766,7 +1774,7 @@ mod test {
         let new = datastore
             .physical_disk_list_new_inventory_on_connection(
                 &conn,
-                CollectionUuid::new_v4(),
+                collection_id,
             )
             .await
             .expect("failed to list new disks");
@@ -1786,7 +1794,7 @@ mod test {
         let new = datastore
             .physical_disk_list_new_inventory_on_connection(
                 &conn,
-                CollectionUuid::new_v4(),
+                collection_id,
             )
             .await
             .expect("failed to list new disks");
