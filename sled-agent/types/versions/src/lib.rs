@@ -81,6 +81,8 @@ pub mod v33;
 pub mod v34;
 #[path = "modify_svc_enabled_not_online_state/mod.rs"]
 pub mod v37;
+#[path = "bootstore_service_nat_generation/mod.rs"]
+pub mod v38;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

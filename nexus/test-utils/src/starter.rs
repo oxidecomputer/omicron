@@ -923,7 +923,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
                 // TODO-correctness Can we fill this in for tests?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             },
             generation: 1,
         };
