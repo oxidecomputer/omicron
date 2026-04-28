@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "35.0.0"
+    "version": "36.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -3495,6 +3495,32 @@
           "readonly"
         ],
         "additionalProperties": false
+      },
+      "BlueprintExternalNetworkingConfig": {
+        "description": "External networking configuration controlled by Reconfigurator via blueprints.",
+        "type": "object",
+        "properties": {
+          "blueprint_external_networking_generation": {
+            "description": "The current generation number of the blueprint's external networking config.\n\nThis generation number is only bumped when a new blueprint is produced that changes the external networking configuration in some way.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "service_zone_nat_entries": {
+            "description": "Set of all Omicron service zone NAT entries.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceZoneNatEntries"
+              }
+            ]
+          }
+        },
+        "required": [
+          "blueprint_external_networking_generation",
+          "service_zone_nat_entries"
+        ]
       },
       "Board": {
         "description": "A VM's mainboard.",
@@ -9779,17 +9805,17 @@
         "description": "All configuration needed to set up system-level networking.",
         "type": "object",
         "properties": {
-          "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfig"
-          },
-          "service_zone_nat_entries": {
+          "blueprint_external_networking_config": {
             "nullable": true,
-            "description": "Set of all Omicron service zone NAT entries.",
+            "description": "External networking configuration specified by blueprints.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ServiceZoneNatEntries"
+                "$ref": "#/components/schemas/BlueprintExternalNetworkingConfig"
               }
             ]
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/RackNetworkConfig"
           }
         },
         "required": [
