@@ -7333,7 +7333,11 @@ dependencies = [
 name = "nexus-networking"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "futures",
+ "gateway-client",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "nexus-db-lookup",
  "nexus-db-queries",
