@@ -178,11 +178,11 @@ pub mod inventory {
     pub use crate::v34::inventory::SvcState;
     pub use crate::v34::inventory::SvcsError;
 
-    pub use crate::v36::inventory::Inventory;
-    pub use crate::v36::inventory::SvcEnabledNotOnline;
-    pub use crate::v36::inventory::SvcEnabledNotOnlineState;
-    pub use crate::v36::inventory::SvcsEnabledNotOnline;
-    pub use crate::v36::inventory::SvcsEnabledNotOnlineResult;
+    pub use crate::v37::inventory::Inventory;
+    pub use crate::v37::inventory::SvcEnabledNotOnline;
+    pub use crate::v37::inventory::SvcEnabledNotOnlineState;
+    pub use crate::v37::inventory::SvcsEnabledNotOnline;
+    pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
