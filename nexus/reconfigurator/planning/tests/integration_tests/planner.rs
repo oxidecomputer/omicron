@@ -5280,7 +5280,7 @@ impl UpdateDeploymentUnits {
                          api-manifest.toml, but a complete system update did \
                          not update deployment unit {:?}. This is surprising: \
                          is this a completely new kind of unit that isn't \
-                         either a zone kind or the host OS unit?",
+                         either a zone-based unit or the host OS unit?",
                         edge.consumer,
                     );
                 }
@@ -5293,7 +5293,7 @@ impl UpdateDeploymentUnits {
                          api-manifest.toml, but a complete system update did \
                          not update deployment unit {:?}. This is surprising: \
                          is this a completely new kind of unit that isn't \
-                         either a zone kind or the host OS unit?",
+                         either a zone-based unit or the host OS unit?",
                         edge.producer,
                     );
                 }
