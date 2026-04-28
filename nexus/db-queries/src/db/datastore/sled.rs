@@ -18,6 +18,7 @@ use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
+use crate::db::model::SqlU16;
 use crate::db::model::to_db_sled_policy;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
@@ -48,6 +49,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::DatasetUuid;
@@ -1615,6 +1617,45 @@ impl DataStore {
 
         Ok(old_state)
     }
+
+    pub async fn sled_try_to_find_slot(
+        &self,
+        opctx: &OpContext,
+        sled: &Sled,
+    ) -> LookupResult<SledLocation> {
+        use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+        use nexus_db_schema::schema::inv_service_processor::dsl as sp_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let slot = baseboard_dsl::hw_baseboard_id
+            .filter(
+                baseboard_dsl::serial_number
+                    .eq(sled.serial_number().to_owned()),
+            )
+            .filter(
+                baseboard_dsl::part_number.eq(sled.part_number().to_owned()),
+            )
+            .inner_join(
+                sp_dsl::inv_service_processor
+                    .on(sp_dsl::hw_baseboard_id.eq(baseboard_dsl::id)),
+            )
+            .select(sp_dsl::sp_slot)
+            .order_by(sp_dsl::time_collected.desc())
+            .first_async::<SqlU16>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .map(|slot| SledLocation::Slot(slot.into()))
+            .unwrap_or(SledLocation::Unknown);
+        Ok(slot)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SledLocation {
+    Unknown,
+    Slot(u16),
 }
 
 // ---

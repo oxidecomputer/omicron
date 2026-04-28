@@ -121,6 +121,10 @@ impl Sled {
         &self.serial_number
     }
 
+    pub fn revision(&self) -> u32 {
+        self.revision.into()
+    }
+
     pub fn part_number(&self) -> &str {
         &self.part_number
     }

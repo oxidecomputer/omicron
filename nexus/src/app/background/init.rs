@@ -790,6 +790,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 sagas.clone(),
                 producer_registry,
+                resolver.clone(),
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
             );
             driver.register(TaskDefinition {

@@ -8,6 +8,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::{FutureExt, future::BoxFuture};
+use gateway_client::types::PowerState;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Sled;
@@ -15,6 +16,7 @@ use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_networking::GatewayClient;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -45,6 +47,7 @@ use virtual_machine::VirtualMachine;
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    resolver: internal_dns_resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
     id: WatcherIdentity,
 }
@@ -74,18 +77,20 @@ impl InstanceWatcher {
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
         producer_registry: &ProducerRegistry,
+        resolver: internal_dns_resolver::Resolver,
         id: WatcherIdentity,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, sagas, metrics, id }
+        Self { datastore, sagas, metrics, id, resolver }
     }
 
     fn check_instance(
         &self,
         opctx: &OpContext,
+        gateways: &Arc<[GatewayClient]>,
         client: SledAgentClient,
         target: VirtualMachine,
         vmm: Vmm,
@@ -93,6 +98,7 @@ impl InstanceWatcher {
     ) -> impl Future<Output = Check> + Send + 'static + use<> {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
+        let gateways = gateways.clone();
 
         let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
         let opctx = {
@@ -103,6 +109,10 @@ impl InstanceWatcher {
             );
             meta.insert("vmm_id".to_string(), vmm_id.to_string());
             meta.insert("sled_id".to_string(), sled.id().to_string());
+            meta.insert(
+                "sled_serial".to_string(),
+                sled.serial_number().to_string(),
+            );
             opctx.child(meta)
         };
 
@@ -201,19 +211,61 @@ impl InstanceWatcher {
                     Err(SledAgentInstanceError(
                         ClientError::CommunicationError(e),
                     )) => {
-                        // TODO(eliza): eventually, we may want to transition the
-                        // instance to the `Failed` state if the sled-agent has been
-                        // unreachable for a while. We may also want to take other
-                        // corrective actions or alert an operator in this case.
-                        //
-                        // TODO(eliza): because we have the purported IP address
-                        // of the instance's VMM from our database query, we could
-                        // also ask the VMM directly when the sled-agent is
-                        // unreachable. We should start doing that here at some
-                        // point.
-                        slog::info!(opctx.log, "sled agent is unreachable"; InlineErrorChain::new(&e));
-                        check.result = Err(Incomplete::SledAgentUnreachable);
-                        return check;
+                        slog::info!(
+                            opctx.log,
+                            "sled-agent is unreachable";
+                            InlineErrorChain::new(&e),
+                        );
+
+                        // Is your computer running?
+                        match is_computer_on(
+                            &opctx, &datastore, &gateways, &sled,
+                        )
+                        .await
+                        {
+                            // ...better go catch it!
+                            Err(error) => {
+                                let error = InlineErrorChain::new(&*error);
+                                warn!(
+                                    opctx.log,
+                                    "sled-agent is unreachable, cannot \
+                                     determine if your computer is running";
+                                    error
+                                );
+                                check.result =
+                                    Err(Incomplete::SledAgentUnreachable);
+                                return check;
+                            }
+                            Ok(PowerState::A0) => {
+                                check.result =
+                                    Err(Incomplete::SledAgentUnreachable);
+                                return check;
+                            }
+                            Ok(state) => {
+                                slog::info!(
+                                    opctx.log,
+                                    "instance is assigned to a VMM on a sled \
+                                     that is not in A0, marking it as Failed";
+                                    "sled_power_state" => ?state,
+                                );
+                                check.outcome =
+                                    CheckOutcome::Failure(Failure::SledOff);
+                                // TODO(eliza): it would be nicer if this used the same
+                                // code path as `mark_instance_failed`...
+                                SledVmmState {
+                                    vmm_state: instance::VmmRuntimeState {
+                                        generation: vmm.generation.0.next(),
+                                        state: instance::VmmState::Failed,
+                                        time_updated: chrono::Utc::now(),
+                                    },
+                                    // It's fine to synthesize `None`s here because a `None`
+                                    // just means "don't update the migration state", not
+                                    // "there is no migration".
+                                    migration_in: None,
+                                    migration_out: None,
+                                }
+                            }
+                        }
                     }
                     Err(SledAgentInstanceError(e)) => {
                         slog::warn!(
@@ -278,6 +330,71 @@ impl InstanceWatcher {
             check
         }
     }
+}
+
+/// An implementation of the `is_computer_on()` function [originally defined
+/// in the BeOS C library][1].
+///
+/// [1]: https://web.archive.org/web/20260309055003/https://www.haiku-os.org/legacy-docs/bebook/TheKernelKit_SystemInfo.html
+async fn is_computer_on(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    gateways: &[GatewayClient],
+    sled: &Sled,
+) -> anyhow::Result<PowerState> {
+    use gateway_types::component::SpType;
+    use nexus_db_queries::db::datastore::sled::SledLocation;
+
+    let SledLocation::Slot(slot) =
+        datastore.sled_try_to_find_slot(opctx, sled).await?
+    else {
+        anyhow::bail!(
+            "could not determine sled location (it may not yet be in the \
+             inventory?)"
+        );
+    };
+
+    // Ask MGS whether the computer is on. If trying to talk to one of the
+    // gateways fails for whatever reason, ask any others we were able to
+    // resolve as well.
+    for GatewayClient { client, addr } in gateways {
+        let state = match client.sp_get(&SpType::Sled, slot).await {
+            Ok(response) => response.into_inner(),
+            Err(error) => {
+                let error = InlineErrorChain::new(&error);
+                slog::warn!(
+                    &opctx.log,
+                    "requesting sled SP status from MGS failed";
+                    "gateway_addr" => %addr,
+                    "error" => &error,
+                );
+                continue;
+            }
+        };
+
+        let part_number = sled.part_number();
+        let rev = sled.revision();
+        let sled_serial = sled.serial_number();
+        if state.serial_number != sled.serial_number() {
+            // Well, this is surprising; is our inventory stale? In any case, if
+            // we can't find the actual location of the sled, we can't determine
+            // whether or not it's turned on...
+            anyhow::bail!(
+                "expected sled {part_number}:{rev}:{sled_serial} to be in \
+                 slot {slot}, but found sled {}:{}:{} instead",
+                state.model,
+                state.revision,
+                state.serial_number,
+            );
+        }
+
+        return Ok(state.power_state);
+    }
+
+    Err(anyhow::anyhow!(
+        "no MGS could determine if the sled is on (asked {})",
+        gateways.len()
+    ))
 }
 
 /// The identity of the process performing the health check, for distinguishing
@@ -382,6 +499,10 @@ enum Failure {
     /// The instance was assigned to a sled that was expunged. Its VMM has been
     /// marked as `Failed`, since the sled is no longer present.
     SledExpunged,
+    /// The instance was assigned to a sled that is not currently in A0.
+    /// Its VMM has been marked as `Failed`, since the computer it's on is not,
+    /// you know...turned on.
+    SledOff,
 }
 
 impl Failure {
@@ -389,6 +510,7 @@ impl Failure {
         match self {
             Self::NoSuchInstance => "no_such_instance".into(),
             Self::SledExpunged => "sled_expunged".into(),
+            Self::SledOff => "sled_off".into(),
         }
     }
 }
@@ -402,8 +524,8 @@ enum Incomplete {
     /// The sled-agent for the sled on which the instance is running was
     /// unreachable.
     ///
-    /// This may indicate a network partition between us and that sled, that
-    /// the sled-agent process has crashed, or that the sled is down.
+    /// This may indicate a network partition between us and that sled, or that
+    /// the sled-agent process has crashed.
     SledAgentUnreachable,
     /// The sled-agent responded with an unexpected HTTP error.
     SledAgentHttpError(u16),
@@ -447,6 +569,26 @@ impl BackgroundTask for InstanceWatcher {
             let mut tasks = ParallelTaskSet::new_with_parallelism(
                 MAX_CONCURRENT_CHECKS,
             );
+
+            let gateways = match GatewayClient::resolve_all_gateways(&opctx.log, &self.resolver).await {
+                Ok(gateways) => gateways.collect::<Arc<[_]>>(),
+                Err(err) => {
+                    // This is a bit sad, but talking to MGS is only necessary
+                    // to check if a sled is powered on in the event that the
+                    // sled-agent is unreachable. If we don't see communication
+                    // errors talking to sled-agents, we can confirm that VMMs
+                    // are, or are not, healthy, even if we are unable to talk
+                    // to MGS.
+                    slog::warn!(
+                        opctx.log,
+                        "failed to resolve any management gateways; we will \
+                         not be checking if sleds are powered on, should \
+                         sled-agents be unreachable";
+                        "error" => InlineErrorChain::new(&*err),
+                    );
+                    Arc::new([])
+                },
+            };
 
             let mut update_sagas_queued: usize = 0;
             let mut instance_states: BTreeMap<String, usize> =
@@ -508,7 +650,7 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, client, target ,vmm ,sled)).await
+                    tasks.spawn(self.check_instance(opctx, &gateways, client, target, vmm, sled)).await
                 } else {
                     // If there are no remaining instances to check, wait for
                     // all previously spawned check to complete.
