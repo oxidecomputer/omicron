@@ -10,7 +10,7 @@ use slog::Logger;
 #[cfg(target_os = "illumos")]
 mod illumos {
     use fmd_adm::{FmdAdm, InvisibleResources, NvList, NvValue};
-    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid};
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
     use sled_agent_types::inventory::{
         FmdHostCase, FmdInventory, FmdInventoryResult, FmdResource,
     };
