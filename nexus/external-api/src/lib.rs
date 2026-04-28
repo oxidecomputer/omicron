@@ -81,6 +81,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_28_00, MANUAL_DISK_ADOPTION),
     (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
     (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),
     (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
@@ -6737,6 +6738,69 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
+
+    /// List physical disks that have not yet been adopted for use
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>,
+        >,
+        HttpError,
+    >;
+
+    /// List physical disk adoption requests
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disk-adoption-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        >,
+        HttpError,
+    >;
+
+    /// Enable adoption of a physical disk for general use
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/disk-adoption-request",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_enable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
+    ) -> Result<
+        HttpResponseCreated<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        HttpError,
+    >;
+
+    /// Disable adoption of a physical disk for general use
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::physical_disk::PhysicalDiskAdoptionRequestPath,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Switches
 

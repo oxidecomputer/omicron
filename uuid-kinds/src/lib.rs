@@ -71,6 +71,7 @@ impl_typed_uuid_kinds! {
         OmicronSledConfig = {},
         OmicronZone = {},
         PhysicalDisk = {},
+        PhysicalDiskAdoptionRequest = {},
         Probe = {},
         Propolis = {},
         Rack = {},
