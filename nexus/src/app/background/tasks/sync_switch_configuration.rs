@@ -2431,6 +2431,19 @@ fn does_bootstore_need_update(
     //   `desired_blueprint_networking_config` based on a stale blueprint.
     // * "Definitely yes" if our generation is not older than the current
     //   bootstore generation and there have been changes to the config.
+    // * "No information" if our NAT entries haven't changed, we fall through to
+    //   checking the rack network config below.
+    //
+    // If our generation exactly matches the bootstore generation, we expect
+    // that the NAT entries will also match. We don't explicitly check for this
+    // here. There's one case where we might encounter "same generation,
+    // different NAT entries" in practice: if the generation is exactly 1, we've
+    // just transitioned to a world where we're tracking this generation at all.
+    // It's possible the most-recently-written config in the bootstore was based
+    // on a stale blueprint, so we'd see a current blueprint with generation 1
+    // and different NAT entries. In this case we'll overwrite the bootstore
+    // with the correct generation 1 value; any subsequent config changes will
+    // bump us beyond generation 1.
     {
         let BlueprintExternalNetworkingConfig {
             blueprint_external_networking_generation: current_gen,
