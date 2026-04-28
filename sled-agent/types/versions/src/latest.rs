@@ -236,8 +236,10 @@ pub mod system_networking {
     pub use crate::v33::system_networking::ServiceZoneNatEntriesError;
     pub use crate::v33::system_networking::ServiceZoneNatEntry;
     pub use crate::v33::system_networking::ServiceZoneNatKind;
-    pub use crate::v33::system_networking::SystemNetworkingConfig;
-    pub use crate::v33::system_networking::WriteNetworkConfigRequest;
+
+    pub use crate::v36::system_networking::BlueprintExternalNetworkingConfig;
+    pub use crate::v36::system_networking::SystemNetworkingConfig;
+    pub use crate::v36::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

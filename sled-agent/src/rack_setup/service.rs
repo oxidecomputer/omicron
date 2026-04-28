@@ -121,8 +121,10 @@ use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
-use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_agent_types::system_networking::{
+    BlueprintExternalNetworkingConfig, ServiceZoneNatEntriesError,
+};
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -1318,7 +1320,7 @@ impl ServiceInner {
             // TODO-correctness could we wait to put this into the bootstore
             // until after the service plan is created, once we've finished
             // moving all system networking into scrimlet reconcilers?
-            service_zone_nat_entries: None,
+            blueprint_external_networking_config: None,
         };
         info!(self.log, "Writing initial network configuration to bootstore");
         rss_step.update(RssStep::InitialNetworkConfigUpdate);
@@ -1370,12 +1372,14 @@ impl ServiceInner {
             .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         // Now that we have a service plan (and therefore a blueprint), we can
-        // fill in the service_zone_nat_entries in the bootstore.
-        system_networking_config.service_zone_nat_entries = Some(
-            blueprint
-                .to_service_zone_nat_entries()
-                .map_err(SetupServiceError::InvalidServiceZoneNatEntries)?,
-        );
+        // fill in the `blueprint_external_networking_config` in the bootstore.
+        system_networking_config.blueprint_external_networking_config =
+            Some(BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: Generation::new(),
+                service_zone_nat_entries: blueprint
+                    .to_service_zone_nat_entries()
+                    .map_err(SetupServiceError::InvalidServiceZoneNatEntries)?,
+            });
         info!(
             self.log,
             "Writing final system networking configuration to bootstore",

@@ -154,7 +154,7 @@ impl SledAgent {
                 },
                 // TODO-correctness Can we fill this in for the simulated
                 // sled-agent?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );

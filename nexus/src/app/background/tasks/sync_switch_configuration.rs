@@ -52,7 +52,6 @@ use omicron_common::{
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
-use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
 use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
@@ -71,6 +70,10 @@ use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
+use sled_agent_types::{
+    early_networking::BfdPeerConfig,
+    system_networking::BlueprintExternalNetworkingConfig,
+};
 use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -1292,13 +1295,21 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let service_zone_nat_entries = match self
+                let (
+                    blueprint_external_networking_generation,
+                    service_zone_nat_entries,
+                ) = match self
                     .rx_blueprint
                     .borrow_and_update()
                     .clone()
-                    .map(|bp| bp.blueprint.to_service_zone_nat_entries())
+                    .map(|bp| bp.blueprint.to_service_zone_nat_entries().map(
+                        |entries| (
+                            bp.blueprint.external_networking_generation,
+                            entries,
+                        )
+                    ))
                 {
-                    Some(Ok(entries)) => entries,
+                    Some(Ok((generation, entries))) => (generation, entries),
                     Some(Err(err)) => {
                         error!(
                             log,
@@ -1314,7 +1325,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let desired_config = SystemNetworkingConfig {
+                // The construction here is slightly weird - we start with
+                // `blueprint_external_networking_config: None` and then
+                // immediately fill it in. This gives us a non-optional
+                // reference to the config we supplied, which we need below to
+                // call `does_bootstore_need_update()`.
+                let mut desired_config = SystemNetworkingConfig {
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: subnet,
                         infra_ip_first,
@@ -1323,8 +1339,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         bgp,
                         bfd,
                     },
-                    service_zone_nat_entries: Some(service_zone_nat_entries),
+                    blueprint_external_networking_config: None,
                 };
+                let desired_blueprint_networking_config = &*desired_config
+                    .blueprint_external_networking_config
+                    .insert(
+                        BlueprintExternalNetworkingConfig {
+                            blueprint_external_networking_generation,
+                            service_zone_nat_entries,
+                        },
+                    );
 
                 // bootstore_needs_update is a boolean value that determines
                 // whether or not we need to increment the bootstore version and
@@ -1353,37 +1377,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .and_then(|envelope| envelope.deserialize_body())
                         {
                             Ok(config) => {
-                                let SystemNetworkingConfig {
-                                    rack_network_config: current_rnc,
-                                    service_zone_nat_entries: current_nat,
-                                } = &config;
-                                let SystemNetworkingConfig {
-                                    rack_network_config: desired_rnc,
-                                    service_zone_nat_entries: desired_nat,
-                                } = &desired_config;
-
-                                let rnc_differs = {
-                                    !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
-                                    !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
-                                    !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
-                                    current_rnc.rack_subnet != desired_rnc.rack_subnet ||
-                                    current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
-                                    current_rnc.infra_ip_last != desired_rnc.infra_ip_last
-                                };
-
-                                let nat_differs = current_nat != desired_nat;
-
-                                if rnc_differs || nat_differs {
-                                    info!(
-                                        log,
-                                        "system network config has changed";
-                                        "old" => ?config,
-                                        "new" => ?desired_config,
-                                    );
-                                    true
-                                } else {
-                                    false
-                                }
+                                does_bootstore_need_update(
+                                    &config,
+                                    &desired_config.rack_network_config,
+                                    desired_blueprint_networking_config,
+                                    &log,
+                                )
                             },
                             Err(e) => {
                                 error!(
@@ -1536,12 +1535,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
     }
 }
 
-fn hashset_eq<T>(left: Vec<T>, right: Vec<T>) -> bool
+fn hashset_eq<T>(left: &[T], right: &[T]) -> bool
 where
     T: Hash + Eq,
 {
-    let left = left.into_iter().collect::<HashSet<T>>();
-    let right = right.into_iter().collect::<HashSet<T>>();
+    let left = left.iter().collect::<HashSet<&T>>();
+    let right = right.iter().collect::<HashSet<&T>>();
     left == right
 }
 
@@ -2401,5 +2400,383 @@ async fn add_static_routes(
                 "error" => format!("{:#}", e)
             );
         };
+    }
+}
+
+fn does_bootstore_need_update(
+    current_contents: &SystemNetworkingConfig,
+    desired_rack_network_config: &RackNetworkConfig,
+    desired_blueprint_networking_config: &BlueprintExternalNetworkingConfig,
+    log: &slog::Logger,
+) -> bool {
+    // If `current_contents` don't have a blueprint networking config at all, we
+    // definitely need to send an update.
+    let Some(current_blueprint_networking_config) =
+        current_contents.blueprint_external_networking_config.as_ref()
+    else {
+        info!(
+            log,
+            "will update bootstore: current contents has no blueprint config",
+        );
+        // TODO-correctness See the note below about not returning early here if
+        // the rack network config is stale, once we have a way to tell.
+        return true;
+    };
+
+    // Check whether we need to definitely or definitely not perform an update
+    // based on the blueprint configs:
+    //
+    // * "Definitely not" if our generation is older than the generation
+    //   currently in the bootstore; this indicates we've produced
+    //   `desired_blueprint_networking_config` based on a stale blueprint.
+    // * "Definitely yes" if our generation is not older than the current
+    //   bootstore generation and there have been changes to the config.
+    // * "No information" if our NAT entries haven't changed, we fall through to
+    //   checking the rack network config below.
+    //
+    // If our generation exactly matches the bootstore generation, we expect
+    // that the NAT entries will also match. We don't explicitly check for this
+    // here. There's one case where we might encounter "same generation,
+    // different NAT entries" in practice: if the generation is exactly 1, we've
+    // just transitioned to a world where we're tracking this generation at all.
+    // It's possible the most-recently-written config in the bootstore was based
+    // on a stale blueprint, so we'd see a current blueprint with generation 1
+    // and different NAT entries. In this case we'll overwrite the bootstore
+    // with the correct generation 1 value; any subsequent config changes will
+    // bump us beyond generation 1.
+    {
+        let BlueprintExternalNetworkingConfig {
+            blueprint_external_networking_generation: current_gen,
+            service_zone_nat_entries: current_nat,
+        } = current_blueprint_networking_config;
+
+        let BlueprintExternalNetworkingConfig {
+            blueprint_external_networking_generation: desired_gen,
+            service_zone_nat_entries: desired_nat,
+        } = desired_blueprint_networking_config;
+
+        // This check must be "strictly less than", not "<=". It's very possible
+        // the blueprint config has not changed (i.e., we'd expect equal
+        // generation numbers) but the rack network config (checked below) has.
+        // We only bail out here if we know we must not send this update.
+        if desired_gen < current_gen {
+            warn!(
+                log,
+                "skipping bootstore update due to stale blueprint";
+                "our-blueprint-gen" => desired_gen,
+                "bootstore-blueprint-gen" => current_gen,
+            );
+            return false;
+        }
+
+        // Our blueprint isn't stale - do we need an update for the NAT entries?
+        if current_nat != desired_nat {
+            info!(
+                log,
+                "will update bootstore: service NAT entries have changed";
+            );
+            // TODO-correctness See the note below about not returning early
+            // here if the rack network config is stale, once we have a way to
+            // tell.
+            return true;
+        }
+    }
+
+    // Check whether we need to perform an update based on the rack network
+    // configs.
+    //
+    // TODO-correctness This needs a similar generation guard as the blueprint
+    // checks above! As written, if the config is different, we always perform
+    // an update, even if the config is different because we have old data and
+    // are comparing against a bootstore written by another Nexus with fresher
+    // data. Once this is fixed, we'll also need to update the early `return
+    // true`s above; needing an update for the blueprint config shouldn't
+    // override our desire to avoid stomping on a newer rack network config.
+    {
+        let RackNetworkConfig {
+            rack_subnet: current_subnet,
+            infra_ip_first: current_infra_ip_first,
+            infra_ip_last: current_infra_ip_last,
+            ports: current_ports,
+            bgp: current_bgp,
+            bfd: current_bfd,
+        } = &current_contents.rack_network_config;
+
+        let RackNetworkConfig {
+            rack_subnet: desired_subnet,
+            infra_ip_first: desired_infra_ip_first,
+            infra_ip_last: desired_infra_ip_last,
+            ports: desired_ports,
+            bgp: desired_bgp,
+            bfd: desired_bfd,
+        } = desired_rack_network_config;
+
+        let rnc_differs = !hashset_eq(current_bgp, desired_bgp)
+            || !hashset_eq(current_bfd, desired_bfd)
+            || !hashset_eq(current_ports, desired_ports)
+            || current_subnet != desired_subnet
+            || current_infra_ip_first != desired_infra_ip_first
+            || current_infra_ip_last != desired_infra_ip_last;
+
+        if rnc_differs {
+            info!(
+                log,
+                "will update bootstore: rack network config has changed";
+                "old" => ?current_contents.rack_network_config,
+                "new" => ?desired_rack_network_config,
+            );
+        }
+
+        rnc_differs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iddqd::IdOrdMap;
+    use omicron_common::api::external::Generation;
+    use omicron_common::api::external::Vni;
+    use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
+    use sled_agent_types::system_networking::ServiceZoneNatEntries;
+    use sled_agent_types::system_networking::ServiceZoneNatEntry;
+    use sled_agent_types::system_networking::ServiceZoneNatKind;
+
+    fn make_rack_network_config(rack_subnet: &str) -> RackNetworkConfig {
+        RackNetworkConfig {
+            rack_subnet: rack_subnet.parse().unwrap(),
+            infra_ip_first: "172.20.15.21".parse().unwrap(),
+            infra_ip_last: "172.20.15.22".parse().unwrap(),
+            ports: vec![],
+            bgp: vec![],
+            bfd: vec![],
+        }
+    }
+
+    fn make_nat_entries(nexus_external_ip: &str) -> ServiceZoneNatEntries {
+        ServiceZoneNatEntries::try_from(
+            [
+                ServiceZoneNatEntry {
+                    zone_id: "00000000-0000-0000-0000-000000000001"
+                        .parse()
+                        .unwrap(),
+                    sled_underlay_ip: "fd00:1122:3344:101::1".parse().unwrap(),
+                    nic_mac: "A8:40:25:FF:80:00".parse().unwrap(),
+                    vni: Vni::SERVICES_VNI,
+                    kind: ServiceZoneNatKind::BoundaryNtp {
+                        snat_cfg: SourceNatConfigGeneric::new(
+                            "172.20.26.1".parse().unwrap(),
+                            0,
+                            16383,
+                        )
+                        .expect("valid snat cfg"),
+                    },
+                },
+                ServiceZoneNatEntry {
+                    zone_id: "00000000-0000-0000-0000-000000000002"
+                        .parse()
+                        .unwrap(),
+                    sled_underlay_ip: "fd00:1122:3344:102::1".parse().unwrap(),
+                    nic_mac: "A8:40:25:FF:80:01".parse().unwrap(),
+                    vni: Vni::SERVICES_VNI,
+                    kind: ServiceZoneNatKind::ExternalDns {
+                        external_ip: "172.20.26.2".parse().unwrap(),
+                    },
+                },
+                ServiceZoneNatEntry {
+                    zone_id: "00000000-0000-0000-0000-000000000003"
+                        .parse()
+                        .unwrap(),
+                    sled_underlay_ip: "fd00:1122:3344:103::1".parse().unwrap(),
+                    nic_mac: "A8:40:25:FF:80:02".parse().unwrap(),
+                    vni: Vni::SERVICES_VNI,
+                    kind: ServiceZoneNatKind::Nexus {
+                        external_ip: nexus_external_ip.parse().unwrap(),
+                    },
+                },
+            ]
+            .into_iter()
+            .collect::<IdOrdMap<_>>(),
+        )
+        .expect("valid service zone NAT entries")
+    }
+
+    fn make_blueprint_config(
+        generation: u32,
+        service_zone_nat_entries: ServiceZoneNatEntries,
+    ) -> BlueprintExternalNetworkingConfig {
+        BlueprintExternalNetworkingConfig {
+            blueprint_external_networking_generation: Generation::from_u32(
+                generation,
+            ),
+            service_zone_nat_entries,
+        }
+    }
+
+    fn make_system_networking_config(
+        rnc: RackNetworkConfig,
+        blueprint: Option<BlueprintExternalNetworkingConfig>,
+    ) -> SystemNetworkingConfig {
+        SystemNetworkingConfig {
+            rack_network_config: rnc,
+            blueprint_external_networking_config: blueprint,
+        }
+    }
+
+    #[test]
+    fn bootstore_update_when_current_has_no_blueprint_config() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_current_has_no_blueprint_config",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(rnc.clone(), None);
+        let desired_blueprint =
+            make_blueprint_config(1, make_nat_entries("172.20.26.3"));
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_no_update_when_desired_blueprint_is_strictly_older() {
+        let logctx = test_setup_log(
+            "bootstore_no_update_when_desired_blueprint_is_strictly_older",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(make_blueprint_config(5, make_nat_entries("172.20.26.3"))),
+        );
+
+        // Intentionally use different NAT entries here; confirm that we do not
+        // report needing an update because the generation here (2) is stale
+        // (current is 5).
+        let desired_blueprint =
+            make_blueprint_config(2, make_nat_entries("172.20.26.4"));
+
+        assert!(!does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_update_when_desired_blueprint_is_newer_and_nat_differs() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_desired_blueprint_is_newer_and_nat_differs",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(make_blueprint_config(2, make_nat_entries("172.20.26.3"))),
+        );
+        let desired_blueprint =
+            make_blueprint_config(5, make_nat_entries("172.20.26.4"));
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    // Pins the "just-transitioned to tracking generation" case explicitly
+    // noted in the comment inside `does_bootstore_need_update()`: at gen=1,
+    // the bootstore may have been written with stale NAT entries by a Nexus
+    // that pre-dates this generation field. Equal gens with different NATs
+    // must still trigger an update so the correct gen=1 value gets written.
+    //
+    // With the current implementation the test would still pass with any
+    // generation (1 isn't special), but we only need to test that we handle
+    // this case for generation 1. We never expect a blueprint to have different
+    // NAT entries without bumping the associated generation number.
+    #[test]
+    fn bootstore_update_when_blueprints_equal_and_nat_differs_at_gen_1() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_blueprints_equal_and_nat_differs_at_gen_1",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(make_blueprint_config(1, make_nat_entries("172.20.26.3"))),
+        );
+        let desired_blueprint =
+            make_blueprint_config(1, make_nat_entries("172.20.26.4"));
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_update_when_nat_matches_but_rnc_differs() {
+        let logctx =
+            test_setup_log("bootstore_update_when_nat_matches_but_rnc_differs");
+
+        let nat = make_nat_entries("172.20.26.3");
+        let current_rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let desired_rnc = make_rack_network_config("fd00:1122:3344:200::/56");
+        let desired_blueprint = make_blueprint_config(3, nat);
+
+        let current = make_system_networking_config(
+            current_rnc,
+            Some(desired_blueprint.clone()),
+        );
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &desired_rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_no_update_when_everything_matches() {
+        let logctx =
+            test_setup_log("bootstore_no_update_when_everything_matches");
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let nat = make_nat_entries("172.20.26.3");
+        let desired_blueprint = make_blueprint_config(3, nat);
+
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(desired_blueprint.clone()),
+        );
+
+        assert!(!does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
     }
 }
