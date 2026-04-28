@@ -77,6 +77,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -559,7 +560,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .clone(),
         };
 
-        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let dropbox = Arc::new(DebugDropbox::for_tests_noop(log));
+        let nexus_internal =
+            N::start_internal(&self.config, &log, dropbox).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
         let internal_address = match nexus_internal_addr {

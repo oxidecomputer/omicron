@@ -41,6 +41,7 @@ nexus-test-interface.workspace = true
 nexus-types.workspace = true
 omicron-cockroach-admin.workspace = true
 omicron-common.workspace = true
+omicron-debug-dropbox.workspace = true
 omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true

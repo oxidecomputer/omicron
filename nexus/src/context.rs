@@ -21,6 +21,7 @@ use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -67,8 +68,9 @@ impl ApiContext {
         rack_id: Uuid,
         log: Logger,
         config: &NexusConfig,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<Self, String> {
-        ServerContext::new(rack_id, log, config)
+        ServerContext::new(rack_id, log, config, debug_dropbox)
             .await
             .map(|context| Self { kind: ServerKind::Internal, context })
     }
@@ -133,6 +135,7 @@ impl ServerContext {
         rack_id: Uuid,
         log: Logger,
         config: &NexusConfig,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
             .pkg
@@ -304,6 +307,7 @@ impl ServerContext {
             &producer_registry,
             config,
             Arc::clone(&authz),
+            debug_dropbox,
         )
         .await
         {
