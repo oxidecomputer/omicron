@@ -821,7 +821,7 @@ impl SpPoller {
                             MeasurementKind::Pwm => "pwm",
                             MeasurementKind::InputPower => "input_power",
                             MeasurementKind::OutputEnergy => "output_energy",
-                            MeasurementKind::InputEnergy => "input_inergy",
+                            MeasurementKind::InputEnergy => "input_energy",
                         };
                         let error = match error {
                             MeasurementError::InvalidSensor => "invalid_sensor",

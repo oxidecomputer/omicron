@@ -232,6 +232,7 @@ impl GatewayApi for GatewayImpl {
                                      API type (yet)";
                                     "sp_type" => ?sp_id.typ,
                                     "sp_slot" => sp_id.slot,
+                                    "component" => %component,
                                     InlineErrorChain::new(&err)
                                 );
                                 None
