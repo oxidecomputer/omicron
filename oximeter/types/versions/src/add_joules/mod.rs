@@ -2,11 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Functional code for the latest versions of types.
+//! Version `ADD_JOULES` of the Oximeter API.
+//!
+//! This only affects the Nexus external API, not Oximeter itself.
 
-pub(crate) mod histogram;
-mod producer;
-pub(crate) mod quantile;
-pub(crate) mod schema;
-pub(crate) mod traits;
-pub(crate) mod types;
+pub mod schema;
