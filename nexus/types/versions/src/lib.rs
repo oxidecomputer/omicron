@@ -79,3 +79,5 @@ pub mod v2026_03_23_00;
 pub mod v2026_03_25_00;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
 pub mod v2026_04_16_00;
+#[path = "tuf_repo_optional_metadata/mod.rs"]
+pub mod v2026_04_17_00;

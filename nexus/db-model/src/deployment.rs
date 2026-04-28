@@ -10,7 +10,7 @@ use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode, Generation,
-    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
+    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifactFile,
     impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -872,7 +872,7 @@ impl BpOmicronZone {
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> anyhow::Result<BlueprintZoneConfig> {
         // Build up a set of common fields for our `BlueprintZoneType`s
         //
@@ -1183,7 +1183,7 @@ impl DbBpZoneImageSourceColumns {
     fn new(
         image_source: DbBpZoneImageSource,
         image_artifact_sha256: Option<ArtifactHash>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> Self {
         // Note that artifact_row can only be Some if image_artifact_sha256 is
         // Some.
@@ -1269,7 +1269,7 @@ impl BpSingleMeasurement {
 
     pub fn to_measurement(
         self,
-        artifact: Option<TufArtifact>,
+        artifact: Option<TufArtifactFile>,
     ) -> BlueprintSingleMeasurement {
         BlueprintSingleMeasurement {
             version: match artifact {

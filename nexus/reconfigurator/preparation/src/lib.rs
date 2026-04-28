@@ -203,7 +203,7 @@ impl PlanningInputFromDb<'_> {
                     .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
                     .internal_context("fetching target release repo")?
-                    .into_external(),
+                    .into(),
             ),
         };
         let tuf_repo = TufRepoPolicy {
@@ -231,7 +231,7 @@ impl PlanningInputFromDb<'_> {
                             .internal_context(
                                 "fetching previous target release repo",
                             )?
-                            .into_external(),
+                            .into(),
                     )
                 } else {
                     TargetReleaseDescription::Initial
