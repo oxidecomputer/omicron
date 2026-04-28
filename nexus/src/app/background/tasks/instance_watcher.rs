@@ -20,6 +20,7 @@ use nexus_networking::GatewayClient;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::inventory;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::GenericUuid;
@@ -31,6 +32,7 @@ use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
 use sled_agent_types::instance;
 use sled_agent_types::instance::SledVmmState;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -38,6 +40,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 oximeter::use_timeseries!("vm-health-check.toml");
@@ -49,6 +52,7 @@ pub(crate) struct InstanceWatcher {
     sagas: Arc<dyn StartSaga>,
     resolver: internal_dns_resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
+    inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
     id: WatcherIdentity,
 }
 
@@ -78,13 +82,14 @@ impl InstanceWatcher {
         sagas: Arc<dyn StartSaga>,
         producer_registry: &ProducerRegistry,
         resolver: internal_dns_resolver::Resolver,
+        inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         id: WatcherIdentity,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, sagas, metrics, id, resolver }
+        Self { datastore, sagas, metrics, id, resolver, inv_rx }
     }
 
     fn check_instance(
@@ -99,6 +104,7 @@ impl InstanceWatcher {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
         let gateways = gateways.clone();
+        let inv_rx = self.inv_rx.clone();
 
         let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
         let opctx = {
@@ -129,7 +135,7 @@ impl InstanceWatcher {
             };
 
             let Some(state) = check
-                .run(&opctx, &datastore, &sled, &vmm, &gateways, &client)
+                .run(&opctx, inv_rx, &sled, &vmm, &gateways, &client)
                 .await
             else {
                 // Check did not result in an updated state, nothing else to
@@ -190,7 +196,7 @@ impl Check {
     async fn run(
         &mut self,
         opctx: &OpContext,
-        datastore: &DataStore,
+        inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         sled: &Sled,
         vmm: &Vmm,
         gateways: &[GatewayClient],
@@ -272,8 +278,7 @@ impl Check {
                 );
 
                 // Is your computer running?
-                match is_computer_on(&opctx, &datastore, &gateways, &sled).await
-                {
+                match is_computer_on(&opctx, &inv_rx, &gateways, &sled).await {
                     // ...impossible to tell! Results are inconclusive.
                     Err(error) => {
                         let error = InlineErrorChain::new(&*error);
@@ -324,19 +329,31 @@ impl Check {
 /// [1]: https://web.archive.org/web/20260309055003/https://www.haiku-os.org/legacy-docs/bebook/TheKernelKit_SystemInfo.html
 async fn is_computer_on(
     opctx: &OpContext,
-    datastore: &DataStore,
+    inv_rx: &watch::Receiver<Option<Arc<inventory::Collection>>>,
     gateways: &[GatewayClient],
     sled: &Sled,
 ) -> anyhow::Result<PowerState> {
-    use gateway_types::component::SpType;
-    use nexus_db_queries::db::datastore::sled::SledLocation;
-
-    let SledLocation::Slot(slot) =
-        datastore.sled_try_to_find_slot(opctx, sled).await?
-    else {
+    let Some(inv) = inv_rx.borrow().clone() else {
         anyhow::bail!(
-            "could not determine sled location (it may not yet be in the \
-             inventory?)"
+            "cannot find sled to ask if it's turned on, since there is no \
+             inventory collection yet"
+        );
+    };
+
+    let part_number = sled.part_number();
+    let rev = sled.revision();
+    let serial_number = sled.serial_number();
+
+    // TODO(eliza): this sucks, i would rather not have to memcpy the strings
+    // here...this would be nicer if we iterated over sled-agents from the
+    // inventory in the main loop. change that!
+    let bb = BaseboardId {
+        part_number: part_number.to_owned(),
+        serial_number: serial_number.to_owned(),
+    };
+    let Some(sp) = inv.sps.get(&bb) else {
+        anyhow::bail!(
+            "SP for sled {part_number}:{rev}:{serial_number} is not in the inventory"
         );
     };
 
@@ -344,7 +361,7 @@ async fn is_computer_on(
     // gateways fails for whatever reason, ask any others we were able to
     // resolve as well.
     for GatewayClient { client, addr } in gateways {
-        let state = match client.sp_get(&SpType::Sled, slot).await {
+        let state = match client.sp_get(&sp.sp_type, sp.sp_slot).await {
             Ok(response) => response.into_inner(),
             Err(error) => {
                 let error = InlineErrorChain::new(&error);
@@ -358,16 +375,14 @@ async fn is_computer_on(
             }
         };
 
-        let part_number = sled.part_number();
-        let rev = sled.revision();
-        let sled_serial = sled.serial_number();
         if state.serial_number != sled.serial_number() {
             // Well, this is surprising; is our inventory stale? In any case, if
             // we can't find the actual location of the sled, we can't determine
             // whether or not it's turned on...
             anyhow::bail!(
-                "expected sled {part_number}:{rev}:{sled_serial} to be in \
-                 slot {slot}, but found sled {}:{}:{} instead",
+                "expected sled {part_number}:{rev}:{serial_number} to be in \
+                 slot {}, but found sled {}:{}:{} instead",
+                sp.sp_slot,
                 state.model,
                 state.revision,
                 state.serial_number,

@@ -791,6 +791,7 @@ impl BackgroundTasksInitializer {
                 sagas.clone(),
                 producer_registry,
                 resolver.clone(),
+                inventory_load_watcher.clone(),
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
             );
             driver.register(TaskDefinition {
