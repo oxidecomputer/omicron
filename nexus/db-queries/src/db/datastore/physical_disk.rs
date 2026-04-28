@@ -124,7 +124,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         disk_id: PhysicalDiskManufacturerIdentity,
-    ) -> Result<(), Error> {
+    ) -> Result<PhysicalDiskAdoptionRequest, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
@@ -167,7 +167,7 @@ impl DataStore {
                     }
 
                     // Insert the adoption request.
-                    diesel::insert_into(
+                    let request = diesel::insert_into(
                         adoption_dsl::physical_disk_adoption_request,
                     )
                     .values((
@@ -177,31 +177,34 @@ impl DataStore {
                         adoption_dsl::model.eq(model),
                         adoption_dsl::time_created.eq(Utc::now()),
                     ))
-                    .execute_async(&conn)
+                    .returning(PhysicalDiskAdoptionRequest::as_returning())
+                    .get_result_async(&conn)
                     .await?;
 
-                    Ok(())
+                    Ok(request)
                 }
             })
             .await;
 
-        // Check for a unique index violation for an active
-        // adoption request with the same vendor/serial/model.
-        //
-        // Return Ok(()) in this case as the request is idempotent.
-        if let Err(e) = txn_res {
-            match err.take() {
+        match txn_res {
+            Ok(request) => return Ok(request),
+            Err(e) => match err.take() {
                 // A called function performed its own error propagation.
                 Some(txn_error) => {
                     return Err(txn_error.into_public_ignore_retries());
                 }
                 // The transaction setup/teardown itself encountered a diesel error.
                 None => match e {
+                    // Check for a unique index violation for an active
+                    // adoption request with the same vendor/serial/model.
+                    //
+                    // Return the existing request in this case as the
+                    // request is idempotent.
                     DieselError::DatabaseError(
                         DieselErrorKind::UniqueViolation,
                         _,
                     ) => {
-                        return Ok(());
+                        // Fall through to query the existing request below.
                     }
                     _ => {
                         return Err(public_error_from_diesel(
@@ -210,10 +213,22 @@ impl DataStore {
                         ));
                     }
                 },
-            }
+            },
         }
 
-        Ok(())
+        // Idempotent case: an adoption request already exists for this disk.
+        // Query it back and return it.
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let request = adoption_dsl::physical_disk_adoption_request
+            .filter(adoption_dsl::vendor.eq(disk_id.vendor))
+            .filter(adoption_dsl::serial.eq(disk_id.serial))
+            .filter(adoption_dsl::model.eq(disk_id.model))
+            .filter(adoption_dsl::time_deleted.is_null())
+            .select(PhysicalDiskAdoptionRequest::as_select())
+            .first_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(request)
     }
 
     /// Stores a new physical disk in the database.

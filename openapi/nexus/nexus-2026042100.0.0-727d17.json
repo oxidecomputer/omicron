@@ -7713,8 +7713,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskAdoptionRequest"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7949,7 +7956,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnadoptedResultsPage"
+                  "$ref": "#/components/schemas/UnadoptedPhysicalDiskResultsPage"
                 }
               }
             }
@@ -25346,29 +25353,21 @@
         "description": "A request to adopt a physical disk into the control plane",
         "type": "object",
         "properties": {
+          "disk_id": {
+            "$ref": "#/components/schemas/PhysicalDiskManufacturerIdentity"
+          },
           "id": {
             "$ref": "#/components/schemas/PhysicalDiskAdoptionRequestUuid"
-          },
-          "model": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "string"
           },
           "time_created": {
             "type": "string",
             "format": "date-time"
-          },
-          "vendor": {
-            "type": "string"
           }
         },
         "required": [
+          "disk_id",
           "id",
-          "model",
-          "serial",
-          "time_created",
-          "vendor"
+          "time_created"
         ]
       },
       "PhysicalDiskAdoptionRequestResultsPage": {
@@ -29963,7 +29962,7 @@
           }
         }
       },
-      "Unadopted": {
+      "UnadoptedPhysicalDisk": {
         "description": "A physical disk that has not yet been adopted by the control plane",
         "type": "object",
         "properties": {
@@ -29988,7 +29987,7 @@
           "variant"
         ]
       },
-      "UnadoptedResultsPage": {
+      "UnadoptedPhysicalDiskResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -29996,7 +29995,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Unadopted"
+              "$ref": "#/components/schemas/UnadoptedPhysicalDisk"
             }
           },
           "next_page": {

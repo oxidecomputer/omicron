@@ -6749,7 +6749,9 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>>,
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>,
+        >,
         HttpError,
     >;
 
@@ -6780,7 +6782,10 @@ pub trait NexusExternalApi {
     async fn physical_disk_enable_adoption(
         rqctx: RequestContext<Self::Context>,
         req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        HttpError,
+    >;
 
     /// Disable adoption of a physical disk for general use
     #[endpoint {

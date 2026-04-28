@@ -203,6 +203,17 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 return json!({ "error": "no inventory" });
             };
 
+            // We only force manual re-adoption of expunged disks currently.
+            // In the future we wish to enable manual adoption of all disks
+            // for security reasons. Doing this now would be a somewhat large
+            // undertaking and unergonomic if done naively. The naive approach
+            // would require users to have to issue adoption requests for up to
+            // 10 disks when they add a new sled to a rack.
+            //
+            // However, we also don't want to bifurcate the code paths that
+            // check to see if adoption is enabled. Therefore in the case of
+            // new disks we automatically fill in an adoption request as if an
+            // operator had done so manually via the external API.
             if let Err(err) = self
                 .datastore
                 .physical_disk_enable_adoption_for_all_new_disks_in_inventory(

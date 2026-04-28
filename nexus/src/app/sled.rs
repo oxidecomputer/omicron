@@ -312,8 +312,15 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         disk_id: nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity,
-    ) -> Result<(), Error> {
-        self.db_datastore.physical_disk_enable_adoption(opctx, disk_id).await
+    ) -> Result<
+        nexus_types::external_api::physical_disk::PhysicalDiskAdoptionRequest,
+        Error,
+    > {
+        let request = self
+            .db_datastore
+            .physical_disk_enable_adoption(opctx, disk_id)
+            .await?;
+        Ok(request.into())
     }
 
     pub(crate) async fn physical_disk_disable_adoption(

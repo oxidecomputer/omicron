@@ -6787,12 +6787,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn physical_disk_enable_adoption(
         rqctx: RequestContext<Self::Context>,
         req: TypedBody<PhysicalDiskManufacturerIdentity>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseCreated<PhysicalDiskAdoptionRequest>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
-            nexus
+            let request = nexus
                 .physical_disk_enable_adoption(&opctx, req.into_inner())
                 .await?;
-            Ok(HttpResponseUpdatedNoContent())
+            Ok(HttpResponseCreated(request))
         })
         .await
     }
