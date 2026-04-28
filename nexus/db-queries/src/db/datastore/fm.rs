@@ -558,6 +558,7 @@ impl DataStore {
                     id: req_id,
                     requested_sitrep_id: sb_req.requested_sitrep_id.into(),
                     data_selection,
+                    comment: sb_req.comment,
                 })
                 .expect("req_id is unique in requests_by_id");
         }
@@ -1779,6 +1780,7 @@ mod tests {
                 comment: "TEST SITREP PLEASE IGNORE".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1829,6 +1831,7 @@ mod tests {
                 comment: "TEST SITREP 1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1844,6 +1847,7 @@ mod tests {
                 comment: "TEST SITREP 2".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1886,6 +1890,7 @@ mod tests {
                 comment: "TEST SITREP 1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1902,6 +1907,7 @@ mod tests {
                 comment: "TEST SITREP WITH BAD PARENT".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1938,6 +1944,7 @@ mod tests {
                 comment: "TEST SITREP 1".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1953,6 +1960,7 @@ mod tests {
                 comment: "TEST SITREP 2".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1969,6 +1977,7 @@ mod tests {
                 comment: "TEST SITREP 3 WITH OUTDATED PARENT".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2181,6 +2190,7 @@ mod tests {
                     class: AlertClass::TestFoo,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
             alerts_requested
@@ -2189,6 +2199,7 @@ mod tests {
                     class: AlertClass::TestFooBar,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
 
@@ -2197,8 +2208,8 @@ mod tests {
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),
                     requested_sitrep_id: sitrep_id,
-
                     data_selection: BundleDataSelection::all(),
+                    comment: String::new(),
                 })
                 .unwrap();
             // A request with a nontrivial data_selection, including
@@ -2224,8 +2235,8 @@ mod tests {
                     .insert_unique(fm::case::SupportBundleRequest {
                         id: SupportBundleUuid::new_v4(),
                         requested_sitrep_id: sitrep_id,
-
                         data_selection: sel,
+                        comment: String::new(),
                     })
                     .unwrap();
             }
@@ -2262,6 +2273,7 @@ mod tests {
                     class: AlertClass::TestQuuxBar,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
+                    comment: String::new(),
                 })
                 .unwrap();
 
@@ -2296,6 +2308,7 @@ mod tests {
                     .to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases,
             ereports_by_id,
@@ -2348,8 +2361,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: SupportBundleUuid::new_v4(),
                 requested_sitrep_id: sitrep_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
         // A request with HostInfo(Specific) and Ereports with time-range
@@ -2376,8 +2389,8 @@ mod tests {
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),
                     requested_sitrep_id: sitrep_id,
-
                     data_selection: sel,
+                    comment: String::new(),
                 })
                 .unwrap();
         }
@@ -2405,6 +2418,7 @@ mod tests {
                 comment: "sitrep with support bundle requests".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -2456,6 +2470,7 @@ mod tests {
                         creator_id: OmicronZoneUuid::new_v4(),
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
+                        next_inv_min_time_started: Utc::now(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -2612,6 +2627,7 @@ mod tests {
                         creator_id: OmicronZoneUuid::new_v4(),
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
+                        next_inv_min_time_started: Utc::now(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -2745,6 +2761,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2784,6 +2801,7 @@ mod tests {
                 case_id: ghost_case_id.into(),
                 class: AlertClass::Probe.into(),
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .execute_async(&*conn)
             .await
@@ -2804,6 +2822,7 @@ mod tests {
                 sitrep_id: ghost_sitrep_id.into(),
                 requested_sitrep_id: ghost_sitrep_id.into(),
                 case_id: ghost_case_id.into(),
+                comment: String::new(),
             })
             .execute_async(&*conn)
             .await
@@ -2979,6 +2998,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3105,6 +3125,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3399,6 +3420,7 @@ mod tests {
                         creator_id: OmicronZoneUuid::new_v4(),
                         comment: "child sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
+                        next_inv_min_time_started: Utc::now(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),

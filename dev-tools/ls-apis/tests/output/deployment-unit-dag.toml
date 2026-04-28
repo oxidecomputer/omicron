@@ -2,6 +2,8 @@
 # To regenerate, run `EXPECTORATE=overwrite cargo nextest run -p omicron-ls-apis`.
 # YOU SHOULD STILL REVIEW CHANGES TO THIS FILE FOR CORRECTNESS.
 
+units_without_server_side_apis = ["NTP"]
+
 [[edges]]
 consumer = "Installinator"
 producer = "Host OS"

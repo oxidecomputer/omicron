@@ -40,6 +40,9 @@ fn test_api_check() {
     expectorate::assert_contents("tests/api_check.out", &stdout_text);
 }
 
+/// Verifies that the file with the list of deployment unit DAG edges is
+/// up-to-date. This file is used by other tests to validate the deployment
+/// sequence.
 #[test]
 fn test_deployment_unit_dag_edges() {
     let cmd_path = path_to_executable(CMD_LS_APIS);

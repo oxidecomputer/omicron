@@ -403,6 +403,8 @@ enum DbCommands {
     Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
+    /// Show instances grouped by the sled they are running on
+    SledInstances(SledInstancesArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
     /// Alias to `omdb instance list`.
@@ -734,6 +736,72 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct SledInstancesArgs {
+    /// Filter by sled number(s). Comma-separated, ranges allowed
+    /// (e.g. "0,3,14-16")
+    #[clap(long = "sled")]
+    sled_numbers: Option<SledNumbers>,
+
+    /// Filter by sled serial number(s). Comma-separated
+    /// (e.g. "BRM44220010,BRM44220022")
+    #[clap(long = "serial", use_value_delimiter = true)]
+    serials: Option<Vec<String>>,
+
+    /// Filter by sled UUID(s). Comma-separated
+    #[clap(long = "sled-id", use_value_delimiter = true)]
+    sled_ids: Option<Vec<SledUuid>>,
+}
+
+/// A comma-separated list of sled numbers with range support
+/// (e.g. "0,3,14-16" -> [0, 3, 14, 15, 16]).
+#[derive(Debug, Clone)]
+struct SledNumbers(Vec<u16>);
+
+const MAX_SLED_NUMBER: u16 = 31;
+
+impl FromStr for SledNumbers {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut result = Vec::new();
+        for part in s.split(',') {
+            let part = part.trim();
+            if let Some((start, end)) = part.split_once('-') {
+                let start: u16 = start.trim().parse().map_err(|e| {
+                    format!("invalid sled number '{start}': {e}")
+                })?;
+                let end: u16 = end
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("invalid sled number '{end}': {e}"))?;
+                if end < start {
+                    return Err(format!("invalid range '{part}': end < start"));
+                }
+                if end > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {end} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
+                result.extend(start..=end);
+            } else {
+                let n: u16 = part.parse().map_err(|e| {
+                    format!("invalid sled number '{part}': {e}")
+                })?;
+                if n > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {n} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
+                result.push(n);
+            }
+        }
+        Ok(SledNumbers(result))
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1376,6 +1444,14 @@ impl DbArgs {
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::SledInstances(args) => {
+                        cmd_db_sled_instances(
+                            &opctx,
+                            &datastore,
+                            args,
+                        )
+                        .await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
@@ -4620,6 +4696,171 @@ async fn cmd_db_sleds(
     Ok(())
 }
 
+/// Run `omdb db sled-instances`: show instances grouped by sled.
+async fn cmd_db_sled_instances(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &SledInstancesArgs,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_schema::schema::instance::dsl;
+    use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+    // Step 1: Fetch the latest inventory collection to get
+    // sled -> (MGS slot, serial) mappings.
+    let collection =
+        CollectionIdOrLatest::Latest.to_collection(opctx, datastore).await?;
+
+    // Build a map: sled_id -> (sp_slot, serial). We only care
+    // about SpType::Sled SPs since instances only run on sleds.
+    struct SledInfo {
+        sp_slot: Option<u16>,
+        serial: String,
+    }
+
+    impl SledInfo {
+        fn slot_label(&self) -> String {
+            match self.sp_slot {
+                Some(sp_slot) => format!("Sled {}", sp_slot),
+                None => "Sled ???".to_string(),
+            }
+        }
+    }
+
+    let mut sled_info: BTreeMap<SledUuid, SledInfo> = BTreeMap::new();
+
+    for sled_agent in &collection.sled_agents {
+        let info = match &sled_agent.baseboard_id {
+            Some(baseboard_id) => {
+                let serial = baseboard_id.serial_number.clone();
+                match collection.sps.get(baseboard_id) {
+                    Some(sp)
+                        if sp.sp_type
+                            == nexus_types::inventory::SpType::Sled =>
+                    {
+                        SledInfo { sp_slot: Some(sp.sp_slot), serial }
+                    }
+                    Some(_) => continue, // not a sled, skip
+                    None => {
+                        eprintln!(
+                            "WARN: no SP found for baseboard \
+                                 {} (sled {})",
+                            baseboard_id.serial_number, sled_agent.sled_id,
+                        );
+                        SledInfo { sp_slot: None, serial }
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "WARN: sled {} has no baseboard ID in \
+                     inventory",
+                    sled_agent.sled_id,
+                );
+                SledInfo { sp_slot: None, serial: "unknown".to_string() }
+            }
+        };
+        sled_info.insert(sled_agent.sled_id, info);
+    }
+
+    // Apply filters: keep only sleds matching the requested
+    // --sled, --serial, or --sled-id criteria.
+    if args.sled_numbers.is_some()
+        || args.serials.is_some()
+        || args.sled_ids.is_some()
+    {
+        sled_info.retain(|sled_id, info| {
+            if let Some(ref nums) = args.sled_numbers {
+                if let Some(sp_slot) = info.sp_slot {
+                    if nums.0.contains(&sp_slot) {
+                        return true;
+                    }
+                }
+            }
+            if let Some(ref serials) = args.serials {
+                if serials.iter().any(|s| s == &info.serial) {
+                    return true;
+                }
+            }
+            if let Some(ref ids) = args.sled_ids {
+                if ids.contains(sled_id) {
+                    return true;
+                }
+            }
+            false
+        });
+    }
+
+    // Step 2: Sort sleds by slot number so that Sled 2 comes
+    // before Sled 10.
+    let mut sorted_sleds: Vec<_> = sled_info.iter().collect();
+    sorted_sleds.sort_by(|(_, a), (_, b)| a.sp_slot.cmp(&b.sp_slot));
+
+    // Step 3: For each sled, query for instances running on it
+    // and print the results.
+    for (sled_id, info) in &sorted_sleds {
+        let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())
+                    .and(vmm_dsl::sled_id.eq(sled_id.into_untyped_uuid()))),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("loading instances")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
+        println!(
+            "{} (serial: {})  sled_id: {}",
+            info.slot_label(),
+            info.serial,
+            sled_id,
+        );
+        if !instances.is_empty() {
+            print_instance_table(&instances);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_instance_table(instances: &[InstanceAndActiveVmm]) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SledInstanceRow {
+        instance_id: String,
+        propolis_id: MaybePropolisId,
+        state: String,
+        name: String,
+    }
+
+    let rows: Vec<SledInstanceRow> = instances
+        .iter()
+        .map(|inst| {
+            let f = instance_fields(inst);
+            SledInstanceRow {
+                instance_id: f.id,
+                propolis_id: f.propolis_id,
+                state: f.state,
+                name: f.name,
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+}
+
 // INSTANCES
 
 /// Run `omdb db instance info`: show details about a customer VM.
@@ -5128,6 +5369,24 @@ struct VmmStateRow {
     generation: u64,
 }
 
+/// Common fields extracted from an InstanceAndActiveVmm, shared by
+/// both `CustomerInstanceRow` and `SledInstanceRow`.
+struct InstanceFields {
+    id: String,
+    propolis_id: MaybePropolisId,
+    state: String,
+    name: String,
+}
+
+fn instance_fields(inst: &InstanceAndActiveVmm) -> InstanceFields {
+    InstanceFields {
+        id: inst.instance().id().to_string(),
+        propolis_id: inst.into(),
+        state: inst.effective_state().to_string(),
+        name: inst.instance().name().to_string(),
+    }
+}
+
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
@@ -5207,14 +5466,15 @@ async fn cmd_db_instances(
             continue;
         }
 
+        let f = instance_fields(&i);
         let cir = CustomerInstanceRow {
-            id: i.instance().id().to_string(),
-            name: i.instance().name().to_string(),
-            state: i.effective_state().to_string(),
+            id: f.id,
+            state: f.state,
             intent: i.instance().intended_state,
-            propolis_id: (&i).into(),
+            propolis_id: f.propolis_id,
             sled_id: (&i).into(),
             host_serial,
+            name: f.name,
         };
 
         rows.push(cir);
@@ -7378,20 +7638,19 @@ async fn cmd_db_migrations_list(
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_schema::schema::migration::dsl;
-    use omicron_common::api::internal::nexus;
 
     let mut state_filters = Vec::new();
     if args.completed {
-        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+        state_filters.push(MigrationState::COMPLETED);
     }
     if args.failed {
-        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+        state_filters.push(MigrationState::FAILED);
     }
     if args.in_progress {
-        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+        state_filters.push(MigrationState::IN_PROGRESS);
     }
     if args.pending {
-        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+        state_filters.push(MigrationState::PENDING);
     }
 
     let mut query = dsl::migration.into_boxed();

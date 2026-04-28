@@ -13,6 +13,7 @@
 extern crate newtype_derive;
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// The path to omicron-ls-apis relative to the workspace root.
 pub const OMICRON_LS_APIS_PATH: &str = "dev-tools/ls-apis";
@@ -54,5 +55,12 @@ pub struct DagEdge {
 /// Top-level structure of the `deployment_unit_dag.toml` file.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DagEdgesFile {
+    /// Deployment units that have no edges in the update DAG.
+    ///
+    /// A deployment unit ends up here when none of its APIs are
+    /// server-side-versioned, which means its updates aren't subject to
+    /// ordering constraints relative to other units.
+    pub units_without_server_side_apis: BTreeSet<DeploymentUnitName>,
+    /// Edges of the deployment unit dependency DAG.
     pub edges: Vec<DagEdge>,
 }

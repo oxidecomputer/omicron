@@ -73,6 +73,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
@@ -2809,18 +2810,26 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
-    match serde_json::from_value::<serde_json::Value>(details.clone()) {
+    match serde_json::from_value::<ServiceFirewallRuleStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(serde_json::Value::Object(map)) => {
-            if !map.is_empty() {
-                eprintln!("    unexpected return value from task: {:?}", map)
+        Ok(status) => {
+            if let Some(e) = status.lookup_error {
+                eprintln!("    error looking up or resolving rules: {}", e);
             }
-        }
-        Ok(val) => {
-            eprintln!("    unexpected return value from task: {:?}", val)
+            if let Some(failures) = status.sled_push_errors {
+                let maybe_s = if failures.len() == 1 { "" } else { "s" };
+                eprintln!(
+                    "    failed to push rules to {} sled{}:",
+                    failures.len(),
+                    maybe_s,
+                );
+                for (sled_id, error) in failures {
+                    eprintln!("        sled {}: {}", sled_id, error);
+                }
+            }
         }
     };
 }
@@ -3485,6 +3494,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
+
     let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
         match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
             Err(error) => {
@@ -3510,6 +3520,30 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                      not yet been loaded.\n\
                  (i) note: this should only happen if Nexus has just started.",
             );
+            return;
+        }
+        Outcome::WaitingForNewerInventory {
+            parent_inv_id,
+            next_inv_min_time_started,
+            input_inv_time_started,
+        } => {
+            const PARENT_INV: &str = "parent sitrep's inventory ID:";
+            const MIN_STARTED: &str = "earliest start time for next inventory:";
+            const LOADED_STARTED: &str = "loaded inventory started at:";
+            const WIDTH: usize =
+                const_max_len(&[PARENT_INV, MIN_STARTED, LOADED_STARTED]) + 1;
+            println!(
+                "    waiting for a newer inventory collection than the one \
+                 in the parent sitrep"
+            );
+            let min_started = humantime::format_rfc3339_millis(
+                next_inv_min_time_started.into(),
+            );
+            let loaded_started =
+                humantime::format_rfc3339_millis(input_inv_time_started.into());
+            println!("      {PARENT_INV:<WIDTH$}{parent_inv_id}");
+            println!("      {MIN_STARTED:<WIDTH$}{min_started}");
+            println!("      {LOADED_STARTED:<WIDTH$}{loaded_started}");
             return;
         }
         Outcome::PreparationError(error) => {

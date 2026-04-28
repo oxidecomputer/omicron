@@ -28,6 +28,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use itertools::Itertools;
 use omicron_deployment_graph::DagEdge;
+use omicron_deployment_graph::DagEdgesFile;
 use omicron_deployment_graph::DeploymentUnitName;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
@@ -541,12 +542,17 @@ impl SystemApis {
         Ok(Dot::new(&graph).to_string())
     }
 
-    /// Returns the edges of the deployment unit dependency DAG.
+    /// Returns the deployment unit dependency DAG for server-side-versioned
+    /// APIs.
     ///
-    /// Each edge represents a consumer that depends on a producer, meaning
-    /// the producer must be fully updated before the consumer starts
-    /// updating.
-    pub fn deployment_unit_dag_edges(&self) -> Result<Vec<DagEdge>> {
+    /// The result contains:
+    ///
+    /// * `edges`: each edge represents a consumer that depends on a producer,
+    ///   meaning the producer must be fully updated before the consumer starts
+    ///   updating.
+    /// * `units_without_server_side_apis`: deployment units that have no edges
+    ///   in the server-side-versioned DAG.
+    pub fn deployment_unit_dag(&self) -> Result<DagEdgesFile> {
         let idu_only_edges = self.validate_idu_only_edges()?;
         let (graph, _nodes) = self.make_deployment_unit_graph(
             ApiDependencyFilter::Default,
@@ -554,14 +560,25 @@ impl SystemApis {
         )?;
 
         let mut edges = BTreeSet::new();
+        let mut units_in_dag = BTreeSet::new();
         for edge_ref in graph.edge_references() {
-            edges.insert(DagEdge {
-                consumer: graph[edge_ref.source()].clone(),
-                producer: graph[edge_ref.target()].clone(),
-            });
+            let consumer = graph[edge_ref.source()].clone();
+            let producer = graph[edge_ref.target()].clone();
+            units_in_dag.insert(consumer.clone());
+            units_in_dag.insert(producer.clone());
+            edges.insert(DagEdge { consumer, producer });
         }
 
-        Ok(edges.into_iter().collect())
+        let units_without_server_side_apis = self
+            .deployment_units()
+            .filter(|u| !units_in_dag.contains(*u))
+            .cloned()
+            .collect();
+
+        Ok(DagEdgesFile {
+            units_without_server_side_apis,
+            edges: edges.into_iter().collect(),
+        })
     }
 
     // The complex type below is only used in this one place: the return value

@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use omicron_common::api::internal::nexus::VmmState as ApiState;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -87,54 +86,35 @@ impl fmt::Display for VmmState {
     }
 }
 
-impl From<VmmState> for omicron_common::api::internal::nexus::VmmState {
+impl From<VmmState> for sled_agent_types::instance::VmmState {
     fn from(value: VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Output;
         match value {
             // The `Creating` state is internal to Nexus; the outside world
             // should treat it as equivalent to `Starting`.
-            VmmState::Creating | VmmState::Starting => Output::Starting,
-            VmmState::Running => Output::Running,
-            VmmState::Stopping => Output::Stopping,
-            VmmState::Stopped => Output::Stopped,
-            VmmState::Rebooting => Output::Rebooting,
-            VmmState::Migrating => Output::Migrating,
-            VmmState::Failed => Output::Failed,
-            VmmState::Destroyed | VmmState::SagaUnwound => Output::Destroyed,
+            VmmState::Creating | VmmState::Starting => Self::Starting,
+            VmmState::Running => Self::Running,
+            VmmState::Stopping => Self::Stopping,
+            VmmState::Stopped => Self::Stopped,
+            VmmState::Rebooting => Self::Rebooting,
+            VmmState::Migrating => Self::Migrating,
+            VmmState::Failed => Self::Failed,
+            VmmState::Destroyed | VmmState::SagaUnwound => Self::Destroyed,
         }
     }
 }
 
-impl From<VmmState> for sled_agent_client::types::VmmState {
-    fn from(value: VmmState) -> Self {
-        use sled_agent_client::types::VmmState as Output;
+impl From<sled_agent_types::instance::VmmState> for VmmState {
+    fn from(value: sled_agent_types::instance::VmmState) -> Self {
+        use sled_agent_types::instance::VmmState as Input;
         match value {
-            // The `Creating` state is internal to Nexus; the outside world
-            // should treat it as equivalent to `Starting`.
-            VmmState::Creating | VmmState::Starting => Output::Starting,
-            VmmState::Running => Output::Running,
-            VmmState::Stopping => Output::Stopping,
-            VmmState::Stopped => Output::Stopped,
-            VmmState::Rebooting => Output::Rebooting,
-            VmmState::Migrating => Output::Migrating,
-            VmmState::Failed => Output::Failed,
-            VmmState::Destroyed | VmmState::SagaUnwound => Output::Destroyed,
-        }
-    }
-}
-
-impl From<ApiState> for VmmState {
-    fn from(value: ApiState) -> Self {
-        use VmmState as Output;
-        match value {
-            ApiState::Starting => Output::Starting,
-            ApiState::Running => Output::Running,
-            ApiState::Stopping => Output::Stopping,
-            ApiState::Stopped => Output::Stopped,
-            ApiState::Rebooting => Output::Rebooting,
-            ApiState::Migrating => Output::Migrating,
-            ApiState::Failed => Output::Failed,
-            ApiState::Destroyed => Output::Destroyed,
+            Input::Starting => Self::Starting,
+            Input::Running => Self::Running,
+            Input::Stopping => Self::Stopping,
+            Input::Stopped => Self::Stopped,
+            Input::Rebooting => Self::Rebooting,
+            Input::Migrating => Self::Migrating,
+            Input::Failed => Self::Failed,
+            Input::Destroyed => Self::Destroyed,
         }
     }
 }
@@ -204,7 +184,8 @@ mod tests {
 
     #[test]
     fn test_all_terminal_api_states_are_terminal_db_states() {
-        for &api_state in ApiState::TERMINAL_STATES {
+        for &api_state in sled_agent_types::instance::VmmState::TERMINAL_STATES
+        {
             let db_state = VmmState::from(api_state);
             assert!(
                 db_state.is_terminal(),

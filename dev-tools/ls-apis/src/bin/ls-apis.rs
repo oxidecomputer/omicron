@@ -8,7 +8,6 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use indent_write::indentable::Indentable;
-use omicron_deployment_graph::DagEdgesFile;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
     FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
@@ -96,8 +95,7 @@ fn main() -> Result<()> {
 }
 
 fn run_dag_edges(apis: &SystemApis) -> Result<()> {
-    let edges = apis.deployment_unit_dag_edges()?;
-    let output = DagEdgesFile { edges };
+    let output = apis.deployment_unit_dag()?;
     let toml_str = toml::to_string_pretty(&output)
         .context("serializing DAG edges as TOML")?;
     print!(

@@ -57,9 +57,9 @@ progenitor::generate_api!(
         DiskVariant = omicron_common::disk::DiskVariant,
         Epoch = trust_quorum_types::types::Epoch,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
-        ExternalIpConfig = omicron_common::api::internal::shared::ExternalIpConfig,
-        ExternalIpv4Config = omicron_common::api::internal::shared::ExternalIpv4Config,
-        ExternalIpv6Config = omicron_common::api::internal::shared::ExternalIpv6Config,
+        ExternalIpConfig = sled_agent_types_versions::latest::instance::ExternalIpConfig,
+        ExternalIpv4Config = sled_agent_types_versions::latest::instance::ExternalIpv4Config,
+        ExternalIpv6Config = sled_agent_types_versions::latest::instance::ExternalIpv6Config,
         Generation = omicron_common::api::external::Generation,
         Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
@@ -73,9 +73,12 @@ progenitor::generate_api!(
         MaxPathConfig = sled_agent_types_versions::latest::early_networking::MaxPathConfig,
         Measurement = sled_agent_types_versions::latest::rot::Measurement,
         MeasurementLog = sled_agent_types_versions::latest::rot::MeasurementLog,
+        MigrationRuntimeState = sled_agent_types_versions::latest::instance::MigrationRuntimeState,
+        MigrationState = sled_agent_types_versions::latest::instance::MigrationState,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        NetworkInterface = sled_agent_types_versions::latest::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
         Nonce = sled_agent_types_versions::latest::rot::Nonce,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
@@ -91,7 +94,7 @@ progenitor::generate_api!(
         PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
         RackNetworkConfig = sled_agent_types_versions::latest::early_networking::RackNetworkConfig,
         ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
-        ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
+        ResolvedVpcFirewallRule = sled_agent_types_versions::latest::instance::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
         Rot = sled_agent_types_versions::latest::rot::Rot,
@@ -102,12 +105,15 @@ progenitor::generate_api!(
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
-        SourceNatConfigGeneric = omicron_common::api::internal::shared::SourceNatConfigGeneric,
+        SledVmmState = sled_agent_types_versions::latest::instance::SledVmmState,
+        SourceNatConfigGeneric = sled_agent_types_versions::latest::inventory::SourceNatConfigGeneric,
         SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
         SystemNetworkingConfig = sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig,
         Threshold = trust_quorum_types::types::Threshold,
         TxEqConfig = sled_agent_types_versions::latest::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types_versions::latest::early_networking::UplinkAddressConfig,
+        VmmRuntimeState = sled_agent_types_versions::latest::instance::VmmRuntimeState,
+        VmmState = sled_agent_types_versions::latest::instance::VmmState,
         Vni = omicron_common::api::external::Vni,
         VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
         WriteNetworkConfigRequest = sled_agent_types_versions::latest::system_networking::WriteNetworkConfigRequest,
@@ -119,89 +125,6 @@ progenitor::generate_api!(
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
-    fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Input;
-        match s {
-            Input::Starting => types::VmmState::Starting,
-            Input::Running => types::VmmState::Running,
-            Input::Stopping => types::VmmState::Stopping,
-            Input::Stopped => types::VmmState::Stopped,
-            Input::Rebooting => types::VmmState::Rebooting,
-            Input::Migrating => types::VmmState::Migrating,
-            Input::Failed => types::VmmState::Failed,
-            Input::Destroyed => types::VmmState::Destroyed,
-        }
-    }
-}
-
-impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
-    fn from(s: types::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Output;
-        match s {
-            types::VmmState::Starting => Output::Starting,
-            types::VmmState::Running => Output::Running,
-            types::VmmState::Stopping => Output::Stopping,
-            types::VmmState::Stopped => Output::Stopped,
-            types::VmmState::Rebooting => Output::Rebooting,
-            types::VmmState::Migrating => Output::Migrating,
-            types::VmmState::Failed => Output::Failed,
-            types::VmmState::Destroyed => Output::Destroyed,
-        }
-    }
-}
-
-impl From<types::VmmRuntimeState>
-    for omicron_common::api::internal::nexus::VmmRuntimeState
-{
-    fn from(s: types::VmmRuntimeState) -> Self {
-        Self {
-            state: s.state.into(),
-            generation: s.gen_,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::SledVmmState>
-    for omicron_common::api::internal::nexus::SledVmmState
-{
-    fn from(s: types::SledVmmState) -> Self {
-        Self {
-            vmm_state: s.vmm_state.into(),
-            migration_in: s.migration_in.map(Into::into),
-            migration_out: s.migration_out.map(Into::into),
-        }
-    }
-}
-
-impl From<types::MigrationRuntimeState>
-    for omicron_common::api::internal::nexus::MigrationRuntimeState
-{
-    fn from(s: types::MigrationRuntimeState) -> Self {
-        Self {
-            migration_id: s.migration_id,
-            state: s.state.into(),
-            generation: s.gen_,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::MigrationState>
-    for omicron_common::api::internal::nexus::MigrationState
-{
-    fn from(s: types::MigrationState) -> Self {
-        use omicron_common::api::internal::nexus::MigrationState as Output;
-        match s {
-            types::MigrationState::Pending => Output::Pending,
-            types::MigrationState::InProgress => Output::InProgress,
-            types::MigrationState::Failed => Output::Failed,
-            types::MigrationState::Completed => Output::Completed,
-        }
     }
 }
 
@@ -271,21 +194,6 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
             Udp => Self::Udp,
             Icmp(v) => Self::Icmp(v),
             Icmp6(v) => Self::Icmp6(v),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
-    for types::NetworkInterfaceKind
-{
-    fn from(
-        s: omicron_common::api::internal::shared::NetworkInterfaceKind,
-    ) -> Self {
-        use omicron_common::api::internal::shared::NetworkInterfaceKind::*;
-        match s {
-            Instance { id } => Self::Instance(id),
-            Service { id } => Self::Service(id),
-            Probe { id } => Self::Probe(id),
         }
     }
 }

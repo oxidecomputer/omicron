@@ -417,7 +417,8 @@ pub enum ApiConsumerStatus {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentUnitInfo {
-    /// human-readable name (e.g. "Nexus", "DNS Server")
+    /// human-readable name (e.g. "Nexus", "DNS Server"), also used as primary
+    /// key
     pub name: DeploymentUnitName,
     /// list of Rust packages that are shipped in this unit
     pub packages: Vec<ServerComponentName>,

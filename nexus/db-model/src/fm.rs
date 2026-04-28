@@ -38,6 +38,7 @@ pub struct SitrepMetadata {
     pub time_created: DateTime<Utc>,
     pub creator_id: DbTypedUuid<OmicronZoneKind>,
     pub comment: String,
+    pub next_inv_min_time_started: DateTime<Utc>,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
@@ -49,12 +50,14 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
             creator_id,
             comment,
             time_created,
+            next_inv_min_time_started,
         } = db_meta;
         Self {
             id: id.into(),
             parent_sitrep_id: parent_sitrep_id.map(Into::into),
             inv_collection_id: inv_collection_id.into(),
             creator_id: creator_id.into(),
+            next_inv_min_time_started,
             comment,
             time_created,
         }
@@ -70,6 +73,7 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             creator_id,
             comment,
             time_created,
+            next_inv_min_time_started,
         } = db_meta;
         Self {
             id: id.into(),
@@ -78,6 +82,7 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             creator_id: creator_id.into(),
             comment,
             time_created,
+            next_inv_min_time_started,
         }
     }
 }

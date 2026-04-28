@@ -137,6 +137,7 @@ Commands:
                                reports
   sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
+  sled-instances               Show instances grouped by the sled they are running on
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
   network                      Print information about the network
@@ -204,6 +205,7 @@ Commands:
                                reports
   sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
+  sled-instances               Show instances grouped by the sled they are running on
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
   network                      Print information about the network
