@@ -79,11 +79,7 @@ impl From<PhysicalDisk>
     for physical_disk_types::PhysicalDiskManufacturerIdentity
 {
     fn from(value: PhysicalDisk) -> Self {
-        Self {
-            vendor: value.vendor.clone(),
-            serial: value.serial.clone(),
-            model: value.model.clone(),
-        }
+        Self { vendor: value.vendor, serial: value.serial, model: value.model }
     }
 }
 

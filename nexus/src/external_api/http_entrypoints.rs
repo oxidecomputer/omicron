@@ -6714,7 +6714,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
             return Err(Error::invalid_value(
                 last_seen.clone(),
-                "bad page token",
+                "pagination currently unsupported",
             )
             .into());
         }

@@ -92,11 +92,9 @@ impl DataStore {
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                    Self::physical_disk_insert_on_connection(
-                        &conn, opctx, disk,
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    Self::physical_disk_insert_on_connection(&conn, disk)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     Self::zpool_insert_on_connection(&conn, opctx, zpool)
                         .await
@@ -229,8 +227,9 @@ impl DataStore {
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> CreateResult<PhysicalDisk> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        let disk = Self::physical_disk_insert_on_connection(&conn, opctx, disk)
+        let disk = Self::physical_disk_insert_on_connection(&conn, disk)
             .await
             .map_err(|err| err.into_public_ignore_retries())?;
         Ok(disk)
@@ -238,10 +237,8 @@ impl DataStore {
 
     pub async fn physical_disk_insert_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> Result<PhysicalDisk, TransactionError<Error>> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
 
         let sled_id = disk.sled_id();
@@ -274,7 +271,7 @@ impl DataStore {
         id: PhysicalDiskUuid,
         policy: PhysicalDiskPolicy,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 
@@ -295,7 +292,7 @@ impl DataStore {
         id: PhysicalDiskUuid,
         state: PhysicalDiskState,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 
@@ -345,7 +342,7 @@ impl DataStore {
             async move {
                 // Find all new disks
                 let new_inv_disks = self
-                    .physical_disk_list_new_inventory_on_collection(
+                    .physical_disk_list_new_inventory_on_connection(
                         &conn,
                         inventory_collection_id,
                     )
@@ -386,7 +383,7 @@ impl DataStore {
     /// Returns all physical disks in inventory that are inserted in
     /// active sleds and do not yet have a record in `physical_disk` or
     /// `physical_disk_adoption_request` tables.
-    pub async fn physical_disk_list_new_inventory_on_collection(
+    pub async fn physical_disk_list_new_inventory_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         inventory_collection_id: CollectionUuid,
@@ -708,7 +705,7 @@ impl DataStore {
         opctx: &OpContext,
         id: PhysicalDiskAdoptionRequestUuid,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         let now = Utc::now();
         use nexus_db_schema::schema::physical_disk_adoption_request::dsl;
         diesel::update(dsl::physical_disk_adoption_request)
@@ -1377,7 +1374,7 @@ mod test {
         // Pay careful attention to our indexing below.
         //
         // We're grabbing the last disk of "disks_a" (which still is
-        // uninitailized) and the last two disks of "disks_b" (of which both are
+        // uninitialized) and the last two disks of "disks_b" (of which both are
         // still unadopted).
         let mut unadopted_disks: Vec<nexus_types::inventory::PhysicalDisk> =
             unadopted_disks
@@ -1610,7 +1607,7 @@ mod test {
             .expect("Failed to look up adoptable disks");
         assert_eq!(adoptable_disks.len(), 1);
 
-        // We should now only have 5 unininitialized disks
+        // We should now only have 5 uninitialized disks
         let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
@@ -1634,7 +1631,7 @@ mod test {
             .expect("Failed to look up adoptable disks");
         assert_eq!(adoptable_disks.len(), 1);
 
-        // We should still have only 5 unininitialized disks
+        // We should still have only 5 uninitialized disks
         let unadopted_disks = datastore
             .physical_disk_unadopted_list(&opctx, collection_id)
             .await
@@ -1707,7 +1704,7 @@ mod test {
 
         // No inventory -> No new disks
         let new = datastore
-            .physical_disk_list_new_inventory_on_collection(
+            .physical_disk_list_new_inventory_on_connection(
                 &conn,
                 CollectionUuid::new_v4(),
             )
@@ -1730,7 +1727,7 @@ mod test {
 
         // We should get this disk returned as brand new
         let new = datastore
-            .physical_disk_list_new_inventory_on_collection(
+            .physical_disk_list_new_inventory_on_connection(
                 &conn,
                 collection_id,
             )
@@ -1752,7 +1749,7 @@ mod test {
         // We should no longer treat this disk as new since it has an
         // adoption request.
         let new = datastore
-            .physical_disk_list_new_inventory_on_collection(
+            .physical_disk_list_new_inventory_on_connection(
                 &conn,
                 CollectionUuid::new_v4(),
             )
@@ -1767,7 +1764,7 @@ mod test {
             .await
             .unwrap();
         let new = datastore
-            .physical_disk_list_new_inventory_on_collection(
+            .physical_disk_list_new_inventory_on_connection(
                 &conn,
                 CollectionUuid::new_v4(),
             )
@@ -1787,7 +1784,7 @@ mod test {
             .await
             .unwrap();
         let new = datastore
-            .physical_disk_list_new_inventory_on_collection(
+            .physical_disk_list_new_inventory_on_connection(
                 &conn,
                 CollectionUuid::new_v4(),
             )
