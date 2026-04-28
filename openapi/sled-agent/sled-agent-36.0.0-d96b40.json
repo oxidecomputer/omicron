@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "35.0.0"
+    "version": "36.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -2769,7 +2769,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
               "*/*": {
                 "schema": {}
