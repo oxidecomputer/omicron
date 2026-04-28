@@ -9987,7 +9987,6 @@ version = "0.1.0"
 dependencies = [
  "dropshot 0.16.7",
  "omicron-workspace-hack",
- "oximeter-types 0.1.0",
  "oximeter-types-versions 0.1.0",
 ]
 
@@ -10078,25 +10077,13 @@ name = "oximeter-types"
 version = "0.1.0"
 dependencies = [
  "approx",
- "bytes",
  "chrono",
  "criterion",
- "float-ord",
- "num",
- "omicron-common",
  "omicron-workspace-hack",
  "oximeter-macro-impl 0.1.0",
  "oximeter-types-versions 0.1.0",
- "parse-display",
  "rand 0.9.2",
  "rand_distr",
- "regex",
- "rstest",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "thiserror 2.0.18",
  "trybuild",
  "uuid",
 ]
@@ -10126,11 +10113,21 @@ dependencies = [
 name = "oximeter-types-versions"
 version = "0.1.0"
 dependencies = [
+ "approx",
+ "bytes",
  "chrono",
+ "float-ord",
+ "num",
  "omicron-common",
  "omicron-workspace-hack",
+ "parse-display",
+ "rand 0.9.2",
+ "regex",
+ "rstest",
  "schemars 0.8.22",
  "serde",
+ "strum 0.27.2",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
