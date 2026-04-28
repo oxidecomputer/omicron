@@ -40,15 +40,3 @@ pub use types::FieldValue;
 pub use types::Measurement;
 pub use types::MetricsError;
 pub use types::Sample;
-
-/// Construct the timeseries name for a Target and Metric.
-pub fn timeseries_name<T, M>(
-    target: &T,
-    metric: &M,
-) -> Result<TimeseriesName, MetricsError>
-where
-    T: Target,
-    M: Metric,
-{
-    TimeseriesName::try_from(format!("{}:{}", target.name(), metric.name()))
-}
