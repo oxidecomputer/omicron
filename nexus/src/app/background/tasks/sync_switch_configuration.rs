@@ -1539,8 +1539,8 @@ fn hashset_eq<T>(left: &[T], right: &[T]) -> bool
 where
     T: Hash + Eq,
 {
-    let left = left.into_iter().collect::<HashSet<&T>>();
-    let right = right.into_iter().collect::<HashSet<&T>>();
+    let left = left.iter().collect::<HashSet<&T>>();
+    let right = right.iter().collect::<HashSet<&T>>();
     left == right
 }
 
