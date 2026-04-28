@@ -24,11 +24,6 @@ pub struct UpdateStatus {
     /// the system is not automatically attempting to manage software versions.
     pub target_release: Nullable<TargetRelease>,
 
-    // TODO-K: Do I assume an update is in progress if there are components in various
-    // versions? Yes and no, if the system has never been updated or is a test system.
-    // it could be in a mix of "unknown" and "install dataset". Otherwise, check against
-    // the target release version:
-    // components_by_release_version	{ "19.2.0-0.ci+gite4b75dde134": 249 }
     /// Count of components running each release version
     ///
     /// Keys will be either:

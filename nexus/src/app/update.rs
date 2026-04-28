@@ -6,7 +6,9 @@
 
 use crate::app::background::LoadedTargetBlueprint;
 use bytes::Bytes;
+use chrono::DateTime;
 use chrono::TimeDelta;
+use chrono::Utc;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
@@ -37,9 +39,15 @@ use update_common::artifacts::{
 };
 use uuid::Uuid;
 
-// TODO-K: Set back to an hour
 /// Threshold at which we consider an active saga stale
-const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(1);
+const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(60);
+
+/// Threshold at which we consider an inventory collection stale
+const STALE_INVETORY_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
+
+/// Threshold at which we consider the inventory collection's last step planned
+/// to be within the boundaries of an update in progress
+const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Used to pull data out of the channels
 #[derive(Clone)]
@@ -243,7 +251,13 @@ impl super::Nexus {
         // We want a rough idea of whether the system is in a healthy state or
         // not. We do this by retrieving the latest inventory collection and
         // performing a series of checks.
-        let contact_support = self.contact_support(opctx).await?;
+        let contact_support = self
+            .contact_support(
+                opctx,
+                time_last_step_planned,
+                &components_by_release_version,
+            )
+            .await?;
 
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
@@ -258,29 +272,50 @@ impl super::Nexus {
     /// the system is in a roughly healthy state based a few health checks.
     ///
     /// The system is considered relatively healthy when:
+    /// - An update is in progress and the last step planned is not older than
+    ///   15 minutes.
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
     /// - No sagas have been running for longer than an hour.
-    async fn contact_support(&self, opctx: &OpContext) -> Result<bool, Error> {
-        let Some(inventory) =
-            self.datastore().inventory_get_latest_collection(opctx).await?
-        else {
-            // There should always be an inventory collection before or after an
-            // update
-            return Ok(true);
-        };
+    async fn contact_support(
+        &self,
+        opctx: &OpContext,
+        time_last_step_planned: DateTime<Utc>,
+        components_by_release_version: &BTreeMap<String, usize>,
+    ) -> Result<bool, Error> {
+        // TODO-K: Verify the order of all checks and log as much as possible
 
-        // TODO-K: check that the inventory collection is not too old. If it is
-        // then call support is true and log it. perhaps log that the information
-        // regarding zpools and services may be incorrect or don't log them at all
+        // We assume an update is in progress if not all components are at the
+        // same version or there are only two versions and they are not
+        // "install dataset" and "unknown".
         //
-        // check that if there's an update in progress, then
-        // time_last_step_planned is within the last 15 minutes. If those are
-        // true then call support is false and don't even check anything else.
-        // if time_last_step_planned is not within that threshold then call
-        // support is true and also do the rest of the checks
-        //
-        // Account for test system versions or if system is being mupdated
+        // If we assume an update is in progress, but the last step planned in
+        // the blueprint is older than 15 minutes, we consider the update as
+        // "stuck".
+        let versions_at_initial_state = components_by_release_version.len()
+            == 2
+            && components_by_release_version.contains_key(
+                &internal_views::TufRepoVersion::Unknown.to_string(),
+            )
+            && components_by_release_version.contains_key(
+                &internal_views::TufRepoVersion::InstallDataset.to_string(),
+            );
+
+        let mut is_update_stuck = false;
+        if components_by_release_version.len() != 1
+            && !versions_at_initial_state
+        {
+            if time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD {
+                is_update_stuck = true
+            } else {
+                info!(
+                    opctx.log,
+                    "no update health checks being run; system assumed to have an \
+                    update in progress in a normal state";
+                );
+                return Ok(false);
+            }
+        };
 
         let stale_active_sagas = self
             .datastore()
@@ -289,30 +324,7 @@ impl super::Nexus {
                 STALE_SAGA_THRESHOLD,
             )
             .await?;
-
-        let unhealthy_zpools = inventory.unhealthy_zpools();
-        let enabled_smf_services_not_online =
-            inventory.enabled_smf_services_not_online();
-
-        let has_unhealthy_zpools = !unhealthy_zpools.is_empty();
-        let has_enabled_services_not_online =
-            !enabled_smf_services_not_online.is_empty();
         let has_stale_sagas = !stale_active_sagas.is_empty();
-
-        if has_unhealthy_zpools {
-            info!(
-                opctx.log,
-                "found unhealthy zpools";
-                "zpools_by_sled" => ?unhealthy_zpools,
-            );
-        }
-        if has_enabled_services_not_online {
-            info!(
-                opctx.log,
-                "found enabled SMF services not online";
-                "svcs_by_sled" => ?enabled_smf_services_not_online,
-            );
-        }
         if has_stale_sagas {
             info!(
                 opctx.log,
@@ -322,14 +334,69 @@ impl super::Nexus {
             );
         }
 
-        let contact_support = has_unhealthy_zpools
+        let Some(inventory) =
+            self.datastore().inventory_get_latest_collection(opctx).await?
+        else {
+            // There should always be an inventory collection before or after an
+            // update. If there isn't, call support. We don't bother with the
+            // remaining health checks because they need the latest inventory
+            // collection.
+            error!(
+                opctx.log,
+                "no inventory collection found; unable to perform update \
+                health checks";
+            );
+            return Ok(true);
+        };
+
+        // Check that the inventory collection is not too old (30 minutes). If it is
+        // then call support is true and log it. Log that the information
+        // regarding zpools and services is out of date. Sagas are collected from another
+        // source so the information will be accurate.
+        let is_inventory_stale =
+            if inventory.time_done < Utc::now() - STALE_INVETORY_THRESHOLD {
+                info!(
+                    opctx.log,
+                    "inventory collection is stale: older that {}",
+                    omicron_common::format_time_delta(STALE_INVETORY_THRESHOLD);
+                    "collection_time_done" => ?inventory.time_done,
+                );
+                true
+            } else {
+                false
+            };
+
+        let unhealthy_zpools = inventory.unhealthy_zpools();
+        let has_unhealthy_zpools = !unhealthy_zpools.is_empty();
+        if has_unhealthy_zpools {
+            info!(
+                opctx.log,
+                "found unhealthy zpools";
+                "zpools_by_sled" => ?unhealthy_zpools,
+            );
+        }
+
+        let enabled_smf_services_not_online =
+            inventory.enabled_smf_services_not_online();
+        let has_enabled_services_not_online =
+            !enabled_smf_services_not_online.is_empty();
+        if has_enabled_services_not_online {
+            info!(
+                opctx.log,
+                "found enabled SMF services not online";
+                "svcs_by_sled" => ?enabled_smf_services_not_online,
+            );
+        }
+
+        let contact_support = is_inventory_stale
+            || is_update_stuck
+            || has_unhealthy_zpools
             || has_enabled_services_not_online
             || has_stale_sagas;
 
         Ok(contact_support)
     }
 
-    // TODO-K: use this to check if an update is happening?
     /// Build a map of version strings to the number of components on that
     /// version
     async fn component_version_counts(
@@ -590,6 +657,24 @@ mod test {
         )
     }
 
+    fn system_versions_initial_state() -> BTreeMap<String, usize> {
+        BTreeMap::from([
+            ("install dataset".to_string(), 13),
+            ("unknown".to_string(), 2),
+        ])
+    }
+
+    fn system_version_update_finished() -> BTreeMap<String, usize> {
+        BTreeMap::from([("9.2.0-0.ci+gite4b75dde134".to_string(), 15)])
+    }
+
+    fn _system_version_update_in_progress() -> BTreeMap<String, usize> {
+        BTreeMap::from([
+            ("9.2.0-0.ci+gite4b75dde134".to_string(), 12),
+            ("install dataset".to_string(), 3),
+        ])
+    }
+
     // Build an inventory collection with fake health statuses and insert it
     // as the latest collection.
     async fn insert_fake_collection(
@@ -642,7 +727,16 @@ mod test {
             healthy_services(),
         )
         .await;
-        assert!(!nexus.contact_support(&opctx).await.unwrap());
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_version_update_finished()
+                )
+                .await
+                .unwrap()
+        );
     }
 
     #[nexus_test(server = crate::Server)]
@@ -658,7 +752,16 @@ mod test {
             healthy_services(),
         )
         .await;
-        assert!(nexus.contact_support(&opctx).await.unwrap());
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_version_update_finished()
+                )
+                .await
+                .unwrap()
+        );
     }
 
     #[nexus_test(server = crate::Server)]
@@ -674,7 +777,16 @@ mod test {
             unhealthy_services(),
         )
         .await;
-        assert!(nexus.contact_support(&opctx).await.unwrap());
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_version_update_finished()
+                )
+                .await
+                .unwrap()
+        );
     }
 
     #[nexus_test(server = crate::Server)]
@@ -690,7 +802,16 @@ mod test {
             unhealthy_services(),
         )
         .await;
-        assert!(nexus.contact_support(&opctx).await.unwrap());
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_versions_initial_state()
+                )
+                .await
+                .unwrap()
+        );
     }
 
     #[nexus_test(server = crate::Server)]
@@ -707,6 +828,17 @@ mod test {
         )
         .await;
         insert_stale_running_saga(cptestctx).await;
-        assert!(nexus.contact_support(&opctx).await.unwrap());
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_versions_initial_state()
+                )
+                .await
+                .unwrap()
+        );
     }
+
+    // TODO-K: Add some more tests for the remaining cases
 }
