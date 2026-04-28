@@ -1341,7 +1341,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                     blueprint_external_networking_config: None,
                 };
-                let desired_blueprint_networking_config = desired_config
+                let desired_blueprint_networking_config = &*desired_config
                     .blueprint_external_networking_config
                     .insert(
                         BlueprintExternalNetworkingConfig {
@@ -2460,7 +2460,7 @@ fn does_bootstore_need_update(
         // generation numbers) but the rack network config (checked below) has.
         // We only bail out here if we know we must not send this update.
         if desired_gen < current_gen {
-            info!(
+            warn!(
                 log,
                 "skipping bootstore update due to stale blueprint";
                 "our-blueprint-gen" => desired_gen,
