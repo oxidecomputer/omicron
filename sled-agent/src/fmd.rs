@@ -11,7 +11,7 @@ use slog::warn;
 
 #[cfg(target_os = "illumos")]
 mod illumos {
-    use fmd_adm::{FmdAdm, NvList, NvValue};
+    use fmd_adm::{FmdAdm, InvisibleResources, NvList, NvValue};
     use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid};
     use sled_agent_types::inventory::{
         FmdHostCase, FmdInventory, FmdInventoryResult, FmdResource,
@@ -100,7 +100,7 @@ mod illumos {
             }
         };
 
-        let resources = match adm.resources(true) {
+        let resources = match adm.resources(InvisibleResources::Included) {
             Ok(resources) => resources
                 .into_iter()
                 .map(|r| {
