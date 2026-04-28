@@ -6,8 +6,6 @@
 
 use sled_agent_types::inventory::FmdInventoryResult;
 use slog::Logger;
-#[cfg(target_os = "illumos")]
-use slog::warn;
 
 #[cfg(target_os = "illumos")]
 mod illumos {
@@ -139,18 +137,13 @@ pub(crate) async fn collect_fmd_inventory(log: &Logger) -> FmdInventoryResult {
     {
         // FMD queries go through door calls to fmd(1M) and can block, so run
         // them on a blocking-friendly thread rather than stalling the runtime.
-        let task_log = log.clone();
-        match tokio::task::spawn_blocking(move || illumos::collect(task_log))
+        // The expect is safe: omicron compiles with `panic = "abort"`, so a
+        // panic inside the blocking task aborts the whole process and the
+        // `JoinHandle` should not be able to return `Err`.
+        let log = log.clone();
+        tokio::task::spawn_blocking(move || illumos::collect(log))
             .await
-        {
-            Ok(inv) => inv,
-            Err(e) => {
-                warn!(log, "fmd collection task failed"; "error" => %e);
-                FmdInventoryResult::Error {
-                    error: format!("fmd collection task failed: {e}"),
-                }
-            }
-        }
+            .expect("fmd collection task panicked")
     }
     #[cfg(not(target_os = "illumos"))]
     {
