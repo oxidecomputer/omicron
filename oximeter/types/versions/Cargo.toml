@@ -16,7 +16,7 @@ omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 parse-display.workspace = true
 regex.workspace = true
-schemars.workspace = true
+schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
 strum.workspace = true
 thiserror.workspace = true
