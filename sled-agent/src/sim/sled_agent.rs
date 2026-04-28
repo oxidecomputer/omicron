@@ -28,9 +28,7 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
-use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
-};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
@@ -58,7 +56,8 @@ use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,

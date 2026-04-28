@@ -2524,7 +2524,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
 dependencies = [
  "oxnet",
  "progenitor 0.13.0",
@@ -5105,7 +5105,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5227,9 +5227,9 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "iddqd"
-version = "0.3.17"
+version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b215e67ed1d1a4b1702acd787c487d16e4c977c5dcbcc4587bdb5ea26b6ce06"
+checksum = "616230c7d641ef971a3a5bfcc654c6b7524ab9c9fb665693c6a397dba9a14aca"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -5315,7 +5315,7 @@ checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -5998,7 +5998,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -6535,7 +6535,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -6836,6 +6836,8 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -7176,6 +7178,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types-versions",
  "uuid",
 ]
 
@@ -7380,8 +7383,11 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "sled-agent-client",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
+ "static_assertions",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
@@ -7842,7 +7848,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "serde_json",
- "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog-error-chain",
  "strum 0.27.2",
@@ -8767,6 +8773,7 @@ dependencies = [
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
  "slog-async",
@@ -9621,7 +9628,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -9640,7 +9647,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -9653,7 +9660,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "libc",
  "libnet",
@@ -9750,7 +9757,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
+source = "git+https://github.com/oxidecomputer/opte?rev=bae0440c199b3908c12903a9532854936353433b#bae0440c199b3908c12903a9532854936353433b"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -9853,6 +9860,7 @@ dependencies = [
  "oximeter-client",
  "oximeter-db",
  "oximeter-types 0.1.0",
+ "proptest",
  "qorb",
  "rand 0.9.2",
  "reqwest 0.13.2",
@@ -11500,7 +11508,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.37",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -11538,7 +11546,7 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -11802,7 +11810,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=b603c9f3dccefcf1d3e941c04505ff6bdd1826b6#b603c9f3dccefcf1d3e941c04505ff6bdd1826b6"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -13637,6 +13645,7 @@ dependencies = [
  "daft",
  "iddqd",
  "indent_write",
+ "itertools 0.14.0",
  "omicron-common",
  "omicron-ledger",
  "omicron-passwords",

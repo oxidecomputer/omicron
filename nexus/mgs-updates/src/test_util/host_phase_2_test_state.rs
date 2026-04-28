@@ -199,7 +199,6 @@ mod api_impl {
     use iddqd::IdOrdMap;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::SledVmmState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -226,6 +225,7 @@ mod api_impl {
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::InstanceMulticastBody;
+    use sled_agent_types::instance::SledVmmState;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;

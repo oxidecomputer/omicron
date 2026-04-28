@@ -93,12 +93,18 @@ pub mod instance {
     pub use crate::v1::instance::InstanceExternalIpBody;
     pub use crate::v1::instance::InstanceMetadata;
     pub use crate::v1::instance::InstanceMigrationTargetParams;
+    pub use crate::v1::instance::MigrationRuntimeState;
+    pub use crate::v1::instance::MigrationState;
+    pub use crate::v1::instance::Migrations;
+    pub use crate::v1::instance::SledVmmState;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
     pub use crate::v1::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
+    pub use crate::v1::instance::VmmRuntimeState;
+    pub use crate::v1::instance::VmmState;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
@@ -109,6 +115,10 @@ pub mod instance {
     pub use crate::v29::instance::VmmSpec;
 
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
+    pub use crate::v32::instance::ExternalIpConfig;
+    pub use crate::v32::instance::ExternalIps;
+    pub use crate::v32::instance::ExternalIpv4Config;
+    pub use crate::v32::instance::ExternalIpv6Config;
     pub use crate::v32::instance::InstanceEnsureBody;
     pub use crate::v32::instance::InstanceSledLocalConfig;
 }
@@ -129,6 +139,7 @@ pub mod inventory {
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
     pub use crate::v1::inventory::MupdateOverrideNonBootInventory;
+    pub use crate::v1::inventory::NetworkInterfaceKind;
     pub use crate::v1::inventory::OmicronZoneDataset;
     pub use crate::v1::inventory::OmicronZoneImageSource;
     pub use crate::v1::inventory::OrphanedDataset;
@@ -139,9 +150,15 @@ pub mod inventory {
     pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneKind;
 
+    pub use crate::v10::inventory::NetworkInterface;
+
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
+    pub use crate::v11::inventory::SourceNatConfig;
+    pub use crate::v11::inventory::SourceNatConfigGeneric;
+    pub use crate::v11::inventory::SourceNatConfigV4;
+    pub use crate::v11::inventory::SourceNatConfigV6;
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
@@ -177,6 +194,7 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
     pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
+    pub use crate::impls::inventory::SourceNatConfigError;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
     pub use crate::impls::inventory::ZpoolHealthParseError;
 }

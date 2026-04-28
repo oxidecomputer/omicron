@@ -13,7 +13,7 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::{
-    nexus::{DiskRuntimeState, SledVmmState},
+    nexus::DiskRuntimeState,
     shared::{
         ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
         SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -446,7 +446,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -458,7 +458,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v31::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -472,7 +472,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v29::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v31(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -487,7 +487,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v18::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v29(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -502,7 +502,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v17::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v18(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -516,7 +516,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v11::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v17(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -531,7 +531,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v10::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         let body = body.try_map(v11::instance::InstanceEnsureBody::try_from)?;
         Self::vmm_register_v11(rqctx, path_params, body).await
     }
@@ -547,7 +547,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v9::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         let body = body.try_map(v10::instance::InstanceEnsureBody::try_from)?;
         Self::vmm_register_v10(rqctx, path_params, body).await
     }
@@ -562,7 +562,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v7::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v9(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -576,7 +576,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v1::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v7(rqctx, path_params, body.map(Into::into)).await
     }
 
@@ -609,7 +609,7 @@ pub trait SledAgentApi {
     async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
 
     #[endpoint {
         method = PUT,
