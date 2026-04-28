@@ -76,12 +76,22 @@ impl DataStore {
                     // functions below check that the Sled hasn't been deleted,
                     // they do not currently check that the Sled has not been
                     // expunged.
-                    Self::check_sled_in_service_on_connection(
-                        &conn,
-                        disk.sled_id(),
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let sled_in_service =
+                        Self::check_sled_in_service_on_connection(
+                            &conn,
+                            disk.sled_id(),
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    if !sled_in_service {
+                        return Err(err.bail(TransactionError::CustomError(
+                            Error::internal_error(&format!(
+                                "Sled {} is not in service",
+                                disk.sled_id(),
+                            )),
+                        )));
+                    }
 
                     // Delete the adoption request if it exists. If it doesn't exist
                     // this will return an error.

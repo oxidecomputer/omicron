@@ -14,9 +14,12 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
+use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::Vni;
 use omicron_common::disk::{
     DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
 };
@@ -28,6 +31,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
+use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
@@ -36,6 +40,9 @@ use serde::{Deserialize, Serialize};
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
+use uuid::Uuid;
+
+use crate::impls::inventory::SourceNatConfigError;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -794,4 +801,142 @@ pub struct OmicronZonesConfig {
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
+}
+
+/// An IP address and port range used for source NAT, i.e., making
+/// outbound network connections from guests or services.
+// Note that `Deserialize` is manually implemented; if you make any
+// changes to the fields of this structure, you must make them to that
+// implementation too.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffable,
+)]
+pub struct SourceNatConfig {
+    /// The external address provided to the instance or service.
+    pub ip: IpAddr,
+    /// The first port used for source NAT, inclusive.
+    pub(crate) first_port: u16,
+    /// The last port used for source NAT, also inclusive.
+    pub(crate) last_port: u16,
+}
+
+// `SourceNatConfig::new()` is here instead of in crate::impls because we need
+// it in our Deserialize impl.
+impl SourceNatConfig {
+    /// Construct a `SourceNatConfig` with the given port range, both inclusive.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `(first_port, last_port)` is not aligned to
+    /// [`NUM_SOURCE_NAT_PORTS`].
+    pub fn new(
+        ip: IpAddr,
+        first_port: u16,
+        last_port: u16,
+    ) -> Result<Self, SourceNatConfigError> {
+        if first_port.is_multiple_of(NUM_SOURCE_NAT_PORTS)
+            && last_port
+                .checked_sub(first_port)
+                .and_then(|diff| diff.checked_add(1))
+                == Some(NUM_SOURCE_NAT_PORTS)
+        {
+            Ok(Self { ip, first_port, last_port })
+        } else {
+            Err(SourceNatConfigError::UnalignedPortPair {
+                first_port,
+                last_port,
+            })
+        }
+    }
+}
+
+// We implement `Deserialize` manually to add validity checking on the port
+// range.
+impl<'de> Deserialize<'de> for SourceNatConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        // The fields of `SourceNatConfigShadow` should exactly match the fields
+        // of `SourceNatConfig`. We're not really using serde's remote derive,
+        // but by adding the attribute we get compile-time checking that all the
+        // field names and types match. (It doesn't check the _order_, but that
+        // should be fine as long as we're using JSON or similar formats.)
+        #[derive(Deserialize)]
+        #[serde(remote = "SourceNatConfig")]
+        struct SourceNatConfigShadow {
+            ip: IpAddr,
+            first_port: u16,
+            last_port: u16,
+        }
+
+        let shadow = SourceNatConfigShadow::deserialize(deserializer)?;
+        SourceNatConfig::new(shadow.ip, shadow.first_port, shadow.last_port)
+            .map_err(D::Error::custom)
+    }
+}
+
+/// The type of network interface
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    Hash,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NetworkInterfaceKind {
+    /// A vNIC attached to a guest instance
+    Instance { id: Uuid },
+    /// A vNIC associated with an internal service
+    Service { id: Uuid },
+    /// A vNIC associated with a probe
+    Probe { id: Uuid },
+}
+
+/// Information required to construct a virtual network interface
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffable,
+)]
+pub struct NetworkInterface {
+    pub id: Uuid,
+    pub kind: NetworkInterfaceKind,
+    pub name: Name,
+    pub ip: IpAddr,
+    pub mac: MacAddr,
+    pub subnet: IpNet,
+    pub vni: Vni,
+    pub primary: bool,
+    pub slot: u8,
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }

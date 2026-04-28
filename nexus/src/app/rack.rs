@@ -715,10 +715,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // Note: Service firewall rules are plumbed in Server::start() via
-        // await_ip_allowlist_plumbing(), which runs before the external HTTP
-        // server starts. This ensures rules are in place for both fresh rack
-        // initialization and Nexus restart scenarios.
+        // Note: Service firewall rules are propagated on a best-effort basis
+        // in Server::start() via attempt_ip_allowlist_plumbing(). OPTE's
+        // default-deny policy ensures Nexus remains unreachable until the
+        // rules are plumbed; the background task retries if the attempt fails.
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo

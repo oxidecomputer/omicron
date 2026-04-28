@@ -33,7 +33,6 @@ use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
-use omicron_common::api::internal::nexus::SledVmmState;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
@@ -111,7 +110,9 @@ impl NexusInternalApi for NexusInternalApiImpl {
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        new_runtime_state: TypedBody<SledVmmState>,
+        new_runtime_state: TypedBody<
+            sled_agent_types_versions::v1::instance::SledVmmState,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;

@@ -79,13 +79,6 @@ pub enum Error {
     #[error("Error interacting with telemetry database: {0}")]
     Database(String),
 
-    /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{0}'", expected.timeseries_name)]
-    SchemaMismatch {
-        expected: Box<TimeseriesSchema>,
-        actual: Box<TimeseriesSchema>,
-    },
-
     #[error("Timeseries not found for: {0}")]
     TimeseriesNotFound(String),
 
