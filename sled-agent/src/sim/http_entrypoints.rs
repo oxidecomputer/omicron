@@ -89,6 +89,7 @@ use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
 use sled_agent_types_versions::v30;
 use sled_agent_types_versions::v33;
+use sled_agent_types_versions::v36;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -408,6 +409,7 @@ impl SledAgentApi for SledAgentSimImpl {
         use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
         use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
         use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
+        use v33::system_networking::SystemNetworkingConfig as BodyV33;
 
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
@@ -430,14 +432,28 @@ impl SledAgentApi for SledAgentSimImpl {
 
         // Downconvert from the current version to the v20 version we have to
         // return from this endpoint.
-        let body =
-            BodyV20::from(BodyV26::from(BodyV30::from(latest_version_body)));
+        let body = BodyV20::from(BodyV26::from(BodyV30::from(BodyV33::from(
+            latest_version_body,
+        ))));
 
         Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
             generation: config.generation,
             schema_version: BodyV20::SCHEMA_VERSION,
             body,
         }))
+    }
+
+    async fn write_network_bootstore_config_v36(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v36::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v33(
