@@ -632,9 +632,9 @@ impl SwitchInterfaceConfig {
     }
 }
 
-impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
-    fn into(self) -> external::SwitchInterfaceConfig {
-        external::SwitchInterfaceConfig {
+impl Into<networking_types::SwitchInterfaceConfig> for SwitchInterfaceConfig {
+    fn into(self) -> networking_types::SwitchInterfaceConfig {
+        networking_types::SwitchInterfaceConfig {
             port_settings_id: self.port_settings_id,
             id: self.id,
             interface_name: self.interface_name.into(),

@@ -405,6 +405,59 @@ pub enum SwitchInterfaceKind {
     Loopback,
 }
 
+/// Describes the kind of an switch interface.
+// This type is the same as `SwitchInterfaceKind` except that the `Vlan` variant
+// doesn't contain any details about the VLAN ID. This type is removed in a
+// future API revision.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchInterfaceKindNoVlanDetails {
+    /// Primary interfaces are associated with physical links. There is exactly
+    /// one primary interface per physical link.
+    Primary,
+
+    /// VLAN interfaces allow physical interfaces to be multiplexed onto
+    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
+    /// tag.
+    Vlan,
+
+    /// Loopback interfaces are anchors for IP addresses that are not specific
+    /// to any particular port.
+    Loopback,
+}
+
+/// A switch port interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchInterfaceConfig {
+    /// The port settings object this switch interface configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// A unique identifier for this switch interface.
+    pub id: Uuid,
+
+    /// The name of this switch interface.
+    pub interface_name: Name,
+
+    /// Whether or not IPv6 is enabled on this interface.
+    pub v6_enabled: bool,
+
+    /// The switch interface kind.
+    pub kind: SwitchInterfaceKindNoVlanDetails,
+}
+
+/// A switch port VLAN interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchVlanInterfaceConfig {
+    /// The switch interface configuration this VLAN interface configuration
+    /// belongs to.
+    pub interface_config_id: Uuid,
+
+    /// The virtual network id for this interface that is used for producing and
+    /// consuming 802.1Q Ethernet tags. This field has a maximum value of 4095
+    /// as 802.1Q tags are twelve bits.
+    pub vlan_id: u16,
+}
+
 /// Configuration data associated with a switch VLAN interface. The VID
 /// indicates a VLAN identifier. Must be between 1 and 4096.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -911,10 +964,10 @@ pub struct SwitchPortSettings {
     pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
-    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+    pub interfaces: Vec<SwitchInterfaceConfig>,
 
     /// Vlan interface settings.
-    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
     pub routes: Vec<external::SwitchPortRouteConfig>,

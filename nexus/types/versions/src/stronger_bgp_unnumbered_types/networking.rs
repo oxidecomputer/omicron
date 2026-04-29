@@ -19,9 +19,9 @@
 //!   * [`SwitchPortSettingsCreate`]
 
 use crate::v2025_11_20_00::networking::{
-    AddressConfig, LinkConfigCreate, RouteConfig, SwitchInterfaceConfigCreate,
-    SwitchPortConfig, SwitchPortConfigCreate, SwitchPortLinkConfig,
-    SwitchPortSettingsGroups,
+    AddressConfig, LinkConfigCreate, RouteConfig, SwitchInterfaceConfig,
+    SwitchInterfaceConfigCreate, SwitchPortConfig, SwitchPortConfigCreate,
+    SwitchPortLinkConfig, SwitchPortSettingsGroups, SwitchVlanInterfaceConfig,
 };
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
@@ -341,10 +341,10 @@ pub struct SwitchPortSettings {
     pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
-    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+    pub interfaces: Vec<SwitchInterfaceConfig>,
 
     /// Vlan interface settings.
-    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
     pub routes: Vec<external::SwitchPortRouteConfig>,

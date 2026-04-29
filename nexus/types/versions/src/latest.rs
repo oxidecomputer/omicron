@@ -266,8 +266,10 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
+    pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfig;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
+    pub use crate::v2025_11_20_00::networking::SwitchInterfaceKindNoVlanDetails;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
@@ -281,6 +283,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsInfoSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsSelector;
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
+    pub use crate::v2025_11_20_00::networking::SwitchVlanInterfaceConfig;
     pub use crate::v2025_11_20_00::networking::SwtichPortSettingsGroupCreate;
 
     pub use crate::v2025_12_12_00::networking::BgpPeerState;

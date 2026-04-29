@@ -28595,7 +28595,7 @@
             "description": "The switch interface kind.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchInterfaceKind2"
+                "$ref": "#/components/schemas/SwitchInterfaceKindNoVlanDetails"
               }
             ]
           },
@@ -28705,7 +28705,7 @@
           }
         ]
       },
-      "SwitchInterfaceKind2": {
+      "SwitchInterfaceKindNoVlanDetails": {
         "description": "Describes the kind of an switch interface.",
         "oneOf": [
           {
