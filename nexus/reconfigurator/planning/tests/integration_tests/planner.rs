@@ -3076,7 +3076,8 @@ fn create_measurement_artifacts_at_version(
 enum WhichVersion {
     /// Use a version and host OS hashes that match the initial system state
     /// (set up by `with_target_release_0_0_1`), so the planner does not issue
-    /// host OS MGS updates.
+    /// any updates if you set the system's target release to one built from
+    /// these artifacts.
     InitialSystemVersion,
 }
 
