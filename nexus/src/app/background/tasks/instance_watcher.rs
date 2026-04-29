@@ -237,6 +237,11 @@ impl Check {
             .await
             .map_err(SledAgentInstanceError);
         match rsp {
+            // We received a response from the sled-agent. We shall update the
+            // instance's state to match.
+            //
+            // Note that this does not always mean that the *VMM* is healthy,
+            // but only that we successfully got its state from the sled-agent.
             Ok(rsp) => {
                 let state = rsp.into_inner();
                 self.outcome =
@@ -256,6 +261,11 @@ impl Check {
                 self.outcome = CheckOutcome::Failure(Failure::NoSuchInstance);
                 mk_failed()
             }
+            // We were able to contact the sled-agent, but it responded with an
+            // error which does *not* tell us that the VMM has failed. Either
+            // the sled-agent is unhealthy, or we sent an invalid request for
+            // some reason. In either case, the check is inconclusive and the
+            // instance's state will not change.
             Err(SledAgentInstanceError(ClientError::ErrorResponse(rsp))) => {
                 let status = rsp.status();
                 if status.is_client_error() {
@@ -270,6 +280,13 @@ impl Check {
                     Err(Incomplete::SledAgentHttpError(status.as_u16()));
                 None
             }
+            // We were unable to communicate with the sled-agent. This could be
+            // due to a network partition between us and the sled-agent, or
+            // because the sled is powered off or not present. We will use the
+            // management network to check whether the sled is present and
+            // powered on. If we determine conclusively that it is not present
+            // and in A0, the instance is moved to `Failed`. Otherwise, the
+            // check is inconclusive and the instance's state will not change.
             Err(SledAgentInstanceError(ClientError::CommunicationError(e))) => {
                 slog::info!(
                     opctx.log,
@@ -309,6 +326,7 @@ impl Check {
                 self.result = Err(Incomplete::SledAgentUnreachable);
                 None
             }
+            // Any other errors mean that the check is inconclusive.
             Err(SledAgentInstanceError(e)) => {
                 slog::warn!(
                     opctx.log,
@@ -323,8 +341,8 @@ impl Check {
     }
 }
 
-/// An implementation of the `is_computer_on()` function [originally defined
-/// in the BeOS C library][1].
+/// An implementation of the `is_computer_on()` function originally defined
+/// [in the BeOS C library][1].
 ///
 /// [1]: https://web.archive.org/web/20260309055003/https://www.haiku-os.org/legacy-docs/bebook/TheKernelKit_SystemInfo.html
 async fn is_computer_on(
