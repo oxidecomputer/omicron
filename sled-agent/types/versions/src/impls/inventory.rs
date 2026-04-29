@@ -21,9 +21,10 @@ use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
-    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
+    FmdInventory, FmdInventoryResult, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
+    ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
     NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
@@ -906,6 +907,120 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
                 writeln!(f, "entry error : {message}")?
             }
         }
+        Ok(())
+    }
+}
+
+impl FmdInventoryResult {
+    pub fn display(&self) -> FmdInventoryResultDisplay<'_> {
+        FmdInventoryResultDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdInventoryResult`]
+pub struct FmdInventoryResultDisplay<'a> {
+    inner: &'a FmdInventoryResult,
+}
+
+impl fmt::Display for FmdInventoryResultDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.inner {
+            FmdInventoryResult::Available(inv) => {
+                write!(f, "{}", inv.display())
+            }
+            FmdInventoryResult::Error { error } => {
+                writeln!(f, "FMD collection failed: {error}")
+            }
+        }
+    }
+}
+
+impl FmdInventory {
+    pub fn display(&self) -> FmdInventoryDisplay<'_> {
+        FmdInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdInventory`]
+pub struct FmdInventoryDisplay<'a> {
+    inner: &'a FmdInventory,
+}
+
+impl fmt::Display for FmdInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdInventory { cases, resources } = self.inner;
+        if cases.is_empty() && resources.is_empty() {
+            writeln!(f, "no faults reported")?;
+            return Ok(());
+        }
+        writeln!(f, "cases ({}):", cases.len())?;
+        for case in cases {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", case.display())?;
+        }
+        writeln!(f, "resources ({}):", resources.len())?;
+        for resource in resources {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", resource.display())?;
+        }
+        Ok(())
+    }
+}
+
+impl FmdHostCase {
+    pub fn display(&self) -> FmdHostCaseDisplay<'_> {
+        FmdHostCaseDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdHostCase`]
+pub struct FmdHostCaseDisplay<'a> {
+    inner: &'a FmdHostCase,
+}
+
+impl fmt::Display for FmdHostCaseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdHostCase { uuid, code, url, event } = self.inner;
+        writeln!(f, "case {uuid} ({code})")?;
+        writeln!(f, "  url: {url}")?;
+        // The event payload is the FMD nvlist serialized to JSON. We
+        // intentionally do not interpret it; round-trip pretty-printing
+        // is enough to make it human-readable.
+        if let Some(event) = event {
+            match serde_json::to_string_pretty(event) {
+                Ok(rendered) => {
+                    writeln!(f, "  event:")?;
+                    let mut indent = IndentWriter::new("    ", &mut *f);
+                    writeln!(indent, "{rendered}")?;
+                }
+                Err(_) => writeln!(f, "  event: <unrenderable>")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FmdResource {
+    pub fn display(&self) -> FmdResourceDisplay<'_> {
+        FmdResourceDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdResource`]
+pub struct FmdResourceDisplay<'a> {
+    inner: &'a FmdResource,
+}
+
+impl fmt::Display for FmdResourceDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdResource { uuid, fmri, case_id, faulty, unusable, invisible } =
+            self.inner;
+        writeln!(f, "resource {uuid} (case {case_id})")?;
+        writeln!(f, "  fmri: {fmri}")?;
+        writeln!(
+            f,
+            "  faulty: {faulty}, unusable: {unusable}, invisible: {invisible}"
+        )?;
         Ok(())
     }
 }

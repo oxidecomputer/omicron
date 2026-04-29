@@ -187,6 +187,10 @@ pub mod inventory {
     pub use crate::v37::inventory::FmdResource;
     pub use crate::v37::inventory::Inventory;
 
+    pub use crate::impls::inventory::FmdHostCaseDisplay;
+    pub use crate::impls::inventory::FmdInventoryDisplay;
+    pub use crate::impls::inventory::FmdInventoryResultDisplay;
+    pub use crate::impls::inventory::FmdResourceDisplay;
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
     pub use crate::impls::inventory::ManifestNonBootInventoryDisplay;

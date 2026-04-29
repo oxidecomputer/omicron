@@ -1099,6 +1099,32 @@ pub fn sled_agent(
         result: ConfigReconcilerInventoryResult::Ok,
     });
 
+    // Synthesize a representative FMD payload: a single faulted resource
+    // diagnosed by a single case. This keeps the per-table-population test
+    // happy and gives downstream golden-output tests something to render.
+    let case_id = omicron_uuid_kinds::FmdHostCaseUuid::new_v4();
+    let resource_id = omicron_uuid_kinds::FmdResourceUuid::new_v4();
+    let mut fmd_cases = iddqd::IdOrdMap::new();
+    fmd_cases.insert_overwrite(sled_agent_types::inventory::FmdHostCase {
+        uuid: case_id,
+        code: "PCIEX-8000-DJ".to_string(),
+        url: "http://illumos.org/msg/PCIEX-8000-DJ".to_string(),
+        event: Some(serde_json::json!({"class": "fault.io.pci.bus"})),
+    });
+    let mut fmd_resources = iddqd::IdOrdMap::new();
+    fmd_resources.insert_overwrite(sled_agent_types::inventory::FmdResource {
+        uuid: resource_id,
+        fmri: "dev:////pci@af,0/pci1022,1483@3,5".to_string(),
+        case_id,
+        faulty: true,
+        unusable: false,
+        invisible: false,
+    });
+    let fmd = FmdInventoryResult::Available(FmdInventory {
+        cases: fmd_cases,
+        resources: fmd_resources,
+    });
+
     Inventory {
         baseboard,
         reservoir_size: ByteCount::from(1024),
@@ -1117,6 +1143,6 @@ pub fn sled_agent(
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,
-        fmd: FmdInventoryResult::Available(FmdInventory::default()),
+        fmd,
     }
 }
