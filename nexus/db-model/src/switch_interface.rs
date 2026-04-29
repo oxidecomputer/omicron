@@ -52,24 +52,6 @@ impl From<networking_types::SwitchInterfaceKind> for DbSwitchInterfaceKind {
     }
 }
 
-impl Into<networking_types::SwitchInterfaceKindNoVlanDetails>
-    for DbSwitchInterfaceKind
-{
-    fn into(self) -> networking_types::SwitchInterfaceKindNoVlanDetails {
-        match self {
-            DbSwitchInterfaceKind::Primary => {
-                networking_types::SwitchInterfaceKindNoVlanDetails::Primary
-            }
-            DbSwitchInterfaceKind::Vlan => {
-                networking_types::SwitchInterfaceKindNoVlanDetails::Vlan
-            }
-            DbSwitchInterfaceKind::Loopback => {
-                networking_types::SwitchInterfaceKindNoVlanDetails::Loopback
-            }
-        }
-    }
-}
-
 #[derive(
     Queryable,
     Insertable,

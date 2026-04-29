@@ -4070,7 +4070,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-            let settings: networking::SwitchPortSettings = result.into();
+            let settings: networking::SwitchPortSettings = result.try_into()?;
             Ok(HttpResponseCreated(settings))
         })
         .await
@@ -4138,7 +4138,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let settings =
                 nexus.switch_port_settings_get(&opctx, &query).await?;
-            Ok(HttpResponseOk(settings.into()))
+            Ok(HttpResponseOk(settings.try_into()?))
         };
         apictx
             .context

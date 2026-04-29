@@ -266,10 +266,8 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
-    pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfig;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
-    pub use crate::v2025_11_20_00::networking::SwitchInterfaceKindNoVlanDetails;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
@@ -306,9 +304,11 @@ pub mod networking {
     pub use crate::v2026_04_16_00::networking::BgpPeer;
     pub use crate::v2026_04_16_00::networking::BgpPeerConfig;
     pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
-    pub use crate::v2026_04_16_00::networking::SwitchPortSettings;
     pub use crate::v2026_04_16_00::networking::SwitchPortSettingsCreate;
     pub use crate::v2026_04_16_00::networking::router_peer_type_try_from_old_representation;
+
+    pub use crate::v2026_04_29_00::networking::SwitchInterfaceConfig;
+    pub use crate::v2026_04_29_00::networking::SwitchPortSettings;
 }
 
 pub mod oxql {

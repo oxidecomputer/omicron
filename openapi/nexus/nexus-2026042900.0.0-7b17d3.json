@@ -28595,7 +28595,7 @@
             "description": "The switch interface kind.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchInterfaceKindNoVlanDetails"
+                "$ref": "#/components/schemas/SwitchInterfaceKind"
               }
             ]
           },
@@ -28701,32 +28701,6 @@
             },
             "required": [
               "type"
-            ]
-          }
-        ]
-      },
-      "SwitchInterfaceKindNoVlanDetails": {
-        "description": "Describes the kind of an switch interface.",
-        "oneOf": [
-          {
-            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
-            "type": "string",
-            "enum": [
-              "primary"
-            ]
-          },
-          {
-            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
-            "type": "string",
-            "enum": [
-              "vlan"
-            ]
-          },
-          {
-            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
-            "type": "string",
-            "enum": [
-              "loopback"
             ]
           }
         ]
@@ -29143,13 +29117,6 @@
             "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
-          },
-          "vlan_interfaces": {
-            "description": "Vlan interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
-            }
           }
         },
         "required": [
@@ -29164,8 +29131,7 @@
           "port",
           "routes",
           "time_created",
-          "time_modified",
-          "vlan_interfaces"
+          "time_modified"
         ]
       },
       "SwitchPortSettingsCreate": {
@@ -29354,27 +29320,6 @@
               "switch1"
             ]
           }
-        ]
-      },
-      "SwitchVlanInterfaceConfig": {
-        "description": "A switch port VLAN interface configuration for a port settings object.",
-        "type": "object",
-        "properties": {
-          "interface_config_id": {
-            "description": "The switch interface configuration this VLAN interface configuration belongs to.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "vlan_id": {
-            "description": "The virtual network id for this interface that is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "interface_config_id",
-          "vlan_id"
         ]
       },
       "TargetRelease": {

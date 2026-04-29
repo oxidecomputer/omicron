@@ -13,8 +13,8 @@ use nexus_types::external_api::networking::{
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
     BgpPeerConfig, LinkConfigCreate, LinkFec, LinkSpeed, LldpLinkConfigCreate,
     Route, RouteConfig, SwitchInterfaceConfigCreate, SwitchInterfaceKind,
-    SwitchInterfaceKindNoVlanDetails, SwitchPort, SwitchPortApplySettings,
-    SwitchPortSettings, SwitchPortSettingsCreate,
+    SwitchPort, SwitchPortApplySettings, SwitchPortSettings,
+    SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
@@ -230,7 +230,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, SwitchInterfaceKindNoVlanDetails::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -272,7 +272,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, SwitchInterfaceKindNoVlanDetails::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());

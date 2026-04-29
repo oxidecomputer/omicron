@@ -388,7 +388,7 @@ pub struct SwitchInterfaceConfigCreate {
 }
 
 /// Indicates the kind for a switch interface.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SwitchInterfaceKind {
     /// Primary interfaces are associated with physical links. There is exactly
@@ -460,7 +460,7 @@ pub struct SwitchVlanInterfaceConfig {
 
 /// Configuration data associated with a switch VLAN interface. The VID
 /// indicates a VLAN identifier. Must be between 1 and 4096.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchVlanInterface {
     /// The virtual network id (VID) that distinguishes this interface and is
     /// used for producing and consuming 802.1Q Ethernet tags. This field has a

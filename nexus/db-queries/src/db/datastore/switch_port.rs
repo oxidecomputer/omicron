@@ -27,7 +27,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, DbSwitchSlot, SqlU16,
+    AddressLot, BgpConfig, DbSwitchInterfaceKind, DbSwitchSlot, SqlU16,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
@@ -187,23 +187,64 @@ impl SwitchPortSettingsCombinedResult {
     }
 }
 
-impl Into<networking::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
-    fn into(self) -> networking::SwitchPortSettings {
-        networking::SwitchPortSettings {
-            identity: self.settings.identity(),
-            port: self.port.into(),
-            groups: self.groups.into_iter().map(Into::into).collect(),
-            links: self.links.into_iter().map(Into::into).collect(),
-            interfaces: self.interfaces.into_iter().map(Into::into).collect(),
-            vlan_interfaces: self
-                .vlan_interfaces
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            routes: self.routes.into_iter().map(Into::into).collect(),
-            bgp_peers: self.bgp_peers.into_iter().map(Into::into).collect(),
-            addresses: self.addresses,
+impl TryFrom<SwitchPortSettingsCombinedResult>
+    for networking::SwitchPortSettings
+{
+    type Error = Error;
+
+    fn try_from(
+        result: SwitchPortSettingsCombinedResult,
+    ) -> Result<Self, Self::Error> {
+        let mut vlan_by_interface = BTreeMap::new();
+        for vlan_iface in result.vlan_interfaces {
+            let SwitchVlanInterfaceConfig { interface_config_id, vid } =
+                vlan_iface;
+            vlan_by_interface.insert(interface_config_id, vid);
         }
+
+        let mut interfaces = Vec::with_capacity(result.interfaces.len());
+        for iface in result.interfaces {
+            let kind = match iface.kind {
+                DbSwitchInterfaceKind::Primary => {
+                    networking::SwitchInterfaceKind::Primary
+                }
+                DbSwitchInterfaceKind::Vlan => {
+                    let Some(vid) = vlan_by_interface.get(&iface.id).copied()
+                    else {
+                        return Err(external::Error::internal_error(format!(
+                            "switch port settings has inconsistent data: \
+                             interface {iface:?} has type vlan, but \
+                             vlan_interfaces does not have matching interface: \
+                             {vlan_by_interface:?}"
+                        )));
+                    };
+                    networking::SwitchInterfaceKind::Vlan(
+                        networking::SwitchVlanInterface { vid: *vid },
+                    )
+                }
+                DbSwitchInterfaceKind::Loopback => {
+                    networking::SwitchInterfaceKind::Loopback
+                }
+            };
+            interfaces.push(networking::SwitchInterfaceConfig {
+                port_settings_id: iface.port_settings_id,
+                id: iface.id,
+                interface_name: iface.interface_name.into(),
+                v6_enabled: iface.v6_enabled,
+                kind,
+            });
+        }
+
+        Ok(networking::SwitchPortSettings {
+            identity: result.settings.identity(),
+            port: result.port.into(),
+            groups: result.groups.into_iter().map(Into::into).collect(),
+            links: result.links.into_iter().map(Into::into).collect(),
+            interfaces,
+            routes: result.routes.into_iter().map(Into::into).collect(),
+            bgp_peers: result.bgp_peers.into_iter().map(Into::into).collect(),
+            addresses: result.addresses,
+        })
     }
 }
 
