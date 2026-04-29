@@ -8,16 +8,16 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 const INV_COLLECTION_ID: Uuid =
-    Uuid::from_u128(25301230_0000_0000_0000_000000000001);
-const SLED_ID: Uuid = Uuid::from_u128(25301230_0000_0000_0000_000000000002);
+    Uuid::from_u128(25401230_0000_0000_0000_000000000001);
+const SLED_ID: Uuid = Uuid::from_u128(25401230_0000_0000_0000_000000000002);
 
 const SVC_UNINITIALIZED: Uuid =
-    Uuid::from_u128(25301231_0000_0000_0000_000000000001);
-const SVC_OFFLINE: Uuid = Uuid::from_u128(25301231_0000_0000_0000_000000000002);
+    Uuid::from_u128(25401231_0000_0000_0000_000000000001);
+const SVC_OFFLINE: Uuid = Uuid::from_u128(25401231_0000_0000_0000_000000000002);
 const SVC_DEGRADED: Uuid =
-    Uuid::from_u128(25301231_0000_0000_0000_000000000003);
+    Uuid::from_u128(25401231_0000_0000_0000_000000000003);
 const SVC_MAINTENANCE: Uuid =
-    Uuid::from_u128(25301231_0000_0000_0000_000000000004);
+    Uuid::from_u128(25401231_0000_0000_0000_000000000004);
 
 pub(crate) fn checks() -> DataMigrationFns {
     DataMigrationFns::new().before(before).after(after)
@@ -42,7 +42,7 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 "
             ))
             .await
-            .expect("failed to insert pre-migration rows for 253");
+            .expect("failed to insert pre-migration rows for 254");
     })
 }
 
@@ -60,7 +60,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("failed to query for uninitialized row after 253");
+            .expect("failed to query for uninitialized row after 254");
         assert_eq!(
             rows.len(),
             0,
@@ -83,7 +83,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("failed to query preserved rows after 253");
+            .expect("failed to query preserved rows after 254");
 
         let observed: Vec<(Uuid, &str)> = rows
             .iter()
@@ -109,7 +109,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                      (inv_collection_id, sled_id, id, fmri, zone, state) \
                  VALUES \
                      ('{INV_COLLECTION_ID}', '{SLED_ID}', \
-                      '25300002-0000-0000-0000-000000000001', \
+                      '25400002-0000-0000-0000-000000000001', \
                       'svc:/site/new-uninit:default', 'global', \
                       'uninitialized');"
             ))
@@ -129,6 +129,6 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                  WHERE inv_collection_id = '{INV_COLLECTION_ID}';"
             ))
             .await
-            .expect("failed to clean up test data for 253");
+            .expect("failed to clean up test data for 254");
     })
 }
