@@ -446,7 +446,7 @@ async fn test_webhook_receiver_names_are_unique(
             secrets: vec![MY_COOL_SECRET.to_string()],
             subscriptions: vec!["test.foo.bar".parse().unwrap()],
         },
-        http::StatusCode::BAD_REQUEST,
+        http::StatusCode::CONFLICT,
     )
     .await;
     assert_eq!(

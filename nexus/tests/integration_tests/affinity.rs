@@ -704,7 +704,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     // We can now create a group and observe it
     project_api.group_create(GROUP_NAME).await;
     let response = project_api
-        .group_create_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .group_create_expect_error(GROUP_NAME, StatusCode::CONFLICT)
         .await;
     assert_eq!(
         response.message,
@@ -726,7 +726,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
         .group_member_add_expect_error(
             GROUP_NAME,
             &instance_name,
-            StatusCode::BAD_REQUEST,
+            StatusCode::CONFLICT,
         )
         .await;
     assert_eq!(
