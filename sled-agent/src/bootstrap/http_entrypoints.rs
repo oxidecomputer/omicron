@@ -10,7 +10,7 @@
 use super::BootstrapError;
 use super::RssAccessError;
 use super::rack_ops::RssAccess;
-use crate::rack_setup::service::RackInitializeRequestParams;
+use sled_agent_rack_setup::RackInitializeRequestParams;
 use crate::updates::ConfigUpdates;
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;

@@ -4,7 +4,7 @@
 
 //! Network setup required to bring up the control plane
 
-use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
@@ -313,7 +313,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// zone it brought up.
     ///
     /// Returns the list of uplinks configured via DPD.
-    pub(crate) async fn init_switch_config(
+    pub async fn init_switch_config(
         &mut self,
         network_config_rx: &watch::Receiver<SystemNetworkingConfig>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,

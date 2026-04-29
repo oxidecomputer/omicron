@@ -21,7 +21,7 @@ use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
 use crate::long_running_tasks::LongRunningTaskHandles;
-use crate::rack_setup::service::RackInitializeRequestParams;
+use sled_agent_rack_setup::RackInitializeRequestParams;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;

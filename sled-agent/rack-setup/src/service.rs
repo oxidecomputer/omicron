@@ -67,12 +67,9 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::bootstrap::early_networking::{
-    EarlyNetworkSetup, EarlyNetworkSetupError,
-};
-use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::rack_setup::plan::service::PlanError as ServicePlanError;
-use crate::rack_setup::plan::sled::Plan as SledPlan;
+use crate::plan::service::PlanError as ServicePlanError;
+use crate::plan::sled::Plan as SledPlan;
+use async_trait::async_trait;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
 use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
@@ -112,6 +109,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfigEnvelope, LldpAdminStatus,
@@ -130,7 +128,7 @@ use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -138,8 +136,39 @@ use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
-pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
-pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
+pub use crate::plan::service::Plan as ServicePlan;
+pub use crate::plan::service::PlannedSledDescription;
+use sled_agent_types::sled::StartSledAgentRequest;
+
+/// Operations RSS performs on the local bootstrap-agent during rack setup.
+///
+/// Implemented by sled-agent. Today the implementation forwards requests over
+/// an in-process channel; in the future (oxidecomputer/omicron#820) this
+/// becomes the IPC interface between an out-of-process RSS and the local
+/// bootstrap-agent.
+#[async_trait]
+pub trait LocalBootstrapAgent: Send + Sync {
+    /// The bootstrap-network address of the sled hosting RSS.
+    fn our_address(&self) -> Ipv6Addr;
+
+    /// Initialize sled-agents on the rack's other sleds.
+    ///
+    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
+    /// `reset_sleds` per run.
+    async fn initialize_sleds(
+        self: Box<Self>,
+        requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
+    ) -> Result<(), String>;
+
+    /// Reset sled-agents on the rack's other sleds.
+    ///
+    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
+    /// `reset_sleds` per run.
+    async fn reset_sleds(
+        self: Box<Self>,
+        requests: Vec<SocketAddrV6>,
+    ) -> Result<(), String>;
+}
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -291,11 +320,11 @@ impl RackSetupService {
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
     /// - `trust_quorum` - A handle to the trust qurom task
-    pub(crate) fn new(
+    pub fn new(
         log: Logger,
         request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
@@ -323,9 +352,9 @@ impl RackSetupService {
         RackSetupService { handle }
     }
 
-    pub(crate) fn new_reset_rack(
+    pub fn new_reset_rack(
         log: Logger,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
@@ -1071,7 +1100,7 @@ impl ServiceInner {
 
     async fn reset(
         &self,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
@@ -1180,7 +1209,7 @@ impl ServiceInner {
         &self,
         request: &RackInitializeRequestParams,
         internal_disks_rx: &InternalDisksReceiver,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
@@ -1866,7 +1895,7 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use crate::plan::service::{Plan as ServicePlan, SledInfo};
     use anyhow::Context;
     use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use iddqd::IdOrdMap;
@@ -1895,8 +1924,8 @@ mod test {
         // Use env! rather than std::env::var because this might be called from
         // a dependent crate.
         let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path =
-            manifest_dir.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let path = manifest_dir
+            .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         toml::from_str(&contents)
             .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
@@ -2136,13 +2165,13 @@ mod test {
         let manifest = Utf8PathBuf::from(manifest);
 
         let path =
-            manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+            manifest.join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
             .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
 
         let path = manifest
-            .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
+            .join("../../smf/sled-agent/gimlet-standalone/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
             .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
@@ -2259,7 +2288,7 @@ mod test {
     fn test_extra_certs() {
         // The stock non-Gimlet config has no TLS certificates.
         let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../smf/sled-agent/non-gimlet/config-rss.toml");
+            .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let cfg =
             rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
                 panic!(

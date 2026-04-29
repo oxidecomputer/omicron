@@ -175,12 +175,12 @@ impl SledConfig {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PlannedSledDescription {
-    pub(crate) underlay_address: SocketAddrV6,
-    pub(crate) sled_id: SledUuid,
-    pub(crate) subnet: Ipv6Subnet<SLED_PREFIX>,
-    pub(crate) config: SledConfig,
-    pub(crate) last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
+pub struct PlannedSledDescription {
+    pub underlay_address: SocketAddrV6,
+    pub sled_id: SledUuid,
+    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub config: SledConfig,
+    pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 }
 
 impl iddqd::IdOrdItem for PlannedSledDescription {
@@ -888,7 +888,7 @@ impl Plan {
         Ok(plan)
     }
 
-    pub(crate) fn to_blueprint(
+    pub fn to_blueprint(
         &self,
         sled_agent_config_generation: Generation,
     ) -> anyhow::Result<Blueprint> {

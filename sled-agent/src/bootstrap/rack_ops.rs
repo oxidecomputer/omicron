@@ -5,8 +5,8 @@
 //! Internal API for rack-level bootstrap agent operations.
 
 use crate::bootstrap::rss_handle::RssHandle;
-use crate::rack_setup::service::RackInitializeRequestParams;
-use crate::rack_setup::service::SetupServiceError;
+use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_rack_setup::SetupServiceError;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;

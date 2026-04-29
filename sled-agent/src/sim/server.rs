@@ -9,9 +9,8 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::{ConvertInto, NexusClient};
-use crate::rack_setup::SledConfig;
-use crate::rack_setup::service::{PlannedSledDescription, ServicePlan};
-use crate::rack_setup::{
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };

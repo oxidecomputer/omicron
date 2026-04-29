@@ -26,13 +26,11 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
-cockroach-admin-client.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
-dns-service-client.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
 # This is the R17 dpd client
 # dpd-client.workspace = true
@@ -97,6 +95,7 @@ sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
 sled-agent-health-monitor.workspace = true
 sled-agent-measurements.workspace = true
+sled-agent-rack-setup.workspace = true
 sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
 sled-agent-resolvable-files.workspace = true

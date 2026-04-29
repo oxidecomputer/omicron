@@ -1,0 +1,69 @@
+[package]
+name = "sled-agent-rack-setup"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bootstore.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
+camino.workspace = true
+cancel-safe-futures.workspace = true
+chrono.workspace = true
+cockroach-admin-client.workspace = true
+dns-service-client.workspace = true
+# XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
+# This is the R17 dpd client
+# dpd-client.workspace = true
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
+futures.workspace = true
+gateway-client.workspace = true
+http.workspace = true
+iddqd.workspace = true
+illumos-utils.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+itertools.workspace = true
+mg-admin-client.workspace = true
+nexus-config.workspace = true
+nexus-lockstep-client.workspace = true
+nexus-types.workspace = true
+ntp-admin-client.workspace = true
+omicron-common.workspace = true
+omicron-ddm-admin-client.workspace = true
+omicron-ledger.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+oxnet.workspace = true
+rand = { workspace = true, features = ["os_rng"] }
+rdb-types.workspace = true
+reqwest = { workspace = true, features = ["rustls", "stream"] }
+schemars = { workspace = true, features = ["chrono", "uuid1"] }
+serde.workspace = true
+sled-agent-client.workspace = true
+sled-agent-config-reconciler.workspace = true
+sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
+sled-storage.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+static_assertions.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
+trust-quorum.workspace = true
+trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+nexus-reconfigurator-blippy.workspace = true
+omicron-test-utils.workspace = true
+rcgen.workspace = true
+sled-agent-types-versions.workspace = true

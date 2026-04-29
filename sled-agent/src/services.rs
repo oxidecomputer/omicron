@@ -23,7 +23,7 @@
 //!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::bootstrap::BootstrapNetworking;
-use crate::bootstrap::early_networking::{
+use sled_agent_rack_setup::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::config::SidecarRevision;
