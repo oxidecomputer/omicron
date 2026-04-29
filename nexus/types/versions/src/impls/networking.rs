@@ -74,7 +74,7 @@ impl latest::networking::SwitchPortSettingsCreate {
 
 // TODO-cleanup We could push `LinkFec` and `LinkSpeed` down into
 // sled-agent-types-versions and reeport them instead of having these
-// conversions. That requires some drift fixes.
+// conversions. That requires <https://github.com/oxidecomputer/drift/pull/20>.
 impl From<PortFec> for latest::networking::LinkFec {
     fn from(x: PortFec) -> Self {
         match x {
