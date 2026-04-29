@@ -378,7 +378,7 @@ impl BackgroundTask for UserDataExportCoordinator {
                 }
             };
 
-            error!(&log, "changeset is {changeset:?}");
+            info!(&log, "changeset is {changeset:?}");
 
             self.process_user_data_export_changeset(
                 &opctx,
