@@ -4900,7 +4900,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<latest::networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::LldpLinkConfig>, HttpError>;
 
     /// Fetch LLDP configuration for switch port
     #[endpoint {
@@ -4914,7 +4914,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::networking::LldpLinkConfig>, HttpError> {
         let query_params = query_params.try_map(TryInto::try_into)?;
         Self::networking_switch_port_lldp_config_view(
             rqctx,
@@ -4935,7 +4935,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<latest::networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<latest::networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Update LLDP configuration for switch port
@@ -4950,7 +4950,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<latest::networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let query_params = query_params.try_map(TryInto::try_into)?;
         Self::networking_switch_port_lldp_config_update(

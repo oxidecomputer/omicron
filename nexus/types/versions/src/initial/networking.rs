@@ -10,8 +10,8 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
-    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, Name, NameOrId, ObjectIdentity,
+    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, Name,
+    NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -319,9 +319,35 @@ pub struct LldpLinkConfigCreate {
     pub management_ip: Option<IpAddr>,
 }
 
-impl PartialEq<LldpLinkConfigCreate>
-    for omicron_common::api::external::LldpLinkConfig
-{
+/// A link layer discovery protocol (LLDP) service configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpLinkConfig {
+    /// The id of this LLDP service instance.
+    pub id: Uuid,
+
+    /// Whether or not the LLDP service is enabled.
+    pub enabled: bool,
+
+    /// The LLDP link name TLV.
+    pub link_name: Option<String>,
+
+    /// The LLDP link description TLV.
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier TLV.
+    pub chassis_id: Option<String>,
+
+    /// The LLDP system name TLV.
+    pub system_name: Option<String>,
+
+    /// The LLDP system description TLV.
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP TLV.
+    pub management_ip: Option<IpAddr>,
+}
+
+impl PartialEq<LldpLinkConfigCreate> for LldpLinkConfig {
     fn eq(&self, other: &LldpLinkConfigCreate) -> bool {
         self.enabled == other.enabled
             && self.link_name == other.link_name
@@ -333,13 +359,8 @@ impl PartialEq<LldpLinkConfigCreate>
     }
 }
 
-impl PartialEq<omicron_common::api::external::LldpLinkConfig>
-    for LldpLinkConfigCreate
-{
-    fn eq(
-        &self,
-        other: &omicron_common::api::external::LldpLinkConfig,
-    ) -> bool {
+impl PartialEq<LldpLinkConfig> for LldpLinkConfigCreate {
+    fn eq(&self, other: &LldpLinkConfig) -> bool {
         self.enabled == other.enabled
             && self.link_name == other.link_name
             && self.link_description == other.link_description
@@ -887,7 +908,7 @@ pub struct SwitchPortSettings {
     pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
-    pub links: Vec<external::SwitchPortLinkConfig>,
+    pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
     pub interfaces: Vec<external::SwitchInterfaceConfig>,
@@ -903,4 +924,71 @@ pub struct SwitchPortSettings {
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<external::SwitchPortAddressView>,
+}
+
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode forward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+/// A link configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortLinkConfig {
+    /// The port settings this link configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The name of this link.
+    pub link_name: Name,
+
+    /// The maximum transmission unit for this link.
+    pub mtu: u16,
+
+    /// The requested forward-error correction method.  If this is not
+    /// specified, the standard FEC for the underlying media will be applied
+    /// if it can be determined.
+    pub fec: Option<LinkFec>,
+
+    /// The configured speed of the link.
+    pub speed: LinkSpeed,
+
+    /// Whether or not the link has autonegotiation enabled.
+    pub autoneg: bool,
+
+    /// The link-layer discovery protocol service configuration for this
+    /// link.
+    pub lldp_link_config: Option<LldpLinkConfig>,
+
+    /// The tx_eq configuration for this link.
+    pub tx_eq_config: Option<TxEqConfig>,
 }

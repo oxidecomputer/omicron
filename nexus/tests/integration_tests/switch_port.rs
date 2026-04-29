@@ -11,15 +11,15 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPort,
-    SwitchPortApplySettings, SwitchPortSettings, SwitchPortSettingsCreate,
+    BgpPeerConfig, LinkConfigCreate, LinkFec, LinkSpeed, LldpLinkConfigCreate,
+    Route, RouteConfig, SwitchInterfaceConfigCreate, SwitchInterfaceKind,
+    SwitchPort, SwitchPortApplySettings, SwitchPortSettings,
+    SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
-    NameOrId,
+    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId,
 };
 use oxnet::IpNet;
 use sled_agent_types::early_networking::{ImportExportPolicy, RouterPeerType};

@@ -83,7 +83,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
@@ -4241,7 +4240,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortPathSelector>,
         query_params: Query<networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::LldpLinkConfig>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4270,7 +4269,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortPathSelector>,
         query_params: Query<networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();

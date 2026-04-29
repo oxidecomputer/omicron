@@ -130,22 +130,22 @@ impl From<SwitchLinkFec> for PortFec {
     }
 }
 
-impl From<external::LinkFec> for SwitchLinkFec {
-    fn from(value: external::LinkFec) -> Self {
+impl From<networking_types::LinkFec> for SwitchLinkFec {
+    fn from(value: networking_types::LinkFec) -> Self {
         match value {
-            external::LinkFec::Firecode => SwitchLinkFec::Firecode,
-            external::LinkFec::None => SwitchLinkFec::None,
-            external::LinkFec::Rs => SwitchLinkFec::Rs,
+            networking_types::LinkFec::Firecode => SwitchLinkFec::Firecode,
+            networking_types::LinkFec::None => SwitchLinkFec::None,
+            networking_types::LinkFec::Rs => SwitchLinkFec::Rs,
         }
     }
 }
 
-impl From<SwitchLinkFec> for external::LinkFec {
+impl From<SwitchLinkFec> for networking_types::LinkFec {
     fn from(value: SwitchLinkFec) -> Self {
         match value {
-            SwitchLinkFec::Firecode => external::LinkFec::Firecode,
-            SwitchLinkFec::None => external::LinkFec::None,
-            SwitchLinkFec::Rs => external::LinkFec::Rs,
+            SwitchLinkFec::Firecode => networking_types::LinkFec::Firecode,
+            SwitchLinkFec::None => networking_types::LinkFec::None,
+            SwitchLinkFec::Rs => networking_types::LinkFec::Rs,
         }
     }
 }
@@ -166,34 +166,34 @@ impl From<SwitchLinkSpeed> for PortSpeed {
     }
 }
 
-impl From<external::LinkSpeed> for SwitchLinkSpeed {
-    fn from(value: external::LinkSpeed) -> Self {
+impl From<networking_types::LinkSpeed> for SwitchLinkSpeed {
+    fn from(value: networking_types::LinkSpeed) -> Self {
         match value {
-            external::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
-            external::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
-            external::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
-            external::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
-            external::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
-            external::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
-            external::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
-            external::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
-            external::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
+            networking_types::LinkSpeed::Speed0G => Self::Speed0G,
+            networking_types::LinkSpeed::Speed1G => Self::Speed1G,
+            networking_types::LinkSpeed::Speed10G => Self::Speed10G,
+            networking_types::LinkSpeed::Speed25G => Self::Speed25G,
+            networking_types::LinkSpeed::Speed40G => Self::Speed40G,
+            networking_types::LinkSpeed::Speed50G => Self::Speed50G,
+            networking_types::LinkSpeed::Speed100G => Self::Speed100G,
+            networking_types::LinkSpeed::Speed200G => Self::Speed200G,
+            networking_types::LinkSpeed::Speed400G => Self::Speed400G,
         }
     }
 }
 
-impl From<SwitchLinkSpeed> for external::LinkSpeed {
+impl From<SwitchLinkSpeed> for networking_types::LinkSpeed {
     fn from(value: SwitchLinkSpeed) -> Self {
         match value {
-            SwitchLinkSpeed::Speed0G => external::LinkSpeed::Speed0G,
-            SwitchLinkSpeed::Speed1G => external::LinkSpeed::Speed1G,
-            SwitchLinkSpeed::Speed10G => external::LinkSpeed::Speed10G,
-            SwitchLinkSpeed::Speed25G => external::LinkSpeed::Speed25G,
-            SwitchLinkSpeed::Speed40G => external::LinkSpeed::Speed40G,
-            SwitchLinkSpeed::Speed50G => external::LinkSpeed::Speed50G,
-            SwitchLinkSpeed::Speed100G => external::LinkSpeed::Speed100G,
-            SwitchLinkSpeed::Speed200G => external::LinkSpeed::Speed200G,
-            SwitchLinkSpeed::Speed400G => external::LinkSpeed::Speed400G,
+            SwitchLinkSpeed::Speed0G => Self::Speed0G,
+            SwitchLinkSpeed::Speed1G => Self::Speed1G,
+            SwitchLinkSpeed::Speed10G => Self::Speed10G,
+            SwitchLinkSpeed::Speed25G => Self::Speed25G,
+            SwitchLinkSpeed::Speed40G => Self::Speed40G,
+            SwitchLinkSpeed::Speed50G => Self::Speed50G,
+            SwitchLinkSpeed::Speed100G => Self::Speed100G,
+            SwitchLinkSpeed::Speed200G => Self::Speed200G,
+            SwitchLinkSpeed::Speed400G => Self::Speed400G,
         }
     }
 }
@@ -535,9 +535,9 @@ impl LldpLinkConfig {
 
 // This converts the internal database version of the config into the
 // user-facing version.
-impl Into<external::LldpLinkConfig> for LldpLinkConfig {
-    fn into(self) -> external::LldpLinkConfig {
-        external::LldpLinkConfig {
+impl Into<networking_types::LldpLinkConfig> for LldpLinkConfig {
+    fn into(self) -> networking_types::LldpLinkConfig {
+        networking_types::LldpLinkConfig {
             id: self.id,
             enabled: self.enabled,
             link_name: self.link_name.clone(),
@@ -584,9 +584,9 @@ impl TxEqConfig {
 
 // This converts the internal database version of the config into the
 // user-facing version.
-impl Into<external::TxEqConfig> for TxEqConfig {
-    fn into(self) -> external::TxEqConfig {
-        external::TxEqConfig {
+impl Into<sled_agent_types::early_networking::TxEqConfig> for TxEqConfig {
+    fn into(self) -> sled_agent_types::early_networking::TxEqConfig {
+        sled_agent_types::early_networking::TxEqConfig {
             pre1: self.pre1,
             pre2: self.pre2,
             main: self.main,

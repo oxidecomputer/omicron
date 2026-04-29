@@ -19,6 +19,7 @@
 use crate::v2025_12_12_00::networking::BgpPeerState;
 use crate::v2025_11_20_00::networking::SwitchPortConfig;
 use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
+use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, Name, NameOrId,
@@ -322,7 +323,7 @@ pub struct SwitchPortSettings {
     pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
-    pub links: Vec<external::SwitchPortLinkConfig>,
+    pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
     pub interfaces: Vec<external::SwitchInterfaceConfig>,

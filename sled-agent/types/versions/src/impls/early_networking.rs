@@ -21,7 +21,6 @@ use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use crate::latest::early_networking::UplinkIpNet;
 use crate::latest::early_networking::UplinkIpNetError;
-use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
 use oxnet::Ipv6Net;
@@ -66,32 +65,6 @@ impl BgpPeerConfig {
 
     pub fn keepalive(&self) -> u64 {
         self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
-    }
-}
-
-impl From<PortFec> for external::LinkFec {
-    fn from(x: PortFec) -> Self {
-        match x {
-            PortFec::Firecode => Self::Firecode,
-            PortFec::None => Self::None,
-            PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-impl From<PortSpeed> for external::LinkSpeed {
-    fn from(x: PortSpeed) -> Self {
-        match x {
-            PortSpeed::Speed0G => Self::Speed0G,
-            PortSpeed::Speed1G => Self::Speed1G,
-            PortSpeed::Speed10G => Self::Speed10G,
-            PortSpeed::Speed25G => Self::Speed25G,
-            PortSpeed::Speed40G => Self::Speed40G,
-            PortSpeed::Speed50G => Self::Speed50G,
-            PortSpeed::Speed100G => Self::Speed100G,
-            PortSpeed::Speed200G => Self::Speed200G,
-            PortSpeed::Speed400G => Self::Speed400G,
-        }
     }
 }
 

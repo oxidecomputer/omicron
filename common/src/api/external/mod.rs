@@ -2843,101 +2843,6 @@ pub struct AddressLotBlock {
     pub last_address: IpAddr,
 }
 
-/// The speed of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkSpeed {
-    /// Zero gigabits per second.
-    Speed0G,
-    /// 1 gigabit per second.
-    Speed1G,
-    /// 10 gigabits per second.
-    Speed10G,
-    /// 25 gigabits per second.
-    Speed25G,
-    /// 40 gigabits per second.
-    Speed40G,
-    /// 50 gigabits per second.
-    Speed50G,
-    /// 100 gigabits per second.
-    Speed100G,
-    /// 200 gigabits per second.
-    Speed200G,
-    /// 400 gigabits per second.
-    Speed400G,
-}
-
-/// The forward error correction mode of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkFec {
-    /// Firecode forward error correction.
-    Firecode,
-    /// No forward error correction.
-    None,
-    /// Reed-Solomon forward error correction.
-    Rs,
-}
-
-/// A link configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortLinkConfig {
-    /// The port settings this link configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The name of this link.
-    pub link_name: Name,
-
-    /// The maximum transmission unit for this link.
-    pub mtu: u16,
-
-    /// The requested forward-error correction method.  If this is not
-    /// specified, the standard FEC for the underlying media will be applied
-    /// if it can be determined.
-    pub fec: Option<LinkFec>,
-
-    /// The configured speed of the link.
-    pub speed: LinkSpeed,
-
-    /// Whether or not the link has autonegotiation enabled.
-    pub autoneg: bool,
-
-    /// The link-layer discovery protocol service configuration for this
-    /// link.
-    pub lldp_link_config: Option<LldpLinkConfig>,
-
-    /// The tx_eq configuration for this link.
-    pub tx_eq_config: Option<TxEqConfig>,
-}
-
-/// A link layer discovery protocol (LLDP) service configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpLinkConfig {
-    /// The id of this LLDP service instance.
-    pub id: Uuid,
-
-    /// Whether or not the LLDP service is enabled.
-    pub enabled: bool,
-
-    /// The LLDP link name TLV.
-    pub link_name: Option<String>,
-
-    /// The LLDP link description TLV.
-    pub link_description: Option<String>,
-
-    /// The LLDP chassis identifier TLV.
-    pub chassis_id: Option<String>,
-
-    /// The LLDP system name TLV.
-    pub system_name: Option<String>,
-
-    /// The LLDP system description TLV.
-    pub system_description: Option<String>,
-
-    /// The LLDP management IP TLV.
-    pub management_ip: Option<IpAddr>,
-}
-
 /// Information about LLDP advertisements from other network entities directly
 /// connected to a switch port.  This structure contains both metadata about
 /// when and where the neighbor was seen, as well as the specific information
@@ -2980,22 +2885,6 @@ impl SimpleIdentity for LldpNeighbor {
     fn id(&self) -> Uuid {
         self.id
     }
-}
-
-/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
-/// equalization settings to improve signal integrity.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct TxEqConfig {
-    /// Pre-cursor tap1
-    pub pre1: Option<i32>,
-    /// Pre-cursor tap2
-    pub pre2: Option<i32>,
-    /// Main tap
-    pub main: Option<i32>,
-    /// Post-cursor tap2
-    pub post2: Option<i32>,
-    /// Post-cursor tap1
-    pub post1: Option<i32>,
 }
 
 /// Describes the kind of an switch interface.

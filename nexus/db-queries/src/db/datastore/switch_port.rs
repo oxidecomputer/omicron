@@ -219,7 +219,7 @@ pub struct LinkConfigCombinedResult {
     pub tx_eq_config: Option<TxEqConfig>,
 }
 
-impl From<LinkConfigCombinedResult> for external::SwitchPortLinkConfig {
+impl From<LinkConfigCombinedResult> for networking::SwitchPortLinkConfig {
     fn from(value: LinkConfigCombinedResult) -> Self {
         Self {
             port_settings_id: value.port_settings_id,

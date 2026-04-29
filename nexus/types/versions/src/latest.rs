@@ -259,6 +259,9 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
+    pub use crate::v2025_11_20_00::networking::LinkFec;
+    pub use crate::v2025_11_20_00::networking::LinkSpeed;
+    pub use crate::v2025_11_20_00::networking::LldpLinkConfig;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
@@ -269,6 +272,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchPortGeometry;
+    pub use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroup;
