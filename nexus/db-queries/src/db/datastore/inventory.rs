@@ -4199,6 +4199,89 @@ impl DataStore {
             measurements
         };
 
+        // Load all FMD inventory rows. We expect at most ~tens of cases or
+        // resources per sled, so we don't bother paginating.
+        let mut fmd_status_by_sled: BTreeMap<SledUuid, Option<String>> = {
+            use nexus_db_schema::schema::inv_fmd_status::dsl;
+            let rows = dsl::inv_fmd_status
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdStatus::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            rows.into_iter()
+                .map(|row| (row.sled_id.into(), row.error_message))
+                .collect()
+        };
+
+        let mut fmd_cases_by_sled: BTreeMap<
+            SledUuid,
+            IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+            let rows = dsl::inv_fmd_host_case
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdHostCase::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            let mut by_sled: BTreeMap<
+                SledUuid,
+                IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
+            > = BTreeMap::new();
+            for row in rows {
+                let sled_id: SledUuid = row.sled_id.into();
+                by_sled
+                    .entry(sled_id)
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| {
+                    Error::internal_error(&format!(
+                        "unexpected duplicate FMD case: {}",
+                        InlineErrorChain::new(&err)
+                    ))
+                })?;
+            }
+            by_sled
+        };
+
+        let mut fmd_resources_by_sled: BTreeMap<
+            SledUuid,
+            IdOrdMap<sled_agent_types::inventory::FmdResource>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_resource::dsl;
+            let rows = dsl::inv_fmd_resource
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdResource::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            let mut by_sled: BTreeMap<
+                SledUuid,
+                IdOrdMap<sled_agent_types::inventory::FmdResource>,
+            > = BTreeMap::new();
+            for row in rows {
+                let sled_id: SledUuid = row.sled_id.into();
+                by_sled
+                    .entry(sled_id)
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| {
+                    Error::internal_error(&format!(
+                        "unexpected duplicate FMD resource: {}",
+                        InlineErrorChain::new(&err)
+                    ))
+                })?;
+            }
+            by_sled
+        };
+
         // Load all the config reconciler zone results; build a map of maps
         // keyed by sled ID.
         let mut last_reconciliation_zone_results = {
@@ -4785,10 +4868,31 @@ impl DataStore {
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),
-                // Populated by the read path in a follow-on commit.
-                fmd: sled_agent_types::inventory::FmdInventoryResult::Available(
-                    sled_agent_types::inventory::FmdInventory::default(),
-                ),
+                fmd: {
+                    use sled_agent_types::inventory::{
+                        FmdInventory, FmdInventoryResult,
+                    };
+                    let cases =
+                        fmd_cases_by_sled.remove(&sled_id).unwrap_or_default();
+                    let resources = fmd_resources_by_sled
+                        .remove(&sled_id)
+                        .unwrap_or_default();
+                    // The status row's error_message column distinguishes
+                    // Available (NULL) from Error (the message). If no row
+                    // exists at all (i.e. an older collection predates this
+                    // migration), fall back to Available with whatever
+                    // case/resource rows we found, which will normally be
+                    // empty.
+                    match fmd_status_by_sled.remove(&sled_id) {
+                        Some(Some(error)) => {
+                            FmdInventoryResult::Error { error }
+                        }
+                        _ => FmdInventoryResult::Available(FmdInventory {
+                            cases,
+                            resources,
+                        }),
+                    }
+                },
             };
             sled_agents
                 .insert_unique(sled_agent)
