@@ -214,17 +214,17 @@ impl From<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
     }
 }
 
-impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
-    fn into(self) -> external::SwitchPortGeometry {
+impl Into<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
+    fn into(self) -> networking_types::SwitchPortGeometry {
         match self {
             SwitchPortGeometry::Qsfp28x1 => {
-                external::SwitchPortGeometry::Qsfp28x1
+                networking_types::SwitchPortGeometry::Qsfp28x1
             }
             SwitchPortGeometry::Qsfp28x2 => {
-                external::SwitchPortGeometry::Qsfp28x2
+                networking_types::SwitchPortGeometry::Qsfp28x2
             }
             SwitchPortGeometry::Sfp28x4 => {
-                external::SwitchPortGeometry::Sfp28x4
+                networking_types::SwitchPortGeometry::Sfp28x4
             }
         }
     }
@@ -354,9 +354,11 @@ impl SwitchPortSettings {
     }
 }
 
-impl Into<external::SwitchPortSettingsIdentity> for SwitchPortSettings {
-    fn into(self) -> external::SwitchPortSettingsIdentity {
-        external::SwitchPortSettingsIdentity { identity: self.identity() }
+impl Into<networking_types::SwitchPortSettingsIdentity> for SwitchPortSettings {
+    fn into(self) -> networking_types::SwitchPortSettingsIdentity {
+        networking_types::SwitchPortSettingsIdentity {
+            identity: self.identity(),
+        }
     }
 }
 
@@ -369,9 +371,11 @@ pub struct SwitchPortSettingsGroups {
     pub port_settings_group_id: Uuid,
 }
 
-impl Into<external::SwitchPortSettingsGroups> for SwitchPortSettingsGroups {
-    fn into(self) -> external::SwitchPortSettingsGroups {
-        external::SwitchPortSettingsGroups {
+impl Into<networking_types::SwitchPortSettingsGroups>
+    for SwitchPortSettingsGroups
+{
+    fn into(self) -> networking_types::SwitchPortSettingsGroups {
+        networking_types::SwitchPortSettingsGroups {
             port_settings_id: self.port_settings_id,
             port_settings_group_id: self.port_settings_group_id,
         }
@@ -395,9 +399,11 @@ pub struct SwitchPortSettingsGroup {
     pub port_settings_id: Uuid,
 }
 
-impl Into<external::SwitchPortSettingsGroup> for SwitchPortSettingsGroup {
-    fn into(self) -> external::SwitchPortSettingsGroup {
-        external::SwitchPortSettingsGroup {
+impl Into<networking_types::SwitchPortSettingsGroup>
+    for SwitchPortSettingsGroup
+{
+    fn into(self) -> networking_types::SwitchPortSettingsGroup {
+        networking_types::SwitchPortSettingsGroup {
             identity: self.identity(),
             port_settings_id: self.port_settings_id,
         }
@@ -419,9 +425,9 @@ impl SwitchPortConfig {
     }
 }
 
-impl Into<external::SwitchPortConfig> for SwitchPortConfig {
-    fn into(self) -> external::SwitchPortConfig {
-        external::SwitchPortConfig {
+impl Into<networking_types::SwitchPortConfig> for SwitchPortConfig {
+    fn into(self) -> networking_types::SwitchPortConfig {
+        networking_types::SwitchPortConfig {
             port_settings_id: self.port_settings_id,
             geometry: self.geometry.into(),
         }

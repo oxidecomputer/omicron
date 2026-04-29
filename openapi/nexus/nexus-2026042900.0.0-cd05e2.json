@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026042400.0.0"
+    "version": "2026042900.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -28861,7 +28861,7 @@
             "description": "The physical link geometry of the port.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchPortGeometry2"
+                "$ref": "#/components/schemas/SwitchPortGeometry"
               }
             ]
           },
@@ -28894,32 +28894,6 @@
         ]
       },
       "SwitchPortGeometry": {
-        "description": "The link geometry associated with a switch port.",
-        "oneOf": [
-          {
-            "description": "The port contains a single QSFP28 link with four lanes.",
-            "type": "string",
-            "enum": [
-              "qsfp28x1"
-            ]
-          },
-          {
-            "description": "The port contains two QSFP28 links each with two lanes.",
-            "type": "string",
-            "enum": [
-              "qsfp28x2"
-            ]
-          },
-          {
-            "description": "The port contains four SFP28 links each with one lane.",
-            "type": "string",
-            "enum": [
-              "sfp28x4"
-            ]
-          }
-        ]
-      },
-      "SwitchPortGeometry2": {
         "description": "The link geometry associated with a switch port.",
         "oneOf": [
           {

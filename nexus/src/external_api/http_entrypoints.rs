@@ -90,7 +90,6 @@ use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
-use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -4096,7 +4095,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<networking::SwitchPortSettingsSelector>,
         >,
     ) -> Result<
-        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpResponseOk<ResultsPage<networking::SwitchPortSettingsIdentity>>,
         HttpError,
     > {
         let apictx = rqctx.context();

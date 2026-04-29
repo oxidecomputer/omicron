@@ -140,6 +140,40 @@ pub struct SwitchPort {
     pub port_settings_id: Option<Uuid>,
 }
 
+/// A switch port settings identity whose id may be used to view additional
+/// details.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct SwitchPortSettingsIdentity {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// This structure maps a port settings object to a port settings groups. Port
+/// settings objects may inherit settings from groups. This mapping defines the
+/// relationship between settings objects and the groups they reference.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroups {
+    /// The id of a port settings object referencing a port settings group.
+    pub port_settings_id: Uuid,
+
+    /// The id of a port settings group being referenced by a port settings
+    /// object.
+    pub port_settings_group_id: Uuid,
+}
+
+/// A port settings group is a named object that references a port settings
+/// object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The port settings that comprise this group.
+    pub port_settings_id: Uuid,
+}
+
 /// Parameters for creating a port settings group.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwtichPortSettingsGroupCreate {
@@ -147,6 +181,16 @@ pub struct SwtichPortSettingsGroupCreate {
     pub identity: IdentityMetadataCreateParams,
     /// Switch port settings to associate with the settings group being created.
     pub settings: SwitchPortSettingsCreate,
+}
+
+/// A physical port configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortConfig {
+    /// The id of the port settings object this configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The physical link geometry of the port.
+    pub geometry: SwitchPortGeometry,
 }
 
 /// Parameters for creating switch port settings. Switch port settings are the
@@ -208,7 +252,7 @@ pub struct SwitchPortConfigCreate {
 }
 
 /// The link geometry associated with a switch port.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchPortGeometry {
     /// The port contains a single QSFP28 link with four lanes.
@@ -837,10 +881,10 @@ pub struct SwitchPortSettings {
     pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<external::SwitchPortSettingsGroups>,
+    pub groups: Vec<SwitchPortSettingsGroups>,
 
     /// Layer 1 physical port settings.
-    pub port: external::SwitchPortConfig,
+    pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
     pub links: Vec<external::SwitchPortLinkConfig>,

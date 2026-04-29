@@ -2843,64 +2843,6 @@ pub struct AddressLotBlock {
     pub last_address: IpAddr,
 }
 
-/// A switch port settings identity whose id may be used to view additional
-/// details.
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct SwitchPortSettingsIdentity {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-}
-
-/// This structure maps a port settings object to a port settings groups. Port
-/// settings objects may inherit settings from groups. This mapping defines the
-/// relationship between settings objects and the groups they reference.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsGroups {
-    /// The id of a port settings object referencing a port settings group.
-    pub port_settings_id: Uuid,
-
-    /// The id of a port settings group being referenced by a port settings
-    /// object.
-    pub port_settings_group_id: Uuid,
-}
-
-/// A port settings group is a named object that references a port settings
-/// object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsGroup {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// The port settings that comprise this group.
-    pub port_settings_id: Uuid,
-}
-
-/// The link geometry associated with a switch port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum SwitchPortGeometry {
-    /// The port contains a single QSFP28 link with four lanes.
-    Qsfp28x1,
-
-    /// The port contains two QSFP28 links each with two lanes.
-    Qsfp28x2,
-
-    /// The port contains four SFP28 links each with one lane.
-    Sfp28x4,
-}
-
-/// A physical port configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortConfig {
-    /// The id of the port settings object this configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The physical link geometry of the port.
-    pub geometry: SwitchPortGeometry,
-}
-
 /// The speed of a link.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]

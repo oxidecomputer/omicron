@@ -81,6 +81,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_29_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
     (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
     (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),
     (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
@@ -4674,7 +4675,9 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::networking::SwitchPortSettingsSelector>,
         >,
     ) -> Result<
-        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpResponseOk<
+            ResultsPage<latest::networking::SwitchPortSettingsIdentity>,
+        >,
         HttpError,
     >;
 

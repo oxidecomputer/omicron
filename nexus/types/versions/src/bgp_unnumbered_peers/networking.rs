@@ -17,6 +17,8 @@
 //! - `SwitchPortSettingsCreate` updated to use the new `BgpPeerConfig`.
 
 use crate::v2025_12_12_00::networking::BgpPeerState;
+use crate::v2025_11_20_00::networking::SwitchPortConfig;
+use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, Name, NameOrId,
@@ -314,10 +316,10 @@ pub struct SwitchPortSettings {
     pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<external::SwitchPortSettingsGroups>,
+    pub groups: Vec<SwitchPortSettingsGroups>,
 
     /// Layer 1 physical port settings.
-    pub port: external::SwitchPortConfig,
+    pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
     pub links: Vec<external::SwitchPortLinkConfig>,

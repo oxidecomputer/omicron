@@ -266,10 +266,14 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
+    pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchPortGeometry;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
+    pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroup;
+    pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
+    pub use crate::v2025_11_20_00::networking::SwitchPortSettingsIdentity;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsInfoSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsSelector;
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
