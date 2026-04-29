@@ -1646,8 +1646,9 @@ mod tests {
 
         let (_dns_ips, config) = test_dns_ips_and_config();
         let sled_info = vec![test_sled_info()];
-        let plan = ServicePlan::create_transient(&logctx.log, &config, sled_info)
-            .expect("should've created a plan");
+        let plan =
+            ServicePlan::create_transient(&logctx.log, &config, sled_info)
+                .expect("should've created a plan");
 
         for sled in &plan.all_sleds {
             eprintln!("testing sled {}", sled.sled_id);
