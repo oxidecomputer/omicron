@@ -80,4 +80,4 @@ pub mod v2026_03_25_00;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
 pub mod v2026_04_16_00;
 #[path = "remove_duplicated_networking_types/mod.rs"]
-pub mod v2026_04_29_00;
+pub mod v2026_04_29_01;

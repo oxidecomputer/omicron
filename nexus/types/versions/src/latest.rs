@@ -307,8 +307,8 @@ pub mod networking {
     pub use crate::v2026_04_16_00::networking::SwitchPortSettingsCreate;
     pub use crate::v2026_04_16_00::networking::router_peer_type_try_from_old_representation;
 
-    pub use crate::v2026_04_29_00::networking::SwitchInterfaceConfig;
-    pub use crate::v2026_04_29_00::networking::SwitchPortSettings;
+    pub use crate::v2026_04_29_01::networking::SwitchInterfaceConfig;
+    pub use crate::v2026_04_29_01::networking::SwitchPortSettings;
 }
 
 pub mod oxql {
