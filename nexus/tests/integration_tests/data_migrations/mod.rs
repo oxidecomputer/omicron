@@ -32,6 +32,7 @@ mod blueprint_sled_last_used_ip;
 mod boot_partitions_inventory;
 mod delete_nexus_default_allow_firewall_rule;
 mod disk_types;
+mod drop_uninitialized_svc_enabled_not_online_state;
 mod ereport_everyone_gets_a_slot;
 mod fix_leaked_bp_oximeter_read_policy_rows;
 mod fix_session_token_column_order;
@@ -86,6 +87,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(ereport_everyone_gets_a_slot);
     register!(rename_default_igw_ip_pool);
     register!(delete_nexus_default_allow_firewall_rule);
+    register!(drop_uninitialized_svc_enabled_not_online_state);
 
     map
 }
