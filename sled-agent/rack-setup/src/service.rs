@@ -136,8 +136,7 @@ use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
-pub use crate::plan::service::Plan as ServicePlan;
-pub use crate::plan::service::PlannedSledDescription;
+use crate::plan::service::ServicePlan;
 use sled_agent_types::sled::StartSledAgentRequest;
 
 /// Operations RSS performs on the local bootstrap-agent during rack setup.
@@ -1896,7 +1895,7 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::plan::service::{Plan as ServicePlan, SledInfo};
+    use crate::plan::service::{ServicePlan, SledInfo};
     use anyhow::Context;
     use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use iddqd::IdOrdMap;

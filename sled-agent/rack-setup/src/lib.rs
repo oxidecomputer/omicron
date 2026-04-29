@@ -9,22 +9,17 @@ extern crate slog;
 
 mod early_networking;
 mod plan;
-/// The main implementation of the RSS service.
-pub mod service;
+mod service;
 
 pub use early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
-
-pub use plan::service::Plan as ServicePlan;
 pub use plan::service::PlannedSledDescription;
+pub use plan::service::ServicePlan;
 pub use plan::service::SledConfig;
-pub use plan::service::{
-    from_ipaddr_to_external_floating_ip,
-    from_sockaddr_to_external_floating_addr,
-    from_source_nat_config_to_external_snat_ip,
-};
-
+pub use plan::service::from_ipaddr_to_external_floating_ip;
+pub use plan::service::from_sockaddr_to_external_floating_addr;
 pub use service::LocalBootstrapAgent;
 pub use service::RackInitializeRequestParams;
+pub use service::RackInitializeRequestParseError;
 pub use service::RackSetupService;
 pub use service::SetupServiceError;
 pub use service::rack_initialize_request_from_file;

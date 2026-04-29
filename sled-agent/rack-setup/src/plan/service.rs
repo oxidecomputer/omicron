@@ -194,7 +194,7 @@ impl iddqd::IdOrdItem for PlannedSledDescription {
 }
 
 #[derive(Clone, Debug)]
-pub struct Plan {
+pub struct ServicePlan {
     pub all_sleds: IdOrdMap<PlannedSledDescription>,
     pub dns_config: DnsConfigParams,
 }
@@ -244,7 +244,7 @@ pub fn from_source_nat_config_to_external_snat_ip(
     OmicronZoneExternalSnatIp { id: ExternalIpUuid::new_v4(), snat_cfg }
 }
 
-impl Plan {
+impl ServicePlan {
     async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
@@ -1585,12 +1585,12 @@ mod tests {
 
         // Confirm that this fails with no sleds
         let sleds = vec![];
-        Plan::create_transient(&logctx.log, &config, sleds)
+        ServicePlan::create_transient(&logctx.log, &config, sleds)
             .expect_err("Should have failed to create plan");
 
         // Try again, with a sled that has ten U.2 disks
         let sleds = vec![test_sled_info()];
-        let plan = Plan::create_transient(&logctx.log, &config, sleds)
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
             .expect("Should have created plan");
 
         assert_eq!(plan.all_sleds.len(), 1);
@@ -1646,7 +1646,7 @@ mod tests {
 
         let (_dns_ips, config) = test_dns_ips_and_config();
         let sled_info = vec![test_sled_info()];
-        let plan = Plan::create_transient(&logctx.log, &config, sled_info)
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sled_info)
             .expect("should've created a plan");
 
         for sled in &plan.all_sleds {
