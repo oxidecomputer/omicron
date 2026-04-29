@@ -485,30 +485,6 @@ instance.  It's also used by `crutest` for testing.
 #
 
 #
-# RSS-only dependencies.  These are real dependencies that only exist during
-# RSS, not during normal operation or upgrade.
-#
-# At RSS time, the system is known to be at a single, consistent version.
-#
-[[dependency_filter_rules]]
-ancestor = "sled-agent-rack-setup"
-client = "cockroach-admin-client"
-evaluation = "rss-only"
-note = """
-The Cockroach Admin client is only used during RSS, which we don't care about
-for the purpose of upgrade.
-"""
-
-[[dependency_filter_rules]]
-ancestor = "sled-agent-rack-setup"
-client = "dns-service-client"
-evaluation = "rss-only"
-note = """
-The DNS service client is only used during RSS, which we don't care about for
-the purpose of upgrade.
-"""
-
-#
 # Non-DAG dependencies.  See above for details.
 #
 
@@ -555,9 +531,26 @@ ancestor = "omicron-sled-agent"
 client = "sled-agent-client"
 evaluation = "not-deployed"
 note = """
-Sled Agent uses a Sled Agent client in two ways: RSS, which we don't care about
-for the purpose of upgrade, and in the `zone-bundle` binary, which is not
+Sled Agent uses a Sled Agent client for the `zone-bundle` binary, which is not
 deployed.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-rack-setup"
+client = "cockroach-admin-client"
+evaluation = "not-deployed"
+note = """
+The Cockroach Admin client is only used during RSS, which we don't care about
+for the purpose of upgrade.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-rack-setup"
+client = "dns-service-client"
+evaluation = "not-deployed"
+note = """
+The DNS service client is only used during RSS, which we don't care about for
+the purpose of upgrade.
 """
 
 [[dependency_filter_rules]]

@@ -1587,7 +1587,6 @@ impl ApiDependencyFilter {
             ApiDependencyFilter::Default => !matches!(
                 evaluation,
                 Evaluation::NonDag
-                    | Evaluation::RssOnly
                     | Evaluation::Bogus
                     | Evaluation::NotDeployed
             ),
