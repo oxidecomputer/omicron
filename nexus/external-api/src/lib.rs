@@ -83,6 +83,7 @@ api_versions!([
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
     (2026_04_29_01, REMOVE_DUPLICATED_NETWORKING_TYPES),
+    (2026_04_29_00, METRICS_ADD_JOULES),
     (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
     (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),
     (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
@@ -6854,7 +6855,9 @@ pub trait NexusExternalApi {
         >,
         other_params: Query<latest::silo::OptionalSiloSelector>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
         HttpError,
     >;
 
@@ -6877,7 +6880,9 @@ pub trait NexusExternalApi {
         >,
         other_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
         HttpError,
     >;
 
@@ -6886,14 +6891,66 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/timeseries/schemas",
         tags = ["system/metrics"],
+        versions = VERSION_METRICS_ADD_JOULES..
     }]
     async fn system_timeseries_schema_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<TimeseriesSchemaPaginationParams>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::TimeseriesSchema>>,
+        HttpResponseOk<
+            ResultsPage<
+                oximeter_types_versions::latest::schema::TimeseriesSchema,
+            >,
+        >,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "system_timeseries_schema_list",
+        method = GET,
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
+        versions = ..VERSION_METRICS_ADD_JOULES
+    }]
+    async fn system_timeseries_schema_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<
+                EmptyScanParams,
+                oximeter_types_versions::v1::schema::TimeseriesName,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::v1::schema::TimeseriesSchema>,
+        >,
+        HttpError,
+    > {
+        use oximeter_types_versions::v1::schema::TimeseriesSchema;
+        use oximeter_types_versions::v2::schema::UnitsConversionJoulesError;
+
+        let page =
+            Self::system_timeseries_schema_list(rqctx, pag_params).await?.0;
+        let items = page
+            .items
+            .into_iter()
+            .map(|item| {
+                TimeseriesSchema::try_from(item).map_err(
+                    |UnitsConversionJoulesError| {
+                        HttpError::for_client_error(
+                            None,
+                            dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                            "client version out of date: schema contains \
+                             new types of units (joules)"
+                                .to_string(),
+                        )
+                    },
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
 
@@ -8339,5 +8396,7 @@ pub type SubnetPoolMemberPaginationParams =
     PaginationParams<EmptyScanParams, oxnet::IpNet>;
 
 /// Type used to paginate request to list timeseries schema
-pub type TimeseriesSchemaPaginationParams =
-    PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
+pub type TimeseriesSchemaPaginationParams = PaginationParams<
+    EmptyScanParams,
+    oximeter_types_versions::latest::schema::TimeseriesName,
+>;
