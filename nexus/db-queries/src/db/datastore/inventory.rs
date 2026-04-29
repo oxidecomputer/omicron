@@ -4637,6 +4637,10 @@ impl DataStore {
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),
+                // Populated by the read path in a follow-on commit.
+                fmd: sled_agent_types::inventory::FmdInventoryResult::Available(
+                    sled_agent_types::inventory::FmdInventory::default(),
+                ),
             };
             sled_agents
                 .insert_unique(sled_agent)
