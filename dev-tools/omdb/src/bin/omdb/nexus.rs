@@ -55,6 +55,7 @@ use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
@@ -1267,6 +1268,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "blueprint_rendezvous" => {
             print_task_blueprint_rendezvous(details);
         }
+        "blueprint_pruner" => {
+            print_task_blueprint_pruner(details);
+        }
         "dns_config_external" | "dns_config_internal" => {
             print_task_dns_config(details);
         }
@@ -1678,6 +1682,19 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 &local_storage_unencrypted_dataset,
                 "local_storage_unencrypted_dataset",
             );
+        }
+    }
+}
+
+fn print_task_blueprint_pruner(details: &serde_json::Value) {
+    match serde_json::from_value::<BlueprintPrunerStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
+        ),
+        Ok(status) => {
+            print!("{}", status);
         }
     }
 }

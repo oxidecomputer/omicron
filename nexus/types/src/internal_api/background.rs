@@ -24,6 +24,7 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
+use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -775,6 +776,114 @@ pub enum BlueprintPlannerStatus {
     },
 }
 
+/// High-level status of the blueprint pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BlueprintPrunerStatus {
+    /// The blueprint pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The blueprint pruner is enabled and ran successfully.
+    Enabled(BlueprintPrunerDetails),
+}
+
+impl std::fmt::Display for BlueprintPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlueprintPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            BlueprintPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
+    }
+}
+
+/// The status of a `blueprint_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlueprintPrunerDetails {
+    /// count of blueprints that were kept by policy
+    ///
+    /// More may be kept because of an error or because the maximum number
+    /// deleted per activation was hit.
+    pub nkept_by_policy: usize,
+    /// blueprints deleted
+    pub deleted: Vec<DeletedBlueprint>,
+    /// count of `bp_target` rows that were determined to be removable
+    pub ntargets_removable: usize,
+    /// count of `bp_target` rows deleted
+    pub ntargets_deleted: usize,
+    /// warnings encountered while pruning
+    pub warnings: Vec<String>,
+}
+
+impl std::fmt::Display for BlueprintPrunerDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "    blueprints kept by policy: {}", self.nkept_by_policy)?;
+        writeln!(
+            f,
+            "    bp_target rows that can be deleted: {}",
+            self.ntargets_removable
+        )?;
+        writeln!(f, "    bp_target rows deleted: {}", self.ntargets_deleted)?;
+        writeln!(f, "    blueprints deleted: {}", self.deleted.len())?;
+        for b in &self.deleted {
+            writeln!(
+                f,
+                "        {} (made target at {})",
+                b.id,
+                humantime::format_rfc3339_millis(b.time_made_target.into())
+            )?;
+        }
+        writeln!(f, "    warnings: {}", self.warnings.len())?;
+        for w in &self.warnings {
+            writeln!(f, "        {}", w)?;
+        }
+        Ok(())
+    }
+}
+
+impl slog::KV for BlueprintPrunerDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            nkept_by_policy,
+            deleted,
+            ntargets_removable,
+            ntargets_deleted,
+            warnings,
+        } = self;
+
+        serializer
+            .emit_usize(Key::from("nkept_by_policy"), *nkept_by_policy)?;
+        serializer
+            .emit_usize(Key::from("ntargets_removable"), *ntargets_removable)?;
+        serializer
+            .emit_usize(Key::from("ntargets_deleted"), *ntargets_deleted)?;
+        // slog does not support nested values out-of-the-box so we settle for
+        // just the counts for now.
+        serializer.emit_usize(Key::from("ndeleted"), deleted.len())?;
+        serializer.emit_usize(Key::from("nwarnings"), warnings.len())?;
+        Ok(())
+    }
+}
+
+/// Describes a blueprint that was deleted by the pruner task
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeletedBlueprint {
+    pub id: BlueprintUuid,
+    pub time_made_target: DateTime<Utc>,
+}
+
 /// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AlertDispatcherStatus {
@@ -1171,6 +1280,9 @@ mod test {
     use super::TufRepoInfo;
     use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
+    use crate::internal_api::background::BlueprintPrunerDetails;
+    use crate::internal_api::background::BlueprintPrunerStatus;
+    use crate::internal_api::background::DeletedBlueprint;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
 
@@ -1215,6 +1327,44 @@ mod test {
 
         assert_contents(
             "output/tuf_repo_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_enabled() {
+        let blueprint1 = DeletedBlueprint {
+            id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
+            time_made_target: "2025-09-30T01:23:45Z".parse().unwrap(),
+        };
+        let blueprint2 = DeletedBlueprint {
+            id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
+            time_made_target: "2025-09-30T02:34:56Z".parse().unwrap(),
+        };
+
+        let details = BlueprintPrunerDetails {
+            deleted: vec![blueprint1, blueprint2],
+            ntargets_deleted: 17,
+            ntargets_removable: 18,
+            nkept_by_policy: 12,
+            warnings: vec![String::from("fake-oh problem-oh")],
+        };
+        let status = BlueprintPrunerStatus::Enabled(details);
+
+        assert_contents(
+            "output/blueprint_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_disabled() {
+        let status = BlueprintPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/blueprint_pruner_status_disabled.out",
             &status.to_string(),
         );
     }
