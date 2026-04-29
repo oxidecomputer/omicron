@@ -91,8 +91,8 @@ use nexus_types::deployment::{
     Blueprint, BlueprintZoneType, blueprint_zone_type,
 };
 use nexus_types::internal_api::params::ExternalPortDiscovery;
-use ntp_admin_client::ClientInfo as _;
-use ntp_admin_client::{
+use ntp_admin_client::v1::ClientInfo as _;
+use ntp_admin_client::v1::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
@@ -210,7 +210,7 @@ pub enum SetupServiceError {
     NexusApi(#[from] NexusError<NexusTypes::Error>),
 
     #[error("Error making HTTP request to NTP Admin Server")]
-    NtpAdminApi(#[from] NtpAdminError<ntp_admin_client::types::Error>),
+    NtpAdminApi(#[from] NtpAdminError<ntp_admin_client::v1::types::Error>),
 
     #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
@@ -723,15 +723,7 @@ impl ServiceInner {
     ) -> Result<TimeSync, SetupServiceError> {
         info!(client.inner(), "Checking time synchronization");
 
-        let ts = client.timesync().await?.into_inner();
-        Ok(TimeSync {
-            sync: ts.sync,
-            ref_id: ts.ref_id,
-            ip_addr: ts.ip_addr,
-            stratum: ts.stratum,
-            ref_time: ts.ref_time,
-            correction: ts.correction,
-        })
+        Ok(client.timesync().await?.into_inner())
     }
 
     async fn wait_for_timesync(

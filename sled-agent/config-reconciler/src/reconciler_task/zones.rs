@@ -26,7 +26,7 @@ use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zone::Zones;
-use ntp_admin_client::types::TimeSync;
+use ntp_admin_client::v1::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
@@ -77,7 +77,9 @@ pub enum TimeSyncError {
     #[error("multiple running NTP zones - this should never happen!")]
     MultipleRunningNtpZones,
     #[error("failed to communicate with NTP admin server")]
-    NtpAdmin(#[from] ntp_admin_client::Error<ntp_admin_client::types::Error>),
+    NtpAdmin(
+        #[from] ntp_admin_client::v1::Error<ntp_admin_client::v1::types::Error>,
+    ),
     #[error("failed to execute chronyc within NTP zone")]
     ExecuteChronyc(#[source] RunCommandError),
     #[error(
@@ -532,7 +534,19 @@ impl OmicronZones {
         match &self.timesync_config {
             TimeSyncConfig::Normal => {
                 match self.timesync_status_from_ntp_zone(log).await {
-                    Ok(timesync) => TimeSyncStatus::TimeSync(timesync),
+                    Ok(timesync) => {
+                        if !timesync.sync {
+                            // TODO-completeness: Include maximum error and
+                            // dispersion after we update to the new client.
+                            warn!(
+                                log,
+                                "time is not yet synchronized";
+                                "correction_s" => timesync.correction,
+                                "stratum" => timesync.stratum,
+                            );
+                        }
+                        TimeSyncStatus::TimeSync(timesync)
+                    }
                     Err(err) => {
                         TimeSyncStatus::FailedToGetSyncStatus(Arc::new(err))
                     }
@@ -575,7 +589,7 @@ impl OmicronZones {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        let client = ntp_admin_client::Client::new(
+        let client = ntp_admin_client::v1::Client::new(
             &format!("http://{ntp_admin_address}"),
             log.clone(),
         );

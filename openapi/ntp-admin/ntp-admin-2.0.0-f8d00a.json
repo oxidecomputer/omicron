@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
     "/timesync": {
@@ -60,7 +60,7 @@
         "type": "object",
         "properties": {
           "correction": {
-            "description": "The current offset between the NTP clock and system clock.",
+            "description": "The current offset between the NTP clock and system clock, in seconds.",
             "type": "number",
             "format": "double"
           },
@@ -68,6 +68,16 @@
             "description": "The NTP reference IP address.",
             "type": "string",
             "format": "ip"
+          },
+          "last_offset": {
+            "description": "The offset of the NTP clock from the reference clock in the last measurement, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "max_error": {
+            "description": "The maximum estimated clock error: root_delay / 2 + root_dispersion, in seconds.",
+            "type": "number",
+            "format": "double"
           },
           "ref_id": {
             "description": "The NTP reference ID.",
@@ -77,6 +87,21 @@
           },
           "ref_time": {
             "description": "The NTP reference time (i.e. what chrony thinks the current time is, not necessarily the current system time).",
+            "type": "number",
+            "format": "double"
+          },
+          "rms_offset": {
+            "description": "The root-mean-square (RMS) of recent NTP clock offsets from the reference clock, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "root_delay": {
+            "description": "The total round-trip delay to the reference clock, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "root_dispersion": {
+            "description": "The root dispersion: uncertainty in the NTP clock due to accumulated frequency errors since the last reference update, in seconds.",
             "type": "number",
             "format": "double"
           },
@@ -94,8 +119,13 @@
         "required": [
           "correction",
           "ip_addr",
+          "last_offset",
+          "max_error",
           "ref_id",
           "ref_time",
+          "rms_offset",
+          "root_delay",
+          "root_dispersion",
           "stratum",
           "sync"
         ]

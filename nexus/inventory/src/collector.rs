@@ -511,7 +511,7 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{addr}");
                 let log = self.log.new(o!("ntp_admin_url" => url.clone()));
 
-                (cfg.id, ntp_admin_client::Client::new(&url, log))
+                (cfg.id, ntp_admin_client::v1::Client::new(&url, log))
             })
             .collect();
 
@@ -537,7 +537,7 @@ impl<'a> Collector<'a> {
     async fn collect_one_timesync(
         log: &slog::Logger,
         zone_id: OmicronZoneUuid,
-        client: &ntp_admin_client::Client,
+        client: &ntp_admin_client::v1::Client,
         in_progress: &mut CollectionBuilder,
     ) -> Result<(), anyhow::Error> {
         let sled_agent_url = client.baseurl();

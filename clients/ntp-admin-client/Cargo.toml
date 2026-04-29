@@ -15,3 +15,6 @@ schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
 omicron-workspace-hack.workspace = true
+
+[build-dependencies]
+git-stub-vcs.workspace = true
