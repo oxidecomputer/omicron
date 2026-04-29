@@ -625,7 +625,7 @@ fn display_sleds(
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements,
-            fmd: _,
+            fmd,
         } = sled;
 
         writeln!(
@@ -914,6 +914,10 @@ fn display_sleds(
                 writeln!(indent2, "{}", m.display())?;
             }
         }
+
+        writeln!(indented, "fmd:")?;
+        let mut indent2 = IndentWriter::new("    ", &mut indented);
+        write!(indent2, "{}", fmd.display())?;
 
         f = indented.into_inner();
         display_svcs_enabled_not_online(smf_services_enabled_not_online, f)?;
