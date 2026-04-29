@@ -252,11 +252,12 @@ impl Check {
             // `Failed`. Let's synthesize a `SledInstanceState` that does
             // that.
             Err(e) if e.vmm_gone() => {
+                let error = InlineErrorChain::new(&e);
                 slog::info!(
                     opctx.log,
                     "sled-agent error indicates that this instance's \
                      VMM has failed!";
-                    "error" => %e,
+                    error,
                 );
                 self.outcome = CheckOutcome::Failure(Failure::NoSuchInstance);
                 mk_failed()
@@ -267,20 +268,28 @@ impl Check {
             // some reason. In either case, the check is inconclusive and the
             // instance's state will not change.
             Err(SledAgentInstanceError(ClientError::ErrorResponse(rsp))) => {
+                // This is a bit goofy: we destructure the error because
+                // `ResponseValue` has a `status()` which is not optional (so we
+                // don't have to unwrap it), but then we re-construct the
+                // `progenitor_client::Error` because we would like to format it
+                // with `InlineErrorChain`. This looks silly but there's nothing
+                // actually *wrong* with it...
                 let status = rsp.status();
+                let error = ClientError::ErrorResponse(rsp);
+                let error = InlineErrorChain::new(&error);
                 if status.is_client_error() {
                     slog::warn!(
                         opctx.log,
                         "check incomplete due to client error";
                         "status" => ?status,
-                        "error" => ?rsp.into_inner()
+                        "error" => error,
                     );
                 } else {
                     slog::info!(
                         opctx.log,
                         "check incomplete due to server error";
                         "status" => ?status,
-                        "error" => ?rsp.into_inner(),
+                        "error" => error,
                     );
                 }
 
@@ -339,7 +348,7 @@ impl Check {
                 slog::warn!(
                     opctx.log,
                     "error checking up on instance";
-                    "error" => ?e,
+                    "error" => InlineErrorChain::new(&e),
                     "status" => ?e.status(),
                 );
                 self.result = Err(Incomplete::ClientError);
