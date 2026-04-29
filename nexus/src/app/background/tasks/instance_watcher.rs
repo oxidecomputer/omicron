@@ -342,7 +342,7 @@ impl Check {
 }
 
 /// An implementation of the `is_computer_on()` function originally defined
-/// [in the BeOS C library][1].
+/// in the BeOS C library][1].
 ///
 /// [1]: https://web.archive.org/web/20260309055003/https://www.haiku-os.org/legacy-docs/bebook/TheKernelKit_SystemInfo.html
 async fn is_computer_on(
@@ -371,7 +371,8 @@ async fn is_computer_on(
     };
     let Some(sp) = inv.sps.get(&bb) else {
         anyhow::bail!(
-            "SP for sled {part_number}:{rev}:{serial_number} is not in the inventory"
+            "SP for sled {part_number}:{rev}:{serial_number} is not in the \
+             inventory"
         );
     };
 
