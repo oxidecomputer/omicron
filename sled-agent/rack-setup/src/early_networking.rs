@@ -4,7 +4,6 @@
 
 //! Network setup required to bring up the control plane
 
-use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
@@ -43,6 +42,7 @@ use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
     PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
 };
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;

@@ -9,11 +9,6 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::{ConvertInto, NexusClient};
-use sled_agent_rack_setup::{
-    PlannedSledDescription, ServicePlan, SledConfig,
-    from_ipaddr_to_external_floating_ip,
-    from_sockaddr_to_external_floating_addr,
-};
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
@@ -56,6 +51,11 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;

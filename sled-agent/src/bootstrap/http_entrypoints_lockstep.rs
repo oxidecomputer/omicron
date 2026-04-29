@@ -9,7 +9,6 @@
 //! need to support a single version.
 
 use super::http_entrypoints::BootstrapServerContext;
-use sled_agent_rack_setup::RackInitializeRequestParams;
 use base64::Engine;
 use bootstore::schemes::v0::NetworkConfig;
 use bootstrap_agent_lockstep_api::BootstrapAgentLockstepApi;
@@ -23,6 +22,7 @@ use dropshot::{
 };
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_rack_setup::RackInitializeRequestParams;
 
 /// Returns a description of the bootstrap agent lockstep API
 pub(crate) fn api() -> ApiDescription<BootstrapServerContext> {

@@ -62,20 +62,20 @@ impl RssHandle {
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        let (handle, receiver) =
+        let (tx, rx) =
             rss_channel(our_bootstrap_address, sprockets, measurements.clone());
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
             internal_disks_rx,
-            Box::new(handle),
+            Box::new(tx),
             bootstore,
             trust_quorum,
             step_tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        receiver.await_local_rss_request(&log).await;
+        rx.await_local_rss_request(&log).await;
         rss.join().await
     }
 
@@ -86,15 +86,15 @@ impl RssHandle {
         sprockets: SprocketsConfig,
         measurements: Arc<MeasurementsHandle>,
     ) -> Result<(), SetupServiceError> {
-        let (handle, receiver) =
+        let (tx, rx) =
             rss_channel(our_bootstrap_address, sprockets, measurements);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
-            Box::new(handle),
+            Box::new(tx),
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        receiver.await_local_rss_request(&log).await;
+        rx.await_local_rss_request(&log).await;
         rss.join().await
     }
 }
@@ -173,15 +173,6 @@ pub(crate) struct BootstrapAgentHandle {
 
 #[async_trait]
 impl LocalBootstrapAgent for BootstrapAgentHandle {
-    fn our_address(&self) -> Ipv6Addr {
-        self.our_bootstrap_address
-    }
-
-    /// Instruct the local bootstrap-agent to initialize sled-agents based on
-    /// the contents of `requests`. Returns `Ok(())` if initializing all sleds
-    /// succeeds; if any sled fails to initialize, an error is returned
-    /// immediately (i.e., the error message will pertain only to the first
-    /// sled that failed to initialize).
     async fn initialize_sleds(
         self: Box<Self>,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
@@ -211,6 +202,10 @@ impl LocalBootstrapAgent for BootstrapAgentHandle {
             .await
             .unwrap();
         rx.await.unwrap()
+    }
+
+    fn our_address(&self) -> Ipv6Addr {
+        self.our_bootstrap_address
     }
 }
 

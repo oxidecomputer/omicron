@@ -67,6 +67,7 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
+use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::sled::Plan as SledPlan;
 use async_trait::async_trait;
@@ -109,7 +110,6 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
-use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfigEnvelope, LldpAdminStatus,
@@ -142,19 +142,18 @@ use sled_agent_types::sled::StartSledAgentRequest;
 
 /// Operations RSS performs on the local bootstrap-agent during rack setup.
 ///
-/// Implemented by sled-agent. Today the implementation forwards requests over
-/// an in-process channel; in the future (oxidecomputer/omicron#820) this
-/// becomes the IPC interface between an out-of-process RSS and the local
-/// bootstrap-agent.
+/// This trait is implemented by sled-agent.
 #[async_trait]
 pub trait LocalBootstrapAgent: Send + Sync {
-    /// The bootstrap-network address of the sled hosting RSS.
-    fn our_address(&self) -> Ipv6Addr;
-
-    /// Initialize sled-agents on the rack's other sleds.
+    /// Instruct the local bootstrap-agent to initialize sled-agents based on
+    /// the contents of `requests`.
     ///
-    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
-    /// `reset_sleds` per run.
+    /// This function takes `self` and can only be called once with the full set
+    /// of sleds to initialize. Returns `Ok(())` if initializing all sleds
+    /// the contents of `requests`. Returns `Ok(())` if initializing all sleds
+    /// succeeds; if any sled fails to initialize, an error is returned
+    /// immediately (i.e., the error message will pertain only to the first sled
+    /// that failed to initialize).
     async fn initialize_sleds(
         self: Box<Self>,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
@@ -168,6 +167,9 @@ pub trait LocalBootstrapAgent: Send + Sync {
         self: Box<Self>,
         requests: Vec<SocketAddrV6>,
     ) -> Result<(), String>;
+
+    /// The bootstrap-network address of the sled hosting RSS.
+    fn our_address(&self) -> Ipv6Addr;
 }
 
 /// For tracking the current RSS step and sending notifications about it.
