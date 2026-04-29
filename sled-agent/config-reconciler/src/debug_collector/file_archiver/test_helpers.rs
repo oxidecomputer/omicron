@@ -166,6 +166,10 @@ pub(crate) enum TestFileKind {
         zone_name: String,
         zone_root: String,
     },
+    DebugDropbox {
+        zone_name: String,
+        zone_root: String,
+    },
     GlobalLogSmfRotated,
     GlobalLogSmfLive,
     GlobalLogSyslogRotated,
@@ -186,6 +190,7 @@ impl TestFileKind {
             | TestFileKind::LogSmfLive { .. }
             | TestFileKind::LogSyslogRotated { .. }
             | TestFileKind::LogSyslogLive { .. }
+            | TestFileKind::DebugDropbox { .. }
             | TestFileKind::GlobalLogSmfRotated
             | TestFileKind::GlobalLogSmfLive
             | TestFileKind::GlobalLogSyslogRotated
@@ -203,7 +208,8 @@ impl TestFileKind {
             TestFileKind::LogSmfRotated { zone_name, zone_root }
             | TestFileKind::LogSmfLive { zone_name, zone_root }
             | TestFileKind::LogSyslogRotated { zone_name, zone_root }
-            | TestFileKind::LogSyslogLive { zone_name, zone_root } => {
+            | TestFileKind::LogSyslogLive { zone_name, zone_root }
+            | TestFileKind::DebugDropbox { zone_name, zone_root } => {
                 Some((zone_name, Utf8Path::new(zone_root)))
             }
             TestFileKind::GlobalLogSmfRotated
@@ -253,6 +259,8 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 } else {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
                 }
+            } else if s.contains(omicron_debug_dropbox::DEBUG_DROPBOX_PATH) {
+                Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
             } else {
                 Err(anyhow!("unknown non-global zone test file kind"))
             }
@@ -348,6 +356,42 @@ impl FileLister for TestLister<'_> {
                     Ok(Filename::try_from(filename.to_owned())
                         .expect("filename has no slashes"))
                 })
+            })
+            .collect()
+    }
+
+    fn list_directories(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>> {
+        // Keep track of the last path that was listed.
+        *self.last_listed.lock().unwrap() = Some(path.to_owned());
+
+        // Inject any errors we've been configured to inject.
+        if let Some(fail_path) = self.injected_error {
+            if path == fail_path {
+                return vec![Err(anyhow!("injected error for {fail_path:?}"))];
+            }
+        }
+
+        // Return the set of immediate subdirectory names under `path`.
+        let mut seen = BTreeSet::new();
+        self.files
+            .iter()
+            .filter_map(|file_path| {
+                // Strip the query path prefix.  The remainder should be at
+                // least two components: a subdirectory name and a filename.
+                let rest = file_path.strip_prefix(path).ok()?;
+                let mut components = rest.components();
+                let subdir = components.next()?.as_str().to_owned();
+                // Only include paths that go deeper than one component.
+                components.next()?;
+                if seen.insert(subdir.clone()) {
+                    Some(Ok(Filename::try_from(subdir)
+                        .expect("subdir name is a valid Filename")))
+                } else {
+                    None
+                }
             })
             .collect()
     }
