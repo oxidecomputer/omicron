@@ -195,6 +195,13 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
     fn try_from(
         result: SwitchPortSettingsCombinedResult,
     ) -> Result<Self, Self::Error> {
+        // We expect the db to hold exactly one `vlan_interface` row for any
+        // `interface` that has kind `Vlan`. Build up a map of all the vlan
+        // interface rows; we'll then prune through that map as we loop over all
+        // the interfaces and check that it's empty when we're done.
+        //
+        // We expect to find exactly 1 entry for every `Vlan` interface and
+        // nothing extra; anything else is some kind of internal inconsistency.
         let mut vlan_by_interface = BTreeMap::new();
         for vlan_iface in result.vlan_interfaces {
             let SwitchVlanInterfaceConfig { interface_config_id, vid } =
@@ -208,9 +215,11 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
                 DbSwitchInterfaceKind::Primary => {
                     networking::SwitchInterfaceKind::Primary
                 }
+                DbSwitchInterfaceKind::Loopback => {
+                    networking::SwitchInterfaceKind::Loopback
+                }
                 DbSwitchInterfaceKind::Vlan => {
-                    let Some(vid) = vlan_by_interface.get(&iface.id).copied()
-                    else {
+                    let Some(vid) = vlan_by_interface.remove(&iface.id) else {
                         return Err(external::Error::internal_error(format!(
                             "switch port settings has inconsistent data: \
                              interface {iface:?} has type vlan, but \
@@ -222,10 +231,8 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
                         networking::SwitchVlanInterface { vid: *vid },
                     )
                 }
-                DbSwitchInterfaceKind::Loopback => {
-                    networking::SwitchInterfaceKind::Loopback
-                }
             };
+
             interfaces.push(networking::SwitchInterfaceConfig {
                 port_settings_id: iface.port_settings_id,
                 id: iface.id,
@@ -233,6 +240,15 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
                 v6_enabled: iface.v6_enabled,
                 kind,
             });
+        }
+
+        if !vlan_by_interface.is_empty() {
+            return Err(external::Error::internal_error(format!(
+                "switch port settings has inconsistent data: \
+                 `vlan_interfaces` references interface IDs that do not have \
+                 a matching vlan interface: leftover vlan values: \
+                 {vlan_by_interface:?}, assembled interfaces: {interfaces:?}"
+            )));
         }
 
         Ok(networking::SwitchPortSettings {

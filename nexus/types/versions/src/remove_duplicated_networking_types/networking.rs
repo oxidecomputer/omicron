@@ -95,15 +95,15 @@ impl From<SwitchPortSettings>
                 SwitchInterfaceKind::Primary => {
                     SwitchInterfaceKindNoVlanDetails::Primary
                 }
+                SwitchInterfaceKind::Loopback => {
+                    SwitchInterfaceKindNoVlanDetails::Loopback
+                }
                 SwitchInterfaceKind::Vlan(SwitchVlanInterface { vid }) => {
                     vlan_interfaces.push(SwitchVlanInterfaceConfig {
                         interface_config_id: iface.id,
                         vlan_id: vid,
                     });
                     SwitchInterfaceKindNoVlanDetails::Vlan
-                }
-                SwitchInterfaceKind::Loopback => {
-                    SwitchInterfaceKindNoVlanDetails::Loopback
                 }
             };
             interfaces.push(

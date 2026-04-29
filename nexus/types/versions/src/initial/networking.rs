@@ -405,7 +405,7 @@ pub enum SwitchInterfaceKind {
     Loopback,
 }
 
-/// Describes the kind of an switch interface.
+/// Describes the kind of a switch interface.
 // This type is the same as `SwitchInterfaceKind` except that the `Vlan` variant
 // doesn't contain any details about the VLAN ID. This type is removed in a
 // future API revision.
