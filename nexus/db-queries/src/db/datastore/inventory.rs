@@ -39,6 +39,9 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvFmdHostCase;
+use nexus_db_model::InvFmdResource;
+use nexus_db_model::InvFmdStatus;
 use nexus_db_model::InvHostPhase1ActiveSlot;
 use nexus_db_model::InvHostPhase1FlashHash;
 use nexus_db_model::InvInternalDns;
@@ -451,6 +454,59 @@ impl DataStore {
                         sled_agent.sled_id,
                         measurement.path.to_string(),
                         measurement.result.clone(),
+                    )
+                })
+            })
+            .collect();
+
+        // Pull FMD inventory out of all sled agents. We always record one
+        // status row per sled (capturing the success/failure discriminant)
+        // and, when collection succeeded, a row per case and per resource.
+        let fmd_status_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .map(|sled_agent| {
+                InvFmdStatus::new(
+                    collection_id,
+                    sled_agent.sled_id,
+                    &sled_agent.fmd,
+                )
+            })
+            .collect();
+        let fmd_host_case_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                let cases = match &sled_agent.fmd {
+                    sled_agent_types::inventory::FmdInventoryResult::Available(
+                        inv,
+                    ) => Some(&inv.cases),
+                    sled_agent_types::inventory::FmdInventoryResult::Error {
+                        ..
+                    } => None,
+                };
+                cases.into_iter().flatten().map(|case| {
+                    InvFmdHostCase::new(collection_id, sled_agent.sled_id, case)
+                })
+            })
+            .collect();
+        let fmd_resource_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                let resources = match &sled_agent.fmd {
+                    sled_agent_types::inventory::FmdInventoryResult::Available(
+                        inv,
+                    ) => Some(&inv.resources),
+                    sled_agent_types::inventory::FmdInventoryResult::Error {
+                        ..
+                    } => None,
+                };
+                resources.into_iter().flatten().map(|resource| {
+                    InvFmdResource::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        resource,
                     )
                 })
             })
@@ -1430,7 +1486,62 @@ impl DataStore {
                 }
             }
 
+            // Insert FMD status rows (one per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_status::dsl;
 
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_status_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_status)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert FMD host case rows (zero or more per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_host_case_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_host_case)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert FMD resource rows (zero or more per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_resource::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_resource_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_resource)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
 
             // Insert rows for all the sled config reconciler disk results
             {
@@ -2164,6 +2275,9 @@ impl DataStore {
             nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
             nlast_reconciliation_measurements: usize,
+            nfmd_status: usize,
+            nfmd_host_cases: usize,
+            nfmd_resources: usize,
             nzone_manifest_zones: usize,
             nzone_manifest_measurements: usize,
             nzone_manifest_non_boot: usize,
@@ -2204,6 +2318,9 @@ impl DataStore {
             nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
             nlast_reconciliation_measurements,
+            nfmd_status,
+            nfmd_host_cases,
+            nfmd_resources,
             nzone_manifest_zones,
             nzone_manifest_measurements,
             nzone_manifest_non_boot,
@@ -2382,6 +2499,31 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove FMD inventory rows.
+                    let nfmd_status = {
+                        use nexus_db_schema::schema::inv_fmd_status::dsl;
+                        diesel::delete(dsl::inv_fmd_status.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nfmd_host_cases = {
+                        use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+                        diesel::delete(dsl::inv_fmd_host_case.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nfmd_resources = {
+                        use nexus_db_schema::schema::inv_fmd_resource::dsl;
+                        diesel::delete(dsl::inv_fmd_resource.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     // Remove rows associated with zone resolver inventory.
                     let nzone_manifest_zones = {
@@ -2596,6 +2738,9 @@ impl DataStore {
                         nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
                         nlast_reconciliation_measurements,
+                        nfmd_status,
+                        nfmd_host_cases,
+                        nfmd_resources,
                         nzone_manifest_zones,
                         nzone_manifest_measurements,
                         nzone_manifest_non_boot,
@@ -2647,6 +2792,9 @@ impl DataStore {
                 nlast_reconciliation_zone_results,
             "nlast_reconciliation_measurements" =>
                 nlast_reconciliation_measurements,
+            "nfmd_status" => nfmd_status,
+            "nfmd_host_cases" => nfmd_host_cases,
+            "nfmd_resources" => nfmd_resources,
             "nzone_manifest_zones" => nzone_manifest_zones,
             "nzone_manifest_measurements" => nzone_manifest_measurements,
             "nzone_manifest_non_boot" => nzone_manifest_non_boot,
