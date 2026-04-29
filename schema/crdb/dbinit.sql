@@ -5131,6 +5131,48 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_status (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    -- NULL when FMD data was successfully collected. Set to the error
+    -- string when FMD collection failed (e.g. on non-illumos sleds, or
+    -- when the daemon was unreachable).
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_host_case (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    code TEXT NOT NULL,
+    url TEXT NOT NULL,
+    -- The full FMD fault event payload as JSON, if present. Stored as
+    -- JSONB without parsing — Nexus does not interpret the FMD event
+    -- schema; it round-trips verbatim for downstream tooling (e.g. omdb).
+    event JSONB,
+
+    PRIMARY KEY (inv_collection_id, sled_id, case_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    resource_id UUID NOT NULL,
+    -- Fault Management Resource Identifier
+    -- (e.g. "dev:////pci@af,0/pci1022,1483@3,5").
+    fmri TEXT NOT NULL,
+    -- The case_id pairs with a corresponding row in inv_fmd_host_case
+    -- under the same (inv_collection_id, sled_id) partition.
+    case_id UUID NOT NULL,
+    faulty BOOL NOT NULL,
+    unusable BOOL NOT NULL,
+    invisible BOOL NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, resource_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -8475,7 +8517,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '253.0.0', NULL)
+    (TRUE, NOW(), NOW(), '254.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

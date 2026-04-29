@@ -1792,6 +1792,38 @@ table! {
 }
 
 table! {
+    inv_fmd_status (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_fmd_host_case (inv_collection_id, sled_id, case_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        case_id -> Uuid,
+        code -> Text,
+        url -> Text,
+        event -> Nullable<Jsonb>,
+    }
+}
+
+table! {
+    inv_fmd_resource (inv_collection_id, sled_id, resource_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        resource_id -> Uuid,
+        fmri -> Text,
+        case_id -> Uuid,
+        faulty -> Bool,
+        unusable -> Bool,
+        invisible -> Bool,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
