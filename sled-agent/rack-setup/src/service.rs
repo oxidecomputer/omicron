@@ -150,7 +150,6 @@ pub trait LocalBootstrapAgent: Send + Sync {
     ///
     /// This function takes `self` and can only be called once with the full set
     /// of sleds to initialize. Returns `Ok(())` if initializing all sleds
-    /// the contents of `requests`. Returns `Ok(())` if initializing all sleds
     /// succeeds; if any sled fails to initialize, an error is returned
     /// immediately (i.e., the error message will pertain only to the first sled
     /// that failed to initialize).

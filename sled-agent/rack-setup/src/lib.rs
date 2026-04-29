@@ -7,10 +7,12 @@
 #[macro_use]
 extern crate slog;
 
-pub mod early_networking;
+mod early_networking;
 mod plan;
 /// The main implementation of the RSS service.
 pub mod service;
+
+pub use early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 
 pub use plan::service::Plan as ServicePlan;
 pub use plan::service::PlannedSledDescription;
