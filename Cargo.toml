@@ -45,6 +45,7 @@ members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
+    "dev-tools/omicron-deployment-graph",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -227,6 +228,7 @@ default-members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
+    "dev-tools/omicron-deployment-graph",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -592,6 +594,7 @@ linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
 lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
