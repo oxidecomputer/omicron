@@ -1884,9 +1884,10 @@ mod test {
     use sled_agent_types::{
         early_networking::RackNetworkConfig,
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, Inventory,
-            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
-            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
+            FmdInventoryResult, Inventory, InventoryDisk,
+            OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
+            SledRole, SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1947,6 +1948,7 @@ mod test {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: FmdInventoryResult::Available(FmdInventory::default()),
             },
             true,
         )

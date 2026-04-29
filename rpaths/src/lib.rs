@@ -7,30 +7,40 @@
 //! ## The least you need to know
 //!
 //! This build-time crate is used by several top-level Omicron crates to set
-//! RPATH so that libpq can be found at runtime.  This is necessary because these
-//! crates depend on "diesel", which depends on "pq-sys", which links in "libpq".
-//! But Cargo/Rust have no built-in way to set the RPATH so that libpq can
-//! actually be found at runtime.  (See below.)  So we've developed the pattern
-//! here instead.  It works like this:
+//! RPATH so that native libraries linked via *-sys crates can be found at
+//! runtime. Currently we do this for two libraries:
 //!
-//! 1. Any crate that depends on pq-sys, directly or not, needs to follow these
-//!    instructions.  Generally, we depend on pq-sys _indirectly_, by virtue of
-//!    depending on Diesel.
+//! - **libpq** (via pq-sys, pulled in by diesel)
+//! - **libfmd_adm** (via fmd-adm-sys, pulled in by fmd-adm in sled-agent)
+//!
+//! Cargo/Rust have no built-in way to set the RPATH for a transitively-linked
+//! native library.  (See below.)  So we've developed the pattern here instead.
+//! It works like this:
+//!
+//! 1. Any crate that depends (directly or transitively) on a -sys crate from
+//!    the list above needs to follow these instructions.  Often the dep is
+//!    indirect — pq-sys arrives via diesel, fmd-adm-sys via omicron-sled-agent.
 //! 2. Affected crates (e.g., omicron-nexus) have a build.rs that just calls
 //!    `omicron_rpath::configure_default_omicron_rpaths()`.
-//! 3. These crates must also add a dependency on "pq-sys", usually version "*".
-//!    (This dependency is unfortunate but necessary in order for us to get the
-//!    metadata emitted by pq-sys that tells it where it found libpq.  Since we
-//!    don't directly use pq-sys in the crate, we don't care what version it is.
-//!    We specify "*" so that when Cargo dedups our dependency with the one in
-//!    Diesel, we pick up whatever would be picked up anyway, and we'll get its
-//!    metadata.)
-//! 4. At the top level of Omicron (in the workspace Cargo.toml), we use a
-//!    patched version of pq-sys that emits metadata that's used by
-//!    `configure_default_omicron_rpaths()`.
+//! 3. These crates must also add a *direct* dependency on the corresponding
+//!    -sys crate(s), usually version "*".  This is unfortunate but necessary
+//!    so that Cargo exposes the `DEP_*_LIBDIRS` env var to our build.rs.
+//!    Since we don't actually use the -sys crate in the parent crate, we
+//!    don't care what version it is, and "*" lets Cargo dedup with whatever
+//!    the transitive dep already pulled in.  Use a target-gated dep
+//!    (`[target.'cfg(target_os = "illumos")'.dependencies]`) when the
+//!    library only exists on illumos (e.g. fmd-adm-sys).
+//! 4. The metadata that drives this comes from the -sys crate's build.rs:
+//!    - For pq-sys, we maintain a fork (see `[patch.crates-io.pq-sys]`
+//!      in the workspace Cargo.toml) that emits `cargo:LIBDIRS=...`.
+//!    - For fmd-adm-sys, the upstream crate emits the metadata directly,
+//!      so no patch is needed.
 //!
-//! This crate is factored (over-engineered, really) so that we can extend this
-//! pattern to other native libraries in the future.
+//! `configure_default_omicron_rpaths()` scans for every `DEP_*_LIBDIRS` env
+//! var in `RPATH_ENV_VARS`.  Each crate's build.rs makes the same call —
+//! only the env vars Cargo actually sets (corresponding to that crate's
+//! direct deps) contribute RPATH entries, so callers don't have to know
+//! which libraries they pull in.
 //!
 //! ## More details
 //!
@@ -57,9 +67,10 @@
 //! to include RPATH entries in the binary instead.
 //!
 //! As of 1.56, Cargo supports the "cargo:rustc-link-arg" instruction for use by
-//! [Build Scripts][3] to pass arbitrary options to the linker.  We use that here
-//! to tell the linker to include the correct RPATH entry for our one native
-//! dependency that's affected by this (libpq, exposed via the pq-sys package).
+//! [Build Scripts][3] to pass arbitrary options to the linker.  We use that
+//! here to tell the linker to include the correct RPATH entries for the
+//! native dependencies affected by this (currently libpq via pq-sys and
+//! libfmd_adm via fmd-adm-sys).
 //!
 //! A subtle but critical point here is that the RPATH is knowable only by the
 //! system that's building the top-level executable binary.  This mechanism can't
@@ -94,10 +105,11 @@
 
 /// Tells Cargo to pass linker arguments that specify the right RPATH for Omicron
 /// binaries
-// This currently assumes that all Omicron binaries link to the same set of
-// native libraries.  As a result, we use a fixed list of libraries.  In the
-// future, if they depend on different combinations, we can accept different
-// arguments here that specify exactly which ones are expected to be found.
+//
+// We scan a fixed set of `DEP_*_LIBDIRS` env vars (see `RPATH_ENV_VARS`).
+// Only those that are actually set contribute to the RPATH — so each crate
+// just calls this once, and only the libraries that crate actually depends
+// on get configured.  No per-caller customization needed.
 pub fn configure_default_omicron_rpaths() {
     internal::configure_default_omicron_rpaths();
     // If no 'rerun-if-*' directives are emitted, cargo conservatively [1]
@@ -145,39 +157,27 @@ mod internal {
     /// variables may itself look like a path, not just a directory.  That is,
     /// these are colon-separated lists of directories.
     ///
-    /// Currently, we only do this for libpq ("pq-sys" package), but this pattern
-    /// could be generalized for other native libraries.
-    pub static RPATH_ENV_VARS: &'static [&'static str] = &["DEP_PQ_LIBDIRS"];
+    /// We scan all of these on every build.rs call. Only env vars that are
+    /// actually set contribute RPATH entries — a crate that doesn't depend on
+    /// (say) fmd-adm-sys simply won't have `DEP_FMD_ADM_LIBDIRS` set, and we
+    /// skip it silently.
+    pub static RPATH_ENV_VARS: &'static [&'static str] =
+        &["DEP_PQ_LIBDIRS", "DEP_FMD_ADM_LIBDIRS"];
 
     /// Tells Cargo to pass linker arguments that specify RPATHs from the
-    /// environment variable `env_var_name`
+    /// environment variable `env_var_name`, if it is set.
     ///
-    /// Panics if the environment variable is not set or contains non-UTF8 data.
-    /// This might be surprising, since environment variables are optional in
-    /// most build-time mechanisms.  We opt for strictness here because in fact
-    /// we _do_ expect these to always be set, and if they're not, it's most
-    /// likely that somebody has forgotten to include a required dependency.  We
-    /// want to tell them that rather than silently produce unrunnable binaries.
+    /// If the env var is unset, this does nothing: the corresponding
+    /// dependency is not present in the current crate's dep tree. If the
+    /// crate *does* need that library at runtime, the missing dep will
+    /// surface as a build-time or runtime link failure later.
     pub fn configure_rpaths_from_env_var(
         rpaths: &mut Vec<String>,
         env_var_name: &OsStr,
     ) {
-        // If you see this message, that means that the build script for some
-        // Omicron crate is trying to configure RPATHs for a native library, but
-        // the environment variable that's supposed to contain the RPATH
-        // information for that library is unset.  That most likely means that
-        // the crate you're building is lacking a direct dependency on the
-        // '*-sys' crate, or else that the '*-sys' crate's build script failed
-        // to set this metadata.
-        let env_var_value =
-            std::env::var_os(env_var_name).unwrap_or_else(|| {
-                panic!(
-                    "omicron-rpaths: expected {:?} to be set in the \
-                    environment, but found it unset.  (Is the current \
-                    crate missing a dependency on a *-sys crate?)",
-                    env_var_name,
-                )
-            });
+        let Some(env_var_value) = std::env::var_os(env_var_name) else {
+            return;
+        };
 
         configure_rpaths_from_path(rpaths, &env_var_value).unwrap_or_else(
             |error| {
@@ -214,16 +214,17 @@ mod internal {
         use std::os::unix::ffi::OsStrExt;
 
         #[test]
-        #[should_panic = "omicron-rpaths: expected \"SHOULD_NOT_EXIST\" \
-        to be set in the environment, but found it unset"]
-        fn test_configure_rpaths_from_bad_envvar() {
+        fn test_configure_rpaths_from_unset_envvar() {
             use super::configure_rpaths_from_env_var;
 
+            // Unset env vars are silently ignored: the dependency that
+            // would set them simply isn't in this crate's dep tree.
             let mut v = Vec::new();
             configure_rpaths_from_env_var(
                 &mut v,
                 &OsString::from("SHOULD_NOT_EXIST"),
             );
+            assert!(v.is_empty());
         }
 
         #[test]

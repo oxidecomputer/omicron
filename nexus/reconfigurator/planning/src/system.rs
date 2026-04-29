@@ -61,6 +61,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryResult;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -1505,6 +1507,7 @@ impl Sled {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: iddqd::IdOrdMap::new(),
+                fmd: FmdInventoryResult::Available(FmdInventory::default()),
             }
         };
 
@@ -1689,6 +1692,7 @@ impl Sled {
             reference_measurements: inv_sled_agent
                 .reference_measurements
                 .clone(),
+            fmd: FmdInventoryResult::Available(FmdInventory::default()),
         };
 
         Sled {

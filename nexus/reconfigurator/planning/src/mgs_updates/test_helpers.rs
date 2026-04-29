@@ -39,6 +39,8 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryResult;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
@@ -1374,6 +1376,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             smf_services_enabled_not_online:
                                 SvcsEnabledNotOnlineResult::DataUnavailable,
                             reference_measurements: IdOrdMap::new(),
+                            fmd: FmdInventoryResult::Available(
+                                FmdInventory::default(),
+                            ),
                         },
                     )
                     .unwrap();

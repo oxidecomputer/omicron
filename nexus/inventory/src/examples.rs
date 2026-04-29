@@ -51,6 +51,8 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryResult;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
@@ -1115,5 +1117,6 @@ pub fn sled_agent(
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,
+        fmd: FmdInventoryResult::Available(FmdInventory::default()),
     }
 }

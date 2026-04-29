@@ -1275,6 +1275,8 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1302,6 +1304,7 @@ impl SledAgent {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 
