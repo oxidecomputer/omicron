@@ -1640,8 +1640,6 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_service_processor);
-
 table! {
     sw_caboose (id) {
         id -> Uuid,
