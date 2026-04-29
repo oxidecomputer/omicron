@@ -9362,7 +9362,6 @@ dependencies = [
  "log",
  "managed",
  "memchr",
- "miniz_oxide",
  "mio",
  "newtype-uuid",
  "nix 0.31.2",
