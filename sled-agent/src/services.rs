@@ -27,7 +27,6 @@ use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
-use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
@@ -100,6 +99,7 @@ use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
