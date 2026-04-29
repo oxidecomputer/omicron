@@ -172,13 +172,8 @@ impl SvcsResult {
                     // managed by SMF.
                     //
                     // `svcs -x` treats `uninitialized` as a "running" state,
-                    // and does not inlcude it in the list of services it
-                    // returns, so we exclude it as well. There is a caveat
-                    // where if you specify a service on the command
-                    // `svcs -x {SERVICE}`, then the command lets the user know
-                    // whether the restarter is invalid or doesn't exist. If we
-                    // find that use case necessary, we can change how we handle
-                    // the `uninitialized`` case here to reflect that behaviour.
+                    // and does not include it in the list of services it
+                    // returns, so we exclude it as well.
                     // More detail in
                     // https://github.com/oxidecomputer/omicron/issues/10316
                     SvcState::Online

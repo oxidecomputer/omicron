@@ -69,7 +69,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
         // The other rows should be preserved with their states intact. Cast
         // the enum to text so this test doesn't need to know about the
-        // current enum type. The migration check guide in schema.rs recommneds
+        // current enum type. The migration check guide in schema.rs recommends
         // schema checks that are not strongly-typed.
         let rows = ctx
             .client
