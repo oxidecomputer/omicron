@@ -269,11 +269,19 @@ impl Check {
             Err(SledAgentInstanceError(ClientError::ErrorResponse(rsp))) => {
                 let status = rsp.status();
                 if status.is_client_error() {
-                    slog::warn!(opctx.log, "check incomplete due to client error";
-                    "status" => ?status, "error" => ?rsp.into_inner());
+                    slog::warn!(
+                        opctx.log,
+                        "check incomplete due to client error";
+                        "status" => ?status,
+                        "error" => ?rsp.into_inner()
+                    );
                 } else {
-                    slog::info!(opctx.log, "check incomplete due to server error";
-                "status" => ?status, "error" => ?rsp.into_inner());
+                    slog::info!(
+                        opctx.log,
+                        "check incomplete due to server error";
+                        "status" => ?status,
+                        "error" => ?rsp.into_inner(),
+                    );
                 }
 
                 self.result =
