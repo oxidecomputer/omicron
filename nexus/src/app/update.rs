@@ -272,51 +272,25 @@ impl super::Nexus {
     /// the system is in a roughly healthy state based a few health checks.
     ///
     /// The system is considered relatively healthy when:
+    /// - No sagas have been running for longer than an hour.
+    /// - An inventory collection exists
     /// - An update is in progress and the last step planned is not older than
     ///   15 minutes.
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
-    /// - No sagas have been running for longer than an hour.
     async fn contact_support(
         &self,
         opctx: &OpContext,
         time_last_step_planned: DateTime<Utc>,
         components_by_release_version: &BTreeMap<String, usize>,
     ) -> Result<bool, Error> {
-        // TODO-K: Verify the order of all checks and log as much as possible
-
-        // We assume an update is in progress if not all components are at the
-        // same version or there are only two versions and they are not
-        // "install dataset" and "unknown".
-        //
-        // If we assume an update is in progress, but the last step planned in
-        // the blueprint is older than 15 minutes, we consider the update as
-        // "stuck".
-        let versions_at_initial_state = components_by_release_version.len()
-            == 2
-            && components_by_release_version.contains_key(
-                &internal_views::TufRepoVersion::Unknown.to_string(),
-            )
-            && components_by_release_version.contains_key(
-                &internal_views::TufRepoVersion::InstallDataset.to_string(),
-            );
-
-        let mut is_update_stuck = false;
-        if components_by_release_version.len() != 1
-            && !versions_at_initial_state
-        {
-            if time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD {
-                is_update_stuck = true
-            } else {
-                info!(
-                    opctx.log,
-                    "no update health checks being run; system assumed to have an \
-                    update in progress in a normal state";
-                );
-                return Ok(false);
-            }
-        };
-
+        // We only run health checks for stale active sagas and an exisiting
+        // inventory collection before checking to see if there is an update in
+        // progress. If these two checks return with unhealthy states, we
+        // definitely want to log them even if there is an update in progress.
+        // It is expected that the remaining checks could fail during an update,
+        // so we don't log them and return early if we identify an update in
+        // progress
         let stale_active_sagas = self
             .datastore()
             .saga_list_running_or_unwinding_older_than_batched(
@@ -337,16 +311,50 @@ impl super::Nexus {
         let Some(inventory) =
             self.datastore().inventory_get_latest_collection(opctx).await?
         else {
-            // There should always be an inventory collection before or after an
-            // update. If there isn't, call support. We don't bother with the
-            // remaining health checks because they need the latest inventory
-            // collection.
+            // There should always be an inventory collection before, after or
+            // during an update. If there isn't, call support. We don't bother
+            // with the remaining health checks because they need the latest
+            // inventory collection.
             error!(
                 opctx.log,
                 "no inventory collection found; unable to perform update \
                 health checks";
             );
             return Ok(true);
+        };
+
+        // We assume an update is in progress if not all components are at the
+        // same version or there are only two versions and they are not
+        // "install dataset" and "unknown".
+        //
+        // If we assume an update is in progress, but the last step planned in
+        // the blueprint is older than 15 minutes, we consider the update as
+        // "stuck".
+        let versions_at_initial_state = components_by_release_version.len()
+            == 2
+            && components_by_release_version.contains_key(
+                &internal_views::TufRepoVersion::Unknown.to_string(),
+            )
+            && components_by_release_version.contains_key(
+                &internal_views::TufRepoVersion::InstallDataset.to_string(),
+            );
+
+        let is_update_in_progress = components_by_release_version.len() != 1
+            && !versions_at_initial_state;
+        let mut is_update_stuck = false;
+
+        if is_update_in_progress {
+            if time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD {
+                is_update_stuck = true
+            } else {
+                info!(
+                    opctx.log,
+                    "skipping update health checks; update in progress with last \
+                    step planned within the last {}",
+                    omicron_common::format_time_delta(STUCK_UPDATE_THRESHOLD);
+                );
+                return Ok(false);
+            }
         };
 
         // Check that the inventory collection is not too old (30 minutes). If it is
@@ -668,7 +676,7 @@ mod test {
         BTreeMap::from([("9.2.0-0.ci+gite4b75dde134".to_string(), 15)])
     }
 
-    fn _system_version_update_in_progress() -> BTreeMap<String, usize> {
+    fn system_version_update_in_progress() -> BTreeMap<String, usize> {
         BTreeMap::from([
             ("9.2.0-0.ci+gite4b75dde134".to_string(), 12),
             ("install dataset".to_string(), 3),
@@ -727,6 +735,8 @@ mod test {
             healthy_services(),
         )
         .await;
+        // No health checks failed and no update is running, contact support
+        // should be false
         assert!(
             !nexus
                 .contact_support(
@@ -752,6 +762,8 @@ mod test {
             healthy_services(),
         )
         .await;
+        // There are unhealthy zpools and no update is running, contact support
+        // should be true
         assert!(
             nexus
                 .contact_support(
@@ -777,6 +789,8 @@ mod test {
             unhealthy_services(),
         )
         .await;
+        // There are unhealthy SMF services and no update is running, contact
+        // support should be true
         assert!(
             nexus
                 .contact_support(
@@ -802,6 +816,8 @@ mod test {
             unhealthy_services(),
         )
         .await;
+        // There are unhealthy zpools and SMF services and no update has ever
+        // been run, contact support should be true
         assert!(
             nexus
                 .contact_support(
@@ -828,6 +844,8 @@ mod test {
         )
         .await;
         insert_stale_running_saga(cptestctx).await;
+        // There is a stale active saga no update has ever been run, contact
+        // support should be true
         assert!(
             nexus
                 .contact_support(
@@ -840,5 +858,92 @@ mod test {
         );
     }
 
-    // TODO-K: Add some more tests for the remaining cases
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_stuck_update(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            healthy_services(),
+        )
+        .await;
+        // Components are split across multiple non-initial versions and the
+        // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
+        // update is considered stuck and contact support is true.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now()
+                        - STUCK_UPDATE_THRESHOLD
+                        - TimeDelta::seconds(10),
+                    &system_version_update_in_progress()
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_update_in_progress(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        // Even with unhealthy zpools and services, an update in progress with a
+        // last step planned within the normal range skips the remaining health
+        // checks and returns false.
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_version_update_in_progress()
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_missing_inventory_collection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        // No inventory collection has been inserted; the health checks can't
+        // run, so contact support is true whether there is an update in
+        // progress or not.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_version_update_finished()
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    &system_version_update_in_progress()
+                )
+                .await
+                .unwrap()
+        );
+    }
 }

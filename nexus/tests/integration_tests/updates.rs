@@ -819,7 +819,9 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
-    // TODO-K: add a test for contact support
+    // The task that checks for enabled not online SMF services isn't running on
+    // a simulated system; the contact_support field should be true
+    assert!(status.contact_support, "should not need to contact support");
 
     cptestctx.teardown().await;
     Ok(())
