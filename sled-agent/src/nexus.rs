@@ -8,7 +8,6 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware::HardwareManager;
 use slog::Logger;
