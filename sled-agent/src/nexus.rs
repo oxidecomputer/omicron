@@ -54,19 +54,6 @@ pub(crate) trait ConvertInto<T>: Sized {
     fn convert(self) -> T;
 }
 
-impl ConvertInto<nexus_lockstep_client::types::PhysicalDiskKind>
-    for DiskVariant
-{
-    fn convert(self) -> nexus_lockstep_client::types::PhysicalDiskKind {
-        use nexus_lockstep_client::types::PhysicalDiskKind;
-
-        match self {
-            DiskVariant::U2 => PhysicalDiskKind::U2,
-            DiskVariant::M2 => PhysicalDiskKind::M2,
-        }
-    }
-}
-
 impl ConvertInto<nexus_client::types::Baseboard>
     for sled_hardware_types::Baseboard
 {
