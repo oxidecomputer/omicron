@@ -21,7 +21,7 @@ pub use ereport_types::{Ena, EreportId};
 /// Preparation only surfaces ereports whose class is in this set — there is
 /// no value in loading ereports the planner cannot consume.
 ///
-/// Empty until [`nexus_fm::diagnosis::analyze`] gains real handling. Grow
+/// Empty until `nexus_fm::diagnosis::analyze` gains real handling. Grow
 /// this alongside the planner as new classes gain support.
 ///
 /// **NULL-class ereports are intentionally excluded by the loader's SQL
