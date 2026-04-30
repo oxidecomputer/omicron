@@ -7,7 +7,6 @@
 //! contains a handle to each of the inner service-specific reconcilers.
 
 use crate::DetermineSwitchSlotStatus;
-use crate::ThisSledSwitchZoneUnderlayIpAddr;
 use crate::dpd_reconciler::DpdReconciler;
 use crate::mgd_reconciler::MgdReconciler;
 use crate::reconciler_task::ReconcilerTaskHandle;
@@ -16,6 +15,7 @@ use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use crate::uplinkd_reconciler::UplinkdReconciler;
 use omicron_common::address::MGS_PORT;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;

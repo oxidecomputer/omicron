@@ -7,9 +7,9 @@
 //! Unlike most reconcilers in this crate, `uplinkd`'s configuration is managed
 //! via SMF, not a dropshot server.
 
-use crate::ThisSledSwitchZoneUnderlayIpAddr;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::time::Duration;

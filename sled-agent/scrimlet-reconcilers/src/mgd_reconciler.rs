@@ -5,11 +5,11 @@
 //! Reconciler responsible for configuration of `mgd` within a scrimlet's switch
 //! zone.
 
-use crate::ThisSledSwitchZoneUnderlayIpAddr;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use mg_admin_client::Client;
 use omicron_common::address::MGD_PORT;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::time::Duration;

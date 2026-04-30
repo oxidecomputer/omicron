@@ -38,6 +38,9 @@
 //! that Nexus is responsible for maintaining what the configuration should be,
 //! and each scrimlet is responsible for applying that configuration to its own
 //! switch zone's services; the latter is implemented via this crate.
+//!
+//! [`ThisSledSwitchZoneUnderlayIpAddr`]:
+//! sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr
 
 mod dpd_reconciler;
 mod handle;
@@ -45,7 +48,6 @@ mod mgd_reconciler;
 mod reconciler_task;
 mod status;
 mod switch_zone_slot;
-mod switch_zone_underlay_ip;
 mod uplinkd_reconciler;
 
 pub use dpd_reconciler::DpdReconcilerStatus;
@@ -61,5 +63,4 @@ pub use status::ReconcilerStatus;
 pub use status::ReconciliationCompletedStatus;
 pub use status::ScrimletReconcilersStatus;
 pub use status::ScrimletStatus;
-pub use switch_zone_underlay_ip::ThisSledSwitchZoneUnderlayIpAddr;
 pub use uplinkd_reconciler::UplinkdReconcilerStatus;

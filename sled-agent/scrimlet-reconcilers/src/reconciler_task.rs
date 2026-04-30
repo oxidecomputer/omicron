@@ -21,7 +21,6 @@
 //! [`ReconcilerTask::run()`] handles 1 and 3, and service-specific
 //! implementations of [`Reconciler`] provide 2.
 
-use crate::ThisSledSwitchZoneUnderlayIpAddr;
 use crate::status::ReconcilerActivationReason;
 use crate::status::ReconcilerCurrentStatus;
 use crate::status::ReconcilerInertReason;
@@ -31,6 +30,7 @@ use crate::status::ReconciliationCompletedStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use chrono::Utc;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::error;
