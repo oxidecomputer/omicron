@@ -175,12 +175,12 @@ impl SledConfig {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PlannedSledDescription {
-    pub(crate) underlay_address: SocketAddrV6,
-    pub(crate) sled_id: SledUuid,
-    pub(crate) subnet: Ipv6Subnet<SLED_PREFIX>,
-    pub(crate) config: SledConfig,
-    pub(crate) last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
+pub struct PlannedSledDescription {
+    pub underlay_address: SocketAddrV6,
+    pub sled_id: SledUuid,
+    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub config: SledConfig,
+    pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 }
 
 impl iddqd::IdOrdItem for PlannedSledDescription {
@@ -194,7 +194,7 @@ impl iddqd::IdOrdItem for PlannedSledDescription {
 }
 
 #[derive(Clone, Debug)]
-pub struct Plan {
+pub struct ServicePlan {
     pub all_sleds: IdOrdMap<PlannedSledDescription>,
     pub dns_config: DnsConfigParams,
 }
@@ -229,7 +229,7 @@ pub fn from_ipaddr_to_external_floating_ip(
     OmicronZoneExternalFloatingIp { id: ExternalIpUuid::new_v4(), ip }
 }
 
-pub fn from_source_nat_config_to_external_snat_ip(
+fn from_source_nat_config_to_external_snat_ip(
     snat_cfg: SourceNatConfigGeneric,
 ) -> OmicronZoneExternalSnatIp {
     // This is pretty weird: IP IDs don't exist yet, so it's fine for us
@@ -244,7 +244,7 @@ pub fn from_source_nat_config_to_external_snat_ip(
     OmicronZoneExternalSnatIp { id: ExternalIpUuid::new_v4(), snat_cfg }
 }
 
-impl Plan {
+impl ServicePlan {
     async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
@@ -888,7 +888,7 @@ impl Plan {
         Ok(plan)
     }
 
-    pub(crate) fn to_blueprint(
+    pub fn to_blueprint(
         &self,
         sled_agent_config_generation: Generation,
     ) -> anyhow::Result<Blueprint> {
@@ -1134,10 +1134,10 @@ struct ServicePortBuilder {
 
 impl ServicePortBuilder {
     fn new(config: &Config) -> Self {
-        use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET, NEXUS_OPTE_IPV4_SUBNET,
             NEXUS_OPTE_IPV6_SUBNET, NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
+            NUM_INITIAL_RESERVED_IP_ADDRESSES,
         };
 
         let external_dns_ips_set = config
@@ -1586,12 +1586,12 @@ mod tests {
 
         // Confirm that this fails with no sleds
         let sleds = vec![];
-        Plan::create_transient(&logctx.log, &config, sleds)
+        ServicePlan::create_transient(&logctx.log, &config, sleds)
             .expect_err("Should have failed to create plan");
 
         // Try again, with a sled that has ten U.2 disks
         let sleds = vec![test_sled_info()];
-        let plan = Plan::create_transient(&logctx.log, &config, sleds)
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
             .expect("Should have created plan");
 
         assert_eq!(plan.all_sleds.len(), 1);
@@ -1647,8 +1647,9 @@ mod tests {
 
         let (_dns_ips, config) = test_dns_ips_and_config();
         let sled_info = vec![test_sled_info()];
-        let plan = Plan::create_transient(&logctx.log, &config, sled_info)
-            .expect("should've created a plan");
+        let plan =
+            ServicePlan::create_transient(&logctx.log, &config, sled_info)
+                .expect("should've created a plan");
 
         for sled in &plan.all_sleds {
             eprintln!("testing sled {}", sled.sled_id);
