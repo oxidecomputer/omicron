@@ -729,7 +729,7 @@ proptest = "1.7.0"
 qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
-rand08 = { package = "rand", version = "0.8.5" }
+rand08 = { package = "rand", version = "0.8.6" }
 rand = "0.9.2"
 rand_core = "0.9.3"
 rand_distr = "0.5.1"
@@ -843,14 +843,14 @@ tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
 toml_edit = "0.22.27"
-tough = { version = "0.20.0", features = [ "http" ] }
+tough = { version = "0.22.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tough-0.22" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tough-0.22", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tough-0.22" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tough-0.22" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
