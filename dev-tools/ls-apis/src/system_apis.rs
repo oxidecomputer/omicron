@@ -575,10 +575,7 @@ impl SystemApis {
             .cloned()
             .collect();
 
-        Ok(DagEdgesFile {
-            units_without_server_side_apis,
-            edges: edges.into_iter().collect(),
-        })
+        Ok(DagEdgesFile { units_without_server_side_apis, edges })
     }
 
     // The complex type below is only used in this one place: the return value

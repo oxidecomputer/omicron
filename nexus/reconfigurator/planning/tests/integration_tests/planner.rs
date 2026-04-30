@@ -3149,13 +3149,15 @@ fn create_measurement_artifacts_at_version(
 enum WhichVersion {
     /// Use a version and host OS hashes that match the initial system state
     /// (set up by `with_target_release_0_0_1`), so the planner does not issue
-    /// host OS MGS updates.
+    /// any updates if you set the system's target release to one built from
+    /// these artifacts.
     InitialSystemVersion,
 
     /// Construct a list of artifact versions that differ from the initial
     /// system state so the planner issues host OS and zone updates. This does
     /// not include SP and RoT updates. (If a test needs that in the future,
-    /// another enum variant should be added.)
+    /// either this variant should be extended or another variant should be
+    /// added.)
     UpdatedHostOsAndZones,
 }
 
@@ -5133,6 +5135,9 @@ fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitName {
 
 /// Deployment units used by
 /// `test_zone_update_ordering_respects_dependency_dag`.
+///
+/// These correspond to deployment units defined in the `ls-apis` API
+/// manifest. See the README for that tool for more information.
 #[derive(Debug)]
 struct UpdateDeploymentUnits {
     /// Units known to correspond to a zone kind, and expected to be part of the
@@ -5140,14 +5145,14 @@ struct UpdateDeploymentUnits {
     /// above.
     zone_based: BTreeSet<DeploymentUnitName>,
     /// Units present in the DAG but expected not to appear in the update
-    /// trace. Currently this is just Installinator, which is part of the
-    /// recovery flow.
+    /// trace. Currently this is just Installinator, which is only part of
+    /// the recovery flow.
     expected_not_in_trace: BTreeSet<DeploymentUnitName>,
     /// The Host OS unit, which is managed by MGS rather than being zone-based.
     host_os: DeploymentUnitName,
     /// The edges of the deployment unit dependency DAG, against which the
     /// observed update trace is checked.
-    edges: Vec<DagEdge>,
+    edges: BTreeSet<DagEdge>,
 }
 
 impl UpdateDeploymentUnits {
@@ -5156,33 +5161,35 @@ impl UpdateDeploymentUnits {
         // producer.
         let in_dag: BTreeSet<_> =
             dag.edges.iter().flat_map(|e| [&e.consumer, &e.producer]).collect();
+
         let zone_based: BTreeSet<_> =
             ZoneKind::iter().map(zone_kind_to_deployment_unit).collect();
 
-        // These units are present in the DAG but are expected not to appear in
-        // the update trace.
         let expected_not_in_trace: BTreeSet<_> =
             [DeploymentUnitName::from("Installinator")].into_iter().collect();
+
         let host_os = DeploymentUnitName::from("Host OS");
 
         // The goal of these assertions is to check for typos or other mistakes
         // while defining these sets. This is all quite complicated, and typos
-        // are easy to do, so we do a bunch of smoke checks as part of the
+        // are easy to make, so we do a bunch of smoke checks as part of the
         // update test.
         //
         // * The host OS unit must appear in the DAG.
         assert!(
             in_dag.contains(&host_os),
-            "host_os ({host_os:?}) does not appear in the deployment unit \
-             DAG ({dag_path}). Is the ID still correct?"
+            "expected to find deployment unit {host_os:?} in deployment \
+             unit DAG ({dag_path}) (did the name of this deployment unit \
+             change?)"
         );
         // * The units that are expected to not be in the trace must still be in
         //   the DAG.
         for unit in &expected_not_in_trace {
             assert!(
                 in_dag.contains(unit),
-                "expected_not_in_trace unit {unit:?} does not appear in the \
-                 deployment unit DAG ({dag_path}). Is the ID still correct?"
+                "expected to find deployment unit {unit:?} in deployment \
+                 unit DAG ({dag_path}) (did the name of this deployment \
+                 unit change?)"
             );
         }
         // * Every zone-based unit must either be in the DAG or have no
@@ -5214,11 +5221,11 @@ impl UpdateDeploymentUnits {
     ///
     /// Panics with a detailed message on the first hard failure or if any
     /// ordering violations are found.
-    fn assert_progress_satisfies_dag(
+    fn assert_trace_satisfies_dag(
         &self,
-        progress: &BTreeMap<DeploymentUnitName, UnitProgress>,
+        trace: &BTreeMap<DeploymentUnitName, UnitTrace>,
     ) {
-        // Every zone-based unit must be present in the progress map.
+        // Every zone-based unit must be present in the trace.
         //
         // Most of the time, this catches cases where the example system isn't
         // complete, i.e. that a particular zone kind is missing from the
@@ -5228,7 +5235,7 @@ impl UpdateDeploymentUnits {
         // deployment unit, but for whatever reason we never issued any updates
         // for it.
         for unit in &self.zone_based {
-            let p = progress.get(unit).unwrap_or_else(|| {
+            let p = trace.get(unit).unwrap_or_else(|| {
                 panic!(
                     "deployment unit {unit:?} is zone-based but was never \
                      updated — is it missing from the example system?"
@@ -5243,11 +5250,11 @@ impl UpdateDeploymentUnits {
         }
 
         {
-            // The host OS unit must also be present in the progress map.
-            let p = progress.get(&self.host_os).unwrap_or_else(|| {
+            // The host OS unit must also be present in the trace.
+            let p = trace.get(&self.host_os).unwrap_or_else(|| {
                 panic!(
                     "host OS deployment unit was never updated — did the \
-                     planner not issue any host OS MGS updates?"
+                     planner not issue any host OS updates?"
                 )
             });
             assert!(
@@ -5259,7 +5266,7 @@ impl UpdateDeploymentUnits {
         }
 
         println!("\ndeployment unit update activity:");
-        for (unit, p) in progress {
+        for (unit, p) in trace {
             println!(
                 "  {unit}: first_activity = {}, all_at_target = {:?}",
                 p.first_activity, p.all_at_target,
@@ -5273,7 +5280,7 @@ impl UpdateDeploymentUnits {
         // ceremony to make sure the test itself is set up correctly.)
         let mut violations = Vec::new();
         for edge in &self.edges {
-            let Some(consumer) = progress.get(&edge.consumer) else {
+            let Some(consumer) = trace.get(&edge.consumer) else {
                 if !self.expected_not_in_trace.contains(&edge.consumer) {
                     panic!(
                         "found a dependency between deployment units in \
@@ -5286,7 +5293,7 @@ impl UpdateDeploymentUnits {
                 }
                 continue;
             };
-            let Some(producer) = progress.get(&edge.producer) else {
+            let Some(producer) = trace.get(&edge.producer) else {
                 if !self.expected_not_in_trace.contains(&edge.producer) {
                     panic!(
                         "found a dependency between deployment units in \
@@ -5342,7 +5349,7 @@ impl UpdateDeploymentUnits {
 /// This gives us enough information to determine if any server-side-managed
 /// ordering constraints were violated.
 #[derive(Debug)]
-struct UnitProgress {
+struct UnitTrace {
     first_activity: usize,
     all_at_target: Option<usize>,
 }
@@ -5415,8 +5422,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     })
     .unwrap();
 
-    let mut progress: BTreeMap<DeploymentUnitName, UnitProgress> =
-        BTreeMap::new();
+    let mut trace: BTreeMap<DeploymentUnitName, UnitTrace> = BTreeMap::new();
 
     /// The maximum number of iterations of the planner before we give up,
     /// assuming it must be in an infinite loop.
@@ -5450,7 +5456,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
             host_phase_1_hash,
             host_phase_2_hash,
         ) {
-            match progress.entry(units.host_os.clone()) {
+            match trace.entry(units.host_os.clone()) {
                 std::collections::btree_map::Entry::Occupied(e) => {
                     assert_eq!(
                         e.get().all_at_target,
@@ -5464,13 +5470,13 @@ fn test_zone_update_ordering_respects_dependency_dag() {
                 std::collections::btree_map::Entry::Vacant(e) => {
                     // First time seeing the host OS unit: insert it with a
                     // pending update.
-                    e.insert(UnitProgress {
+                    e.insert(UnitTrace {
                         first_activity: i,
                         all_at_target: None,
                     });
                 }
             };
-        } else if let Some(p) = progress.get_mut(&units.host_os) {
+        } else if let Some(p) = trace.get_mut(&units.host_os) {
             // No pending host OS updates and we've previously seen
             // activity: all host OS updates are complete.
             if p.all_at_target.is_none() {
@@ -5488,7 +5494,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
             .flatten();
         for z in modified_zones {
             let unit = zone_kind_to_deployment_unit(z.kind);
-            match progress.entry(unit) {
+            match trace.entry(unit) {
                 std::collections::btree_map::Entry::Occupied(e) => {
                     assert_eq!(
                         e.get().all_at_target,
@@ -5498,7 +5504,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
                     );
                 }
                 std::collections::btree_map::Entry::Vacant(e) => {
-                    e.insert(UnitProgress {
+                    e.insert(UnitTrace {
                         first_activity: i,
                         all_at_target: None,
                     });
@@ -5517,7 +5523,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
             zones_by_unit.entry(unit).or_default().push(zone);
         }
         for (unit, zones) in &zones_by_unit {
-            if let Some(p) = progress.get_mut(unit) {
+            if let Some(p) = trace.get_mut(unit) {
                 if p.all_at_target.is_none()
                     && zones
                         .iter()
@@ -5598,7 +5604,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
 
     // Verify the trace against the DAG: every zone-based unit and host_os
     // converged, and every DAG edge respects temporal ordering.
-    units.assert_progress_satisfies_dag(&progress);
+    units.assert_trace_satisfies_dag(&trace);
 
     logctx.cleanup_successful();
 }
