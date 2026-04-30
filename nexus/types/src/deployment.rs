@@ -261,8 +261,8 @@ pub struct Blueprint {
     /// for in-service zones
     ///
     /// This generation number is bumped any time a zone with external
-    /// networking (currently: Nexus, external DNS, or boundary NTP) is added,
-    /// expunged, or changed in a way that involves its external connectivity.
+    /// networking is added, expunged, or changed in a way that affects the way
+    /// NAT entries have to be configured in dendrite.
     pub external_networking_generation: Generation,
 
     /// CockroachDB state fingerprint when this blueprint was created
@@ -3325,6 +3325,8 @@ pub struct BlueprintMetadata {
     pub nexus_generation: Generation,
     /// The current generation of the collective set of external networking
     /// configuration across all in-service zones
+    ///
+    /// See [`Blueprint::external_networking_generation`].
     pub external_networking_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
