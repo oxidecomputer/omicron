@@ -65,4 +65,3 @@ camino-tempfile.workspace = true
 nexus-reconfigurator-blippy.workspace = true
 omicron-test-utils.workspace = true
 rcgen.workspace = true
-sled-agent-types-versions.workspace = true

@@ -8,7 +8,6 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware::HardwareManager;
 use slog::Logger;
@@ -52,19 +51,6 @@ pub(crate) fn make_nexus_client_with_port(
 
 pub(crate) trait ConvertInto<T>: Sized {
     fn convert(self) -> T;
-}
-
-impl ConvertInto<nexus_lockstep_client::types::PhysicalDiskKind>
-    for DiskVariant
-{
-    fn convert(self) -> nexus_lockstep_client::types::PhysicalDiskKind {
-        use nexus_lockstep_client::types::PhysicalDiskKind;
-
-        match self {
-            DiskVariant::U2 => PhysicalDiskKind::U2,
-            DiskVariant::M2 => PhysicalDiskKind::M2,
-        }
-    }
 }
 
 impl ConvertInto<nexus_client::types::Baseboard>

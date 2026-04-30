@@ -229,7 +229,7 @@ pub fn from_ipaddr_to_external_floating_ip(
     OmicronZoneExternalFloatingIp { id: ExternalIpUuid::new_v4(), ip }
 }
 
-pub fn from_source_nat_config_to_external_snat_ip(
+fn from_source_nat_config_to_external_snat_ip(
     snat_cfg: SourceNatConfigGeneric,
 ) -> OmicronZoneExternalSnatIp {
     // This is pretty weird: IP IDs don't exist yet, so it's fine for us

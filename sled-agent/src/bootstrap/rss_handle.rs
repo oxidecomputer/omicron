@@ -62,14 +62,14 @@ impl RssHandle {
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) =
-            rss_channel(our_bootstrap_address, sprockets, measurements.clone());
+        let (tx, rx) = rss_channel(sprockets, measurements.clone());
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
             internal_disks_rx,
             Box::new(tx),
+            our_bootstrap_address,
             bootstore,
             trust_quorum,
             step_tx,
@@ -86,12 +86,12 @@ impl RssHandle {
         sprockets: SprocketsConfig,
         measurements: Arc<MeasurementsHandle>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) =
-            rss_channel(our_bootstrap_address, sprockets, measurements);
+        let (tx, rx) = rss_channel(sprockets, measurements);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
             Box::new(tx),
+            our_bootstrap_address,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;
@@ -140,13 +140,12 @@ async fn initialize_sled_agent(
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
 fn rss_channel(
-    our_bootstrap_address: Ipv6Addr,
     sprockets: SprocketsConfig,
     measurements: Arc<MeasurementsHandle>,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
+        BootstrapAgentHandle { inner: tx },
         BootstrapAgentHandleReceiver { inner: rx, sprockets, measurements },
     )
 }
@@ -168,7 +167,6 @@ enum RequestKind {
 
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<Request>,
-    our_bootstrap_address: Ipv6Addr,
 }
 
 #[async_trait]
@@ -202,10 +200,6 @@ impl LocalBootstrapAgent for BootstrapAgentHandle {
             .await
             .unwrap();
         rx.await.unwrap()
-    }
-
-    fn our_address(&self) -> Ipv6Addr {
-        self.our_bootstrap_address
     }
 }
 

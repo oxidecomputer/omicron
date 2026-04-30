@@ -69,6 +69,7 @@
 
 use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use crate::plan::service::PlanError as ServicePlanError;
+use crate::plan::service::ServicePlan;
 use crate::plan::sled::Plan as SledPlan;
 use async_trait::async_trait;
 use bootstore::schemes::v0 as bootstore;
@@ -119,6 +120,7 @@ use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
@@ -136,20 +138,19 @@ use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
-use crate::plan::service::ServicePlan;
-use sled_agent_types::sled::StartSledAgentRequest;
-
 /// Operations RSS performs on the local bootstrap-agent during rack setup.
 ///
-/// This trait is implemented by sled-agent.
+/// This trait exists so this crate doesn't have to depend on the rest of
+/// `sled-agent`; the sole production implementor is `BootstrapAgentHandle` in
+/// `sled-agent::bootstrap::rss_handle`.
 #[async_trait]
 pub trait LocalBootstrapAgent: Send + Sync {
     /// Instruct the local bootstrap-agent to initialize sled-agents based on
     /// the contents of `requests`.
     ///
-    /// This function takes `self` and can only be called once with the full set
-    /// of sleds to initialize. Returns `Ok(())` if initializing all sleds
-    /// succeeds; if any sled fails to initialize, an error is returned
+    /// This method consumes the handle and can only be called once with the
+    /// full set of sleds to initialize. Returns `Ok(())` if initializing all
+    /// sleds succeeds; if any sled fails to initialize, an error is returned
     /// immediately (i.e., the error message will pertain only to the first sled
     /// that failed to initialize).
     async fn initialize_sleds(
@@ -165,9 +166,6 @@ pub trait LocalBootstrapAgent: Send + Sync {
         self: Box<Self>,
         requests: Vec<SocketAddrV6>,
     ) -> Result<(), String>;
-
-    /// The bootstrap-network address of the sled hosting RSS.
-    fn our_address(&self) -> Ipv6Addr;
 }
 
 /// For tracking the current RSS step and sending notifications about it.
@@ -318,6 +316,8 @@ impl RackSetupService {
     /// - `internal_disks_rx`: Tells us about available internal disks
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
+    /// - `our_bootstrap_address`: The bootstrap-network address of the sled
+    ///   hosting RSS (i.e., this sled).
     /// - `bootstore` - A handle to call bootstore APIs
     /// - `trust_quorum` - A handle to the trust qurom task
     pub fn new(
@@ -325,6 +325,7 @@ impl RackSetupService {
         request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        our_bootstrap_address: Ipv6Addr,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
@@ -336,6 +337,7 @@ impl RackSetupService {
                     &request,
                     &internal_disks_rx,
                     local_bootstrap_agent,
+                    our_bootstrap_address,
                     bootstore,
                     trust_quorum,
                     step_tx,
@@ -355,10 +357,13 @@ impl RackSetupService {
     pub fn new_reset_rack(
         log: Logger,
         local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        our_bootstrap_address: Ipv6Addr,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
-            if let Err(e) = svc.reset(local_bootstrap_agent).await {
+            if let Err(e) =
+                svc.reset(local_bootstrap_agent, our_bootstrap_address).await
+            {
                 warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
@@ -1101,6 +1106,7 @@ impl ServiceInner {
     async fn reset(
         &self,
         local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        our_bootstrap_address: Ipv6Addr,
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
@@ -1110,7 +1116,6 @@ impl ServiceInner {
                 BootstrapInterface::GlobalZone,
             ])
             .await?;
-        let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
             .chain(iter::once(our_bootstrap_address))
             .map(|addr| {
@@ -1210,6 +1215,7 @@ impl ServiceInner {
         request: &RackInitializeRequestParams,
         internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        our_bootstrap_address: Ipv6Addr,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
@@ -1269,7 +1275,7 @@ impl ServiceInner {
         // Wait for enough peers to create a new plan
         let bootstrap_addrs = match &config.bootstrap_discovery {
             BootstrapAddressDiscovery::OnlyOurs => {
-                BTreeSet::from([local_bootstrap_agent.our_address()])
+                BTreeSet::from([our_bootstrap_address])
             }
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };

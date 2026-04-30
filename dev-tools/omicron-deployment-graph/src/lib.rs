@@ -62,5 +62,5 @@ pub struct DagEdgesFile {
     /// ordering constraints relative to other units.
     pub units_without_server_side_apis: BTreeSet<DeploymentUnitName>,
     /// Edges of the deployment unit dependency DAG.
-    pub edges: Vec<DagEdge>,
+    pub edges: BTreeSet<DagEdge>,
 }

@@ -4095,7 +4095,7 @@ dependencies = [
 [[package]]
 name = "gateway-ereport-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ea2f39ccdea124b5affcad0ca17bc5dacf65823a#ea2f39ccdea124b5affcad0ca17bc5dacf65823a"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0d7a8992f914ad6a5947409048779969bbe80e3d#0d7a8992f914ad6a5947409048779969bbe80e3d"
 dependencies = [
  "serde",
  "zerocopy 0.8.40",
@@ -4104,7 +4104,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ea2f39ccdea124b5affcad0ca17bc5dacf65823a#ea2f39ccdea124b5affcad0ca17bc5dacf65823a"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0d7a8992f914ad6a5947409048779969bbe80e3d#0d7a8992f914ad6a5947409048779969bbe80e3d"
 dependencies = [
  "bitflags 2.11.0",
  "hubpack",
@@ -4121,8 +4121,8 @@ dependencies = [
 
 [[package]]
 name = "gateway-sp-comms"
-version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ea2f39ccdea124b5affcad0ca17bc5dacf65823a#ea2f39ccdea124b5affcad0ca17bc5dacf65823a"
+version = "0.1.2"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0d7a8992f914ad6a5947409048779969bbe80e3d#0d7a8992f914ad6a5947409048779969bbe80e3d"
 dependencies = [
  "async-trait",
  "backoff",
@@ -7102,7 +7102,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openapiv3",
- "oximeter-types 0.1.0",
+ "oximeter-types-versions 0.1.0",
  "oxnet",
  "oxql-types",
  "schemars 0.8.22",
@@ -9151,7 +9151,6 @@ dependencies = [
  "nexus-client",
  "nexus-config",
  "nexus-lockstep-client",
- "nexus-reconfigurator-blippy",
  "nexus-types",
  "nix 0.31.2",
  "ntp-admin-client",
@@ -9174,7 +9173,6 @@ dependencies = [
  "propolis_api_types",
  "rand 0.9.2",
  "range-requests",
- "rcgen",
  "regress 0.10.5",
  "repo-depot-api",
  "repo-depot-client",
@@ -13641,7 +13639,6 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
- "sled-agent-types-versions",
  "sled-hardware-types",
  "sled-storage",
  "slog",
