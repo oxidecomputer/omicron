@@ -32,12 +32,12 @@ mod local_switch_zone_ip {
         /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
         /// start this sled agent.
         ///
-        /// This takes a full request object instead of something smaller (like
-        /// just a sled subnet) to put up a roadblock to accidentally
-        /// constructing a [`ThisSledSwitchZoneUnderlayIpAddr`] that points to
-        /// any address other than our own. `sled-agent` has ready access to the
-        /// subnets and addresses of other sleds, but doesn't have ready access
-        /// to other sleds' [`StartSledAgentRequest`]s.
+        /// This function MUST only be called by a `sled-agent` with its own
+        /// `StartSledAgentRequest`. We can't statically enforce this
+        /// requirement, but failure to adhere to this convention defeats the
+        /// entire point of this type: it is supposed to provide a way for
+        /// `sled-agent` (and related crates) to statically "tag" an IP address
+        /// as being the IP of its own, local switch zone.
         pub fn from_sled_agent_request(
             request: &StartSledAgentRequest,
         ) -> Self {

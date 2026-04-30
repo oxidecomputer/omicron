@@ -71,7 +71,6 @@ use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
 use crate::plan::sled::SledPlan;
-use async_trait::async_trait;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
 use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
@@ -129,6 +128,7 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
@@ -143,7 +143,6 @@ use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 /// This trait exists so this crate doesn't have to depend on the rest of
 /// `sled-agent`; the sole production implementor is `BootstrapAgentHandle` in
 /// `sled-agent::bootstrap::rss_handle`.
-#[async_trait]
 pub trait LocalBootstrapAgent: Send + Sync {
     /// Instruct the local bootstrap-agent to initialize sled-agents based on
     /// the contents of `requests`.
@@ -153,19 +152,19 @@ pub trait LocalBootstrapAgent: Send + Sync {
     /// sleds succeeds; if any sled fails to initialize, an error is returned
     /// immediately (i.e., the error message will pertain only to the first sled
     /// that failed to initialize).
-    async fn initialize_sleds(
-        self: Box<Self>,
+    fn initialize_sleds(
+        self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
-    ) -> Result<(), String>;
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// Reset sled-agents on the rack's other sleds.
     ///
     /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
     /// `reset_sleds` per run.
-    async fn reset_sleds(
-        self: Box<Self>,
+    fn reset_sleds(
+        self,
         requests: Vec<SocketAddrV6>,
-    ) -> Result<(), String>;
+    ) -> impl Future<Output = Result<(), String>> + Send;
 }
 
 /// For tracking the current RSS step and sending notifications about it.
@@ -321,11 +320,11 @@ impl RackSetupService {
     /// - `bootstore` - A handle to call bootstore APIs
     /// - `trust_quorum` - A handle to the trust qurom task
     #[expect(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new<T: LocalBootstrapAgent + 'static>(
         log: Logger,
         request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
-        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        local_bootstrap_agent: T,
         our_bootstrap_address: Ipv6Addr,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
@@ -355,9 +354,9 @@ impl RackSetupService {
         RackSetupService { handle }
     }
 
-    pub fn new_reset_rack(
+    pub fn new_reset_rack<T: LocalBootstrapAgent + 'static>(
         log: Logger,
-        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        local_bootstrap_agent: T,
         our_bootstrap_address: Ipv6Addr,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
@@ -1104,9 +1103,9 @@ impl ServiceInner {
         Ok(())
     }
 
-    async fn reset(
+    async fn reset<T: LocalBootstrapAgent>(
         &self,
-        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        local_bootstrap_agent: T,
         our_bootstrap_address: Ipv6Addr,
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
@@ -1212,11 +1211,11 @@ impl ServiceInner {
     //    indicates that the plan executed successfully, and the only work
     //    remaining is to handoff to Nexus.
     #[expect(clippy::too_many_arguments)]
-    async fn run(
+    async fn run<T: LocalBootstrapAgent>(
         &self,
         request: &RackInitializeRequestParams,
         internal_disks_rx: &InternalDisksReceiver,
-        local_bootstrap_agent: Box<dyn LocalBootstrapAgent>,
+        local_bootstrap_agent: T,
         our_bootstrap_address: Ipv6Addr,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,

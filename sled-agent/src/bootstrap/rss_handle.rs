@@ -6,7 +6,6 @@
 
 use super::client as bootstrap_agent_client;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
-use async_trait::async_trait;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RssStep;
 use futures::StreamExt;
@@ -68,7 +67,7 @@ impl RssHandle {
             log.new(o!("component" => "RSS")),
             config,
             internal_disks_rx,
-            Box::new(tx),
+            tx,
             our_bootstrap_address,
             bootstore,
             trust_quorum,
@@ -90,7 +89,7 @@ impl RssHandle {
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
-            Box::new(tx),
+            tx,
             our_bootstrap_address,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
@@ -169,10 +168,9 @@ pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<Request>,
 }
 
-#[async_trait]
 impl LocalBootstrapAgent for BootstrapAgentHandle {
     async fn initialize_sleds(
-        self: Box<Self>,
+        self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
     ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
@@ -191,7 +189,7 @@ impl LocalBootstrapAgent for BootstrapAgentHandle {
     }
 
     async fn reset_sleds(
-        self: Box<Self>,
+        self,
         requests: Vec<SocketAddrV6>,
     ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();

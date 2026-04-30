@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-async-trait.workspace = true
 bootstore.workspace = true
 bootstrap-agent-lockstep-types.workspace = true
 camino.workspace = true
