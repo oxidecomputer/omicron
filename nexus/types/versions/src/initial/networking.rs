@@ -10,8 +10,8 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
-    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, Name, NameOrId, ObjectIdentity,
+    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, Name,
+    NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -140,6 +140,40 @@ pub struct SwitchPort {
     pub port_settings_id: Option<Uuid>,
 }
 
+/// A switch port settings identity whose id may be used to view additional
+/// details.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct SwitchPortSettingsIdentity {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// This structure maps a port settings object to a port settings groups. Port
+/// settings objects may inherit settings from groups. This mapping defines the
+/// relationship between settings objects and the groups they reference.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroups {
+    /// The id of a port settings object referencing a port settings group.
+    pub port_settings_id: Uuid,
+
+    /// The id of a port settings group being referenced by a port settings
+    /// object.
+    pub port_settings_group_id: Uuid,
+}
+
+/// A port settings group is a named object that references a port settings
+/// object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The port settings that comprise this group.
+    pub port_settings_id: Uuid,
+}
+
 /// Parameters for creating a port settings group.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwtichPortSettingsGroupCreate {
@@ -147,6 +181,16 @@ pub struct SwtichPortSettingsGroupCreate {
     pub identity: IdentityMetadataCreateParams,
     /// Switch port settings to associate with the settings group being created.
     pub settings: SwitchPortSettingsCreate,
+}
+
+/// A physical port configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortConfig {
+    /// The id of the port settings object this configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The physical link geometry of the port.
+    pub geometry: SwitchPortGeometry,
 }
 
 /// Parameters for creating switch port settings. Switch port settings are the
@@ -208,7 +252,7 @@ pub struct SwitchPortConfigCreate {
 }
 
 /// The link geometry associated with a switch port.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchPortGeometry {
     /// The port contains a single QSFP28 link with four lanes.
@@ -275,9 +319,35 @@ pub struct LldpLinkConfigCreate {
     pub management_ip: Option<IpAddr>,
 }
 
-impl PartialEq<LldpLinkConfigCreate>
-    for omicron_common::api::external::LldpLinkConfig
-{
+/// A link layer discovery protocol (LLDP) service configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpLinkConfig {
+    /// The id of this LLDP service instance.
+    pub id: Uuid,
+
+    /// Whether or not the LLDP service is enabled.
+    pub enabled: bool,
+
+    /// The LLDP link name TLV.
+    pub link_name: Option<String>,
+
+    /// The LLDP link description TLV.
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier TLV.
+    pub chassis_id: Option<String>,
+
+    /// The LLDP system name TLV.
+    pub system_name: Option<String>,
+
+    /// The LLDP system description TLV.
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP TLV.
+    pub management_ip: Option<IpAddr>,
+}
+
+impl PartialEq<LldpLinkConfigCreate> for LldpLinkConfig {
     fn eq(&self, other: &LldpLinkConfigCreate) -> bool {
         self.enabled == other.enabled
             && self.link_name == other.link_name
@@ -289,13 +359,8 @@ impl PartialEq<LldpLinkConfigCreate>
     }
 }
 
-impl PartialEq<omicron_common::api::external::LldpLinkConfig>
-    for LldpLinkConfigCreate
-{
-    fn eq(
-        &self,
-        other: &omicron_common::api::external::LldpLinkConfig,
-    ) -> bool {
+impl PartialEq<LldpLinkConfig> for LldpLinkConfigCreate {
+    fn eq(&self, other: &LldpLinkConfig) -> bool {
         self.enabled == other.enabled
             && self.link_name == other.link_name
             && self.link_description == other.link_description
@@ -323,7 +388,7 @@ pub struct SwitchInterfaceConfigCreate {
 }
 
 /// Indicates the kind for a switch interface.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SwitchInterfaceKind {
     /// Primary interfaces are associated with physical links. There is exactly
@@ -340,9 +405,62 @@ pub enum SwitchInterfaceKind {
     Loopback,
 }
 
+/// Describes the kind of a switch interface.
+// This type is the same as `SwitchInterfaceKind` except that the `Vlan` variant
+// doesn't contain any details about the VLAN ID. This type is removed in a
+// future API revision.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchInterfaceKindNoVlanDetails {
+    /// Primary interfaces are associated with physical links. There is exactly
+    /// one primary interface per physical link.
+    Primary,
+
+    /// VLAN interfaces allow physical interfaces to be multiplexed onto
+    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
+    /// tag.
+    Vlan,
+
+    /// Loopback interfaces are anchors for IP addresses that are not specific
+    /// to any particular port.
+    Loopback,
+}
+
+/// A switch port interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchInterfaceConfig {
+    /// The port settings object this switch interface configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// A unique identifier for this switch interface.
+    pub id: Uuid,
+
+    /// The name of this switch interface.
+    pub interface_name: Name,
+
+    /// Whether or not IPv6 is enabled on this interface.
+    pub v6_enabled: bool,
+
+    /// The switch interface kind.
+    pub kind: SwitchInterfaceKindNoVlanDetails,
+}
+
+/// A switch port VLAN interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchVlanInterfaceConfig {
+    /// The switch interface configuration this VLAN interface configuration
+    /// belongs to.
+    pub interface_config_id: Uuid,
+
+    /// The virtual network id for this interface that is used for producing and
+    /// consuming 802.1Q Ethernet tags. This field has a maximum value of 4095
+    /// as 802.1Q tags are twelve bits.
+    pub vlan_id: u16,
+}
+
 /// Configuration data associated with a switch VLAN interface. The VID
 /// indicates a VLAN identifier. Must be between 1 and 4096.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchVlanInterface {
     /// The virtual network id (VID) that distinguishes this interface and is
     /// used for producing and consuming 802.1Q Ethernet tags. This field has a
@@ -837,19 +955,19 @@ pub struct SwitchPortSettings {
     pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<external::SwitchPortSettingsGroups>,
+    pub groups: Vec<SwitchPortSettingsGroups>,
 
     /// Layer 1 physical port settings.
-    pub port: external::SwitchPortConfig,
+    pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
-    pub links: Vec<external::SwitchPortLinkConfig>,
+    pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
-    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+    pub interfaces: Vec<SwitchInterfaceConfig>,
 
     /// Vlan interface settings.
-    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
     pub routes: Vec<external::SwitchPortRouteConfig>,
@@ -859,4 +977,71 @@ pub struct SwitchPortSettings {
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<external::SwitchPortAddressView>,
+}
+
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode forward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+/// A link configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortLinkConfig {
+    /// The port settings this link configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The name of this link.
+    pub link_name: Name,
+
+    /// The maximum transmission unit for this link.
+    pub mtu: u16,
+
+    /// The requested forward-error correction method.  If this is not
+    /// specified, the standard FEC for the underlying media will be applied
+    /// if it can be determined.
+    pub fec: Option<LinkFec>,
+
+    /// The configured speed of the link.
+    pub speed: LinkSpeed,
+
+    /// Whether or not the link has autonegotiation enabled.
+    pub autoneg: bool,
+
+    /// The link-layer discovery protocol service configuration for this
+    /// link.
+    pub lldp_link_config: Option<LldpLinkConfig>,
+
+    /// The tx_eq configuration for this link.
+    pub tx_eq_config: Option<TxEqConfig>,
 }

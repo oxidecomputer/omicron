@@ -16,6 +16,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::DbSwitchSlot;
+use nexus_types::external_api::networking as networking_types;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
@@ -105,7 +106,7 @@ impl DataStore {
         rack_id: Uuid,
         switch_slot: SwitchSlot,
         port_name: Name,
-    ) -> LookupResult<external::LldpLinkConfig> {
+    ) -> LookupResult<networking_types::LldpLinkConfig> {
         use nexus_db_schema::schema::lldp_link_config;
         use nexus_db_schema::schema::lldp_link_config::dsl;
 
@@ -145,7 +146,7 @@ impl DataStore {
         rack_id: Uuid,
         switch_slot: SwitchSlot,
         port_name: Name,
-        config: external::LldpLinkConfig,
+        config: networking_types::LldpLinkConfig,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::lldp_link_config::dsl;
 

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026042900.0.0"
+    "version": "2026042901.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -28595,7 +28595,7 @@
             "description": "The switch interface kind.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchInterfaceKind2"
+                "$ref": "#/components/schemas/SwitchInterfaceKind"
               }
             ]
           },
@@ -28701,32 +28701,6 @@
             },
             "required": [
               "type"
-            ]
-          }
-        ]
-      },
-      "SwitchInterfaceKind2": {
-        "description": "Describes the kind of an switch interface.",
-        "oneOf": [
-          {
-            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
-            "type": "string",
-            "enum": [
-              "primary"
-            ]
-          },
-          {
-            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
-            "type": "string",
-            "enum": [
-              "vlan"
-            ]
-          },
-          {
-            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
-            "type": "string",
-            "enum": [
-              "loopback"
             ]
           }
         ]
@@ -28861,7 +28835,7 @@
             "description": "The physical link geometry of the port.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchPortGeometry2"
+                "$ref": "#/components/schemas/SwitchPortGeometry"
               }
             ]
           },
@@ -28894,32 +28868,6 @@
         ]
       },
       "SwitchPortGeometry": {
-        "description": "The link geometry associated with a switch port.",
-        "oneOf": [
-          {
-            "description": "The port contains a single QSFP28 link with four lanes.",
-            "type": "string",
-            "enum": [
-              "qsfp28x1"
-            ]
-          },
-          {
-            "description": "The port contains two QSFP28 links each with two lanes.",
-            "type": "string",
-            "enum": [
-              "qsfp28x2"
-            ]
-          },
-          {
-            "description": "The port contains four SFP28 links each with one lane.",
-            "type": "string",
-            "enum": [
-              "sfp28x4"
-            ]
-          }
-        ]
-      },
-      "SwitchPortGeometry2": {
         "description": "The link geometry associated with a switch port.",
         "oneOf": [
           {
@@ -29003,7 +28951,7 @@
             "description": "The tx_eq configuration for this link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TxEqConfig2"
+                "$ref": "#/components/schemas/TxEqConfig"
               }
             ]
           }
@@ -29169,13 +29117,6 @@
             "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
-          },
-          "vlan_interfaces": {
-            "description": "Vlan interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
-            }
           }
         },
         "required": [
@@ -29190,8 +29131,7 @@
           "port",
           "routes",
           "time_created",
-          "time_modified",
-          "vlan_interfaces"
+          "time_modified"
         ]
       },
       "SwitchPortSettingsCreate": {
@@ -29380,27 +29320,6 @@
               "switch1"
             ]
           }
-        ]
-      },
-      "SwitchVlanInterfaceConfig": {
-        "description": "A switch port VLAN interface configuration for a port settings object.",
-        "type": "object",
-        "properties": {
-          "interface_config_id": {
-            "description": "The switch interface configuration this VLAN interface configuration belongs to.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "vlan_id": {
-            "description": "The virtual network id for this interface that is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "interface_config_id",
-          "vlan_id"
         ]
       },
       "TargetRelease": {
@@ -29632,42 +29551,6 @@
         ]
       },
       "TxEqConfig": {
-        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
-        "type": "object",
-        "properties": {
-          "main": {
-            "nullable": true,
-            "description": "Main tap",
-            "type": "integer",
-            "format": "int32"
-          },
-          "post1": {
-            "nullable": true,
-            "description": "Post-cursor tap1",
-            "type": "integer",
-            "format": "int32"
-          },
-          "post2": {
-            "nullable": true,
-            "description": "Post-cursor tap2",
-            "type": "integer",
-            "format": "int32"
-          },
-          "pre1": {
-            "nullable": true,
-            "description": "Pre-cursor tap1",
-            "type": "integer",
-            "format": "int32"
-          },
-          "pre2": {
-            "nullable": true,
-            "description": "Pre-cursor tap2",
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
-      "TxEqConfig2": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
         "properties": {
