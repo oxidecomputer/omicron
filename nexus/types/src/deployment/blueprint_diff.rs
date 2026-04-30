@@ -121,9 +121,10 @@ impl<'a> BlueprintDiffSummary<'a> {
             return true;
         }
 
-        // Did the external networking generation change? (This should only
-        // happen if there was a change in sleds also, but it doesn't hurt to
-        // double check.)
+        // Did the external networking generation change? (Since we never mutate
+        // networking config properties in place, and always expunge/add zones
+        // to change them, this should only happen if there was a change in
+        // sleds also, but it doesn't hurt to double check.)
         if external_networking_generation.before
             != external_networking_generation.after
         {

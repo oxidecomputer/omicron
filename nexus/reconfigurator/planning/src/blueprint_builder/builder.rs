@@ -2714,6 +2714,14 @@ fn is_external_networking_config_different(
 ) -> bool {
     // Helper function to condense a blueprint into just a set of all its
     // external networking config, suitable only for comparison.
+    //
+    // This check is overly cautious: we never mutate a zone's properties in
+    // place, and instead always expunge it and add a new one to change
+    // properties, so it would be sufficient to only check that the set of zone
+    // IDs that have external networking matches. But it's harmless to check
+    // that the actual networking properties themselves haven't changed, either,
+    // and if in the futuer we allow mutating properties without expunging, this
+    // check will still be correct.
     fn all_external_networking_config(
         blueprint: &Blueprint,
     ) -> BTreeSet<(
