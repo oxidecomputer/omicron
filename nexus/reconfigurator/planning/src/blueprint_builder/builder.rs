@@ -1012,7 +1012,7 @@ impl<'a> BlueprintBuilder<'a> {
         //     conceptually immutable to the rest of the system
         // (b) Performing this check on the fully-realized child blueprint
         //     makes it easy to ensure we're checking _exactly_ the same thing:
-        //     `did_external_networking_config_change()` can call the same
+        //     `is_external_networking_config_different()` can call the same
         //     `Blueprint::*` helper methods to determine whether there were
         //     changes.
         if is_external_networking_config_different(

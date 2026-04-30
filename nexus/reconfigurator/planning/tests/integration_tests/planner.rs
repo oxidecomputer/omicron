@@ -2916,7 +2916,8 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
         blueprint3.sleds.get(&sled_id).unwrap().sled_agent_generation,
         bp2_sled_config.generation
     );
-    // Expunging Nexus does change the external networking config.
+    // Marking a zone as "ready for cleanup" does not change the external
+    // networking configuration.
     assert_eq!(
         blueprint3.external_networking_generation,
         blueprint2.external_networking_generation,
