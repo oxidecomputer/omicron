@@ -169,7 +169,7 @@ impl SystemDescription {
         let rack_subnet =
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // (The same behavior is replicated in RSS in `Plan::create()` in
+        // (The same behavior is replicated in RSS in `SledPlan::create()` in
         // sled-agent/rack-setup/src/plan/sled.rs.)
         let sled_subnets = SubnetIterator::new(rack_subnet);
 
@@ -2138,7 +2138,7 @@ impl SubnetIterator {
     fn new(rack_subnet: Ipv6Net) -> Self {
         let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // (The same behavior is replicated in RSS in `Plan::create()` in
+        // (The same behavior is replicated in RSS in `SledPlan::create()` in
         // sled-agent/rack-setup/src/plan/sled.rs.)
         subnets.next();
         Self { subnets }
