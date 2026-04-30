@@ -533,6 +533,20 @@ pub enum PlanningInputKind {
     NicMacNotInBluperint(OmicronZoneNicEntry),
     NicIpNotInBlueprint(OmicronZoneNicEntry),
     NicWithUnknownOpteSubnet(OmicronZoneNicEntry),
+
+    /// The blueprint's `external_networking_generation` was bumped
+    /// unexpectedly: either we expected no bump at all and a bump happened, or
+    /// we expected a bump but the generation changed by more than 1.
+    ExternalNetworkingGenerationBumpedUnexpectedly {
+        parent_generation: Generation,
+        expected_child_generation: Generation,
+        actual_child_generation: Generation,
+    },
+
+    /// The blueprint's `external_networking_generation` was not bumped
+    /// when it should have been: the diff between the blueprint and its parent
+    /// contains at least one change to the external networking config.
+    ExternalNetworkingGenerationNotBumped(Generation),
 }
 
 impl fmt::Display for PlanningInputKind {
@@ -569,6 +583,30 @@ impl fmt::Display for PlanningInputKind {
                     "planning input contains a NIC with an IP not in a known
                      OPTE subnet: {} (NIC {} in zone {})",
                     nic.nic.ip, nic.nic.id, nic.zone_id,
+                )
+            }
+            PlanningInputKind::ExternalNetworkingGenerationBumpedUnexpectedly {
+                parent_generation,
+                expected_child_generation,
+                actual_child_generation,
+            } => {
+                write!(
+                    f,
+                    "expected blueprint external networking generation to be \
+                     {expected_child_generation} (from parent's generation \
+                     {parent_generation}), but the blueprint's actual \
+                     generation is {actual_child_generation}",
+                )
+            }
+            PlanningInputKind::ExternalNetworkingGenerationNotBumped(
+                generation,
+            ) => {
+                write!(
+                    f,
+                    "blueprint's external networking configuration has \
+                     changed from the parent blueprint in the planning input, \
+                     but the external networking generation remained at \
+                     {generation}",
                 )
             }
         }

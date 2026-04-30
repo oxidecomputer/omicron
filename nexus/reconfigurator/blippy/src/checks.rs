@@ -7,6 +7,7 @@ use crate::blippy::BlueprintKind;
 use crate::blippy::PlanningInputKind;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
@@ -27,8 +28,10 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -41,6 +44,7 @@ pub(crate) fn perform_planning_input_checks(
     input: &PlanningInput,
 ) {
     check_planning_input_network_records_appear_in_blueprint(blippy, input);
+    check_external_networking_generation(blippy, input.parent_blueprint());
 }
 
 pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
@@ -2350,6 +2354,63 @@ fn check_planning_input_network_records_appear_in_blueprint(
                     );
                 }
             }
+        }
+    }
+}
+
+fn check_external_networking_generation(
+    blippy: &mut Blippy<'_>,
+    parent_blueprint: &Blueprint,
+) {
+    // Helper function to condense a blueprint into just a set of all its
+    // external networking config, suitable only for comparison.
+    fn all_external_networking_config(
+        blueprint: &Blueprint,
+    ) -> BTreeSet<(
+        SledUuid,
+        OmicronZoneUuid,
+        OmicronZoneExternalIp,
+        &NetworkInterface,
+    )> {
+        blueprint
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (ip, nic) = zone_config.zone_type.external_networking()?;
+                Some((sled_id, zone_config.id, ip, nic))
+            })
+            .collect()
+    }
+
+    let expect_generation_bump =
+        all_external_networking_config(blippy.blueprint())
+            != all_external_networking_config(parent_blueprint);
+
+    if expect_generation_bump {
+        if blippy.blueprint().external_networking_generation
+            != parent_blueprint.external_networking_generation.next()
+        {
+            blippy.push_planning_input_note(
+                Severity::Fatal,
+                PlanningInputKind::ExternalNetworkingGenerationBumpedUnexpectedly {
+                    parent_generation:
+                        parent_blueprint.external_networking_generation,
+                    expected_child_generation:
+                        parent_blueprint.external_networking_generation.next(),
+                    actual_child_generation:
+                        blippy.blueprint().external_networking_generation,
+                },
+            );
+        }
+    } else {
+        if blippy.blueprint().external_networking_generation
+            != parent_blueprint.external_networking_generation
+        {
+            blippy.push_planning_input_note(
+                Severity::Fatal,
+                PlanningInputKind::ExternalNetworkingGenerationNotBumped(
+                    blippy.blueprint().external_networking_generation,
+                ),
+            );
         }
     }
 }
