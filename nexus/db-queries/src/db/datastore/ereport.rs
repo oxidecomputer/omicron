@@ -320,8 +320,9 @@ impl DataStore {
     }
 
     /// Lists ereports which have not been marked as **definitely seen**
-    /// (included in a committed sitrep) in the database, paginated by the
-    /// reporter restart ID and ENA.
+    /// (included in a committed sitrep) in the database, restricted to
+    /// ereports whose `class` is one of `classes`, paginated by the reporter
+    /// restart ID and ENA.
     ///
     /// Note that this filters based only on whether they have been marked in
     /// the database. Because marking seen ereports occurs asynchronously from
@@ -329,22 +330,79 @@ impl DataStore {
     /// query may have already been seen. These ereports must be filtered out at
     /// a higher level based on the contents of the current sitrep when
     /// determining which ereports are *actually* new.
+    ///
+    /// Ereports with `class IS NULL` are intentionally never returned: the
+    /// SQL filter is `class = ANY($1::text[])`, which never matches NULL.
+    /// Callers (e.g. fm_analysis preparation) deliberately key off
+    /// [`nexus_types::fm::ereport::known_ereport_classes`] so that the loader
+    /// only surfaces ereports the planner can consume; see that function's
+    /// documentation for the policy and rationale.
+    ///
+    /// If `classes` is empty, this returns an empty result without
+    /// round-tripping to the database.
     pub async fn ereports_list_unmarked(
         &self,
         opctx: &OpContext,
+        classes: &[&str],
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         // TODO(eliza): ereports should probably have their own resource type someday...
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        Self::ereports_list_unmarked_query(pagparams)
+        // An empty class set means the diagnosis engine has no handler for
+        // any ereport. There's no value in paging through CRDB to find out
+        // there's nothing to load.
+        if classes.is_empty() {
+            return Ok(Vec::new());
+        }
+        Self::ereports_list_unmarked_query(classes, pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Diesel query that counts ereports per class across the entire (non
+    /// soft-deleted) ereport table.
+    ///
+    /// Backed by the `lookup_ereports_by_class` partial index (predicate
+    /// `time_deleted IS NULL`). The query is a *full index scan* over that
+    /// partial index — bounded by the predicate — but never a full table
+    /// scan of the primary key. The `explain_ereport_class_totals_query`
+    /// test asserts this.
+    pub fn ereport_class_totals_query()
+    -> impl RunnableQuery<(Option<String>, i64)> + use<> {
+        use diesel::dsl::count_star;
+        dsl::ereport
+            .group_by(dsl::class)
+            .filter(dsl::time_deleted.is_null())
+            .select((dsl::class, count_star()))
+    }
+
+    /// Diesel query that counts ereports per class, restricted to ereports
+    /// that have not yet been marked as seen in any committed sitrep.
+    ///
+    /// Backed by the `lookup_unmarked_ereports_by_class` partial index
+    /// (predicate `marked_seen_in IS NULL AND time_deleted IS NULL`).
+    /// Bounded by the partial-index predicate; never a full table scan.
+    /// The `explain_ereport_unmarked_class_totals_query` test asserts this.
+    pub fn ereport_unmarked_class_totals_query()
+    -> impl RunnableQuery<(Option<String>, i64)> + use<> {
+        use diesel::dsl::count_star;
+        dsl::ereport
+            .group_by(dsl::class)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::marked_seen_in.is_null())
+            .select((dsl::class, count_star()))
+    }
+
     fn ereports_list_unmarked_query(
+        classes: &[&str],
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> impl RunnableQuery<Ereport> + use<> {
+        // NULL-class ereports are intentionally excluded: `class = ANY(...)`
+        // never matches NULL. See `known_ereport_classes` in nexus-types for
+        // the policy.
+        let classes: Vec<String> =
+            classes.iter().map(|c| (*c).to_string()).collect();
         paginated_multicolumn(
             dsl::ereport,
             (dsl::restart_id, dsl::ena),
@@ -352,6 +410,7 @@ impl DataStore {
         )
         .filter(dsl::marked_seen_in.is_null())
         .filter(dsl::time_deleted.is_null())
+        .filter(dsl::class.eq_any(classes))
         .select(Ereport::as_select())
     }
 
@@ -687,7 +746,9 @@ mod tests {
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let query = DataStore::ereports_list_unmarked_query(&pagparams);
+        let classes: &[&str] = &["ereport.cpu.example", "ereport.fan.example"];
+        let query =
+            DataStore::ereports_list_unmarked_query(classes, &pagparams);
         expectorate_query_contents(
             &query,
             "tests/output/ereports_list_unmarked.sql",
@@ -708,21 +769,107 @@ mod tests {
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let query = DataStore::ereports_list_unmarked_query(&pagparams);
+        let classes: &[&str] = &["ereport.cpu.example", "ereport.fan.example"];
+        let query =
+            DataStore::ereports_list_unmarked_query(classes, &pagparams);
         let explanation = query
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        eprintln!("{explanation}");
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
+        assert_uses_partial_index_only(
+            &explanation,
+            "lookup_unmarked_ereports_by_class",
         );
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_ereport_class_totals_query() {
+        let logctx =
+            dev::test_setup_log("explain_ereport_class_totals_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::ereport_class_totals_query();
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        assert_uses_partial_index_only(
+            &explanation,
+            "lookup_ereports_by_class",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_ereport_unmarked_class_totals_query() {
+        let logctx = dev::test_setup_log(
+            "explain_ereport_unmarked_class_totals_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::ereport_unmarked_class_totals_query();
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        assert_uses_partial_index_only(
+            &explanation,
+            "lookup_unmarked_ereports_by_class",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Asserts that an EXPLAIN plan:
+    ///   1. Names the expected partial index in its `table:` line.
+    ///   2. Does not contain any `FULL SCAN` over a non-partial index. A
+    ///      `FULL SCAN` over a partial index is acceptable (the partial
+    ///      predicate already bounds the rows touched), but a `FULL SCAN`
+    ///      over the primary key or a non-partial secondary index means
+    ///      we walked the whole table.
+    #[track_caller]
+    fn assert_uses_partial_index_only(
+        explanation: &str,
+        expected_index: &str,
+    ) {
+        eprintln!("{explanation}");
+
+        let mut last_table_was_partial = false;
+        let mut found_expected = false;
+        let mut bad_full_scan = false;
+        for line in explanation.lines() {
+            let line = line.trim();
+            if line.starts_with("table:") {
+                last_table_was_partial = line.contains("(partial index)");
+                if line.contains(&format!("@{expected_index}")) {
+                    found_expected = true;
+                }
+            } else if line.contains("FULL SCAN") && !last_table_was_partial {
+                bad_full_scan = true;
+            }
+        }
+
+        assert!(
+            !bad_full_scan,
+            "Found a FULL SCAN over a non-partial index in plan:\n{explanation}"
+        );
+        assert!(
+            found_expected,
+            "Expected plan to use index `{expected_index}`, but plan was:\n{explanation}"
+        );
     }
 
     // This test tests that the `ereport_fetch_matching` queries succeed with
@@ -833,6 +980,107 @@ mod tests {
             .await
             .expect("fetch matching with class filters should succeed");
         check_results(dbg!(found_by_class), &id, &ereport);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// `ereports_list_unmarked` filters by class. Verifies:
+    /// - Only ereports with `class IN (filter)` are returned.
+    /// - Ereports with NULL class are never returned, even when no class
+    ///   filter is specifically targeting them.
+    /// - An empty `classes` slice returns empty without a DB roundtrip.
+    #[tokio::test]
+    async fn test_ereports_list_unmarked_class_filter() {
+        let logctx =
+            dev::test_setup_log("test_ereports_list_unmarked_class_filter");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Insert three ereports under one reporter: classes "alpha", "beta",
+        // and NULL.
+        let restart_id = EreporterRestartUuid::new_v4();
+        let collector_id = OmicronZoneUuid::new_v4();
+        let make = |ena: u64, class: Option<&str>| fm::EreportData {
+            id: fm::EreportId { restart_id, ena: ereport_types::Ena(ena) },
+            time_collected: Utc::now(),
+            collector_id,
+            part_number: Some("CPN".to_string()),
+            serial_number: Some("SN".to_string()),
+            class: class.map(str::to_string),
+            report: serde_json::json!({}),
+        };
+        datastore
+            .ereports_insert(
+                &opctx,
+                fm::Reporter::Sp {
+                    sp_type: nexus_types::inventory::SpType::Sled,
+                    slot: 0,
+                },
+                vec![
+                    make(1, Some("alpha")),
+                    make(2, Some("beta")),
+                    make(3, None),
+                ],
+            )
+            .await
+            .expect("insert should succeed");
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+
+        // Filter for "alpha" only — should return only ENA 1.
+        let alpha_only = datastore
+            .ereports_list_unmarked(opctx, &["alpha"], &pagparams)
+            .await
+            .expect("alpha-only query should succeed");
+        let enas: Vec<u64> =
+            alpha_only.iter().map(|e| e.ena.0.0).collect();
+        assert_eq!(enas, vec![1], "alpha-only should match only ENA 1");
+
+        // Filter for "alpha" + "beta" — should return ENAs 1 and 2 but
+        // NEVER the NULL-class ereport (ENA 3).
+        let alpha_beta = datastore
+            .ereports_list_unmarked(
+                opctx,
+                &["alpha", "beta"],
+                &pagparams,
+            )
+            .await
+            .expect("alpha+beta query should succeed");
+        let mut enas: Vec<u64> =
+            alpha_beta.iter().map(|e| e.ena.0.0).collect();
+        enas.sort();
+        assert_eq!(
+            enas,
+            vec![1, 2],
+            "alpha+beta should match ENAs 1 and 2; NULL-class ENA 3 must \
+             be excluded by the class filter"
+        );
+
+        // Filter for a class that doesn't exist — should return empty.
+        let nope = datastore
+            .ereports_list_unmarked(
+                opctx,
+                &["nonexistent.class"],
+                &pagparams,
+            )
+            .await
+            .expect("nonexistent-class query should succeed");
+        assert!(nope.is_empty(), "nonexistent class should match nothing");
+
+        // Empty classes — should return empty without a DB roundtrip.
+        let empty = datastore
+            .ereports_list_unmarked(opctx, &[], &pagparams)
+            .await
+            .expect("empty-classes query should succeed");
+        assert!(
+            empty.is_empty(),
+            "empty classes list must short-circuit to no results"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

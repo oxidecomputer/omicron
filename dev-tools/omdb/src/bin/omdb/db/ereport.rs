@@ -55,6 +55,10 @@ enum Commands {
 
     /// List ereport reporters
     Reporters(ReportersArgs),
+
+    /// Summarize ereports by class, marking which classes Nexus has handlers
+    /// for (per `nexus_types::fm::ereport::known_ereport_classes`).
+    Classes,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -115,6 +119,8 @@ pub(super) async fn cmd_db_ereport(
         Commands::Reporters(ref args) => {
             cmd_db_ereporters(datastore, args).await
         }
+
+        Commands::Classes => cmd_db_ereport_classes(datastore).await,
     }
 }
 
@@ -463,6 +469,109 @@ async fn cmd_db_ereporters(
         .with(tabled::settings::Padding::new(0, 1, 0, 0));
 
     println!("{table}");
+
+    Ok(())
+}
+
+async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
+    use std::collections::BTreeMap;
+
+    let known: std::collections::BTreeSet<&'static str> =
+        nexus_types::fm::ereport::known_ereport_classes()
+            .iter()
+            .copied()
+            .collect();
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // Both queries are backed by partial indexes (`lookup_ereports_by_class`
+    // and `lookup_unmarked_ereports_by_class`) and do not full-table-scan;
+    // see explain tests in nexus-db-queries.
+    let totals: Vec<(Option<String>, i64)> = DataStore::ereport_class_totals_query()
+        .load_async(&*conn)
+        .await
+        .context("loading per-class totals")?;
+    let unmarkeds: Vec<(Option<String>, i64)> =
+        DataStore::ereport_unmarked_class_totals_query()
+            .load_async(&*conn)
+            .await
+            .context("loading per-class unmarked counts")?;
+
+    // Merge by class. Key: Option<String> so NULL gets its own bucket.
+    let mut by_class: BTreeMap<Option<String>, (i64, i64)> = BTreeMap::new();
+    for (class, total) in totals {
+        by_class.entry(class).or_insert((0, 0)).0 = total;
+    }
+    for (class, unmarked) in unmarkeds {
+        by_class.entry(class).or_insert((0, 0)).1 = unmarked;
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ClassRow {
+        #[tabled(rename = "KNOWN-TO-NEXUS")]
+        known: &'static str,
+        class: String,
+        total: i64,
+        unmarked: i64,
+    }
+
+    let mut rows: Vec<ClassRow> = by_class
+        .into_iter()
+        .map(|(class, (total, unmarked))| {
+            let (known_marker, class_str) = match class {
+                None => ("excluded", "(NULL)".to_string()),
+                Some(c) => {
+                    let k = if known.contains(c.as_str()) {
+                        "yes"
+                    } else {
+                        "no"
+                    };
+                    (k, c)
+                }
+            };
+            ClassRow {
+                known: known_marker,
+                class: class_str,
+                total,
+                unmarked,
+            }
+        })
+        .collect();
+
+    // Sort: unknown-but-present first (highest unmarked), then known, then NULL.
+    rows.sort_by(|a, b| {
+        let priority = |row: &ClassRow| match row.known {
+            "no" => 0,
+            "yes" => 1,
+            _ => 2,
+        };
+        priority(a)
+            .cmp(&priority(b))
+            .then_with(|| b.unmarked.cmp(&a.unmarked))
+            .then_with(|| a.class.cmp(&b.class))
+    });
+
+    let mut table = tabled::Table::new(&rows);
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+    println!("{table}");
+
+    // Footer: classes Nexus knows about but has no DB rows for.
+    let seen_known: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r.known == "yes")
+        .map(|r| r.class.as_str())
+        .collect();
+    let absent: Vec<&&'static str> =
+        known.iter().filter(|c| !seen_known.contains(*c)).collect();
+    if !absent.is_empty() {
+        println!("\nKnown classes with no rows in the database:");
+        for c in absent {
+            println!("  {c}");
+        }
+    }
 
     Ok(())
 }

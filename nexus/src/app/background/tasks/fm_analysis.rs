@@ -195,6 +195,17 @@ impl FmAnalysis {
         builder: &mut fm::analysis_input::Builder,
         errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
+        // Only surface ereports the planner has handlers for. With an empty
+        // set, the datastore short-circuits to an empty result without
+        // touching CRDB; see `known_ereport_classes` in nexus-types for the
+        // policy (including why NULL-class ereports are never loaded).
+        let classes =
+            nexus_types::fm::ereport::known_ereport_classes();
+        slog::debug!(
+            opctx.log,
+            "loading new ereports";
+            "known_classes" => ?classes,
+        );
         let mut paginator = Paginator::new(
             nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -203,7 +214,11 @@ impl FmAnalysis {
             let prev_total = builder.num_ereports();
             let batch = self
                 .datastore
-                .ereports_list_unmarked(opctx, &p.current_pagparams())
+                .ereports_list_unmarked(
+                    opctx,
+                    classes,
+                    &p.current_pagparams(),
+                )
                 .await?;
             paginator = p.found_batch(&batch, &|e| {
                 (e.restart_id.into_untyped_uuid(), e.ena)

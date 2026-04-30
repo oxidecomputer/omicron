@@ -7379,6 +7379,17 @@ ON omicron.public.ereport (
 WHERE
     time_deleted IS NULL;
 
+-- Targeted partial index supporting fm_analysis preparation: filter by class
+-- (the planner's `known_ereport_classes`) restricted to ereports that are
+-- still unprocessed, ordered by the (restart_id, ena) pagination key.
+CREATE INDEX IF NOT EXISTS lookup_unmarked_ereports_by_class
+ON omicron.public.ereport (
+    class, restart_id, ena
+)
+WHERE
+    marked_seen_in IS NULL
+    AND time_deleted IS NULL;
+
 CREATE INDEX IF NOT EXISTS lookup_unseen_ereports
 ON omicron.public.ereport (
     restart_id, ena
@@ -8474,7 +8485,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '254.0.0', NULL)
+    (TRUE, NOW(), NOW(), '255.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
