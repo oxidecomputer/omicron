@@ -1832,6 +1832,9 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
+/// Maximum number of entries in each filter field of a [`VpcFirewallRuleFilter`].
+pub const VPC_FIREWALL_RULE_MAX_FILTER_LEN: usize = 256;
+
 /// Filters reduce the scope of a firewall rule. Without filters, the rule
 /// applies to all packets to the targets (or from the targets, if it's an
 /// outbound rule). With multiple filters, the rule applies only to packets
@@ -1841,15 +1844,15 @@ pub struct VpcFirewallRuleFilter {
     /// If present, host filters match the "other end" of traffic from the
     /// target’s perspective: for an inbound rule, they match the source of
     /// traffic. For an outbound rule, they match the destination.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
     /// If present, the networking protocols this rule applies to.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
     /// If present, the destination ports or port ranges this rule applies to.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub ports: Option<Vec<L4PortRange>>,
 }
 

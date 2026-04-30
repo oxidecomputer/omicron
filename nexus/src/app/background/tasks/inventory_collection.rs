@@ -13,6 +13,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
+use nexus_networking::GatewayClient;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -136,16 +137,9 @@ async fn inventory_activate(
         .context("pruning old collections")?;
 
     // Find MGS clients.
-    let mgs_clients = resolver
-        .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
-        .await
-        .context("looking up MGS addresses")?
-        .into_iter()
-        .map(|sockaddr| {
-            let url = format!("http://{}", sockaddr);
-            let log = opctx.log.new(o!("gateway_url" => url.clone()));
-            gateway_client::Client::new(&url, log)
-        })
+    let mgs_clients = GatewayClient::resolve_all_gateways(&opctx.log, resolver)
+        .await?
+        .map(|GatewayClient { client, .. }| client)
         .collect::<Vec<_>>();
 
     // Find clickhouse-admin-keeper servers if there are any.

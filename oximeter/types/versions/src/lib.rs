@@ -33,3 +33,5 @@ mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
 pub mod v1;
+#[path = "add_joules/mod.rs"]
+pub mod v2;

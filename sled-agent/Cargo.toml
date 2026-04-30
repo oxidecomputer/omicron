@@ -26,13 +26,11 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
-cockroach-admin-client.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
-dns-service-client.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
 # This is the R17 dpd client
 # dpd-client.workspace = true
@@ -41,7 +39,6 @@ dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
 futures.workspace = true
-gateway-client.workspace = true
 glob.workspace = true
 hex.workspace = true
 http.workspace = true
@@ -59,7 +56,6 @@ itertools.workspace = true
 key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
-mg-admin-client.workspace = true
 nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-lockstep-client.workspace = true
@@ -81,7 +77,6 @@ propolis-mock-server.workspace = true # Only used by the simulated sled agent
 propolis_api_types.workspace = true
 rand = { workspace = true, features = ["os_rng"] }
 range-requests.workspace = true
-rdb-types.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
@@ -97,10 +92,10 @@ sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
 sled-agent-health-monitor.workspace = true
 sled-agent-measurements.workspace = true
+sled-agent-rack-setup.workspace = true
 sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
 sled-agent-resolvable-files.workspace = true
-sled-agent-scrimlet-reconcilers.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
@@ -147,11 +142,9 @@ guppy.workspace = true
 hex-literal.workspace = true
 http.workspace = true
 hyper.workspace = true
-nexus-reconfigurator-blippy.workspace = true
 omicron-test-utils.workspace = true
 progenitor.workspace = true
 pretty_assertions.workspace = true
-rcgen.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true

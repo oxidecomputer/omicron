@@ -5,7 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -67,7 +66,7 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_scrimlet_reconcilers::ThisSledSwitchZoneUnderlayIpAddr;
+use sled_agent_rack_setup::EarlyNetworkSetupError;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
@@ -86,7 +85,9 @@ use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_agent_types::rot::Rot;
-use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::{
+    StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
+};
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{

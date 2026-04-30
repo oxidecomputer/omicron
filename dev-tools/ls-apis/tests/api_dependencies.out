@@ -16,7 +16,6 @@ Clickhouse Single-Node Cluster Admin (client: clickhouse-admin-single-client)
 
 CockroachDB Cluster Admin (client: cockroach-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 3 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Crucible Agent (client: crucible-agent-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path
@@ -34,7 +33,6 @@ Maghemite DDM Admin (client: ddm-admin-client)
 
 DNS Server (client: dns-service-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 Dendrite DPD (client: dpd-client)
     consumed by: ddmd (maghemite/ddmd) via 2 paths
@@ -51,8 +49,8 @@ Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: lldpd (lldp/lldpd) via 1 path
     consumed by: mgd (maghemite/mgd) via 1 path
-    consumed by: omicron-nexus (omicron/nexus) via 4 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
+    consumed by: omicron-nexus (omicron/nexus) via 5 paths
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: wicketd (omicron/wicketd) via 3 paths
 
 Wicketd Installinator (client: installinator-client)
@@ -64,7 +62,7 @@ LLDP daemon (client: lldpd-client)
 
 Maghemite MG Admin (client: mg-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Nexus Internal API (client: nexus-client)
     consumed by: crucible-pantry (crucible/pantry) via 1 path
@@ -74,12 +72,12 @@ Nexus Internal API (client: nexus-client)
     consumed by: propolis-server (propolis/bin/propolis-server) via 3 paths
 
 Nexus Internal Lockstep API (client: nexus-lockstep-client)
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
-        status: expected, reason: Only RSS uses this API and it is not part of upgrade
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
+        status: expected, reason: Only RSS and sled-agent-sim use this API, neither of which is part of upgrade
 
 NTP Admin (client: ntp-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 3 paths
 
 External API (client: oxide-client)
 

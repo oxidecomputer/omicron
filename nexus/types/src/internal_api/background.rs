@@ -1157,6 +1157,15 @@ pub struct SessionCleanupStatus {
     pub error: Option<String>,
 }
 
+/// Status of the background task pushing service firewall rules.
+#[derive(Default, Deserialize, Serialize)]
+pub struct ServiceFirewallRuleStatus {
+    /// An error encountered looking firewall rules up in the database.
+    pub lookup_error: Option<String>,
+    /// Errors encountered pushing the set of rules to each sled.
+    pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

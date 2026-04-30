@@ -15,7 +15,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-pub struct Plan {
+pub struct SledPlan {
     pub rack_id: Uuid,
     pub sleds: BTreeMap<SocketAddrV6, StartSledAgentRequest>,
 
@@ -23,7 +23,7 @@ pub struct Plan {
     pub config: Config,
 }
 
-impl Plan {
+impl SledPlan {
     pub fn create(
         log: &Logger,
         config: &Config,

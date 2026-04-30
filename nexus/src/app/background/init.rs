@@ -790,6 +790,8 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 sagas.clone(),
                 producer_registry,
+                resolver.clone(),
+                inventory_load_watcher.clone(),
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
             );
             driver.register(TaskDefinition {
@@ -1567,6 +1569,7 @@ pub mod test {
                 default_request_body_max_bytes: 8 * 1024,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
+                compression: dropshot::CompressionConfig::None,
             },
         )
         .await

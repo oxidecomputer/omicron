@@ -38,11 +38,11 @@ use omicron_common::backoff::{
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
-use sled_agent_scrimlet_reconcilers::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
     PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
 };
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -313,7 +313,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// zone it brought up.
     ///
     /// Returns the list of uplinks configured via DPD.
-    pub(crate) async fn init_switch_config(
+    pub async fn init_switch_config(
         &mut self,
         network_config_rx: &watch::Receiver<SystemNetworkingConfig>,
         switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
