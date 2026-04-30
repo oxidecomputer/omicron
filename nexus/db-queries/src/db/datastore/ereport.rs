@@ -788,8 +788,7 @@ mod tests {
 
     #[tokio::test]
     async fn explain_ereport_class_totals_query() {
-        let logctx =
-            dev::test_setup_log("explain_ereport_class_totals_query");
+        let logctx = dev::test_setup_log("explain_ereport_class_totals_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
@@ -811,9 +810,8 @@ mod tests {
 
     #[tokio::test]
     async fn explain_ereport_unmarked_class_totals_query() {
-        let logctx = dev::test_setup_log(
-            "explain_ereport_unmarked_class_totals_query",
-        );
+        let logctx =
+            dev::test_setup_log("explain_ereport_unmarked_class_totals_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
@@ -841,10 +839,7 @@ mod tests {
     ///      over the primary key or a non-partial secondary index means
     ///      we walked the whole table.
     #[track_caller]
-    fn assert_uses_partial_index_only(
-        explanation: &str,
-        expected_index: &str,
-    ) {
+    fn assert_uses_partial_index_only(explanation: &str, expected_index: &str) {
         eprintln!("{explanation}");
 
         let mut last_table_was_partial = false;
@@ -1037,22 +1032,16 @@ mod tests {
             .ereports_list_unmarked(opctx, &["alpha"], &pagparams)
             .await
             .expect("alpha-only query should succeed");
-        let enas: Vec<u64> =
-            alpha_only.iter().map(|e| e.ena.0.0).collect();
+        let enas: Vec<u64> = alpha_only.iter().map(|e| e.ena.0.0).collect();
         assert_eq!(enas, vec![1], "alpha-only should match only ENA 1");
 
         // Filter for "alpha" + "beta" — should return ENAs 1 and 2 but
         // NEVER the NULL-class ereport (ENA 3).
         let alpha_beta = datastore
-            .ereports_list_unmarked(
-                opctx,
-                &["alpha", "beta"],
-                &pagparams,
-            )
+            .ereports_list_unmarked(opctx, &["alpha", "beta"], &pagparams)
             .await
             .expect("alpha+beta query should succeed");
-        let mut enas: Vec<u64> =
-            alpha_beta.iter().map(|e| e.ena.0.0).collect();
+        let mut enas: Vec<u64> = alpha_beta.iter().map(|e| e.ena.0.0).collect();
         enas.sort();
         assert_eq!(
             enas,
@@ -1063,11 +1052,7 @@ mod tests {
 
         // Filter for a class that doesn't exist — should return empty.
         let nope = datastore
-            .ereports_list_unmarked(
-                opctx,
-                &["nonexistent.class"],
-                &pagparams,
-            )
+            .ereports_list_unmarked(opctx, &["nonexistent.class"], &pagparams)
             .await
             .expect("nonexistent-class query should succeed");
         assert!(nope.is_empty(), "nonexistent class should match nothing");

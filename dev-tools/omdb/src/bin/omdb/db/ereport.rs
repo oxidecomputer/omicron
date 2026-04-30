@@ -487,10 +487,11 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     // Both queries are backed by partial indexes (`lookup_ereports_by_class`
     // and `lookup_unmarked_ereports_by_class`) and do not full-table-scan;
     // see explain tests in nexus-db-queries.
-    let totals: Vec<(Option<String>, i64)> = DataStore::ereport_class_totals_query()
-        .load_async(&*conn)
-        .await
-        .context("loading per-class totals")?;
+    let totals: Vec<(Option<String>, i64)> =
+        DataStore::ereport_class_totals_query()
+            .load_async(&*conn)
+            .await
+            .context("loading per-class totals")?;
     let unmarkeds: Vec<(Option<String>, i64)> =
         DataStore::ereport_unmarked_class_totals_query()
             .load_async(&*conn)
@@ -522,20 +523,12 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
             let (known_marker, class_str) = match class {
                 None => ("excluded", "(NULL)".to_string()),
                 Some(c) => {
-                    let k = if known.contains(c.as_str()) {
-                        "yes"
-                    } else {
-                        "no"
-                    };
+                    let k =
+                        if known.contains(c.as_str()) { "yes" } else { "no" };
                     (k, c)
                 }
             };
-            ClassRow {
-                known: known_marker,
-                class: class_str,
-                total,
-                unmarked,
-            }
+            ClassRow { known: known_marker, class: class_str, total, unmarked }
         })
         .collect();
 
