@@ -499,12 +499,17 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
             .context("loading per-class unmarked counts")?;
 
     // Merge by class. Key: Option<String> so NULL gets its own bucket.
-    let mut by_class: BTreeMap<Option<String>, (i64, i64)> = BTreeMap::new();
+    #[derive(Default)]
+    struct ClassCounts {
+        total: i64,
+        unmarked: i64,
+    }
+    let mut by_class: BTreeMap<Option<String>, ClassCounts> = BTreeMap::new();
     for (class, total) in totals {
-        by_class.entry(class).or_insert((0, 0)).0 = total;
+        by_class.entry(class).or_default().total = total;
     }
     for (class, unmarked) in unmarkeds {
-        by_class.entry(class).or_insert((0, 0)).1 = unmarked;
+        by_class.entry(class).or_default().unmarked = unmarked;
     }
 
     #[derive(Tabled)]
@@ -519,7 +524,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
 
     let mut rows: Vec<ClassRow> = by_class
         .into_iter()
-        .map(|(class, (total, unmarked))| {
+        .map(|(class, ClassCounts { total, unmarked })| {
             let (known_marker, class_str) = match class {
                 None => ("excluded", "(NULL)".to_string()),
                 Some(c) => {
