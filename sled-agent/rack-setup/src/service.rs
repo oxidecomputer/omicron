@@ -70,7 +70,7 @@
 use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
-use crate::plan::sled::Plan as SledPlan;
+use crate::plan::sled::SledPlan;
 use async_trait::async_trait;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
@@ -138,7 +138,7 @@ use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
-/// Operations RSS performs on the local bootstrap-agent during rack setup.
+/// Operations RSS performs on the local bootstrap agent during rack setup.
 ///
 /// This trait exists so this crate doesn't have to depend on the rest of
 /// `sled-agent`; the sole production implementor is `BootstrapAgentHandle` in
@@ -316,10 +316,11 @@ impl RackSetupService {
     /// - `internal_disks_rx`: Tells us about available internal disks
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
-    /// - `our_bootstrap_address`: The bootstrap-network address of the sled
+    /// - `our_bootstrap_address`: The bootstrap address of the sled
     ///   hosting RSS (i.e., this sled).
     /// - `bootstore` - A handle to call bootstore APIs
     /// - `trust_quorum` - A handle to the trust qurom task
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
         request: RackInitializeRequestParams,
@@ -1210,6 +1211,7 @@ impl ServiceInner {
     //    rack, a marker file is created at "rss_completed_marker_path()". This
     //    indicates that the plan executed successfully, and the only work
     //    remaining is to handoff to Nexus.
+    #[expect(clippy::too_many_arguments)]
     async fn run(
         &self,
         request: &RackInitializeRequestParams,
