@@ -155,7 +155,12 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Write a reconfigurator-cli script to load the file, edit the
     // blueprint, and save the entire state to a new file.
     let mut s = String::new();
-    swriteln!(s, "load {} {}", saved_state1_path, collection.id);
+    swriteln!(
+        s,
+        "load {} --collection-id {}",
+        saved_state1_path,
+        collection.id
+    );
     swriteln!(
         s,
         "blueprint-edit {} add-nexus {} {}",
@@ -205,7 +210,12 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // a little unfortunate but it's hard to avoid if we want to test that
     // blueprint-save works.
     let mut s = String::new();
-    swriteln!(s, "load {} {}", saved_state2_path, collection.id);
+    swriteln!(
+        s,
+        "load {} --collection-id {}",
+        saved_state2_path,
+        collection.id
+    );
     swriteln!(s, "blueprint-save {} {}", new_blueprint.id, new_blueprint_path);
     std::fs::write(&script2_path, &s)
         .with_context(|| format!("write {}", &script2_path))

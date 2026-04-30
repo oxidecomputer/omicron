@@ -359,26 +359,16 @@ fn get_primary_collection_id(
             if state.collections.iter().any(|c| c.id == id) {
                 Ok(id)
             } else {
-                bail!("collection {} not found in data", id)
+                bail!("inventory collection {} not found in data", id)
             }
         }
-        None => match state.collections.len() {
-            1 => Ok(state.collections[0].id),
-            0 => bail!(
-                "no collection_id specified and file contains 0 collections"
-            ),
-            count => bail!(
-                "no collection_id specified and file contains {} \
-                    collections: {}",
-                count,
-                state
-                    .collections
-                    .iter()
-                    .map(|c| c.id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        },
+        None => {
+            // If no inventory collection was specified, choose the latest one.
+            match state.collections.iter().max_by_key(|c| &c.time_started) {
+                Some(collection) => Ok(collection.id),
+                None => Err(anyhow!("file contains no inventory collections")),
+            }
+        }
     }
 }
 

@@ -56,7 +56,7 @@ save saved.out
 wipe system
 # This should NOT show the target release.
 show
-load saved.out 61f451b3-2121-4ed6-91c7-a550054f6c21
+load saved.out --collection-id 61f451b3-2121-4ed6-91c7-a550054f6c21
 # This should show the target release.
 show
 
