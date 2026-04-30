@@ -10,7 +10,6 @@
 use super::BootstrapError;
 use super::RssAccessError;
 use super::rack_ops::RssAccess;
-use crate::rack_setup::service::RackInitializeRequestParams;
 use crate::updates::ConfigUpdates;
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;
@@ -25,6 +24,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
