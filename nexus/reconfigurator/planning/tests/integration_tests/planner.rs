@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use assert_matches::assert_matches;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
@@ -32,6 +34,8 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZoneRunningStatus;
@@ -57,12 +61,18 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::ArtifactId;
+use omicron_deployment_graph::DEPLOYMENT_UNIT_DAG_PATH;
+use omicron_deployment_graph::DagEdge;
+use omicron_deployment_graph::DagEdgesFile;
+use omicron_deployment_graph::DeploymentUnitName;
+use omicron_deployment_graph::OMICRON_LS_APIS_PATH;
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -83,10 +93,12 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::env;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -3014,15 +3026,76 @@ fn sim_update_collection_from_blueprint(
         .expect("generated inventory");
 }
 
+/// Simulate MGS host OS update completion for all pending host phase 1
+/// updates in the blueprint. For each sled with a pending update, toggle the
+/// active phase 1 flash slot and boot disk to the other slot, and write the
+/// target hashes there.
+///
+/// Returns `true` if any host OS updates were simulated.
+fn sim_complete_pending_host_os_updates(
+    sim: &mut ReconfiguratorCliTestState,
+    blueprint: &Blueprint,
+    target_phase_1_hash: ArtifactHash,
+    target_phase_2_hash: ArtifactHash,
+) -> bool {
+    let serials: Vec<&str> = blueprint
+        .pending_mgs_updates
+        .iter()
+        .filter(|u| matches!(u.details, PendingMgsUpdateDetails::HostPhase1(_)))
+        .map(|u| u.baseboard_id.serial_number.as_str())
+        .collect();
+
+    if serials.is_empty() {
+        return false;
+    }
+
+    sim.change_state("simulate MGS host OS update completion", |state| {
+        let description = state.system_mut().description_mut();
+        for serial in &serials {
+            let sled_id = description.serial_to_sled_id(serial)?;
+            // Toggle the slot.
+            let new_slot = description
+                .get_sled(sled_id)?
+                .sp_host_phase_1_active_slot()
+                .expect("simulated sleds have an active phase 1 slot")
+                .toggled();
+            let (slot_a, slot_b) = match new_slot {
+                M2Slot::A => (Some(target_phase_1_hash), None),
+                M2Slot::B => (None, Some(target_phase_1_hash)),
+            };
+            description.sled_update_host_phase_1_artifacts(
+                sled_id,
+                Some(new_slot),
+                slot_a,
+                slot_b,
+            )?;
+            let (slot_a, slot_b) = match new_slot {
+                M2Slot::A => (Some(target_phase_2_hash), None),
+                M2Slot::B => (None, Some(target_phase_2_hash)),
+            };
+            description.sled_update_host_phase_2_artifacts(
+                sled_id,
+                Some(new_slot),
+                slot_a,
+                slot_b,
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+
+    true
+}
+
 macro_rules! fake_zone_artifact {
-    ($kind: ident, $version: expr) => {
+    ($kind: ident, $version: expr, $hash: expr) => {
         TufArtifactMeta {
             id: ArtifactId {
                 name: ZoneKind::$kind.artifact_id_name().to_string(),
                 version: $version,
                 kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
             },
-            hash: ArtifactHash([0; 32]),
+            hash: $hash,
             size: 0,
             board: None,
             sign: None,
@@ -3079,6 +3152,13 @@ enum WhichVersion {
     /// any updates if you set the system's target release to one built from
     /// these artifacts.
     InitialSystemVersion,
+
+    /// Construct a list of artifact versions that differ from the initial
+    /// system state so the planner issues host OS and zone updates. This does
+    /// not include SP and RoT updates. (If a test needs that in the future,
+    /// either this variant should be extended or another variant should be
+    /// added.)
+    UpdatedHostOsAndZones,
 }
 
 impl WhichVersion {
@@ -3086,6 +3166,10 @@ impl WhichVersion {
         match self {
             WhichVersion::InitialSystemVersion => {
                 ArtifactVersion::new_static("1.0.0-freeform")
+                    .expect("parsed artifact version")
+            }
+            WhichVersion::UpdatedHostOsAndZones => {
+                ArtifactVersion::new_static("2.0.0-freeform")
                     .expect("parsed artifact version")
             }
         }
@@ -3103,6 +3187,28 @@ impl WhichVersion {
                     "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
                 )),
             ),
+            WhichVersion::UpdatedHostOsAndZones => {
+                // These are new hashes that differ from the initial system
+                // state, so that the planner issues host phase 1 and 2 updates.
+                (ArtifactHash([2; 32]), ArtifactHash([3; 32]))
+            }
+        }
+    }
+
+    /// Returns the artifact hash used for zone images at this version.
+    ///
+    /// The two versions use different hashes so that the planner sees them as
+    /// distinct artifacts.
+    ///
+    /// Note that `BlueprintZoneImageSource` compares both the version and the
+    /// hash. If we changed the version but not the hash, then the planner would
+    /// issue updates. But the Oxide system generally assumes that there's a 1:1
+    /// mapping between versions and hashes (see RFD 554), and using separate
+    /// hashes means the test is more honest about what's going on.
+    fn zone_artifact_hash(self) -> ArtifactHash {
+        match self {
+            WhichVersion::InitialSystemVersion => ArtifactHash([0; 32]),
+            WhichVersion::UpdatedHostOsAndZones => ArtifactHash([4; 32]),
         }
     }
 }
@@ -3110,21 +3216,22 @@ impl WhichVersion {
 fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
     let version = which.version();
     let (host_phase_1_hash, host_phase_2_hash) = which.host_phase_hashes();
+    let zone_hash = which.zone_artifact_hash();
 
     vec![
         // Omit `BoundaryNtp` because it has the same artifact name as
         // `InternalNtp`.
-        fake_zone_artifact!(Clickhouse, version.clone()),
-        fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-        fake_zone_artifact!(ClickhouseServer, version.clone()),
-        fake_zone_artifact!(CockroachDb, version.clone()),
-        fake_zone_artifact!(Crucible, version.clone()),
-        fake_zone_artifact!(CruciblePantry, version.clone()),
-        fake_zone_artifact!(ExternalDns, version.clone()),
-        fake_zone_artifact!(InternalDns, version.clone()),
-        fake_zone_artifact!(InternalNtp, version.clone()),
-        fake_zone_artifact!(Nexus, version.clone()),
-        fake_zone_artifact!(Oximeter, version.clone()),
+        fake_zone_artifact!(Clickhouse, version.clone(), zone_hash),
+        fake_zone_artifact!(ClickhouseKeeper, version.clone(), zone_hash),
+        fake_zone_artifact!(ClickhouseServer, version.clone(), zone_hash),
+        fake_zone_artifact!(CockroachDb, version.clone(), zone_hash),
+        fake_zone_artifact!(Crucible, version.clone(), zone_hash),
+        fake_zone_artifact!(CruciblePantry, version.clone(), zone_hash),
+        fake_zone_artifact!(ExternalDns, version.clone(), zone_hash),
+        fake_zone_artifact!(InternalDns, version.clone(), zone_hash),
+        fake_zone_artifact!(InternalNtp, version.clone(), zone_hash),
+        fake_zone_artifact!(Nexus, version.clone(), zone_hash),
+        fake_zone_artifact!(Oximeter, version.clone(), zone_hash),
         TufArtifactMeta {
             id: ArtifactId {
                 name: "host-os-phase-1".to_string(),
@@ -3153,6 +3260,10 @@ fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
                 version: ArtifactVersion::new("0.0.1").unwrap(),
                 kind: KnownArtifactKind::GimletSp.into(),
             },
+            // The WhichVersion enum does not currently have a variant for
+            // a different SP version, so we hardcode the hash here. If
+            // WhichVersion gains such a variant, this would be the place to
+            // change.
             hash: ArtifactHash([0; 32]),
             size: 0,
             board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
@@ -3164,6 +3275,10 @@ fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
                 version: ArtifactVersion::new("0.0.1").unwrap(),
                 kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
             },
+            // The WhichVersion enum does not currently have a variant for
+            // a different RoT version, so we hardcode the hash here. If
+            // WhichVersion gains such a variant, this would be the place to
+            // change.
             hash: ArtifactHash([0; 32]),
             size: 0,
             board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
@@ -3175,6 +3290,10 @@ fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
                 version: ArtifactVersion::new("0.0.1").unwrap(),
                 kind: ArtifactKind::GIMLET_ROT_STAGE0,
             },
+            // The WhichVersion enum does not currently have a variant for a
+            // different RoT stage 0 version, so we hardcode the hash here. If
+            // WhichVersion gains such a variant, this would be the place to
+            // change.
             hash: ArtifactHash([0; 32]),
             size: 0,
             board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
@@ -4995,4 +5114,497 @@ fn test_multiple_measurements() {
     }
 
     panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
+}
+
+/// Maps a `ZoneKind` to its deployment unit name.
+fn zone_kind_to_deployment_unit(kind: ZoneKind) -> DeploymentUnitName {
+    let s = match kind {
+        ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "NTP",
+        ZoneKind::Clickhouse
+        | ZoneKind::ClickhouseKeeper
+        | ZoneKind::ClickhouseServer => "ClickHouse",
+        ZoneKind::CockroachDb => "Cockroach",
+        ZoneKind::Crucible => "Crucible",
+        ZoneKind::CruciblePantry => "Crucible Pantry",
+        ZoneKind::ExternalDns | ZoneKind::InternalDns => "DNS Server",
+        ZoneKind::Nexus => "Nexus",
+        ZoneKind::Oximeter => "Oximeter",
+    };
+    DeploymentUnitName::from(s)
+}
+
+/// Deployment units used by
+/// `test_zone_update_ordering_respects_dependency_dag`.
+///
+/// These correspond to deployment units defined in the `ls-apis` API
+/// manifest. See the README for that tool for more information.
+#[derive(Debug)]
+struct UpdateDeploymentUnits {
+    /// Units known to correspond to a zone kind, and expected to be part of the
+    /// update trace. This map is derived from `zone_kind_to_deployment_unit`
+    /// above.
+    zone_based: BTreeSet<DeploymentUnitName>,
+    /// Units present in the DAG but expected not to appear in the update
+    /// trace. Currently this is just Installinator, which is only part of
+    /// the recovery flow.
+    expected_not_in_trace: BTreeSet<DeploymentUnitName>,
+    /// The Host OS unit, which is managed by MGS rather than being zone-based.
+    host_os: DeploymentUnitName,
+    /// The edges of the deployment unit dependency DAG, against which the
+    /// observed update trace is checked.
+    edges: BTreeSet<DagEdge>,
+}
+
+impl UpdateDeploymentUnits {
+    fn new(dag: DagEdgesFile, dag_path: &Utf8Path) -> Self {
+        // Units that appear in the DAG edges as either a consumer or a
+        // producer.
+        let in_dag: BTreeSet<_> =
+            dag.edges.iter().flat_map(|e| [&e.consumer, &e.producer]).collect();
+
+        let zone_based: BTreeSet<_> =
+            ZoneKind::iter().map(zone_kind_to_deployment_unit).collect();
+
+        let expected_not_in_trace: BTreeSet<_> =
+            [DeploymentUnitName::from("Installinator")].into_iter().collect();
+
+        let host_os = DeploymentUnitName::from("Host OS");
+
+        // The goal of these assertions is to check for typos or other mistakes
+        // while defining these sets. This is all quite complicated, and typos
+        // are easy to make, so we do a bunch of smoke checks as part of the
+        // update test.
+        //
+        // * The host OS unit must appear in the DAG.
+        assert!(
+            in_dag.contains(&host_os),
+            "expected to find deployment unit {host_os:?} in deployment \
+             unit DAG ({dag_path}) (did the name of this deployment unit \
+             change?)"
+        );
+        // * The units that are expected to not be in the trace must still be in
+        //   the DAG.
+        for unit in &expected_not_in_trace {
+            assert!(
+                in_dag.contains(unit),
+                "expected to find deployment unit {unit:?} in deployment \
+                 unit DAG ({dag_path}) (did the name of this deployment \
+                 unit change?)"
+            );
+        }
+        // * Every zone-based unit must either be in the DAG or have no
+        //   server-side APIs. This catches typos in
+        //   `zone_kind_to_deployment_unit`'s string literals.
+        for unit in &zone_based {
+            assert!(
+                in_dag.contains(unit)
+                    || dag.units_without_server_side_apis.contains(unit),
+                "zone_kind_to_deployment_unit produced {unit:?}, which does \
+                 not appear in the deployment unit DAG nor as a unit without \
+                 server-side APIs ({dag_path}) — is the ID correct?"
+            );
+        }
+
+        Self { zone_based, expected_not_in_trace, host_os, edges: dag.edges }
+    }
+
+    /// Verify that an observed update trace is consistent with the DAG.
+    ///
+    /// Specifically:
+    ///
+    /// * Every zone-based unit must have been exercised and reached the
+    ///   target image.
+    /// * The host OS unit must have been exercised and completed.
+    /// * For every DAG edge, the consumer must not have started updating
+    ///   before the producer finished. Edges referencing units this test
+    ///   doesn't track (i.e., `expected_not_in_trace`) are skipped.
+    ///
+    /// Panics with a detailed message on the first hard failure or if any
+    /// ordering violations are found.
+    fn assert_trace_satisfies_dag(
+        &self,
+        trace: &BTreeMap<DeploymentUnitName, UnitTrace>,
+    ) {
+        // Every zone-based unit must be present in the trace.
+        //
+        // Most of the time, this catches cases where the example system isn't
+        // complete, i.e. that a particular zone kind is missing from the
+        // example system.
+        //
+        // This also captures the case where the example system *did* have a
+        // deployment unit, but for whatever reason we never issued any updates
+        // for it.
+        for unit in &self.zone_based {
+            let p = trace.get(unit).unwrap_or_else(|| {
+                panic!(
+                    "deployment unit {unit:?} is zone-based but was never \
+                     updated — is it missing from the example system?"
+                )
+            });
+            assert!(
+                p.all_at_target.is_some(),
+                "deployment unit {unit:?} was updated (first activity at \
+                 iteration {}) but never had all zones reach the target image",
+                p.first_activity,
+            );
+        }
+
+        {
+            // The host OS unit must also be present in the trace.
+            let p = trace.get(&self.host_os).unwrap_or_else(|| {
+                panic!(
+                    "host OS deployment unit was never updated — did the \
+                     planner not issue any host OS updates?"
+                )
+            });
+            assert!(
+                p.all_at_target.is_some(),
+                "host OS deployment unit was updated (first activity at \
+                 iteration {}) but never completed all host OS updates",
+                p.first_activity,
+            );
+        }
+
+        println!("\ndeployment unit update activity:");
+        for (unit, p) in trace {
+            println!(
+                "  {unit}: first_activity = {}, all_at_target = {:?}",
+                p.first_activity, p.all_at_target,
+            );
+        }
+
+        // Now that we've established completeness of the update, verify that
+        // for each dependency between deployment units, the client did not
+        // start getting updated until after all instances of the dependencies
+        // were updated. (This is the meat of the test! The rest is mostly
+        // ceremony to make sure the test itself is set up correctly.)
+        let mut violations = Vec::new();
+        for edge in &self.edges {
+            let Some(consumer) = trace.get(&edge.consumer) else {
+                if !self.expected_not_in_trace.contains(&edge.consumer) {
+                    panic!(
+                        "found a dependency between deployment units in \
+                         api-manifest.toml, but a complete system update did \
+                         not update deployment unit {:?}. This is surprising: \
+                         is this a completely new kind of unit that isn't \
+                         either a zone-based unit or the host OS unit?",
+                        edge.consumer,
+                    );
+                }
+                continue;
+            };
+            let Some(producer) = trace.get(&edge.producer) else {
+                if !self.expected_not_in_trace.contains(&edge.producer) {
+                    panic!(
+                        "found a dependency between deployment units in \
+                         api-manifest.toml, but a complete system update did \
+                         not update deployment unit {:?}. This is surprising: \
+                         is this a completely new kind of unit that isn't \
+                         either a zone-based unit or the host OS unit?",
+                        edge.producer,
+                    );
+                }
+                continue;
+            };
+
+            let producer_done = match producer.all_at_target {
+                Some(v) => v,
+                None => panic!(
+                    "producer {:?} has zones but never reached target",
+                    edge.producer
+                ),
+            };
+
+            if consumer.first_activity < producer_done {
+                violations.push(format!(
+                    "for the dependency from consumer {:?} to producer {:?}, \
+                     the consumer started updating at iteration {}, \
+                     but the producer was not fully updated until \
+                     iteration {producer_done}",
+                    edge.consumer, edge.producer, consumer.first_activity,
+                ));
+            }
+        }
+
+        if !violations.is_empty() {
+            println!("\nDAG ordering violations:");
+            for v in &violations {
+                println!("  - {v}");
+            }
+            panic!(
+                "zone update ordering violated the dependency DAG \
+                 ({} violations)",
+                violations.len()
+            );
+        }
+
+        println!("\nall DAG ordering constraints satisfied");
+    }
+}
+
+/// For each deployment unit, tracks the first iteration where the planner
+/// touched any instance of it (whether to update or expunge it), and the first
+/// iteration where all in-service instances reached the target image.
+///
+/// This gives us enough information to determine if any server-side-managed
+/// ordering constraints were violated.
+#[derive(Debug)]
+struct UnitTrace {
+    first_activity: usize,
+    all_at_target: Option<usize>,
+}
+
+/// Verify that the planner's zone update ordering is a topological sort of the
+/// deployment unit dependency DAG.
+#[test]
+fn test_zone_update_ordering_respects_dependency_dag() {
+    static TEST_NAME: &str = "zone_update_ordering_respects_dependency_dag";
+    let logctx = test_setup_log(TEST_NAME);
+
+    // Read the metadata that gets produced by `ls-apis` about which deployment
+    // units have components that depend on server-side-versioned APIs in other
+    // deployment units. In the end, our goal is to verify that a real update
+    // sequence is consistent with these dependencies.
+    let dag_path = {
+        let workspace_root =
+            Utf8PathBuf::from(env::var("NEXTEST_WORKSPACE_ROOT").expect(
+                "NEXTEST_WORKSPACE_ROOT must be set \
+                 (use cargo nextest run)",
+            ));
+        workspace_root.join(OMICRON_LS_APIS_PATH).join(DEPLOYMENT_UNIT_DAG_PATH)
+    };
+    let dag_contents = std::fs::read_to_string(&dag_path)
+        .unwrap_or_else(|e| panic!("read {dag_path}: {e}"));
+    let dag: DagEdgesFile =
+        toml::from_str(&dag_contents).expect("parsed deployment_unit_dag.toml");
+
+    // Categorize the deployment units we'll be reasoning about. The
+    // constructor verifies self-consistency between the DAG file and our
+    // hardcoded categorization of each unit.
+    let units = UpdateDeploymentUnits::new(dag, &dag_path);
+
+    // Set up the example system with all zone types represented.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| {
+        builder.all_zone_types()?.with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // In order to walk through a complete update of the example system, we need
+    // to first assemble metadata for a target release that we're updating to.
+    // We use made-up version strings and artifact hashes.
+    let which = WhichVersion::UpdatedHostOsAndZones;
+    let version = which.version();
+    let (host_phase_1_hash, host_phase_2_hash) = which.host_phase_hashes();
+    let target_image_source = BlueprintZoneImageSource::Artifact {
+        version: BlueprintArtifactVersion::Available {
+            version: version.clone(),
+        },
+        hash: which.zone_artifact_hash(),
+    };
+    // The TUF repo's overall hash doesn't matter for this test.
+    let repo_hash = ArtifactHash([0; 32]);
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: repo_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_artifacts_for_version(which),
+    });
+
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    let mut trace: BTreeMap<DeploymentUnitName, UnitTrace> = BTreeMap::new();
+
+    /// The maximum number of iterations of the planner before we give up,
+    /// assuming it must be in an infinite loop.
+    const MAX_PLANNING_ITERATIONS: usize = 100;
+
+    // Next, walk through a complete system update by running the planner in a
+    // loop and updating the example system each time to reflect the change that
+    // the planner made. Along the way, for each deployment unit, track the
+    // first iteration where the planner made a change.
+    let mut parent = blueprint1;
+    let mut i = 0;
+    let final_blueprint = loop {
+        i += 1;
+        assert!(
+            i <= MAX_PLANNING_ITERATIONS,
+            "did not converge after {MAX_PLANNING_ITERATIONS} iterations",
+        );
+
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+
+        let BlueprintSource::Planner(report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+
+        // Track any pending host OS updates and simulate their completion.
+        if sim_complete_pending_host_os_updates(
+            &mut sim,
+            &blueprint,
+            host_phase_1_hash,
+            host_phase_2_hash,
+        ) {
+            match trace.entry(units.host_os.clone()) {
+                std::collections::btree_map::Entry::Occupied(e) => {
+                    assert_eq!(
+                        e.get().all_at_target,
+                        None,
+                        "sim_complete_pending_host_os_updates should not \
+                         have performed updates after all_at_target is \
+                         set to Some (i.e., the host OS update is \
+                         believed to be complete)"
+                    );
+                }
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    // First time seeing the host OS unit: insert it with a
+                    // pending update.
+                    e.insert(UnitTrace {
+                        first_activity: i,
+                        all_at_target: None,
+                    });
+                }
+            };
+        } else if let Some(p) = trace.get_mut(&units.host_os) {
+            // No pending host OS updates and we've previously seen
+            // activity: all host OS updates are complete.
+            if p.all_at_target.is_none() {
+                p.all_at_target = Some(i);
+            }
+        }
+
+        // Record the first iteration with any zone activity per deployment
+        // unit.
+        let zone_updates = &report.zone_updates;
+        let modified_zones = zone_updates
+            .updated_zones
+            .values()
+            .chain(zone_updates.expunged_zones.values())
+            .flatten();
+        for z in modified_zones {
+            let unit = zone_kind_to_deployment_unit(z.kind);
+            match trace.entry(unit) {
+                std::collections::btree_map::Entry::Occupied(e) => {
+                    assert_eq!(
+                        e.get().all_at_target,
+                        None,
+                        "attempted to update a zone after all_at_target \
+                             is set to Some (i.e., the update is complete)"
+                    );
+                }
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    e.insert(UnitTrace {
+                        first_activity: i,
+                        all_at_target: None,
+                    });
+                }
+            }
+        }
+
+        // Check which deployment units have all their in-service zones at the
+        // target image in this blueprint.
+        let mut zones_by_unit: BTreeMap<
+            DeploymentUnitName,
+            Vec<&BlueprintZoneConfig>,
+        > = BTreeMap::new();
+        for (_, zone) in blueprint.in_service_zones() {
+            let unit = zone_kind_to_deployment_unit(zone.zone_type.kind());
+            zones_by_unit.entry(unit).or_default().push(zone);
+        }
+        for (unit, zones) in &zones_by_unit {
+            if let Some(p) = trace.get_mut(unit) {
+                if p.all_at_target.is_none()
+                    && zones
+                        .iter()
+                        .all(|z| z.image_source == target_image_source)
+                {
+                    p.all_at_target = Some(i);
+                }
+            }
+        }
+
+        // Check whether the update has converged.
+        //
+        // Update convergence consists of two properties:
+        //
+        // 1. The blueprint (i.e., the desired state for most of it, as
+        //    well as the list of pending MGS updates which is an
+        //    exception to the desired-state model) has no changes
+        //    compared to the parent.
+        // 2. There are no pending MGS updates.
+        //
+        // We only check property 1 here and move property 2 to be a
+        // postcondition below. Why is that okay? Consider the situation
+        // in which property 1 is satisfied but property 2 is not (i.e.,
+        // the reconfigurator is no longer making forward progress, but
+        // there are still pending MGS updates). This is a bug, and we
+        // must fail the test if it occurs! That could be done in one of
+        // two ways:
+        //
+        // A. Treat the update as not having completed, and wait until
+        //    MAX_PLANNING_ITERATIONS before failing the test.
+        // B. Treat the update as having stalled out, and fail the test
+        //    as a postcondition.
+        //
+        // We're choosing option B here partly because it produces better
+        // error messages (we no longer exhaust out
+        // MAX_PLANNING_ITERATIONS before failing), and partly because we
+        // don't have to define a more complex notion of "update is
+        // ongoing".
+        let has_changes = blueprint.diff_since_blueprint(&parent).has_changes();
+        if !has_changes {
+            println!("planning converged after {i} iterations");
+            break blueprint;
+        }
+
+        parent = blueprint;
+    };
+
+    // Every in-service zone in the final blueprint should be at the target
+    // image.
+    let not_at_target: Vec<_> = final_blueprint
+        .in_service_zones()
+        .filter(|(_, zone)| zone.image_source != target_image_source)
+        .map(|(sled, zone)| {
+            format!(
+                "  sled {sled}: zone {} ({:?}), image_source: {}",
+                zone.id,
+                zone.zone_type.kind(),
+                zone.image_source,
+            )
+        })
+        .collect();
+    if !not_at_target.is_empty() {
+        panic!(
+            "diff summary claims convergence, but {} zones are not at \
+             target:\n{}",
+            not_at_target.len(),
+            not_at_target.join("\n"),
+        );
+    }
+
+    // Verify that all pending MGS updates have been processed.
+    assert_eq!(
+        final_blueprint.pending_mgs_updates,
+        PendingMgsUpdates::new(),
+        "after the blueprint stopped changing, no pending MGS updates should \
+         remain",
+    );
+
+    // Verify the trace against the DAG: every zone-based unit and host_os
+    // converged, and every DAG edge respects temporal ordering.
+    units.assert_trace_satisfies_dag(&trace);
+
+    logctx.cleanup_successful();
 }

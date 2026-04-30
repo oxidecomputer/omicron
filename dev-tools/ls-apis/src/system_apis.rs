@@ -6,7 +6,6 @@
 //! the Oxide system
 
 use crate::ClientPackageName;
-use crate::DeploymentUnitName;
 use crate::LoadArgs;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
@@ -28,10 +27,14 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use itertools::Itertools;
+use omicron_deployment_graph::DagEdge;
+use omicron_deployment_graph::DagEdgesFile;
+use omicron_deployment_graph::DeploymentUnitName;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -161,10 +164,10 @@ impl SystemApis {
         // unit, the deployment unit for any component, the servers in each
         // component, etc.
         let mut tracker = ServerComponentsTracker::new(&server_packages);
-        for (deployment_unit, dunit_info) in api_metadata.deployment_units() {
+        for dunit_info in api_metadata.deployment_units() {
             for dunit_pkg in &dunit_info.packages {
                 tracker.found_deployment_unit_package(
-                    deployment_unit,
+                    &dunit_info.name,
                     dunit_pkg,
                 )?;
                 let (workspace, server_pkg) =
@@ -537,6 +540,42 @@ impl SystemApis {
         let (graph, _) =
             self.make_deployment_unit_graph(filter, EdgeFilter::All)?;
         Ok(Dot::new(&graph).to_string())
+    }
+
+    /// Returns the deployment unit dependency DAG for server-side-versioned
+    /// APIs.
+    ///
+    /// The result contains:
+    ///
+    /// * `edges`: each edge represents a consumer that depends on a producer,
+    ///   meaning the producer must be fully updated before the consumer starts
+    ///   updating.
+    /// * `units_without_server_side_apis`: deployment units that have no edges
+    ///   in the server-side-versioned DAG.
+    pub fn deployment_unit_dag(&self) -> Result<DagEdgesFile> {
+        let idu_only_edges = self.validate_idu_only_edges()?;
+        let (graph, _nodes) = self.make_deployment_unit_graph(
+            ApiDependencyFilter::Default,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
+
+        let mut edges = BTreeSet::new();
+        let mut units_in_dag = BTreeSet::new();
+        for edge_ref in graph.edge_references() {
+            let consumer = graph[edge_ref.source()].clone();
+            let producer = graph[edge_ref.target()].clone();
+            units_in_dag.insert(consumer.clone());
+            units_in_dag.insert(producer.clone());
+            edges.insert(DagEdge { consumer, producer });
+        }
+
+        let units_without_server_side_apis = self
+            .deployment_units()
+            .filter(|u| !units_in_dag.contains(*u))
+            .cloned()
+            .collect();
+
+        Ok(DagEdgesFile { units_without_server_side_apis, edges })
     }
 
     // The complex type below is only used in this one place: the return value
@@ -1545,6 +1584,7 @@ impl ApiDependencyFilter {
             ApiDependencyFilter::Default => !matches!(
                 evaluation,
                 Evaluation::NonDag
+                    | Evaluation::RssOnly
                     | Evaluation::Bogus
                     | Evaluation::NotDeployed
             ),
