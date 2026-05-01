@@ -472,6 +472,7 @@ impl DataStore {
             .filter(diesel::dsl::not(
                 dsl::pantry_ip.eq_any(in_service_pantries),
             ))
+            .filter(dsl::resource_deleted.eq(false))
             .set(dsl::resource_deleted.eq(true))
             .execute_async(&*conn)
             .await
