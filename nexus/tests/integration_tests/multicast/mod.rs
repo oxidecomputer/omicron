@@ -16,8 +16,7 @@
 
 use std::future::Future;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
@@ -42,13 +41,16 @@ use nexus_types::external_api::multicast::{
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types::identity::{Asset, Resource};
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::{
     ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
     Instance, InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, MulticastGroupUuid, SledUuid,
+};
 
 use crate::integration_tests::instances as instance_helpers;
 use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
@@ -59,7 +61,6 @@ pub(crate) type ControlPlaneTestContext =
 
 mod api;
 mod authorization;
-mod cache_invalidation;
 mod enablement;
 mod failures;
 mod groups;
@@ -245,28 +246,16 @@ pub(crate) async fn activate_multicast_reconciler(
     .await
 }
 
-/// Activates the inventory loader and waits for it to complete.
+/// Activate the multicast reconciler once, then poll `condition` until it
+/// holds (or `timeout` elapses).
 ///
-/// This ensures the watch channel has the latest inventory collection from the database.
-pub(crate) async fn activate_inventory_loader(
-    lockstep_client: &ClientTestContext,
-) -> nexus_lockstep_client::types::BackgroundTask {
-    nexus_test_utils::background::activate_background_task(
-        lockstep_client,
-        "inventory_loader",
-    )
-    .await
-}
-
-/// Wait for a condition to be true, activating the reconciler periodically.
-///
-/// This is like `wait_for_condition` but activates the multicast reconciler
-/// periodically (not on every poll) to drive state changes. We activate the
-/// reconciler every 500ms.
-///
-/// Useful for tests that need to wait for reconciler-driven state changes
-/// (e.g., member state transitions).
-pub(crate) async fn wait_for_condition_with_reconciler<F, Fut, T, E>(
+/// For tests that expect convergence in a single reconciler pass. We
+/// poll after the activation to absorb read-after-write visibility lag
+/// (DB commits, sled-agent state propagation), not to wait for further
+/// reconciler iterations. If `condition` only holds after multiple
+/// passes, the test author must orchestrate explicitly: activate per
+/// step and assert intermediate state between steps.
+pub(crate) async fn activate_then_wait_for_condition<F, Fut, T, E>(
     lockstep_client: &ClientTestContext,
     condition: F,
     poll_interval: &Duration,
@@ -276,37 +265,8 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<T, CondCheckError<E>>>,
 {
-    // Activate reconciler less frequently than we check the condition
-    // This reduces overhead while still driving state changes forward
-    const RECONCILER_ACTIVATION_INTERVAL: Duration = Duration::from_millis(500);
-
-    let last_reconciler_activation = Arc::new(Mutex::new(Instant::now()));
-
-    // First, wait for any already-activated reconciler run to complete.
-    // This tests explicit activation paths (saga completions, etc.).
-    wait_for_multicast_reconciler(lockstep_client).await;
-
-    wait_for_condition(
-        || async {
-            // Only activate reconciler if enough time has passed
-            let now = Instant::now();
-            let should_activate = {
-                let last = last_reconciler_activation.lock().unwrap();
-                now.duration_since(*last) >= RECONCILER_ACTIVATION_INTERVAL
-            };
-
-            if should_activate {
-                // Use activate to drive progress
-                activate_multicast_reconciler(lockstep_client).await;
-                *last_reconciler_activation.lock().unwrap() = now;
-            }
-
-            condition().await
-        },
-        poll_interval,
-        timeout,
-    )
-    .await
+    activate_multicast_reconciler(lockstep_client).await;
+    wait_for_condition(condition, poll_interval, timeout).await
 }
 
 /// Ensure inventory collection has completed with SP data for all sleds.
@@ -391,7 +351,7 @@ pub(crate) async fn ensure_inventory_ready(
                 Err(CondCheckError::<String>::NotYet)
             }
         },
-        &Duration::from_millis(500),
+        &POLL_INTERVAL,
         &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
@@ -454,7 +414,7 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                 }
             }
         },
-        &Duration::from_millis(200),
+        &POLL_INTERVAL,
         &POLL_TIMEOUT,
     )
     .await
@@ -558,11 +518,20 @@ pub(crate) async fn wait_for_group_active(
     .await
 }
 
-/// Wait for a specific member to reach the expected state
-/// (e.g., Joined, Joining, Left).
+/// Wait for a multicast group member to reach the expected state.
 ///
-/// For "Joined" state, this function uses `wait_for_condition_with_reconciler`
-/// to ensure the reconciler processes member state transitions.
+/// Ensures inventory and DPD are ready, drives one reconciler activation,
+/// then asserts the member is observable in `expected_state`. If the state
+/// does not match after the pass, fails loudly rather than retrying via
+/// reactivation.
+///
+/// We poll briefly after the pass to absorb DB read-after-write lag,
+/// not to wait for further reconciler iterations.
+///
+/// Tests that genuinely need multi-step convergence (e.g., recovery from
+/// an injected external failure) must orchestrate explicitly: drive each
+/// step with `activate_multicast_reconciler` and assert the intermediate
+/// state between steps.
 pub(crate) async fn wait_for_member_state(
     cptestctx: &ControlPlaneTestContext,
     group_name: &str,
@@ -573,89 +542,135 @@ pub(crate) async fn wait_for_member_state(
     let lockstep_client = &cptestctx.lockstep_client;
     let expected_state_as_str = expected_state.to_string();
 
-    // For "Joined" state, ensure instance has a sled_id assigned
-    // (no need to check inventory again since ensure_inventory_ready() already
-    // verified all sleds have SP data at test setup)
+    // "Joined" requires the dataplane: the reconciler resolves
+    // sled→port and programs DPD before that transition. Pre-populate
+    // DDM peers and wait for DPD readiness before polling for it.
+    //
+    // "Joining" and "Left" converge from DB-only transitions, so
+    // don't gate those as failure-mode tests rely on being able to wait
+    // on them with working DPD stopped.
     if expected_state == nexus_db_model::MulticastGroupMemberState::Joined {
+        nexus_test_utils::multicast::populate_ddm_peers(cptestctx).await;
+        ensure_dpd_ready(cptestctx).await;
         let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
         wait_for_instance_sled_assignment(cptestctx, &instance_uuid).await;
     }
 
+    // Drive one converging pass. This explicit activate guarantees a fresh
+    // pass runs after this point regardless of whether the API call that
+    // triggered the test already activated the reconciler.
+    activate_multicast_reconciler(lockstep_client).await;
+
+    // Verify the post-pass state. Treat read-after-write visibility lag as
+    // `NotYet`, but treat any *other* observed state as a permanent failure.
     let check_member = || async {
         let members = list_multicast_group_members(client, group_name).await;
-
-        // If we're looking for "Joined" state, we need to ensure the member exists first
-        // and then wait for the reconciler to process it
-        if expected_state == nexus_db_model::MulticastGroupMemberState::Joined {
-            if let Some(member) =
-                members.iter().find(|m| m.instance_id == instance_id)
-            {
-                match member.state.as_str() {
-                    "Joined" => Ok(member.clone()),
-                    "Joining" => {
-                        // Member exists and is in transition - wait a bit more
-                        Err(CondCheckError::NotYet)
-                    }
-                    "Left" => {
-                        // Member in Left state, reconciler needs to process instance start - wait more
-                        Err(CondCheckError::NotYet)
-                    }
-                    other_state => Err(CondCheckError::Failed(format!(
-                        "Member {instance_id} in group {group_name} has unexpected state '{other_state}', expected 'Left', 'Joining' or 'Joined'"
-                    ))),
-                }
-            } else {
-                // Member doesn't exist yet - wait for it to be created
-                Err(CondCheckError::NotYet)
+        match members.iter().find(|m| m.instance_id == instance_id) {
+            Some(member) if member.state == expected_state_as_str => {
+                Ok(member.clone())
             }
-        } else {
-            // For other states, just look for exact match
-            if let Some(member) =
-                members.iter().find(|m| m.instance_id == instance_id)
-            {
-                if member.state == expected_state_as_str {
-                    Ok(member.clone())
-                } else {
-                    Err(CondCheckError::NotYet)
-                }
-            } else {
-                Err(CondCheckError::NotYet)
-            }
+            Some(member) => Err(CondCheckError::Failed(format!(
+                "member {instance_id} in group {group_name} reached state \
+                 '{}' after one reconciler pass, expected '{expected_state_as_str}'",
+                member.state
+            ))),
+            None => Err(CondCheckError::NotYet),
         }
     };
 
-    // Use reconciler-activating wait for "Joined" state
-    let res = if expected_state
-        == nexus_db_model::MulticastGroupMemberState::Joined
+    match wait_for_condition(
+        check_member,
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
     {
-        wait_for_condition_with_reconciler(
-            lockstep_client,
-            check_member,
-            &POLL_INTERVAL,
-            &MULTICAST_OPERATION_TIMEOUT,
-        )
-        .await
-    } else {
-        wait_for_condition(
-            check_member,
-            &POLL_INTERVAL,
-            &MULTICAST_OPERATION_TIMEOUT,
-        )
-        .await
-    };
-
-    match res {
         Ok(member) => member,
         Err(poll::Error::TimedOut(elapsed)) => {
             panic!(
-                "member {instance_id} in group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
+                "member {instance_id} in group {group_name} did not appear within {elapsed:?}",
             );
         }
         Err(poll::Error::PermanentError(err)) => {
             panic!(
-                "failed waiting for member {instance_id} in group {group_name} to reach state '{expected_state_as_str}': {err:?}",
+                "reconciler did not converge member {instance_id} in group \
+                 {group_name} to '{expected_state_as_str}': {err}",
             );
         }
+    }
+}
+
+/// Wait for a batch of multicast group members to reach their respective
+/// expected states after a single reconciler pass.
+///
+/// Like [`wait_for_member_state`] but checks multiple members after
+/// one shared reconciler pass. Panics if any member ends up in an
+/// unexpected state.
+pub(crate) async fn wait_for_members_state(
+    cptestctx: &ControlPlaneTestContext,
+    group_name: &str,
+    expected: &[(Uuid, nexus_db_model::MulticastGroupMemberState)],
+) -> Vec<MulticastGroupMember> {
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+
+    let joined_instances: Vec<InstanceUuid> = expected
+        .iter()
+        .filter(|(_, state)| {
+            *state == nexus_db_model::MulticastGroupMemberState::Joined
+        })
+        .map(|(id, _)| InstanceUuid::from_untyped_uuid(*id))
+        .collect();
+
+    if !joined_instances.is_empty() {
+        nexus_test_utils::multicast::populate_ddm_peers(cptestctx).await;
+        ensure_dpd_ready(cptestctx).await;
+        for instance_uuid in &joined_instances {
+            wait_for_instance_sled_assignment(cptestctx, instance_uuid).await;
+        }
+    }
+
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let check = || async {
+        let members = list_multicast_group_members(client, group_name).await;
+        let mut resolved = Vec::with_capacity(expected.len());
+        for (instance_id, expected_state) in expected {
+            let expected_str = expected_state.to_string();
+            match members.iter().find(|m| m.instance_id == *instance_id) {
+                Some(member) if member.state == expected_str => {
+                    resolved.push(member.clone());
+                }
+                Some(member) => {
+                    return Err(CondCheckError::Failed(format!(
+                        "member {instance_id} in group {group_name} reached \
+                         state '{}' after one reconciler pass, expected \
+                         '{expected_str}'",
+                        member.state
+                    )));
+                }
+                None => return Err(CondCheckError::NotYet),
+            }
+        }
+        Ok(resolved)
+    };
+
+    match wait_for_condition(
+        check,
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(members) => members,
+        Err(poll::Error::TimedOut(elapsed)) => panic!(
+            "members in group {group_name} did not all appear within \
+             {elapsed:?} (expected {expected:?})",
+        ),
+        Err(poll::Error::PermanentError(err)) => panic!(
+            "reconciler did not converge members in group {group_name} \
+             (expected {expected:?}): {err}",
+        ),
     }
 }
 
@@ -1061,7 +1076,12 @@ pub(crate) async fn wait_for_member_count(
     }
 }
 
-/// Wait for a multicast group to be deleted (returns 404).
+/// Wait for a multicast group to be fully deleted (returns 404).
+///
+/// Drives one reconciler activation, which runs `process_deleting_group_inner`
+/// end-to-end (M2P/forwarding clear, DPD removal, underlay delete, member
+/// delete, group row delete) for groups in "Deleting". Polling around the
+/// API check is only for read-after-write visibility.
 pub(crate) async fn wait_for_group_deleted(
     cptestctx: &ControlPlaneTestContext,
     group_name: &str,
@@ -1069,22 +1089,25 @@ pub(crate) async fn wait_for_group_deleted(
     let client = &cptestctx.external_client;
     let lockstep_client = &cptestctx.lockstep_client;
 
-    match wait_for_condition_with_reconciler(
-        lockstep_client,
-        || async {
-            let group_url = mcast_group_url(group_name);
-            let response = NexusRequest::new(
-                RequestBuilder::new(client, Method::GET, &group_url)
-                    .expect_status(Some(StatusCode::NOT_FOUND)),
-            )
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await;
-            match response {
-                Ok(_) => Ok(()),
-                Err(_) => Err(CondCheckError::<()>::NotYet),
-            }
-        },
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let check = || async {
+        let group_url = mcast_group_url(group_name);
+        let response = NexusRequest::new(
+            RequestBuilder::new(client, Method::GET, &group_url)
+                .expect_status(Some(StatusCode::NOT_FOUND)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await;
+        match response {
+            Ok(_) => Ok(()),
+            Err(_) => Err(CondCheckError::<()>::NotYet),
+        }
+    };
+
+    match wait_for_condition(
+        check,
         &POLL_INTERVAL,
         &MULTICAST_OPERATION_TIMEOUT,
     )
@@ -1092,7 +1115,10 @@ pub(crate) async fn wait_for_group_deleted(
     {
         Ok(_) => {}
         Err(poll::Error::TimedOut(elapsed)) => {
-            panic!("group {group_name} was not deleted within {elapsed:?}",);
+            panic!(
+                "group {group_name} was not deleted within {elapsed:?} after \
+                 one reconciler pass",
+            );
         }
         Err(poll::Error::PermanentError(err)) => {
             panic!(
@@ -1102,10 +1128,11 @@ pub(crate) async fn wait_for_group_deleted(
     }
 }
 
-/// Wait for a multicast group to be deleted from DPD (dataplane) with reconciler activation.
+/// Wait for a multicast group to be removed from DPD (dataplane).
 ///
-/// This function waits for the DPD to report that the multicast group no longer exists
-/// (returns 404), while periodically activating the reconciler to drive the cleanup process.
+/// Drives one reconciler activation, which runs `process_deleting_group_inner`
+/// (DPD `remove_groups` by tag) for groups in "Deleting". Polling around the
+/// DPD GET is only for read-after-write visibility.
 pub(crate) async fn wait_for_group_deleted_from_dpd(
     cptestctx: &ControlPlaneTestContext,
     multicast_ip: std::net::IpAddr,
@@ -1113,17 +1140,17 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
     let lockstep_client = &cptestctx.lockstep_client;
     let dpd_client = nexus_test_utils::dpd_client(cptestctx);
 
-    match wait_for_condition_with_reconciler(
-        lockstep_client,
-        || async {
-            match dpd_client.multicast_group_get(&multicast_ip).await {
-                Ok(_) => {
-                    // Group still exists in DPD - not yet deleted
-                    Err(CondCheckError::<()>::NotYet)
-                }
-                Err(_) => Ok(()), // Group doesn't exist - deleted
-            }
-        },
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let check = || async {
+        match dpd_client.multicast_group_get(&multicast_ip).await {
+            Ok(_) => Err(CondCheckError::<()>::NotYet),
+            Err(_) => Ok(()),
+        }
+    };
+
+    match wait_for_condition(
+        check,
         &POLL_INTERVAL,
         &MULTICAST_OPERATION_TIMEOUT,
     )
@@ -1132,7 +1159,8 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
         Ok(_) => {}
         Err(poll::Error::TimedOut(elapsed)) => {
             panic!(
-                "group with IP {multicast_ip} was not deleted from DPD within {elapsed:?}",
+                "group with IP {multicast_ip} was not deleted from DPD within \
+                 {elapsed:?} after one reconciler pass",
             );
         }
         Err(poll::Error::PermanentError(err)) => {
@@ -1350,6 +1378,183 @@ pub(crate) async fn cleanup_instances(
     ops::join_all(delete_futures).await;
 }
 
+/// Wait until each listed member's stored `sled_id` matches the expected
+/// post-migration sled.
+///
+/// [`wait_for_member_state`] for "Joined" is satisfied as soon as the
+/// member is in "Joined", which can happen with the *pre-migration*
+/// `sled_id` still recorded if the reconciler has not yet re-observed
+/// the new active VMM.
+/// Tests that snapshot dataplane state immediately after migration must
+/// wait until the DB row reflects the new placement.
+///
+/// Drives one reconciler activation. The members reconciler detects the
+/// `member.sled_id != live_vmm.sled_id` skew and runs `handle_sled_migration`
+/// inline (`members.rs:704-713`), so the row is settled by the time this
+/// returns. Polling around the read is only for read-after-write visibility.
+pub(crate) async fn wait_for_member_sled_ids(
+    cptestctx: &ControlPlaneTestContext,
+    group_name: &str,
+    expected: &[(Uuid, SledUuid)],
+) {
+    let lockstep_client = &cptestctx.lockstep_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    let group_id = {
+        let group =
+            get_multicast_group(&cptestctx.external_client, group_name).await;
+        group.identity.id
+    };
+
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let check = || async {
+        let members = datastore
+            .multicast_group_members_list(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_id),
+                &DataPageParams::max_page(),
+            )
+            .await
+            .map_err(|e| {
+                CondCheckError::Failed(format!("list members failed: {e}"))
+            })?;
+
+        for (instance_id, expected_sled) in expected {
+            let member = members
+                .iter()
+                .find(|m| m.parent_id == *instance_id)
+                .ok_or(CondCheckError::NotYet)?;
+            let sled_id = member.sled_id.ok_or(CondCheckError::NotYet)?;
+            if sled_id.into_untyped_uuid() != expected_sled.into_untyped_uuid()
+            {
+                return Err(CondCheckError::Failed(format!(
+                    "member for instance {instance_id} reached sled_id \
+                     {sled_id:?} after one reconciler pass, expected \
+                     {expected_sled:?}"
+                )));
+            }
+        }
+        Ok::<_, CondCheckError<String>>(())
+    };
+
+    wait_for_condition(check, &POLL_INTERVAL, &MULTICAST_OPERATION_TIMEOUT)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "members in group {group_name} did not reach expected sled \
+                 assignments {expected:?}: {e:?}"
+            )
+        });
+}
+
+/// Migrate an instance to a specific target sled.
+///
+/// No-op if the instance is already on `target_sled`. Otherwise drives
+/// the standard request-then-simulate-source-then-simulate-target sequence
+/// used by other integration tests, returning when the instance has
+/// reached `Running` on the target.
+pub(crate) async fn migrate_instance_to(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+    target_sled: SledUuid,
+) {
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    if info.sled_id == target_sled {
+        return;
+    }
+    let source_sled = info.sled_id;
+
+    let migrate_url = format!("/instances/{instance_id}/migrate");
+    NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest { dst_sled_id: target_sled }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("should initiate migration");
+
+    let info =
+        nexus.active_instance_info(&instance_id, None).await.unwrap().unwrap();
+    let src_propolis = info.propolis_id;
+    let dst_propolis = info.dst_propolis_id.unwrap();
+
+    instance_helpers::vmm_simulate_on_sled(
+        cptestctx,
+        nexus,
+        source_sled,
+        src_propolis,
+    )
+    .await;
+    instance_helpers::instance_wait_for_state(
+        client,
+        instance_id,
+        InstanceState::Migrating,
+    )
+    .await;
+
+    instance_helpers::vmm_simulate_on_sled(
+        cptestctx,
+        nexus,
+        target_sled,
+        dst_propolis,
+    )
+    .await;
+    instance_helpers::instance_wait_for_state(
+        client,
+        instance_id,
+        InstanceState::Running,
+    )
+    .await;
+}
+
+/// Resolve the underlay admin-local IPv6 address for a multicast group
+/// given its external multicast IP.
+pub(crate) async fn fetch_underlay_admin_ip(
+    cptestctx: &ControlPlaneTestContext,
+    external_multicast_ip: IpAddr,
+) -> dpd_client::types::UnderlayMulticastIpv6 {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    let external_group = datastore
+        .multicast_group_lookup_by_ip(&opctx, external_multicast_ip)
+        .await
+        .expect("should look up external multicast group by IP");
+    let underlay_group_id = external_group
+        .underlay_group_id
+        .expect("external group should have underlay_group_id");
+    let underlay_group = datastore
+        .underlay_multicast_group_fetch(&opctx, underlay_group_id)
+        .await
+        .expect("should fetch underlay multicast group");
+
+    match underlay_group.multicast_ip.ip() {
+        IpAddr::V6(v6) => {
+            dpd_client::types::UnderlayMulticastIpv6::try_from(v6)
+                .expect("underlay IP should be admin-local IPv6")
+        }
+        IpAddr::V4(other) => {
+            panic!("expected IPv6 underlay address, got {other}")
+        }
+    }
+}
+
 /// Stop multiple instances, poking the simulated sled-agent while waiting.
 pub(crate) async fn stop_instances(
     cptestctx: &ControlPlaneTestContext,
@@ -1534,5 +1739,123 @@ pub(crate) mod ops {
         op4: impl Future<Output = T4>,
     ) -> (T1, T2, T3, T4) {
         tokio::join!(op1, op2, op3, op4)
+    }
+}
+
+/// Assert that *every* mgd in the fixture has an MRIB route for `group_ip`.
+///
+/// Iterates every switch zone present in `cptestctx.mgd`, so multi-switch
+/// fixtures (`extra_sled_agents > 0`) catch a route that is programmed only
+/// on a subset of switches.
+pub(crate) async fn assert_mrib_route_exists(
+    cptestctx: &nexus_test_utils::ControlPlaneTestContext<
+        omicron_nexus::Server,
+    >,
+    group_ip: IpAddr,
+) {
+    for_each_mgd(cptestctx, |slot, mgd_client| async move {
+        wait_for_condition::<_, (), _, _>(
+            || async {
+                let routes = mgd_client
+                    .static_list_mcast_routes()
+                    .await
+                    .unwrap()
+                    .into_inner();
+                if routes
+                    .iter()
+                    .any(|r| mrib_route_matches_group(&r.key, group_ip))
+                {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &POLL_INTERVAL,
+            &MULTICAST_OPERATION_TIMEOUT,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            panic!("mgd on {slot:?} never had a route for {group_ip}: {e:?}")
+        });
+    })
+    .await;
+}
+
+/// Assert that *no* mgd in the fixture has an MRIB route for `group_ip`.
+pub(crate) async fn assert_mrib_route_absent(
+    cptestctx: &nexus_test_utils::ControlPlaneTestContext<
+        omicron_nexus::Server,
+    >,
+    group_ip: IpAddr,
+) {
+    for_each_mgd(cptestctx, |slot, mgd_client| async move {
+        wait_for_condition::<_, (), _, _>(
+            || async {
+                let routes = mgd_client
+                    .static_list_mcast_routes()
+                    .await
+                    .unwrap()
+                    .into_inner();
+                if routes
+                    .iter()
+                    .any(|r| mrib_route_matches_group(&r.key, group_ip))
+                {
+                    Err(CondCheckError::NotYet)
+                } else {
+                    Ok(())
+                }
+            },
+            &POLL_INTERVAL,
+            &MULTICAST_OPERATION_TIMEOUT,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            panic!("mgd on {slot:?} still had a route for {group_ip}: {e:?}")
+        });
+    })
+    .await;
+}
+
+/// Run `f` against every mgd client in the fixture, in `SwitchSlot` order.
+async fn for_each_mgd<F, Fut>(
+    cptestctx: &nexus_test_utils::ControlPlaneTestContext<
+        omicron_nexus::Server,
+    >,
+    f: F,
+) where
+    F: Fn(
+        sled_agent_types::early_networking::SwitchSlot,
+        mg_admin_client::Client,
+    ) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    assert!(
+        !cptestctx.mgd.is_empty(),
+        "multicast MRIB assertions require at least one mgd in the test \
+         fixture",
+    );
+    let switches: std::collections::BTreeMap<_, _> =
+        cptestctx.mgd.iter().collect();
+    for (slot, mgd) in switches {
+        let mgd_client = mg_admin_client::Client::new(
+            &format!("http://[::1]:{}", mgd.port),
+            cptestctx.logctx.log.clone(),
+        );
+        f(*slot, mgd_client).await;
+    }
+}
+
+fn mrib_route_matches_group(
+    key: &mg_admin_client::types::MulticastRouteKey,
+    group_ip: IpAddr,
+) -> bool {
+    match (key, group_ip) {
+        (mg_admin_client::types::MulticastRouteKey::V4(k), IpAddr::V4(ip)) => {
+            k.group == ip
+        }
+        (mg_admin_client::types::MulticastRouteKey::V6(k), IpAddr::V6(ip)) => {
+            k.group == ip
+        }
+        _ => false,
     }
 }

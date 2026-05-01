@@ -46,9 +46,10 @@ use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
-    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+    InstancePathParam, VmmIssueDiskSnapshotRequestBody,
+    VmmIssueDiskSnapshotRequestPathParam, VmmIssueDiskSnapshotRequestResponse,
+    VmmPathParam, VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
+    VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::multicast::{
@@ -83,7 +84,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26, v30, v33};
+use sled_agent_types_versions::{v1, v7, v20, v25, v26, v30, v33};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -711,33 +712,96 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn vmm_join_multicast_group(
+    async fn instance_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
+        path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let id = path_params.into_inner().propolis_id;
+        let instance_id = path_params.into_inner().instance_id;
         let membership = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.instance_join_multicast_group(id, &membership).await?;
+                sa.instance_join_multicast_group(instance_id, &membership)
+                    .await?;
                 Ok(HttpResponseUpdatedNoContent())
             })
             .await
     }
 
-    async fn vmm_leave_multicast_group(
+    async fn instance_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
+        path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let id = path_params.into_inner().propolis_id;
+        let instance_id = path_params.into_inner().instance_id;
         let membership = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.instance_leave_multicast_group(id, &membership).await?;
+                sa.instance_leave_multicast_group(instance_id, &membership)
+                    .await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_join_multicast_group_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let membership = match body.into_inner() {
+            v7::instance::InstanceMulticastBody::Join(m) => m,
+            v7::instance::InstanceMulticastBody::Leave(_) => {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Join endpoint cannot process Leave operations".to_string(),
+                ));
+            }
+        };
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let Some(instance_id) =
+                    sa.instance_id_for_propolis(propolis_id).await?
+                else {
+                    // No registered VMM means no OPTE port to update.
+                    return Ok(HttpResponseUpdatedNoContent());
+                };
+                sa.instance_join_multicast_group(instance_id, &membership)
+                    .await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_leave_multicast_group_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let membership = match body.into_inner() {
+            v7::instance::InstanceMulticastBody::Leave(m) => m,
+            v7::instance::InstanceMulticastBody::Join(_) => {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Leave endpoint cannot process Join operations".to_string(),
+                ));
+            }
+        };
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let Some(instance_id) =
+                    sa.instance_id_for_propolis(propolis_id).await?
+                else {
+                    return Ok(HttpResponseUpdatedNoContent());
+                };
+                sa.instance_leave_multicast_group(instance_id, &membership)
+                    .await?;
                 Ok(HttpResponseUpdatedNoContent())
             })
             .await

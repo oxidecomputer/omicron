@@ -1844,7 +1844,8 @@ mod tests {
                 | ServiceName::RepoDepot
                 | ServiceName::ManagementGatewayService
                 | ServiceName::Dendrite
-                | ServiceName::Mgd => {
+                | ServiceName::Mgd
+                | ServiceName::Ddm => {
                     out.insert(service, Ok(()));
                 }
                 // InternalNtp is too large to fit in a single DNS packet and

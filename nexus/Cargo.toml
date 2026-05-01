@@ -150,6 +150,7 @@ nexus-reconfigurator-rendezvous.workspace = true
 nexus-types.workspace = true
 nexus-types-versions.workspace = true
 omicron-common.workspace = true
+omicron-ddm-admin-client.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true

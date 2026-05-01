@@ -287,6 +287,76 @@
         }
       }
     },
+    "/instances/{instance_id}/multicast-group": {
+      "put": {
+        "operationId": "instance_join_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InstanceUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "instance_leave_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InstanceUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "Fetch basic information about this sled",
@@ -2431,76 +2501,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InstanceExternalIpBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/vmms/{propolis_id}/multicast-group": {
-      "put": {
-        "operationId": "vmm_join_multicast_group",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "propolis_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/PropolisUuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastMembership"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "vmm_leave_multicast_group",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "propolis_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/PropolisUuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastMembership"
               }
             }
           },

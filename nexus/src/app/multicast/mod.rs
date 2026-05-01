@@ -47,7 +47,7 @@
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use ref_cast::RefCast;
@@ -61,7 +61,7 @@ use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSource
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::multicast;
 use nexus_types::multicast::MulticastGroupCreate;
-use omicron_common::address::is_ssm_address;
+use omicron_common::address::{UNDERLAY_MULTICAST_SUBNET, is_ssm_address};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
     IdentityMetadataCreateParams, ListResultVec, LookupResult,
@@ -71,6 +71,7 @@ use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 pub(crate) mod dataplane;
 pub(crate) mod sled;
+pub(crate) mod switch_zone;
 
 /// Validate that SSM addresses have source IPs.
 ///
@@ -857,6 +858,76 @@ fn generate_group_name_from_ip(
             "IP should be valid as group name: {ip}"
         ))
     })
+}
+
+/// Maps an external multicast address to an underlay address in ff04::/64.
+///
+/// Maps external addresses into [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64,
+/// a subset of the admin-local scope ff04::/16 per RFC 7346) using XOR-fold.
+/// This prefix is static for consistency across racks.
+///
+/// See [RFC 7346] for IPv6 multicast admin-local scope.
+///
+/// # Salt Parameter (Collision Avoidance)
+///
+/// The `salt` enables collision avoidance via XOR perturbation. XOR is
+/// bijective: distinct salts produce distinct outputs (since
+/// `a ^ b = a ^ c` implies `b = c`), guaranteeing 256 unique addresses
+/// per external IP.
+///
+/// On collision (underlay IP already in use), the caller increments
+/// salt and retries. The successful salt is stored with the group for
+/// deterministic reconstruction.
+///
+/// # Implementation
+///
+/// ```text
+/// underlay_ip = ff04:: | ((xor_fold(external_ip) ^ salt) & HOST_MASK)
+/// ```
+///
+/// - IPv4: embedded directly (32 bits fits in 64-bit host space)
+/// - IPv6: XOR upper and lower 64-bit halves to fold 128 to 64 bits
+/// - Salt in [0, 255]: XORed into host bits for collision retry
+///
+/// The `& HOST_MASK` guarantees the result stays within ff04::/64.
+///
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+pub(crate) fn map_external_to_underlay_ip(
+    external_ip: IpAddr,
+    salt: u8,
+) -> IpAddr {
+    const HOST_BITS: u32 = 128 - UNDERLAY_MULTICAST_SUBNET.width() as u32;
+    let prefix_base =
+        u128::from_be_bytes(UNDERLAY_MULTICAST_SUBNET.addr().octets());
+
+    map_external_to_underlay_ip_impl(prefix_base, HOST_BITS, external_ip, salt)
+}
+
+/// Core implementation separated for testing with custom prefix/host_bits.
+pub(crate) fn map_external_to_underlay_ip_impl(
+    prefix_base: u128,
+    host_bits: u32,
+    external_ip: IpAddr,
+    salt: u8,
+) -> IpAddr {
+    let host_mask: u128 =
+        if host_bits >= 128 { u128::MAX } else { (1u128 << host_bits) - 1 };
+
+    let host_value: u128 = match external_ip {
+        IpAddr::V4(ipv4) => u128::from(u32::from_be_bytes(ipv4.octets())),
+        IpAddr::V6(ipv6) => {
+            let full = u128::from_be_bytes(ipv6.octets());
+            if host_bits >= 128 {
+                full
+            } else {
+                (full >> host_bits) ^ (full & host_mask)
+            }
+        }
+    };
+
+    let salted = (host_value ^ u128::from(salt)) & host_mask;
+    let underlay = prefix_base | salted;
+    IpAddr::V6(Ipv6Addr::from(underlay.to_be_bytes()))
 }
 
 #[cfg(test)]

@@ -150,19 +150,21 @@ async fn mgde_fetch_group_data(
         .await
         .map_err(saga_action_failed)?;
 
-    // Validate groups are in correct state
+    // "Active" is allowed for crash recovery. Rejecting would tear
+    // down correctly-applied DPD state.
     match external_group.state {
-        nexus_db_model::MulticastGroupState::Creating => {}
+        nexus_db_model::MulticastGroupState::Creating
+        | nexus_db_model::MulticastGroupState::Active => {}
         other_state => {
             warn!(
                 osagactx.log(),
-                "external group not in 'Creating' state for DPD";
+                "external group not in 'Creating' or 'Active' state for DPD";
                 "external_group_id" => %params.external_group_id,
                 "external_group_name" => external_group.name().as_str(),
                 "current_state" => ?other_state
             );
             return Err(saga_action_failed(Error::internal_error(&format!(
-                "External group {} is in state {other_state:?}, expected 'Creating'",
+                "External group {} is in state {other_state:?}, expected 'Creating' or 'Active'",
                 params.external_group_id
             ))));
         }
@@ -454,12 +456,16 @@ mod test {
         );
     }
 
-    /// Test that the saga rejects external groups that are not in "Creating" state.
+    /// Test that the saga accepts "Active" groups (idempotent crash recovery)
+    /// but still rejects groups that are no longer in flight.
     ///
-    /// The saga validates that external groups are in "Creating" state before applying
-    /// DPD configuration. This test verifies that validation works correctly.
+    /// `mgde_fetch_group_data` allows "Creating" and "Active". Re-running the
+    /// saga over a group whose `mgde_update_group_state` already committed
+    /// must succeed through the original DAG so recovery does not roll back
+    /// correctly-applied DPD state. Other states (e.g., "Deleted") are still
+    /// out of scope and must be rejected.
     #[nexus_test(server = crate::Server)]
-    async fn test_saga_rejects_non_creating_state(
+    async fn test_saga_accepts_active_rejects_terminal_state(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
@@ -539,19 +545,44 @@ mod test {
             .await
             .expect("Group should transition to Active state");
 
-        // Try to run saga on Active group - should fail
+        // Re-running the saga on an "Active" group simulates crash-recovery
+        // re-execution: every action is idempotent, so the saga must succeed
+        // through the original DAG rather than triggering rollback that would
+        // tear down correctly-applied DPD state.
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             external_group_id: external_group.id(),
             underlay_group_id: underlay_group.id,
         };
 
+        nexus
+            .sagas
+            .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
+            .await
+            .expect("Saga should re-run idempotently against an Active group");
+
+        // Transition the group to "Deleting" and re-run the saga. The saga
+        // must refuse to run against a group that is no longer in "Creating"
+        // or "Active".
+        let marked = datastore
+            .mark_multicast_group_for_removal_if_no_members(&opctx, group_id)
+            .await
+            .expect("group should mark for removal");
+        assert!(marked, "group should transition to Deleting");
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            external_group_id: external_group.id(),
+            underlay_group_id: underlay_group.id,
+        };
         let result = nexus
             .sagas
             .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
             .await;
-
-        // Saga should reject Active group
-        assert!(result.is_err(), "Saga should reject group in Active state");
+        assert!(
+            result.is_err(),
+            "Saga should reject group that is no longer in 'Creating' or \
+             'Active'",
+        );
     }
 }

@@ -3003,6 +3003,7 @@ mod tests {
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            &[],
         );
 
         let cleanup_context = CleanupContext::default();

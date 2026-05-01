@@ -38,8 +38,8 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
-    SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, InstanceUuid, PhysicalDiskUuid, PropolisUuid,
+    SledUuid, SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::{IpNet, Ipv6Net};
 use propolis_client::instance_spec::FileStorageBackend;
@@ -111,9 +111,9 @@ pub struct SledAgent {
     /// subnets attached to instances.
     pub attached_subnets:
         Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
-    /// multicast group memberships for instances
-    pub multicast_groups:
-        Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
+    /// multicast group memberships, keyed by instance.
+    pub instance_multicast_groups:
+        Mutex<HashMap<InstanceUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
@@ -198,7 +198,7 @@ impl SledAgent {
             mcast_fwd: Mutex::new(HashMap::new()),
             external_ips: Mutex::new(HashMap::new()),
             attached_subnets: Mutex::new(HashMap::new()),
-            multicast_groups: Mutex::new(HashMap::new()),
+            instance_multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
@@ -861,39 +861,21 @@ impl SledAgent {
 
     pub async fn instance_join_multicast_group(
         &self,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
-            return Err(Error::internal_error(
-                "can't join multicast group for VMM that's not registered",
-            ));
-        }
-
-        let mut groups = self.multicast_groups.lock().unwrap();
-        let my_groups = groups.entry(propolis_id).or_default();
-
-        my_groups.insert(membership.clone());
-
+        let mut groups = self.instance_multicast_groups.lock().unwrap();
+        groups.entry(instance_id).or_default().insert(membership.clone());
         Ok(())
     }
 
     pub async fn instance_leave_multicast_group(
         &self,
-        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
-            return Err(Error::internal_error(
-                "can't leave multicast group for VMM that's not registered",
-            ));
-        }
-
-        let mut groups = self.multicast_groups.lock().unwrap();
-        let my_groups = groups.entry(propolis_id).or_default();
-
-        my_groups.remove(membership);
-
+        let mut groups = self.instance_multicast_groups.lock().unwrap();
+        groups.entry(instance_id).or_default().remove(membership);
         Ok(())
     }
 

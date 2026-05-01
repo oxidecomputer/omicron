@@ -275,9 +275,9 @@ dependencies = [
 
 [[package]]
 name = "assert_cmd"
-version = "2.1.2"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c5bcfa8749ac45dd12cb11055aeeb6b27a3895560d60d71e3c23bf979e60514"
+checksum = "39bae1d3fa576f7c6519514180a72559268dd7d1fe104070956cb687bc6673bd"
 dependencies = [
  "anstyle",
  "bstr",
@@ -1239,9 +1239,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.20.6"
+version = "0.20.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78cef5b5a1a6827c7322ae2a636368a573006b27cfa76c7ebd53e834daeaab6a"
+checksum = "3c6b04e07d8080154ed4ac03546d9a2b303cc2fe1901ba0b35b301516e289368"
 dependencies = [
  "smallvec 1.15.1",
  "target-lexicon",
@@ -1741,10 +1741,11 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad#1ddaa5d6b101fbaa2c29eca847111cbef1a272ad"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194#cc8e02a0800034c431c8cf96b889ea638da3d194"
 dependencies = [
  "anyhow",
  "chrono",
+ "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
  "rand 0.9.2",
  "schemars 0.8.22",
@@ -1762,11 +1763,10 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194#cc8e02a0800034c431c8cf96b889ea638da3d194"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091#e10e4f5a993fe950ab1b478abb5dcbfa7aa92091"
 dependencies = [
  "anyhow",
  "chrono",
- "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
  "rand 0.9.2",
  "schemars 0.8.22",
@@ -2525,7 +2525,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=4d1f20f793da102b29b914569725ebc9fdf746dd#4d1f20f793da102b29b914569725ebc9fdf746dd"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c3c3032f8bdc91d6faf2b36e05b8375a0980765c#c3c3032f8bdc91d6faf2b36e05b8375a0980765c"
 dependencies = [
  "oxnet",
  "progenitor 0.13.0",
@@ -3108,30 +3108,6 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad#1ddaa5d6b101fbaa2c29eca847111cbef1a272ad"
-dependencies = [
- "async-trait",
- "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad)",
- "crc8",
- "futures",
- "http",
- "oxnet",
- "progenitor 0.13.0",
- "regress",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "tokio",
- "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
- "uuid",
-]
-
-[[package]]
-name = "dpd-client"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194#cc8e02a0800034c431c8cf96b889ea638da3d194"
 dependencies = [
  "async-trait",
@@ -3144,6 +3120,30 @@ dependencies = [
  "progenitor 0.11.2",
  "regress",
  "reqwest 0.12.28",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+ "tokio",
+ "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
+ "uuid",
+]
+
+[[package]]
+name = "dpd-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091#e10e4f5a993fe950ab1b478abb5dcbfa7aa92091"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091)",
+ "crc8",
+ "futures",
+ "http",
+ "oxnet",
+ "progenitor 0.13.0",
+ "regress",
+ "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -6200,11 +6200,11 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5297962ef19edda4ce33aaa484386e0a5b3d7f2f4e037cbeee00503ef6b29d33"
+checksum = "14e6ba06f0ade6e504aff834d7c34298e5155c6baca353cc6a4aaff2f9fd7f33"
 dependencies = [
- "anstream 0.6.21",
+ "anstream 1.0.0",
  "anstyle",
  "clap",
  "escape8259",
@@ -6247,18 +6247,18 @@ checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linkme"
-version = "0.3.35"
+version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e3283ed2d0e50c06dd8602e0ab319bb048b6325d0bba739db64ed8205179898"
+checksum = "e83272d46373fb8decca684579ac3e7c8f3d71d4cc3aa693df8759e260ae41cf"
 dependencies = [
  "linkme-impl",
 ]
 
 [[package]]
 name = "linkme-impl"
-version = "0.3.35"
+version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5cec0ec4228b4853bb129c84dbf093a27e6c7a20526da046defc334a1b017f7"
+checksum = "32d59e20403c7d08fe62b4376edfe5c7fb2ef1e6b1465379686d0f21c8df444b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6503,7 +6503,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=4d1f20f793da102b29b914569725ebc9fdf746dd#4d1f20f793da102b29b914569725ebc9fdf746dd"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c3c3032f8bdc91d6faf2b36e05b8375a0980765c#c3c3032f8bdc91d6faf2b36e05b8375a0980765c"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -7648,7 +7648,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091)",
  "dropshot 0.16.7",
  "futures",
  "gateway-messages",
@@ -8594,7 +8594,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091)",
  "dropshot 0.16.7",
  "ereport-types",
  "expectorate",
@@ -8660,6 +8660,7 @@ dependencies = [
  "num-integer",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-ddm-admin-client",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9231,6 +9232,7 @@ dependencies = [
  "reqwest 0.13.2",
  "ring",
  "rustls 0.22.4",
+ "schemars 0.8.22",
  "serde",
  "sha2",
  "slog",
@@ -11698,7 +11700,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=4d1f20f793da102b29b914569725ebc9fdf746dd#4d1f20f793da102b29b914569725ebc9fdf746dd"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c3c3032f8bdc91d6faf2b36e05b8375a0980765c#c3c3032f8bdc91d6faf2b36e05b8375a0980765c"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -14505,9 +14507,9 @@ checksum = "df7f62577c25e07834649fc3b39fafdc597c0a3527dc1c60129201ccfcbaa50c"
 
 [[package]]
 name = "target-spec"
-version = "3.5.7"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "585c173ce474b6257cfb2a107949e48eb1ab9cae21cecbdf13401ae3be4a411a"
+checksum = "b00e973676af5497c2a69cc9787e2205c00f3b6f4f70e7d7b0112e28aa84b501"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
@@ -16697,7 +16699,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091)",
  "dropshot 0.16.7",
  "gateway-client",
  "gateway-types",
@@ -16762,7 +16764,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=1ddaa5d6b101fbaa2c29eca847111cbef1a272ad)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e10e4f5a993fe950ab1b478abb5dcbfa7aa92091)",
  "dropshot 0.16.7",
  "either",
  "expectorate",

@@ -399,6 +399,7 @@ impl DnsConfigBuilder {
         dendrite_port: u16,
         mgs_port: u16,
         mgd_port: u16,
+        ddm_port: u16,
     ) -> anyhow::Result<()> {
         let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
         self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
@@ -407,7 +408,8 @@ impl DnsConfigBuilder {
             &zone,
             mgs_port,
         )?;
-        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
+        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)?;
+        self.service_backend_zone(ServiceName::Ddm, &zone, ddm_port)
     }
 
     /// Higher-level shorthand for adding a Nexus zone with both its internal
@@ -779,6 +781,8 @@ mod test {
             "_oximeter-reader._tcp",
         );
         assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);
+        assert_eq!(ServiceName::Mgd.dns_name(), "_mgd._tcp",);
+        assert_eq!(ServiceName::Ddm.dns_name(), "_ddm._tcp",);
         assert_eq!(
             ServiceName::CruciblePantry.dns_name(),
             "_crucible-pantry._tcp",
@@ -794,6 +798,33 @@ mod test {
             ServiceName::Crucible(zone_uuid).dns_name(),
             "_crucible._tcp.00000000-0000-0000-0000-000000000000",
         );
+    }
+
+    #[test]
+    fn host_zone_switch_publishes_all_services() {
+        let sled_uuid: SledUuid =
+            "001de000-51ed-4000-8000-000000000001".parse().unwrap();
+        let switch_zone_ip = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+
+        let mut b = DnsConfigBuilder::new();
+        b.host_zone_switch(sled_uuid, switch_zone_ip, 1, 2, 3, 4).unwrap();
+        let config = b.build_full_config_for_initial_generation();
+
+        let services: std::collections::BTreeSet<_> = config
+            .zones
+            .iter()
+            .flat_map(|z| z.records.iter())
+            .map(|(name, _)| name.as_str())
+            .collect();
+        for expected in
+            ["_dendrite._tcp", "_mgs._tcp", "_mgd._tcp", "_ddm._tcp"]
+        {
+            assert!(
+                services.contains(expected),
+                "expected {expected} in published switch-zone services; \
+                 got {services:?}"
+            );
+        }
     }
 
     #[test]

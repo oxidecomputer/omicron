@@ -4,6 +4,7 @@
 
 //! Manager for all OPTE ports on a Helios system
 
+use crate::addrobj::AddrObject;
 use crate::dladm::OPTE_LINK_PREFIX;
 use crate::opte::AttachedSubnet;
 use crate::opte::EnsureAttachedSubnetResult;
@@ -89,6 +90,7 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::net::UdpSocket;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
@@ -160,6 +162,32 @@ struct PortManagerInner {
     ///
     /// IGW IDs are specific to the VPC of each NIC.
     eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
+
+    /// Underlay NIC interface names (e.g., "cxgbe0", "cxgbe1").
+    ///
+    /// Used to program NIC multicast MAC filters via
+    /// `UdpSocket::join_multicast_v6`.
+    // Empty in tests where no real underlay NICs exist.
+    underlay_nics: Vec<String>,
+
+    /// UDP sockets held open to maintain NIC multicast MAC filters.
+    ///
+    /// On T6 hardware the NIC will not deliver multicast frames to
+    /// xde unless the corresponding multicast MAC filter is programmed.
+    /// Joining an IPv6 multicast group on a UDP socket causes the
+    /// kernel to call `mac_multicast_add` on the interface, which
+    /// programs the filter. The socket receives no data (xde's
+    /// siphon/flow hook intercepts first) and exists solely to hold
+    /// the filter entry.
+    ///
+    /// Dropping the socket removes the filter.
+    ///
+    /// See <https://github.com/oxidecomputer/opte/issues/908>.
+    //
+    // Leaf lock: acquiring this while another `PortManagerInner` lock is held
+    // breaks the acyclic graph. The locked region must not call back
+    // into `PortManager`, as `std::sync::Mutex` is non-reentrant.
+    mcast_underlay_sockets: Mutex<HashMap<Ipv6Addr, UdpSocket>>,
 }
 
 impl PortManagerInner {
@@ -375,8 +403,17 @@ pub struct PortManager {
 }
 
 impl PortManager {
-    /// Create a new manager, for creating OPTE ports
-    pub fn new(log: Logger, underlay_ip: Ipv6Addr) -> Self {
+    /// Create a new manager, for creating OPTE ports.
+    ///
+    /// When `underlay_nics` is non-empty, the constructor performs kernel
+    /// I/O: one ioctl to list existing M2P mappings, then one
+    /// `setsockopt(IPV6_JOIN_GROUP)` per mapping per NIC to rehydrate
+    /// multicast MAC filters.
+    pub fn new(
+        log: Logger,
+        underlay_ip: Ipv6Addr,
+        underlay_nics: &[AddrObject],
+    ) -> Self {
         let inner = Arc::new(PortManagerInner {
             log,
             next_port_id: AtomicU64::new(0),
@@ -384,9 +421,108 @@ impl PortManager {
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
             eip_gateways: Mutex::new(Default::default()),
+            underlay_nics: underlay_nics
+                .iter()
+                .map(|n| n.interface().to_string())
+                .collect(),
+            mcast_underlay_sockets: Mutex::new(HashMap::new()),
         });
 
-        Self { inner }
+        let mgr = Self { inner };
+
+        // Rehydrate MAC filter sockets for any M2P mappings that
+        // survived in the xde kernel module across a sled-agent
+        // restart. Without this, the NIC's multicast MAC filters
+        // are lost when the old process exits.
+        //
+        // Eager rehydration occurs here, not a lazy approach: the Nexus
+        // convergence loop's `converge_m2p` treats an M2P present on both
+        // DB and sled as already converged and never re-applies `set_mcast_m2p`,
+        // so a missing MAC filter would never be healed by convergence alone.
+        //
+        // Cost: one `dump_m2p` ioctl plus one `setsockopt(IPV6_JOIN_GROUP)`
+        // per surviving group per underlay NIC. Bounded by active groups on
+        // this sled and runs only at sled-agent startup.
+        mgr.rehydrate_underlay_multicast_filters();
+
+        mgr
+    }
+
+    /// Re-open underlay multicast filter sockets for M2P mappings
+    /// that already exist in the xde kernel module.
+    ///
+    /// Called at startup to cover the sled-agent restart case where
+    /// OPTE kernel state persists but userspace socket state is lost.
+    ///
+    /// On a cold boot (no prior xde state), `list_mcast_m2p` returns
+    /// an error or an empty list.
+    fn rehydrate_underlay_multicast_filters(&self) {
+        if self.inner.underlay_nics.is_empty() {
+            return;
+        }
+
+        let mappings = match self.list_mcast_m2p() {
+            Ok(m) => m,
+            Err(e) => {
+                // Expected on cold boot when xde has no prior state.
+                debug!(
+                    self.inner.log,
+                    "No M2P mappings to rehydrate";
+                    "error" => InlineErrorChain::new(&e),
+                );
+                return;
+            }
+        };
+
+        let mut failed: Vec<String> = Vec::new();
+        for mapping in &mappings {
+            if self.join_underlay_multicast_group(mapping.underlay) {
+                continue;
+            }
+            // Clear the surviving xde M2P entry so `converge_m2p` sees
+            // the gap on its next pass and re-issues `set_mcast_m2p`,
+            // which retries the underlay join. Without this, the entry
+            // stays in xde and convergence treats it as already
+            // converged, leaving the group black-holed until cycled
+            // inactive→active.
+            let clear_req = ClearMcast2Phys {
+                group: mapping.group,
+                underlay: mapping.underlay,
+            };
+            if let Err(e) = self.clear_mcast_m2p(&clear_req) {
+                warn!(
+                    self.inner.log,
+                    "Failed to clear M2P after rehydration join failure, \
+                     group will stay black-holed until convergence retries";
+                    "group" => %mapping.group,
+                    "underlay" => %mapping.underlay,
+                    "error" => InlineErrorChain::new(&e),
+                );
+            }
+            failed.push(mapping.underlay.to_string());
+        }
+
+        let total = mappings.len();
+        let succeeded = total - failed.len();
+        if !mappings.is_empty() {
+            info!(
+                self.inner.log,
+                "Rehydrated underlay multicast filter sockets";
+                "succeeded" => succeeded,
+                "total" => total,
+            );
+        }
+        if !failed.is_empty() {
+            warn!(
+                self.inner.log,
+                "Some underlay multicast filter sockets failed to \
+                 rehydrate; M2P entries cleared so convergence will \
+                 reissue on the next pass";
+                "failed_count" => failed.len(),
+                "total" => total,
+                "failed_underlay_addrs" => ?failed,
+            );
+        }
     }
 
     pub fn underlay_ip(&self) -> &Ipv6Addr {
@@ -927,6 +1063,10 @@ impl PortManager {
     }
 
     /// Install a multicast overlay-to-underlay (M2P) mapping in OPTE.
+    ///
+    /// This setter also programs the underlay NIC multicast MAC filters by
+    /// joining the underlay IPv6 multicast group on a UDP socket, ensuring the
+    /// NIC delivers frames to xde. See `mcast_underlay_sockets` docs.
     pub fn set_mcast_m2p(&self, req: &Mcast2PhysMapping) -> Result<(), Error> {
         let addr: Ipv6Addr = req.underlay;
 
@@ -941,10 +1081,16 @@ impl PortManager {
             .map_err(|_| Error::InvalidMcastUnderlay(addr))?;
         let hdl = Handle::new()?;
         hdl.set_m2p(&SetMcast2PhysReq { group: req.group.into(), underlay })?;
+
+        self.join_underlay_multicast_group(addr);
+
         Ok(())
     }
 
     /// Remove a multicast overlay-to-underlay (M2P) mapping from OPTE.
+    ///
+    /// Drops the corresponding underlay MAC filter socket, removing the
+    /// NIC multicast MAC filter entry.
     pub fn clear_mcast_m2p(&self, req: &ClearMcast2Phys) -> Result<(), Error> {
         let addr: Ipv6Addr = req.underlay;
 
@@ -962,7 +1108,143 @@ impl PortManager {
             group: req.group.into(),
             underlay,
         })?;
+
+        self.leave_underlay_multicast_group(addr);
+
         Ok(())
+    }
+
+    /// Join an underlay IPv6 multicast group on all underlay NICs via a
+    /// UDP socket, programming the NIC's multicast MAC filters.
+    ///
+    /// On T6 hardware the NIC drops multicast frames unless the
+    /// corresponding MAC filter is installed. Joining the group on a
+    /// socket triggers `mac_multicast_add` in the kernel. The socket
+    /// receives no data, as xde intercepts first.
+    ///
+    /// The cxgbe driver supports [at most 336 multicast filter
+    /// entries][cxgbe-mcast-limit] per interface. Beyond that, joins
+    /// will fail and the NIC will not deliver frames for those groups.
+    ///
+    /// Failures are logged but not propagated. The M2P mapping in OPTE
+    /// is the primary requirement, and MAC filter programming is
+    /// best-effort (e.g., NIC transiently unplumbed at boot, cxgbe
+    /// multicast filter table exhausted). See [opte#908] for context.
+    ///
+    /// [cxgbe-mcast-limit]: https://github.com/oxidecomputer/illumos-gate/blob/c43b3b549678498219f87d7bb5882e9a9a904ade/usr/src/uts/common/io/cxgbe/t4nex/t4_mac.c#L759-L765
+    /// [opte#908]: https://github.com/oxidecomputer/opte/issues/908
+    fn join_underlay_multicast_group(&self, addr: Ipv6Addr) -> bool {
+        if self.inner.underlay_nics.is_empty() {
+            return false;
+        }
+
+        let mut sockets = self.inner.mcast_underlay_sockets.lock().unwrap();
+        if sockets.contains_key(&addr) {
+            return true;
+        }
+
+        let sock = match UdpSocket::bind("[::]:0") {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(
+                    self.inner.log,
+                    "Failed to bind UDP socket for underlay multicast filter";
+                    "addr" => %addr,
+                    "error" => %e,
+                );
+                return false;
+            }
+        };
+
+        // Minimize the receive buffer. This socket exists solely to
+        // trigger MAC filter programming. xde intercepts packets before
+        // they reach the socket. The small buffer limits resource waste
+        // if that invariant is ever violated.
+        if let Err(e) = sock.set_nonblocking(true) {
+            warn!(
+                self.inner.log,
+                "Failed to set underlay multicast socket non-blocking";
+                "addr" => %addr,
+                "error" => %e,
+            );
+        }
+        // The kernel may round up from 1 to its own minimum.
+        let _ = unsafe {
+            libc::setsockopt(
+                std::os::unix::io::AsRawFd::as_raw_fd(&sock),
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &1i32 as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            )
+        };
+
+        let joined_any = self
+            .inner
+            .underlay_nics
+            .iter()
+            .filter_map(|nic_name| {
+                let if_index = nix::net::if_::if_nametoindex(nic_name.as_str())
+                    .map_err(|e| {
+                        warn!(
+                            self.inner.log,
+                            "Failed to resolve underlay NIC index";
+                            "nic" => nic_name,
+                            "error" => %e,
+                        );
+                    })
+                    .ok()?;
+
+                sock.join_multicast_v6(&addr, if_index)
+                    .map_err(|e| {
+                        warn!(
+                            self.inner.log,
+                            "Failed to join underlay multicast group on NIC";
+                            "addr" => %addr,
+                            "nic" => nic_name,
+                            "if_index" => if_index,
+                            "error" => %e,
+                        );
+                    })
+                    .ok()?;
+
+                debug!(
+                    self.inner.log,
+                    "Joined underlay multicast group on NIC";
+                    "addr" => %addr,
+                    "nic" => nic_name,
+                    "if_index" => if_index,
+                );
+                Some(())
+            })
+            .count()
+            > 0;
+
+        if joined_any {
+            sockets.insert(addr, sock);
+            true
+        } else {
+            warn!(
+                self.inner.log,
+                "no NIC joins succeeded for underlay multicast group, \
+                 will retry on next call";
+                "addr" => %addr,
+            );
+            false
+        }
+    }
+
+    /// Drop the UDP socket for an underlay multicast address, removing
+    /// the NIC MAC filter entries.
+    fn leave_underlay_multicast_group(&self, addr: Ipv6Addr) {
+        let mut sockets = self.inner.mcast_underlay_sockets.lock().unwrap();
+        if sockets.remove(&addr).is_some() {
+            debug!(
+                self.inner.log,
+                "Removed underlay multicast filter socket";
+                "addr" => %addr,
+            );
+        }
     }
 
     /// Set multicast forwarding next hops for an underlay group address.
@@ -1536,6 +1818,8 @@ impl Drop for PortTicket {
 mod tests {
     use super::PortCreateParams;
     use super::PortManager;
+    #[cfg(target_os = "illumos")]
+    use crate::addrobj::AddrObject;
     use crate::opte::Error;
     use crate::opte::Handle;
     use macaddr::MacAddr6;
@@ -1570,17 +1854,70 @@ mod tests {
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    #[cfg(target_os = "illumos")]
+    use std::time::Duration;
+    #[cfg(target_os = "illumos")]
+    use std::time::Instant;
     use uuid::Uuid;
 
     // Maximum ephemeral port number for source NAT (14-bit range).
     const MAX_PORT: u16 = (1 << 14) - 1;
+
+    /// Loopback interface name on illumos. Tests that verify kernel
+    /// IPv6 multicast membership are illumos-only because they shell
+    /// out to illumos's `netstat -g -f inet6`.
+    #[cfg(target_os = "illumos")]
+    const LOOPBACK_IF: &str = "lo0";
+
+    /// Returns `true` iff `netstat -g -f inet6` reports `group` as a
+    /// membership on `interface`.
+    ///
+    /// Used to verify that `join_multicast_v6`/leave on the filter
+    /// socket actually reached the kernel's IP layer for the named
+    /// underlay NIC, rather than just updating the in-process
+    /// `mcast_underlay_sockets` map.
+    #[cfg(target_os = "illumos")]
+    fn netstat_v6_has_membership(interface: &str, group: &Ipv6Addr) -> bool {
+        let out = std::process::Command::new("netstat")
+            .args(["-g", "-n", "-f", "inet6"])
+            .output()
+            .expect("netstat -g invocation failed");
+        let group_str = group.to_string();
+        String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+            let mut fields = line.split_whitespace();
+            if let (Some(iface), Some(grp)) = (fields.next(), fields.next()) {
+                iface == interface && grp == group_str
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Poll `netstat -g` until membership matches `expected`, panicking
+    /// on timeout. The kernel should update synchronously on the join
+    /// or leave syscall, but polling absorbs possible transient delay.
+    #[cfg(target_os = "illumos")]
+    fn poll_v6_membership(interface: &str, group: &Ipv6Addr, expected: bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if netstat_v6_has_membership(interface, group) == expected {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!(
+            "timeout: membership for {group} on {interface} expected {}",
+            if expected { "present" } else { "absent" }
+        );
+    }
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
     #[test]
     fn multiple_ports_does_not_destroy_default_route() {
         let logctx =
             test_setup_log("multiple_ports_does_not_destroy_default_route");
-        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
         let default_ipv4_route =
             IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
         let default_ipv6_route =
@@ -2308,7 +2645,8 @@ mod tests {
     #[test]
     fn multicast_groups_ensure_diffing() {
         let logctx = test_setup_log("multicast_groups_ensure_diffing");
-        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
 
         let handle = Handle::new().unwrap();
         handle.set_xde_underlay("underlay0", "underlay1").unwrap();
@@ -2450,7 +2788,8 @@ mod tests {
     #[test]
     fn multicast_port_deletion_cleanup() {
         let logctx = test_setup_log("multicast_port_deletion_cleanup");
-        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
 
         let handle = Handle::new().unwrap();
         handle.set_xde_underlay("underlay0", "underlay1").unwrap();
@@ -2544,7 +2883,8 @@ mod tests {
     #[test]
     fn multicast_ensure_missing_port_error() {
         let logctx = test_setup_log("multicast_ensure_missing_port_error");
-        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
 
         let nic_id = Uuid::new_v4();
         let nic_kind = NetworkInterfaceKind::Instance { id: Uuid::new_v4() };
@@ -2564,6 +2904,182 @@ mod tests {
             other => {
                 panic!("expected MulticastUpdateMissingPort, got {other:?}")
             }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verify that `set_mcast_m2p` programs underlay NIC multicast MAC
+    /// filters via UDP socket join and that `clear_mcast_m2p` removes them.
+    ///
+    /// Asserts both the in-process `mcast_underlay_sockets` bookkeeping
+    /// and kernel-level IPv6 group membership on the underlay interface
+    /// (observable via `netstat -g -f inet6`). Kernel-level verification
+    /// is what ensures `join_multicast_v6` actually reached IP and, on
+    /// actual hardware, would drive `mac_multicast_add` to program the
+    /// NIC filter.
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn underlay_multicast_mac_filter_lifecycle() {
+        let logctx = test_setup_log("underlay_multicast_mac_filter_lifecycle");
+        let nics = vec![AddrObject::new_control(LOOPBACK_IF).unwrap()];
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &nics);
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
+
+        // ff04::1 is within the underlay multicast subnet.
+        let underlay: Ipv6Addr = "ff04::1".parse().unwrap();
+        let group: IpAddr = "239.10.10.1".parse().unwrap();
+
+        let req =
+            sled_agent_types::multicast::Mcast2PhysMapping { group, underlay };
+
+        // Prefligt check: the group must not already be joined on the
+        // underlay interface.
+        assert!(
+            !netstat_v6_has_membership(LOOPBACK_IF, &underlay),
+            "unexpected pre-existing membership {underlay} on {LOOPBACK_IF}",
+        );
+
+        // Set M2P -> socket should be created and kernel should show join.
+        manager.set_mcast_m2p(&req).unwrap();
+        {
+            let sockets = manager.inner.mcast_underlay_sockets.lock().unwrap();
+            assert!(
+                sockets.contains_key(&underlay),
+                "Socket should exist after set_mcast_m2p"
+            );
+        }
+        poll_v6_membership(LOOPBACK_IF, &underlay, true);
+
+        // Setting the same M2P again should be idempotent.
+        manager.set_mcast_m2p(&req).unwrap();
+        {
+            let sockets = manager.inner.mcast_underlay_sockets.lock().unwrap();
+            assert_eq!(
+                sockets.len(),
+                1,
+                "Duplicate set_mcast_m2p should not create extra sockets"
+            );
+        }
+        assert!(
+            netstat_v6_has_membership(LOOPBACK_IF, &underlay),
+            "membership should still be present after idempotent re-set"
+        );
+
+        // Clear M2P -> socket should be removed and kernel membership gone.
+        let clear_req =
+            sled_agent_types::multicast::ClearMcast2Phys { group, underlay };
+        manager.clear_mcast_m2p(&clear_req).unwrap();
+        {
+            let sockets = manager.inner.mcast_underlay_sockets.lock().unwrap();
+            assert!(
+                !sockets.contains_key(&underlay),
+                "Socket should be removed after clear_mcast_m2p"
+            );
+        }
+        poll_v6_membership(LOOPBACK_IF, &underlay, false);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verify that rehydration at startup reopens filter sockets for
+    /// M2P mappings that survived in mock xde state across a
+    /// PortManager drop (simulating sled-agent restart).
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn underlay_multicast_mac_filter_rehydration() {
+        let logctx =
+            test_setup_log("underlay_multicast_mac_filter_rehydration");
+        let nics = vec![AddrObject::new_control(LOOPBACK_IF).unwrap()];
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
+
+        // Use a distinct underlay address to avoid collisions with
+        // other tests sharing the static OPTE_STATE.
+        let underlay: Ipv6Addr = "ff04::99".parse().unwrap();
+        let group: IpAddr = "239.10.10.99".parse().unwrap();
+
+        let req =
+            sled_agent_types::multicast::Mcast2PhysMapping { group, underlay };
+
+        // Phase 1: first PortManager sets M2P (populates mock xde state).
+        {
+            let mgr1 = PortManager::new(
+                logctx.log.clone(),
+                Ipv6Addr::LOCALHOST,
+                &nics,
+            );
+            mgr1.set_mcast_m2p(&req).unwrap();
+            {
+                let sockets = mgr1.inner.mcast_underlay_sockets.lock().unwrap();
+                assert!(sockets.contains_key(&underlay));
+            }
+            poll_v6_membership(LOOPBACK_IF, &underlay, true);
+        }
+
+        // mgr1 dropped: socket closed, kernel membership removed.
+        poll_v6_membership(LOOPBACK_IF, &underlay, false);
+
+        // Mock xde state (static) still has the M2P entry, simulating
+        // xde kernel state surviving a sled-agent restart.
+        {
+            let hdl = Handle::new().unwrap();
+            let dump = hdl.dump_m2p().unwrap();
+            assert!(
+                !dump.ip4.is_empty() || !dump.ip6.is_empty(),
+                "Mock xde should still hold the M2P mapping after drop"
+            );
+        }
+
+        // Phase 2: new PortManager rehydrates from surviving xde state.
+        let mgr2 =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &nics);
+        {
+            let sockets = mgr2.inner.mcast_underlay_sockets.lock().unwrap();
+            assert!(
+                sockets.contains_key(&underlay),
+                "Rehydration should reopen socket for surviving M2P"
+            );
+        }
+        poll_v6_membership(LOOPBACK_IF, &underlay, true);
+
+        // Cleanup and clear the M2P.
+        let clear_req =
+            sled_agent_types::multicast::ClearMcast2Phys { group, underlay };
+        mgr2.clear_mcast_m2p(&clear_req).unwrap();
+        poll_v6_membership(LOOPBACK_IF, &underlay, false);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verify that no sockets are created when no underlay NICs are
+    /// configured (test/sim mode).
+    #[test]
+    fn underlay_multicast_mac_filter_no_nics() {
+        let logctx = test_setup_log("underlay_multicast_mac_filter_no_nics");
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
+
+        let underlay: Ipv6Addr = "ff04::2".parse().unwrap();
+        let group: IpAddr = "239.10.10.2".parse().unwrap();
+
+        let req =
+            sled_agent_types::multicast::Mcast2PhysMapping { group, underlay };
+
+        manager.set_mcast_m2p(&req).unwrap();
+        {
+            let sockets = manager.inner.mcast_underlay_sockets.lock().unwrap();
+            assert!(
+                sockets.is_empty(),
+                "No sockets should be created without underlay NICs"
+            );
         }
 
         logctx.cleanup_successful();

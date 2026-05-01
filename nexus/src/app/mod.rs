@@ -33,7 +33,6 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
 use omicron_common::address::MGD_PORT;
-use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -1246,6 +1245,15 @@ pub(crate) async fn dpd_clients(
         }
     };
 
+    // Per-request bounds so a stalled DPD connection can't hang an RPW
+    // iteration or saga action indefinitely. Matches the timeout pair on
+    // the shared Nexus `reqwest_client`.
+    let reqwest_client = reqwest::ClientBuilder::new()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("failed to build DPD reqwest client: {e}"))?;
+
     let clients: Vec<(SocketAddrV6, dpd_client::Client)> = dpd_socketaddrs
         .iter()
         .map(|socket_addr| {
@@ -1256,8 +1264,9 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
-            let client = dpd_client::Client::new(
+            let client = dpd_client::Client::new_with_client(
                 &format!("http://{socket_addr}"),
+                reqwest_client.clone(),
                 client_state,
             );
 
@@ -1325,29 +1334,28 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
-/// Look up Dendrite addresses in DNS then determine the switch location of
-/// any addresses we're able to resolve the SwitchSlot for. If a switch
-/// zone is down, the resolution process will fail and the entry will be
-/// missing from the result.
+#[derive(Clone, Debug)]
+pub(crate) struct SwitchZoneTarget {
+    pub(crate) target: String,
+    pub(crate) addr: Ipv6Addr,
+}
+
+/// Look up switch zones in DNS, then determine the switch location of any
+/// zones we're able to resolve the `SwitchSlot` for. If a switch zone is down,
+/// the resolution process will fail and the entry will be missing from the
+/// result.
 ///
 /// # Errors
-/// If we fail to resolve the ipv6 addresses of the Dendrite service we
-/// return an error
+/// If we fail to resolve the MGS SRV records for switch zones, return an error.
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
-    let switch_zone_addresses = match resolver
-        .lookup_all_ipv6(ServiceName::Dendrite)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(e) => {
-            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-            return Err(e.to_string());
-        }
-    };
-    Ok(map_switch_zone_addrs(&log, switch_zone_addresses, resolver).await)
+    Ok(switch_zone_targets(resolver, log)
+        .await?
+        .into_iter()
+        .map(|(slot, endpoint)| (slot, endpoint.addr))
+        .collect())
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1359,40 +1367,52 @@ async fn switch_zone_address_mappings(
 // up switch addresses as a whole, since how DNS is currently setup for
 // Dendrite is insufficient for what we need.
 //
-/// Query MGS in each switch zone to learn which switch slot is being managed by
-/// the services located on a given ipv6 address. This information can be used
-/// along with the well known port numbers to target a specific switch + service
-/// combination.
+/// Query MGS in each switch zone to learn which switch slot is managed by each
+/// service target.
 ///
 /// We return whatever we're able to successfully resolve. In the event of
-/// a communication timeout or other failure with MGS, the SwitchSlot -> Ipv6Addr
-/// mapping will be missing from the returned HashMap. Callers will need to inspect
+/// a communication timeout or other failure with MGS, the corresponding entry
+/// will be missing from the returned `HashMap`. Callers will need to inspect
 /// the contents to ensure what they expect to be there is actually there.
-async fn map_switch_zone_addrs(
-    log: &Logger,
-    switch_zone_addresses: Vec<Ipv6Addr>,
+pub(crate) async fn switch_zone_targets(
     resolver: &internal_dns_resolver::Resolver,
-) -> HashMap<SwitchSlot, Ipv6Addr> {
+    log: &Logger,
+) -> Result<HashMap<SwitchSlot, SwitchZoneTarget>, String> {
     use gateway_client::Client as MgsClient;
+
     info!(log, "Determining switch slots managed by switch zones");
-    let mut switch_zone_addrs = HashMap::new();
+    let mgs_targets = match resolver
+        .lookup_srv(ServiceName::ManagementGatewayService)
+        .await
+    {
+        Ok(targets) => targets,
+        Err(e) => {
+            error!(log, "failed to resolve MGS service targets"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
 
-    for addr in switch_zone_addresses {
-        let port = match resolver
-            .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
-            .await
-        {
-            Ok(addrs) => {
-                let port_map: HashMap<Ipv6Addr, u16> = addrs
-                    .into_iter()
-                    .map(|sockaddr| (*sockaddr.ip(), sockaddr.port()))
-                    .collect();
+    let mut switch_zone_targets = HashMap::new();
 
-                *port_map.get(&addr).unwrap_or(&MGS_PORT)
+    for (target, port) in mgs_targets {
+        let addr = match resolver.ipv6_lookup(&target).await {
+            Ok(Some(addr)) => addr,
+            Ok(None) => {
+                warn!(
+                    log,
+                    "MGS SRV target resolved without an IPv6 address";
+                    "target" => &target,
+                );
+                continue;
             }
             Err(e) => {
-                error!(log, "failed to resolve MGS addresses"; "error" => %e);
-                MGS_PORT
+                warn!(
+                    log,
+                    "failed to resolve IPv6 address for MGS target";
+                    "target" => &target,
+                    "error" => %e,
+                );
+                continue;
             }
         };
 
@@ -1401,14 +1421,22 @@ async fn map_switch_zone_addrs(
             log.new(o!("component" => "MgsClient")),
         );
 
-        info!(log, "determining switch slot managed by switch zone"; "zone_address" => #?addr);
+        info!(
+            log,
+            "determining switch slot managed by switch zone";
+            "target" => &target,
+            "zone_address" => #?addr,
+            "mgs_port" => port,
+        );
         let switch_slot = match mgs_client.sp_local_switch_id().await {
             Ok(switch) => {
                 info!(
                     log,
                     "identified switch slot for switch zone";
                     "slot" => #?switch,
-                    "zone_address" => #?addr
+                    "target" => &target,
+                    "zone_address" => #?addr,
+                    "mgs_port" => port,
                 );
                 switch.slot
             }
@@ -1416,19 +1444,22 @@ async fn map_switch_zone_addrs(
                 error!(
                     log,
                     "failed to identify switch slot for switch zone";
+                    "target" => &target,
                     "zone_address" => #?addr,
+                    "mgs_port" => port,
                     "reason" => #?e
                 );
                 continue;
             }
         };
 
+        let endpoint = SwitchZoneTarget { target, addr };
         match switch_slot {
             0 => {
-                switch_zone_addrs.insert(SwitchSlot::Switch0, addr);
+                switch_zone_targets.insert(SwitchSlot::Switch0, endpoint);
             }
             1 => {
-                switch_zone_addrs.insert(SwitchSlot::Switch1, addr);
+                switch_zone_targets.insert(SwitchSlot::Switch1, endpoint);
             }
             _ => {
                 warn!(
@@ -1442,10 +1473,10 @@ async fn map_switch_zone_addrs(
     info!(
         log,
         "completed mapping switch zones to switch slots";
-        "mappings" => #?switch_zone_addrs
+        "mappings" => #?switch_zone_targets
     );
 
-    switch_zone_addrs
+    Ok(switch_zone_targets)
 }
 
 /// Begin configuring an external HTTP client, returning a

@@ -41,6 +41,17 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
+// `oxide_vpc::api::DEFAULT_MULTICAST_VNI` and
+// `omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI` live in sibling
+// crates that cannot reference each other's constant. They must stay
+// numerically equal: the MRIB, M2P mappings, and OPTE all route on this
+// value, so any divergence would black-hole multicast traffic.
+const _: () = assert!(
+    oxide_vpc::api::DEFAULT_MULTICAST_VNI
+        == omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI.as_u32(),
+    "oxide_vpc::api::DEFAULT_MULTICAST_VNI must equal omicron_common Vni::DEFAULT_MULTICAST_VNI",
+);
+
 /// Information about the gateway for an OPTE port
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
