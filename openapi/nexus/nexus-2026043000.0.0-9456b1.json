@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026042900.0.0"
+    "version": "2026043000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -25749,7 +25749,7 @@
         ]
       },
       "Probe": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A networking probe",
         "type": "object",
         "properties": {
           "description": {
@@ -26753,7 +26753,7 @@
         ]
       },
       "SamlIdentityProvider": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A SAML identity provider",
         "type": "object",
         "properties": {
           "acs_url": {
