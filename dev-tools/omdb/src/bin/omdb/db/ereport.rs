@@ -515,7 +515,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ClassRow {
-        #[tabled(rename = "KNOWN-TO-NEXUS")]
+        #[tabled(rename = "KNOWN-TO-OMDB")]
         known: &'static str,
         class: String,
         total: i64,
@@ -550,13 +550,19 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
             .then_with(|| a.class.cmp(&b.class))
     });
 
+    println!(
+        "Note: KNOWN-TO-OMDB reflects handlers compiled into THIS omdb \
+         binary;\nthe currently-deployed Nexus may differ if it was built \
+         from a different commit.\n"
+    );
+
     let mut table = tabled::Table::new(&rows);
     table
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0));
     println!("{table}");
 
-    // Footer: classes Nexus knows about but has no DB rows for.
+    // Footer: classes this omdb knows about but has no DB rows for.
     let seen_known: std::collections::BTreeSet<&str> = rows
         .iter()
         .filter(|r| r.known == "yes")
@@ -565,7 +571,9 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     let absent: Vec<&&'static str> =
         known.iter().filter(|c| !seen_known.contains(*c)).collect();
     if !absent.is_empty() {
-        println!("\nKnown classes with no rows in the database:");
+        println!(
+            "\nClasses known to this omdb but with no rows in the database:"
+        );
         for c in absent {
             println!("  {c}");
         }
