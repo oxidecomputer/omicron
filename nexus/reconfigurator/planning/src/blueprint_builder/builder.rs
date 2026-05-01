@@ -2720,7 +2720,7 @@ fn is_external_networking_config_different(
     // properties, so it would be sufficient to only check that the set of zone
     // IDs that have external networking matches. But it's harmless to check
     // that the actual networking properties themselves haven't changed, either,
-    // and if in the futuer we allow mutating properties without expunging, this
+    // and if in the future we allow mutating properties without expunging, this
     // check will still be correct.
     fn all_external_networking_config(
         blueprint: &Blueprint,
