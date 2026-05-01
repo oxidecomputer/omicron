@@ -7380,7 +7380,7 @@ WHERE
     time_deleted IS NULL;
 
 -- Targeted partial index supporting fm_analysis preparation: filter by class
--- (the planner's `known_ereport_classes`) restricted to ereports that are
+-- (FM analysis's `known_ereport_classes`) restricted to ereports that are
 -- still unprocessed, ordered by the (restart_id, ena) pagination key.
 CREATE INDEX IF NOT EXISTS lookup_unmarked_ereports_by_class
 ON omicron.public.ereport (

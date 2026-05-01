@@ -522,7 +522,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         /// Class has rows in the DB but is NOT in `known_ereport_classes()`.
         No,
         /// Class is NULL — strict-match policy means the loader never
-        /// surfaces these to the planner.
+        /// surfaces these to FM analysis.
         NullClass,
     }
     impl std::fmt::Display for KnownToOmdb {

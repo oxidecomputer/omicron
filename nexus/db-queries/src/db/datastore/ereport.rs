@@ -335,8 +335,8 @@ impl DataStore {
     /// SQL filter is `class = ANY($1::text[])`, which never matches NULL.
     /// Callers (e.g. fm_analysis preparation) deliberately key off
     /// [`nexus_types::fm::ereport::known_ereport_classes`] so that the loader
-    /// only surfaces ereports the planner can consume; see that function's
-    /// documentation for the policy and rationale.
+    /// only surfaces ereports that FM analysis can consume; see that
+    /// function's documentation for the policy and rationale.
     ///
     /// If `classes` is empty, this returns an empty result without
     /// round-tripping to the database.

@@ -19,13 +19,13 @@ pub use ereport_types::{Ena, EreportId};
 
 /// Ereport classes that the diagnosis engine currently understands.
 /// Preparation only surfaces ereports whose class is in this set — there is
-/// no value in loading ereports the planner cannot consume.
+/// no value in loading ereports FM analysis cannot consume.
 ///
 /// Empty until `nexus_fm::diagnosis::analyze` gains real handling. Grow
-/// this alongside the planner as new classes gain support.
+/// this alongside FM analysis as new classes gain support.
 ///
 /// **NULL-class ereports are intentionally excluded by the loader's SQL
-/// filter** (`class = ANY(...)` never matches NULL). If the planner ever
+/// filter** (`class = ANY(...)` never matches NULL). If FM analysis ever
 /// needs to handle the "couldn't extract a class" or "reporter doesn't know
 /// its identity" cases, that's an explicit decision (e.g. a sentinel
 /// loader path), not a default of this list.
