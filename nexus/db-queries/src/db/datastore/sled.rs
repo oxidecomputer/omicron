@@ -5814,7 +5814,7 @@ pub(in crate::db::datastore) mod test {
                 )]));
 
                 let jh = tokio::spawn(async move {
-                    let vmm = datastore
+                    datastore
                         .sled_reservation_create_inner(
                             &opctx,
                             instance.id,
@@ -5827,8 +5827,7 @@ pub(in crate::db::datastore) mod test {
                             db::model::SledReservationConstraints::none(),
                         )
                         .await
-                        .unwrap();
-                    vmm
+                        .unwrap()
                 });
 
                 jhs.push(jh);
