@@ -917,12 +917,11 @@ pub struct FmAnalysisStatus {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub inv_collection_id: Option<CollectionUuid>,
     /// Ereport classes that *this* Nexus's diagnosis engine consumes
-    /// (per [`fm::ereport::known_ereport_classes`]). Recorded here so an
-    /// operator interpreting the activation outcome can see what the loader
-    /// was configured to surface — e.g. whether `RanAnalysis` produced no
-    /// new ereports because the set is empty vs. because nothing matched.
-    ///
-    /// [`fm::ereport::known_ereport_classes`]: crate::fm::ereport::known_ereport_classes
+    /// (per `nexus_fm::diagnosis::known_ereport_classes`). Recorded here so
+    /// an operator interpreting the activation outcome can see what the
+    /// loader was configured to surface — e.g. whether `RanAnalysis`
+    /// produced no new ereports because the set is empty vs. because
+    /// nothing matched.
     pub known_classes: Vec<String>,
     pub outcome: fm_analysis::Outcome,
 }
