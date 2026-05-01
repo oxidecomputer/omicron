@@ -337,9 +337,6 @@ impl DataStore {
     /// [`nexus_types::fm::ereport::known_ereport_classes`] so that the loader
     /// only surfaces ereports that FM analysis can consume; see that
     /// function's documentation for the policy and rationale.
-    ///
-    /// If `classes` is empty, this returns an empty result without
-    /// round-tripping to the database.
     pub async fn ereports_list_unmarked(
         &self,
         opctx: &OpContext,
