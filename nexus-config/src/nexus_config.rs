@@ -968,9 +968,22 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
+/// Default for [`FmTasksConfig::analysis_enabled`].
+///
+/// To re-enable fault management analysis fleet-wide once the subsystem is
+/// ready (see omicron#10348), change the body of this function to return
+/// `true`.  This is the single source of truth for both the serde
+/// "missing field" default and `FmTasksConfig::default()`.
+fn default_fm_analysis_enabled() -> bool {
+    false
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
+    /// whether the fault management analysis background task runs.
+    #[serde(default = "default_fm_analysis_enabled")]
+    pub analysis_enabled: bool,
     /// period (in seconds) for periodic activations of the background task that
     /// drives fault management analysis.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -993,6 +1006,7 @@ pub struct FmTasksConfig {
 impl Default for FmTasksConfig {
     fn default() -> Self {
         Self {
+            analysis_enabled: default_fm_analysis_enabled(),
             // Analysis is generally triggered by changes in the current sitrep,
             // inventory, or by the ereport ingester(s), so it need not be
             // periodically activated all that frequently.
@@ -1575,6 +1589,7 @@ mod test {
                             disable: false,
                         },
                         fm: FmTasksConfig {
+                            analysis_enabled: default_fm_analysis_enabled(),
                             analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
