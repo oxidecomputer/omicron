@@ -3520,10 +3520,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     if known_classes.is_empty() {
         println!("    {KNOWN_CLASSES:<WIDTH$}(none)");
     } else {
-        println!(
-            "    {KNOWN_CLASSES:<WIDTH$}({} total)",
-            known_classes.len()
-        );
+        println!("    {KNOWN_CLASSES:<WIDTH$}({} total)", known_classes.len());
         for class in &known_classes {
             println!("      - {class}");
         }
