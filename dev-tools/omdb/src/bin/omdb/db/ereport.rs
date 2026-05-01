@@ -512,13 +512,35 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         by_class.entry(class).or_default().unmarked = unmarked;
     }
 
+    // Whether the diagnosis engine in *this* omdb's build has a handler for
+    // a given ereport class.
+    #[derive(PartialEq, Eq)]
+    enum KnownToOmdb {
+        /// Class has rows in the DB AND is in `known_ereport_classes()`.
+        Yes,
+        /// Class has rows in the DB but is NOT in `known_ereport_classes()`.
+        No,
+        /// Class is NULL — strict-match policy means the loader never
+        /// surfaces these to the planner.
+        NullClass,
+    }
+    impl std::fmt::Display for KnownToOmdb {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                Self::Yes => "yes",
+                Self::No => "no",
+                Self::NullClass => "NullClass",
+            })
+        }
+    }
+
     // The variable-length `class` column goes last so that wrapping on a
     // narrow terminal doesn't disrupt the fixed-width numeric columns.
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ClassRow<'a> {
         #[tabled(rename = "KNOWN-TO-OMDB")]
-        known: &'static str,
+        known: KnownToOmdb,
         total: i64,
         unmarked: i64,
         class: &'a str,
@@ -527,11 +549,14 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     let mut rows: Vec<ClassRow<'_>> = by_class
         .iter()
         .map(|(class, ClassCounts { total, unmarked })| {
-            let (known_marker, class_str): (&'static str, &str) = match class {
-                None => ("excluded", "(NULL)"),
+            let (known_marker, class_str): (KnownToOmdb, &str) = match class {
+                None => (KnownToOmdb::NullClass, "(NULL)"),
                 Some(c) => {
-                    let k =
-                        if known.contains(c.as_str()) { "yes" } else { "no" };
+                    let k = if known.contains(c.as_str()) {
+                        KnownToOmdb::Yes
+                    } else {
+                        KnownToOmdb::No
+                    };
                     (k, c.as_str())
                 }
             };
@@ -547,9 +572,9 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     // Sort: unknown-but-present first (highest unmarked), then known, then NULL.
     rows.sort_by(|a, b| {
         let priority = |row: &ClassRow<'_>| match row.known {
-            "no" => 0,
-            "yes" => 1,
-            _ => 2,
+            KnownToOmdb::No => 0,
+            KnownToOmdb::Yes => 1,
+            KnownToOmdb::NullClass => 2,
         };
         priority(a)
             .cmp(&priority(b))
@@ -572,7 +597,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     // Footer: classes this omdb knows about but has no DB rows for.
     let seen_known: std::collections::BTreeSet<&str> = rows
         .iter()
-        .filter(|r| r.known == "yes")
+        .filter(|r| r.known == KnownToOmdb::Yes)
         .map(|r| r.class)
         .collect();
     let absent: Vec<&&'static str> =
