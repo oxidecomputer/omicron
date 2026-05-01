@@ -62,6 +62,7 @@ use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -428,32 +429,15 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             let candidate_datasets: HashSet<CandidateDataset> = zpools_for_sled
                 .iter()
                 .filter(|zpool_get_result| {
-                    let ZpoolGetForSledReservationResult {
-                        pool,
-                        last_inv_total_size,
-                        rendezvous_local_storage_unencrypted_dataset_id: _,
-                        crucible_dataset_usage,
-                        local_storage_usage,
-                    } = zpool_get_result;
-
                     // The total request size for the local storage dataset
                     // allocation is the disk size plus the required
                     // overhead.
                     let request_size: i64 = request.size().to_bytes() as i64
                         + request.required_dataset_overhead().to_bytes() as i64;
 
-                    let new_size_used: i64 = crucible_dataset_usage
-                        + local_storage_usage
-                        + request_size;
-
-                    let control_plane_storage_buffer: i64 =
-                        pool.control_plane_storage_buffer().into();
-                    let adjusted_total: i64 =
-                        last_inv_total_size - control_plane_storage_buffer;
-
                     // Any zpool that has space for this local storage
                     // dataset allocation is considered a candidate.
-                    new_size_used < adjusted_total
+                    zpool_get_result.has_room_for_allocation(request_size)
                 })
                 .map(|zpool_get_result| CandidateDataset {
                     rendezvous_local_storage_unencrypted_dataset_id:
@@ -508,6 +492,62 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         });
 
         Some(Self { log: log.clone(), allocations_to_perform, queue })
+    }
+
+    /// Remove items from the queue if the _current_ size usage for the pools
+    /// now shows that there is not enough room.
+    pub fn prune(
+        &mut self,
+        zpools_for_sled: Vec<ZpoolGetForSledReservationResult>,
+    ) {
+        let zpools_for_sled: HashMap<_, _> = zpools_for_sled
+            .into_iter()
+            .map(|zpool_get_result| {
+                (zpool_get_result.pool.id(), zpool_get_result)
+            })
+            .collect();
+
+        self.queue.retain(|incomplete_allocation_list| {
+            // An incomplete allocation list has a set of local storage
+            // allocations that were matched to zpools with available space:
+            //
+            // | A -> Z | A -> Z | A -> Z |
+            //
+            // Check that each of of these is still valid: this iterator was
+            // constructed from a `ZpoolGetForSledReservationResult` that was
+            // taken previously, and other sled reservations (or crucible
+            // allocations!) may have consumed space that was previously free.
+            // If the sled reservation query was run for one of these
+            // allocations it would always fail.
+            //
+            // Do not retain an incomplete allocation list if any of the
+            // allocations are no longer valid. This also prunes the search
+            // space, as going any further would not make sense.
+
+            for allocation in &incomplete_allocation_list.allocations {
+                match zpools_for_sled.get(&allocation.pool_id) {
+                    Some(zpool_for_sled) => {
+                        // Zpool still exists, does it still have room?
+
+                        if !zpool_for_sled.has_room_for_allocation(
+                            allocation.required_dataset_size,
+                        ) {
+                            // Do not retain this incomplete list of
+                            // allocations: one of them is no longer valid.
+                            return false;
+                        }
+                    }
+
+                    None => {
+                        // Zpool doesn't exist anymore!
+                        return false;
+                    }
+                }
+            }
+
+            // by default, continue searching further
+            true
+        });
     }
 }
 
@@ -1170,8 +1210,9 @@ impl DataStore {
             } else {
                 // If local storage allocation is required, match the requests
                 // with all the zpools of this sled that have available space.
-                // This iterator finds all possible configurations that would
-                // satisfy the requests for local storage and tries them all.
+                // The `CompleteLocalStorageAllocationLists` iterator finds all
+                // possible configurations that would satisfy the requests for
+                // local storage and tries them all.
 
                 let zpools_for_sled = self
                     .zpool_get_for_sled_reservation(&opctx, sled_target)
@@ -1193,7 +1234,7 @@ impl DataStore {
                     }
                 };
 
-                let complete_allocation_lists =
+                let mut complete_allocation_lists =
                     match CompleteLocalStorageAllocationLists::new(
                         &log,
                         sled_target,
@@ -1218,9 +1259,9 @@ impl DataStore {
                         }
                     };
 
-                // Loop here over each complete set of local storage allocations
+                // Search for each complete set of local storage allocations
                 // required, and attempt the sled insert resource query with
-                // that particular allocation.
+                // that particular set.
                 //
                 // If the `complate_allocation_lists` iterator returns None,
                 // control will pass to the end of the loop marked with 'outer,
@@ -1229,7 +1270,35 @@ impl DataStore {
                 // there will _not_ be any more sleds to try and the user will
                 // see a capacity error.
 
-                for allocations in complete_allocation_lists {
+                loop {
+                    // If other concurrent sled reservations are not taken into
+                    // account, another sled reservation could allocate local
+                    // storage onto the same pools that this one considers
+                    // candidates, and then this iterator will return an
+                    // allocation that will never work. Because the iterator
+                    // searches for _every_ possible combination, this will end
+                    // up searching for a long time. It's important to prune the
+                    // list that we're searching from: using the _current_
+                    // results from `zpool_get_for_sled_reservation`, remove
+                    // allocations from the search list if the current free
+                    // space on candidate pools no longer has the required room.
+
+                    let zpools_for_sled = self
+                        .zpool_get_for_sled_reservation(&opctx, sled_target)
+                        .await?;
+
+                    complete_allocation_lists.prune(zpools_for_sled);
+
+                    let allocations = match complete_allocation_lists.next() {
+                        Some(allocations) => allocations,
+
+                        None => {
+                            // All done searching, nothing worked. Try another
+                            // sled!
+                            break;
+                        }
+                    };
+
                     info!(
                         &log,
                         "attempting to insert sled resource record";
@@ -1804,6 +1873,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::SledUuid;
     use predicates::{BoxPredicate, prelude::*};
     use sled_agent_types::inventory::ZpoolHealth;
+    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::SocketAddrV6;
 
@@ -5643,6 +5713,131 @@ pub(in crate::db::datastore) mod test {
                 .unwrap();
 
             vmms.push(vmm);
+        }
+
+        let sleds: HashSet<_> =
+            vmms.into_iter().map(|vmm| vmm.sled_id).collect();
+
+        assert_eq!(sleds.len(), 32);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Ensure that a full rack can have one VMM take all the U2s on each sled,
+    /// where the sled reservations happen concurrently in chunks
+    #[tokio::test]
+    async fn local_storage_allocation_full_rack_concurrent() {
+        let logctx = dev::test_setup_log("local_storage_allocation_full_rack");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut config = LocalStorageTest {
+            sleds: vec![],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            instances: vec![],
+        };
+
+        const MAX_U2_PER_INSTANCE: usize = 10;
+
+        for i in 0..32 {
+            let mut u2s = vec![];
+
+            for n in 0..MAX_U2_PER_INSTANCE {
+                u2s.push(LocalStorageTestSledU2 {
+                    physical_disk_id: PhysicalDiskUuid::new_v4(),
+                    physical_disk_serial: format!("phys_{i}_{n}"),
+
+                    zpool_id: ZpoolUuid::new_v4(),
+                    control_plane_storage_buffer:
+                        external::ByteCount::from_gibibytes_u32(250),
+
+                    inventory_total_size:
+                        external::ByteCount::from_gibibytes_u32(1024),
+
+                    crucible_dataset_id: DatasetUuid::new_v4(),
+                    crucible_dataset_addr: format!(
+                        "[fd00:1122:3344:{i}{n:02x}::1]:12345"
+                    )
+                    .parse()
+                    .unwrap(),
+
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
+                });
+            }
+
+            config.sleds.push(LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: format!("sled_{i}"),
+                u2s,
+            });
+
+            let mut disks = vec![];
+
+            for n in 0..MAX_U2_PER_INSTANCE {
+                disks.push(LocalStorageTestInstanceDisk {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from(format!("local-{i}-{n}"))
+                        .unwrap(),
+                    size: external::ByteCount::from_gibibytes_u32(512),
+                });
+            }
+
+            config.instances.push(LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: format!("inst{i}"),
+                affinity: None,
+                disks,
+            });
+        }
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let mut vmms = vec![];
+
+        // Reserve the instances concurrently in chunks - 8 at a time, because
+        // that's the maximum concurrent claims that qorb currently supports.
+        for chunk in config.instances.chunks(8) {
+            let mut jhs = vec![];
+
+            for (i, config_instance) in chunk.iter().enumerate() {
+                let instance = Instance::new_with_id(config_instance.id);
+
+                let datastore = datastore.clone();
+
+                let opctx = opctx.child(BTreeMap::from([(
+                    String::from("task"),
+                    format!("{i}"),
+                )]));
+
+                let jh = tokio::spawn(async move {
+                    let vmm = datastore
+                        .sled_reservation_create_inner(
+                            &opctx,
+                            instance.id,
+                            PropolisUuid::new_v4(),
+                            db::model::Resources::new(
+                                128,
+                                ByteCount::try_from(1024).unwrap(),
+                                ByteCount::try_from(1024).unwrap(),
+                            ),
+                            db::model::SledReservationConstraints::none(),
+                        )
+                        .await
+                        .unwrap();
+                    vmm
+                });
+
+                jhs.push(jh);
+            }
+
+            for jh in jhs {
+                let vmm = jh.await.unwrap();
+                vmms.push(vmm);
+            }
         }
 
         let sleds: HashSet<_> =

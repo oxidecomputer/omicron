@@ -50,16 +50,33 @@ pub struct ZpoolGetForSledReservationResult {
     pub pool: Zpool,
 
     /// Last reported inventory size for the zpool
-    pub last_inv_total_size: i64,
+    last_inv_total_size: i64,
 
     /// The rendezvous local storage dataset (unencrypted) for this zpool
     pub rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
 
     /// Upper bound on Crucible dataset usage
-    pub crucible_dataset_usage: i64,
+    crucible_dataset_usage: i64,
 
     /// Upper bound on Local Storage dataset usage
-    pub local_storage_usage: i64,
+    local_storage_usage: i64,
+}
+
+impl ZpoolGetForSledReservationResult {
+    /// Does this Zpool have room for additional bytes to be allocated to it?
+    pub fn has_room_for_allocation(&self, additional_size: i64) -> bool {
+        let new_size_used: i64 = self.crucible_dataset_usage
+            + self.local_storage_usage
+            + additional_size;
+
+        let control_plane_storage_buffer: i64 =
+            self.pool.control_plane_storage_buffer().into();
+
+        let adjusted_total_available: i64 =
+            self.last_inv_total_size - control_plane_storage_buffer;
+
+        new_size_used < adjusted_total_available
+    }
 }
 
 impl DataStore {
