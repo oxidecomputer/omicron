@@ -530,20 +530,19 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
             f.write_str(match self {
                 Self::Yes => "yes",
                 Self::No => "no",
-                Self::NullClass => "NullClass",
+                Self::NullClass => "-",
             })
         }
     }
 
-    // The variable-length `class` column goes last so that wrapping on a
-    // narrow terminal doesn't disrupt the fixed-width numeric columns.
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ClassRow<'a> {
-        #[tabled(rename = "KNOWN-TO-OMDB")]
         known: KnownToOmdb,
         total: i64,
         unmarked: i64,
+        /// Variable-length, so it goes last: wrapping on a narrow terminal
+        /// won't disrupt the fixed-width numeric columns.
         class: &'a str,
     }
 
@@ -584,9 +583,10 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     });
 
     println!(
-        "Note: KNOWN-TO-OMDB reflects which classes have a diagnosis engine \
-         in THIS omdb\nbinary; the currently-deployed Nexus may differ if it \
-         was built from a different commit.\n"
+        "note: KNOWN reflects which classes have a diagnosis engine in Nexus \
+         as of\nthe control plane build that produced this omdb; the \
+         currently-deployed\nNexus may differ if it was built from a \
+         different commit.\n"
     );
 
     let mut table = tabled::Table::new(&rows);
