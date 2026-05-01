@@ -496,7 +496,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
 
     /// Remove items from the queue if the _current_ size usage for the pools
     /// now shows that there is not enough room.
-    pub fn prune(
+    pub fn prune_invalidated_allocation_lists(
         &mut self,
         zpools_for_sled: Vec<ZpoolGetForSledReservationResult>,
     ) {
@@ -511,7 +511,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             // An incomplete allocation list has a set of local storage
             // allocations that were matched to zpools with available space:
             //
-            // | A -> Z | A -> Z | A -> Z |
+            // | allocation -> zpool | allocation -> zpool | ...
             //
             // Check that each of of these is still valid: this iterator was
             // constructed from a `ZpoolGetForSledReservationResult` that was
@@ -1287,16 +1287,14 @@ impl DataStore {
                         .zpool_get_for_sled_reservation(&opctx, sled_target)
                         .await?;
 
-                    complete_allocation_lists.prune(zpools_for_sled);
+                    complete_allocation_lists
+                        .prune_invalidated_allocation_lists(zpools_for_sled);
 
-                    let allocations = match complete_allocation_lists.next() {
-                        Some(allocations) => allocations,
-
-                        None => {
-                            // All done searching, nothing worked. Try another
-                            // sled!
-                            break;
-                        }
+                    let Some(allocations) = complete_allocation_lists.next()
+                    else {
+                        // All done searching, nothing worked. Try another
+                        // sled!
+                        break;
                     };
 
                     info!(
@@ -5618,7 +5616,7 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
-    /// Ensure that a full rack can have one VMM take all the U2s on each sled
+    /// Ensure that a full rack can have one VMM take all the U.2s on each sled
     #[tokio::test]
     async fn local_storage_allocation_full_rack() {
         let logctx = dev::test_setup_log("local_storage_allocation_full_rack");
@@ -5726,11 +5724,13 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
-    /// Ensure that a full rack can have one VMM take all the U2s on each sled,
+    /// Ensure that a full rack can have one VMM take all the U.2s on each sled,
     /// where the sled reservations happen concurrently in chunks
     #[tokio::test]
     async fn local_storage_allocation_full_rack_concurrent() {
-        let logctx = dev::test_setup_log("local_storage_allocation_full_rack");
+        let logctx = dev::test_setup_log(
+            "local_storage_allocation_full_rack_concurrent",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
