@@ -1147,6 +1147,26 @@ pub struct AuditLogCleanupStatus {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SwitchPortPopulatorStatusKind {
+    /// A previous activation of this task had already populated the ports for
+    /// this switch.
+    PreviouslyPopulated,
+
+    /// We successfully populated the ports of this switch.
+    Populated { num_ports: usize },
+}
+
+/// The status of a `populate_switch_ports` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortPopulatorStatus {
+    /// Result of populating switch 0's ports, if any.
+    pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
+    /// Result of populating switch 1's ports, if any.
+    pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
 /// The status of a `session_cleanup` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SessionCleanupStatus {
