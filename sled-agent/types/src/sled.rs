@@ -29,6 +29,9 @@ mod local_switch_zone_ip {
     pub struct ThisSledSwitchZoneUnderlayIpAddr(Ipv6Addr);
 
     impl ThisSledSwitchZoneUnderlayIpAddr {
+        #[cfg(any(test, feature = "testing"))]
+        pub const TEST_FAKE: Self = Self(Ipv6Addr::LOCALHOST);
+
         /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
         /// start this sled agent.
         ///
