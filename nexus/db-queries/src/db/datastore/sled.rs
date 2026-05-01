@@ -31,6 +31,7 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -62,7 +63,6 @@ use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -367,7 +367,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
     fn new(
         log: &Logger,
         sled_target: SledUuid,
-        zpools_for_sled: NonEmpty<ZpoolGetForSledReservationResult>,
+        mut zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
         local_storage_disks: &'a [LocalStorageDisk],
     ) -> Option<Self> {
         let local_storage_allocation_required: Vec<&LocalStorageDisk> =
@@ -397,12 +397,11 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             })
             .collect();
 
-        let zpools_for_sled: Vec<_> = zpools_for_sled
-            .into_iter()
-            .filter(|zpool_get_result| {
-                !local_storage_zpools_used.contains(&zpool_get_result.pool.id())
-            })
-            .collect();
+        // Do not allow multiple disks backed by local storage to use the same
+        // pool for the same instance.
+        zpools_for_sled.retain(|zpool_get_result| {
+            !local_storage_zpools_used.contains(&zpool_get_result.pool.id())
+        });
 
         if local_storage_allocation_required.len() > zpools_for_sled.len() {
             // Not enough zpools to satisfy the number of allocations required.
@@ -498,15 +497,8 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
     /// now shows that there is not enough room.
     pub fn prune_invalidated_allocation_lists(
         &mut self,
-        zpools_for_sled: Vec<ZpoolGetForSledReservationResult>,
+        zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
     ) {
-        let zpools_for_sled: HashMap<_, _> = zpools_for_sled
-            .into_iter()
-            .map(|zpool_get_result| {
-                (zpool_get_result.pool.id(), zpool_get_result)
-            })
-            .collect();
-
         self.queue.retain(|incomplete_allocation_list| {
             // An incomplete allocation list has a set of local storage
             // allocations that were matched to zpools with available space:
@@ -1218,20 +1210,15 @@ impl DataStore {
                     .zpool_get_for_sled_reservation(&opctx, sled_target)
                     .await?;
 
-                let zpools_for_sled = match NonEmpty::from_vec(zpools_for_sled)
-                {
-                    Some(zpools_for_sled) => zpools_for_sled,
+                if zpools_for_sled.is_empty() {
+                    warn!(&log, "no zpools for {sled_target:?}?");
 
-                    None => {
-                        warn!(&log, "no zpools for {sled_target:?}?");
+                    sled_targets.remove(&sled_target);
+                    banned.remove(&sled_target);
+                    unpreferred.remove(&sled_target);
+                    preferred.remove(&sled_target);
 
-                        sled_targets.remove(&sled_target);
-                        banned.remove(&sled_target);
-                        unpreferred.remove(&sled_target);
-                        preferred.remove(&sled_target);
-
-                        continue;
-                    }
+                    continue;
                 };
 
                 let mut complete_allocation_lists =

@@ -24,6 +24,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -77,6 +78,16 @@ impl ZpoolGetForSledReservationResult {
 
         new_size_used < adjusted_total_available
     }
+}
+
+impl IdOrdItem for ZpoolGetForSledReservationResult {
+    type Key<'a> = ZpoolUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.pool.id()
+    }
+
+    id_upcast!();
 }
 
 impl DataStore {
@@ -426,7 +437,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-    ) -> ListResultVec<ZpoolGetForSledReservationResult> {
+    ) -> LookupResult<IdOrdMap<ZpoolGetForSledReservationResult>> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::crucible_dataset;
@@ -510,7 +521,7 @@ impl DataStore {
                 )
             })?;
 
-        let mut converted = Vec::with_capacity(tuples.len());
+        let mut converted = IdOrdMap::with_capacity(tuples.len());
 
         for tuple in tuples {
             let (
@@ -558,16 +569,22 @@ impl DataStore {
                 continue;
             };
 
-            converted.push(ZpoolGetForSledReservationResult {
-                pool,
-                last_inv_total_size,
-                rendezvous_local_storage_unencrypted_dataset_id:
-                    DatasetUuid::from_untyped_uuid(
-                        rendezvous_local_storage_unencrypted_dataset_id,
-                    ),
-                crucible_dataset_usage: crucible_dataset_usage.into(),
-                local_storage_usage: local_storage_usage.into(),
-            });
+            converted
+                .insert_unique(ZpoolGetForSledReservationResult {
+                    pool,
+                    last_inv_total_size,
+                    rendezvous_local_storage_unencrypted_dataset_id:
+                        DatasetUuid::from_untyped_uuid(
+                            rendezvous_local_storage_unencrypted_dataset_id,
+                        ),
+                    crucible_dataset_usage: crucible_dataset_usage.into(),
+                    local_storage_usage: local_storage_usage.into(),
+                })
+                .map_err(|e| {
+                    Error::internal_error(format!(
+                        "multiple results for the same pool: {e}"
+                    ))
+                })?;
         }
 
         Ok(converted)
