@@ -334,7 +334,7 @@ impl DataStore {
     /// Ereports with `class IS NULL` are intentionally never returned: the
     /// SQL filter is `class = ANY($1::text[])`, which never matches NULL.
     /// Callers (e.g. fm_analysis preparation) deliberately key off
-    /// [`nexus_types::fm::ereport::known_ereport_classes`] so that the loader
+    /// `nexus_fm::diagnosis::known_ereport_classes` so that the loader
     /// only surfaces ereports that FM analysis can consume; see that
     /// function's documentation for the policy and rationale.
     pub async fn ereports_list_unmarked(
@@ -396,8 +396,8 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> impl RunnableQuery<Ereport> + use<> {
         // NULL-class ereports are intentionally excluded: `class = ANY(...)`
-        // never matches NULL. See `known_ereport_classes` in nexus-types for
-        // the policy.
+        // never matches NULL. See `nexus_fm::diagnosis::known_ereport_classes`
+        // for the policy.
         let classes: Vec<String> =
             classes.iter().map(|c| (*c).to_string()).collect();
         paginated_multicolumn(

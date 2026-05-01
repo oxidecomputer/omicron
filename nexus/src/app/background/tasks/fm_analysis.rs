@@ -81,11 +81,10 @@ impl FmAnalysis {
         // Snapshot the static known-classes set once, up front, so it's
         // reported in the activation status regardless of which outcome
         // variant fires.
-        let known_classes: Vec<String> =
-            nexus_types::fm::ereport::known_ereport_classes()
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        let known_classes: Vec<String> = fm::diagnosis::known_ereport_classes()
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
 
         let parent_sitrep = self.sitrep_rx.borrow_and_update().clone();
         let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.1.id());
@@ -209,7 +208,7 @@ impl FmAnalysis {
         errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
         // Only surface ereports a diagnosis engine will consume.
-        let classes = nexus_types::fm::ereport::known_ereport_classes();
+        let classes = fm::diagnosis::known_ereport_classes();
         let mut paginator = Paginator::new(
             nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,

@@ -6,6 +6,8 @@
 
 use super::DbFetchOptions;
 use super::check_limit;
+use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
@@ -23,6 +25,7 @@ use clap::Subcommand;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
 use diesel::prelude::*;
+use internal_dns_types::names::ServiceName;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ereport as model;
 use nexus_db_model::ereport::DbEna;
@@ -57,9 +60,21 @@ enum Commands {
     Reporters(ReportersArgs),
 
     /// Summarize ereports by class, marking which classes a diagnosis engine
-    /// in Nexus consumes (per
-    /// `nexus_types::fm::ereport::known_ereport_classes`).
-    Classes,
+    /// in Nexus consumes (fetched from Nexus's lockstep API; falls back to
+    /// `?` if Nexus is unreachable).
+    Classes(ClassesArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct ClassesArgs {
+    /// URL of the Nexus lockstep API. If not provided, looks up an instance
+    /// in internal DNS.
+    #[clap(
+        long,
+        env = "OMDB_NEXUS_URL",
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
+    nexus_internal_url: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -105,6 +120,8 @@ struct ReportersArgs {
 }
 
 pub(super) async fn cmd_db_ereport(
+    omdb: &Omdb,
+    log: &slog::Logger,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &EreportArgs,
@@ -121,7 +138,9 @@ pub(super) async fn cmd_db_ereport(
             cmd_db_ereporters(datastore, args).await
         }
 
-        Commands::Classes => cmd_db_ereport_classes(datastore).await,
+        Commands::Classes(ref args) => {
+            cmd_db_ereport_classes(omdb, log, datastore, args).await
+        }
     }
 }
 
@@ -474,14 +493,30 @@ async fn cmd_db_ereporters(
     Ok(())
 }
 
-async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
+async fn cmd_db_ereport_classes(
+    omdb: &Omdb,
+    log: &slog::Logger,
+    datastore: &DataStore,
+    args: &ClassesArgs,
+) -> anyhow::Result<()> {
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
 
-    let known: std::collections::BTreeSet<&'static str> =
-        nexus_types::fm::ereport::known_ereport_classes()
-            .iter()
-            .copied()
-            .collect();
+    // Try to fetch the known list from Nexus. If anything fails, fall back
+    // to "?" for every row — DB totals are still useful even without Nexus.
+    let known_from_nexus =
+        fetch_known_classes_from_nexus(omdb, log, args).await;
+    let known: BTreeSet<String> = match &known_from_nexus {
+        Ok(list) => list.iter().cloned().collect(),
+        Err(err) => {
+            eprintln!(
+                "warning: could not fetch known ereport classes from Nexus: \
+                 {err:#}"
+            );
+            BTreeSet::new()
+        }
+    };
+    let nexus_reachable = known_from_nexus.is_ok();
 
     let conn = datastore.pool_connection_for_tests().await?;
 
@@ -513,24 +548,27 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         by_class.entry(class).or_default().unmarked = unmarked;
     }
 
-    // Whether *this* omdb's build has a diagnosis engine that consumes a
+    // Whether the deployed Nexus has a diagnosis engine that consumes a
     // given ereport class.
     #[derive(PartialEq, Eq)]
-    enum KnownToOmdb {
-        /// Class has rows in the DB AND is in `known_ereport_classes()`.
+    enum KnownToNexus {
+        /// Class has rows in the DB AND is in the list returned by Nexus.
         Yes,
-        /// Class has rows in the DB but is NOT in `known_ereport_classes()`.
+        /// Class has rows in the DB but is NOT in the list returned by Nexus.
         No,
         /// Class is NULL — strict-match policy means the loader never
         /// surfaces these to FM analysis.
         NullClass,
+        /// Could not reach Nexus — known/unknown is undetermined.
+        Unknown,
     }
-    impl std::fmt::Display for KnownToOmdb {
+    impl std::fmt::Display for KnownToNexus {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(match self {
                 Self::Yes => "yes",
                 Self::No => "no",
                 Self::NullClass => "-",
+                Self::Unknown => "?",
             })
         }
     }
@@ -538,7 +576,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ClassRow<'a> {
-        known: KnownToOmdb,
+        known: KnownToNexus,
         total: i64,
         unmarked: i64,
         /// Variable-length, so it goes last: wrapping on a narrow terminal
@@ -549,13 +587,16 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     let mut rows: Vec<ClassRow<'_>> = by_class
         .iter()
         .map(|(class, ClassCounts { total, unmarked })| {
-            let (known_marker, class_str): (KnownToOmdb, &str) = match class {
-                None => (KnownToOmdb::NullClass, "(NULL)"),
+            let (known_marker, class_str): (KnownToNexus, &str) = match class {
+                None => (KnownToNexus::NullClass, "(NULL)"),
+                Some(c) if !nexus_reachable => {
+                    (KnownToNexus::Unknown, c.as_str())
+                }
                 Some(c) => {
                     let k = if known.contains(c.as_str()) {
-                        KnownToOmdb::Yes
+                        KnownToNexus::Yes
                     } else {
-                        KnownToOmdb::No
+                        KnownToNexus::No
                     };
                     (k, c.as_str())
                 }
@@ -569,12 +610,14 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         })
         .collect();
 
-    // Sort: unknown-but-present first (highest unmarked), then known, then NULL.
+    // Sort: unknown-but-present first (highest unmarked), then known, then
+    // undetermined, then NULL.
     rows.sort_by(|a, b| {
         let priority = |row: &ClassRow<'_>| match row.known {
-            KnownToOmdb::No => 0,
-            KnownToOmdb::Yes => 1,
-            KnownToOmdb::NullClass => 2,
+            KnownToNexus::No => 0,
+            KnownToNexus::Yes => 1,
+            KnownToNexus::Unknown => 2,
+            KnownToNexus::NullClass => 3,
         };
         priority(a)
             .cmp(&priority(b))
@@ -582,12 +625,16 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
             .then_with(|| a.class.cmp(b.class))
     });
 
-    println!(
-        "note: KNOWN reflects which classes have a diagnosis engine in Nexus \
-         as of\nthe control plane build that produced this omdb; the \
-         currently-deployed\nNexus may differ if it was built from a \
-         different commit.\n"
-    );
+    if nexus_reachable {
+        println!(
+            "note: KNOWN reflects which classes the currently-deployed Nexus \
+             knows how\nto consume.\n"
+        );
+    } else {
+        println!(
+            "note: could not reach Nexus to determine known ereport classes.\n"
+        );
+    }
 
     let mut table = tabled::Table::new(&rows);
     table
@@ -595,22 +642,47 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         .with(tabled::settings::Padding::new(0, 1, 0, 0));
     println!("{table}");
 
-    // Footer: classes this omdb knows about but has no DB rows for.
-    let seen_known: std::collections::BTreeSet<&str> = rows
-        .iter()
-        .filter(|r| r.known == KnownToOmdb::Yes)
-        .map(|r| r.class)
-        .collect();
-    let absent: Vec<&&'static str> =
-        known.iter().filter(|c| !seen_known.contains(*c)).collect();
-    if !absent.is_empty() {
-        println!(
-            "\nClasses known to this omdb but with no rows in the database:"
-        );
-        for c in absent {
-            println!("  {c}");
+    // Footer: classes Nexus knows about but with no rows in the database.
+    if nexus_reachable {
+        let seen_known: BTreeSet<&str> = rows
+            .iter()
+            .filter(|r| r.known == KnownToNexus::Yes)
+            .map(|r| r.class)
+            .collect();
+        let absent: Vec<&String> =
+            known.iter().filter(|c| !seen_known.contains(c.as_str())).collect();
+        if !absent.is_empty() {
+            println!(
+                "\nClasses Nexus knows about but with no rows in the database:"
+            );
+            for c in absent {
+                println!("  {c}");
+            }
         }
     }
 
     Ok(())
+}
+
+async fn fetch_known_classes_from_nexus(
+    omdb: &Omdb,
+    log: &slog::Logger,
+    args: &ClassesArgs,
+) -> anyhow::Result<Vec<String>> {
+    let nexus_url = match &args.nexus_internal_url {
+        Some(url) => url.clone(),
+        None => {
+            let addr = omdb
+                .dns_lookup_one(log.clone(), ServiceName::NexusLockstep)
+                .await
+                .context("resolving Nexus lockstep service via internal DNS")?;
+            format!("http://{addr}")
+        }
+    };
+    let client = nexus_lockstep_client::Client::new(&nexus_url, log.clone());
+    let resp = client
+        .fm_known_ereport_classes_list()
+        .await
+        .context("calling Nexus fm_known_ereport_classes_list")?;
+    Ok(resp.into_inner())
 }

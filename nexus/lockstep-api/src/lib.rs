@@ -587,6 +587,17 @@ pub trait NexusLockstepApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SledSelector>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    // Fault management
+
+    /// List ereport classes that this Nexus's diagnosis engines consume.
+    #[endpoint {
+        method = GET,
+        path = "/fm/known-ereport-classes",
+    }]
+    async fn fm_known_ereport_classes_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
 }
 
 /// Path parameters for Rack requests.
