@@ -7,7 +7,7 @@ pub mod common;
 use crate::common::reconfigurator::blueprint_wait_sled_configs_propagated;
 use anyhow::Context;
 use common::LiveTestContext;
-use common::reconfigurator::blueprint_edit_current_target;
+use common::reconfigurator::blueprint_edit_current_target_enabled;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
 use nexus_lockstep_client::ClientInfo as _;
@@ -78,7 +78,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .all_sled_ids(SledFilter::Commissioned)
         .collect::<Vec<_>>();
     let sled_id = *commissioned_sled_ids.first().expect("any sled id");
-    let (blueprint1, blueprint2) = blueprint_edit_current_target(
+    let (blueprint1, blueprint2) = blueprint_edit_current_target_enabled(
         log,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
@@ -194,7 +194,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     info!(log, "created demo saga"; "demo_saga" => ?demo_saga);
 
     // Now expunge the zone we just created.
-    let (_blueprint2, blueprint3) = blueprint_edit_current_target(
+    let (_blueprint2, blueprint3) = blueprint_edit_current_target_enabled(
         log,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
