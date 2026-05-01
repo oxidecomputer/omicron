@@ -2381,36 +2381,30 @@ fn check_external_networking_generation(
             .collect()
     }
 
+    let parent_generation = parent_blueprint.external_networking_generation;
+    let actual_child_generation =
+        blippy.blueprint().external_networking_generation;
+
+    // We expect the child generation to be the next gen after the parent if and
+    // only if there have been any changes to the networking config.
     let expect_generation_bump =
         all_external_networking_config(blippy.blueprint())
             != all_external_networking_config(parent_blueprint);
 
-    if expect_generation_bump {
-        if blippy.blueprint().external_networking_generation
-            != parent_blueprint.external_networking_generation.next()
-        {
-            blippy.push_planning_input_note(
-                Severity::Fatal,
-                PlanningInputKind::ExternalNetworkingGenerationBumpedUnexpectedly {
-                    parent_generation:
-                        parent_blueprint.external_networking_generation,
-                    expected_child_generation:
-                        parent_blueprint.external_networking_generation.next(),
-                    actual_child_generation:
-                        blippy.blueprint().external_networking_generation,
-                },
-            );
-        }
+    let expected_child_generation = if expect_generation_bump {
+        parent_generation.next()
     } else {
-        if blippy.blueprint().external_networking_generation
-            != parent_blueprint.external_networking_generation
-        {
-            blippy.push_planning_input_note(
-                Severity::Fatal,
-                PlanningInputKind::ExternalNetworkingGenerationNotBumped(
-                    blippy.blueprint().external_networking_generation,
-                ),
-            );
-        }
+        parent_generation
+    };
+
+    if actual_child_generation != expected_child_generation {
+        blippy.push_planning_input_note(
+            Severity::Fatal,
+            PlanningInputKind::WrongExternalNetworkingGeneration {
+                parent_generation,
+                expected_child_generation,
+                actual_child_generation,
+            },
+        );
     }
 }
