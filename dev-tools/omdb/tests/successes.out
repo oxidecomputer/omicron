@@ -697,6 +697,7 @@ task: "fm_analysis"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     parent sitrep ID:                None
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
 /!\ analysis failed: FM analysis is not yet implemented
@@ -1378,6 +1379,7 @@ task: "fm_analysis"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     parent sitrep ID:                None
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
 /!\ analysis failed: FM analysis is not yet implemented
