@@ -195,8 +195,8 @@ impl FmAnalysis {
         builder: &mut fm::analysis_input::Builder,
         errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
-        // Only surface ereports the planner has handlers for. With an empty
-        // set, the datastore short-circuits to an empty result without
+        // Only surface ereports a diagnosis engine will consume. With an
+        // empty set, the datastore short-circuits to an empty result without
         // touching CRDB; see `known_ereport_classes` in nexus-types for the
         // policy (including why NULL-class ereports are never loaded).
         let classes = nexus_types::fm::ereport::known_ereport_classes();

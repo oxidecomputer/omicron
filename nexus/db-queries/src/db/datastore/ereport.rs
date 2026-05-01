@@ -348,8 +348,8 @@ impl DataStore {
     ) -> ListResultVec<Ereport> {
         // TODO(eliza): ereports should probably have their own resource type someday...
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        // An empty class set means the diagnosis engine has no handler for
-        // any ereport. There's no value in paging through CRDB to find out
+        // An empty class set means no diagnosis engine consumes any ereport
+        // class. There's no value in paging through CRDB to find out
         // there's nothing to load.
         if classes.is_empty() {
             return Ok(Vec::new());

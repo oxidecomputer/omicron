@@ -56,8 +56,9 @@ enum Commands {
     /// List ereport reporters
     Reporters(ReportersArgs),
 
-    /// Summarize ereports by class, marking which classes Nexus has handlers
-    /// for (per `nexus_types::fm::ereport::known_ereport_classes`).
+    /// Summarize ereports by class, marking which classes a diagnosis engine
+    /// in Nexus consumes (per
+    /// `nexus_types::fm::ereport::known_ereport_classes`).
     Classes,
 }
 
@@ -512,8 +513,8 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         by_class.entry(class).or_default().unmarked = unmarked;
     }
 
-    // Whether the diagnosis engine in *this* omdb's build has a handler for
-    // a given ereport class.
+    // Whether *this* omdb's build has a diagnosis engine that consumes a
+    // given ereport class.
     #[derive(PartialEq, Eq)]
     enum KnownToOmdb {
         /// Class has rows in the DB AND is in `known_ereport_classes()`.
@@ -583,9 +584,9 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     });
 
     println!(
-        "Note: KNOWN-TO-OMDB reflects handlers compiled into THIS omdb \
-         binary;\nthe currently-deployed Nexus may differ if it was built \
-         from a different commit.\n"
+        "Note: KNOWN-TO-OMDB reflects which classes have a diagnosis engine \
+         in THIS omdb\nbinary; the currently-deployed Nexus may differ if it \
+         was built from a different commit.\n"
     );
 
     let mut table = tabled::Table::new(&rows);
