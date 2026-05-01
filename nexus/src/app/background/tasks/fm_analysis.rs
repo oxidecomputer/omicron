@@ -372,6 +372,11 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SitrepUuid;
 
+    /// These tests exercise the analysis path; the toggle stays on so
+    /// `actually_activate()` (which is what the tests call directly) is
+    /// reached by the same code path it would be in production-with-toggle-on.
+    const ANALYSIS_ENABLED: bool = true;
+
     fn activators() -> Activators {
         let a = Activators {
             inventory_loader: Activator::new(),
@@ -455,6 +460,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -487,6 +493,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -512,6 +519,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -541,6 +549,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -570,6 +579,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
