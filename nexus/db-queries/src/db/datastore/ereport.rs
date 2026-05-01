@@ -743,7 +743,10 @@ mod tests {
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let classes: &[&str] = &["ereport.cpu.example", "ereport.fan.example"];
+        let classes: &[&str] = &[
+            "ereport.positronic-brain.example",
+            "ereport.spinning-blades.example",
+        ];
         let query =
             DataStore::ereports_list_unmarked_query(classes, &pagparams);
         expectorate_query_contents(
@@ -766,7 +769,10 @@ mod tests {
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let classes: &[&str] = &["ereport.cpu.example", "ereport.fan.example"];
+        let classes: &[&str] = &[
+            "ereport.positronic-brain.example",
+            "ereport.spinning-blades.example",
+        ];
         let query =
             DataStore::ereports_list_unmarked_query(classes, &pagparams);
         let explanation = query
