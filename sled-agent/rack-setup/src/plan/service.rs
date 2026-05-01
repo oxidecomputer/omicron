@@ -970,6 +970,7 @@ impl ServicePlan {
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             // Nexus will fill in the CockroachDB values during initialization.
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:

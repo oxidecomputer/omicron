@@ -257,6 +257,14 @@ pub struct Blueprint {
     /// control to the newer generation (see: RFD 588).
     pub nexus_generation: Generation,
 
+    /// The generation of the collective set of all external networking required
+    /// for in-service zones
+    ///
+    /// This generation number is bumped any time a zone with external
+    /// networking is added, expunged, or changed in a way that affects the way
+    /// NAT entries have to be configured in dendrite.
+    pub external_networking_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -306,6 +314,7 @@ impl Blueprint {
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
+            external_networking_generation: self.external_networking_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -1436,6 +1445,10 @@ impl BlueprintDisplay<'_> {
                         .to_string(),
                 ),
                 (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
+                (
+                    EXTERNAL_NETWORKING_GENERATION,
+                    self.blueprint.external_networking_generation.to_string(),
+                ),
             ],
         )
     }
@@ -1465,6 +1478,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             sleds,
             pending_mgs_updates,
             parent_blueprint_id,
+            source,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
             cockroachdb_fingerprint: _,
@@ -1475,16 +1489,15 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These six fields are handled by `make_metadata_table()`, called
-            // below.
+            // Handled by `make_metadata_table()`, called below.
             target_release_minimum_generation: _,
             nexus_generation: _,
+            external_networking_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
             creator: _,
             comment: _,
-            source,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -3310,6 +3323,11 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::nexus_generation`].
     pub nexus_generation: Generation,
+    /// The current generation of the collective set of external networking
+    /// configuration across all in-service zones
+    ///
+    /// See [`Blueprint::external_networking_generation`].
+    pub external_networking_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
