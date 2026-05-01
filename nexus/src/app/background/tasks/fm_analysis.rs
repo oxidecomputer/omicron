@@ -24,6 +24,7 @@ use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+#[allow(dead_code)] // TODO(#10348)
 #[derive(Clone)]
 pub struct FmAnalysis {
     datastore: Arc<DataStore>,
@@ -35,6 +36,7 @@ pub struct FmAnalysis {
 
 /// This is just because I don't like it when a constructor takes multiple
 /// positional arguments of the same type...
+#[allow(dead_code)] // TODO(#10348)
 #[derive(Clone)]
 pub struct Activators {
     pub inventory_loader: Activator,
@@ -63,6 +65,7 @@ impl BackgroundTask for FmAnalysis {
     }
 }
 
+#[allow(dead_code)] // TODO(#10348)
 impl FmAnalysis {
     pub fn new(
         datastore: Arc<DataStore>,
@@ -330,6 +333,7 @@ impl FmAnalysis {
     }
 }
 
+#[allow(dead_code)] // TODO(#10348)
 #[derive(Debug, thiserror::Error)]
 enum PreparationError {
     #[error(transparent)]

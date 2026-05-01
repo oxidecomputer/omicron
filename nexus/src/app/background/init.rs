@@ -107,7 +107,8 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
-use super::tasks::fm_analysis::{self, FmAnalysis};
+// TODO(#10348): re-enable when fm_analysis is re-registered below.
+// use super::tasks::fm_analysis::{self, FmAnalysis};
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
@@ -1140,30 +1141,34 @@ impl BackgroundTasksInitializer {
             activator: task_fm_sitrep_loader,
         });
 
-        let fm_analysis = FmAnalysis::new(
-            datastore.clone(),
-            sitrep_watcher.clone(),
-            inventory_load_watcher.clone(),
-            fm_analysis::Activators {
-                inventory_loader: task_inventory_loader.clone(),
-                sitrep_loader: task_fm_sitrep_loader.clone(),
-                sitrep_gc: task_fm_sitrep_gc.clone(),
-            },
-            nexus_id,
-        );
-        driver.register(TaskDefinition {
-            name: "fm_analysis",
-            description:
-                "performs fault management analysis and updates the sitrep",
-            period: config.fm.analysis_period_secs,
-            task_impl: Box::new(fm_analysis),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![
-                Box::new(sitrep_watcher.clone()),
-                Box::new(inventory_load_watcher.clone()),
-            ],
-            activator: task_fm_analysis,
-        });
+        // TODO(#10348): fm_analysis is temporarily disabled. Re-enable
+        // by uncommenting this block and the `use` at the top of this
+        // file.
+        //
+        // let fm_analysis = FmAnalysis::new(
+        //     datastore.clone(),
+        //     sitrep_watcher.clone(),
+        //     inventory_load_watcher.clone(),
+        //     fm_analysis::Activators {
+        //         inventory_loader: task_inventory_loader.clone(),
+        //         sitrep_loader: task_fm_sitrep_loader.clone(),
+        //         sitrep_gc: task_fm_sitrep_gc.clone(),
+        //     },
+        //     nexus_id,
+        // );
+        // driver.register(TaskDefinition {
+        //     name: "fm_analysis",
+        //     description:
+        //         "performs fault management analysis and updates the sitrep",
+        //     period: config.fm.analysis_period_secs,
+        //     task_impl: Box::new(fm_analysis),
+        //     opctx: opctx.child(BTreeMap::new()),
+        //     watchers: vec![
+        //         Box::new(sitrep_watcher.clone()),
+        //         Box::new(inventory_load_watcher.clone()),
+        //     ],
+        //     activator: task_fm_analysis,
+        // });
 
         driver.register(TaskDefinition {
             name: "fm_rendezvous",
