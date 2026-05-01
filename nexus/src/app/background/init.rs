@@ -145,6 +145,7 @@ use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
+use crate::app::background::tasks::populate_switch_ports;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
 use crate::app::saga::StartSaga;
@@ -277,6 +278,7 @@ impl BackgroundTasksInitializer {
             task_trust_quorum_manager: Activator::new(),
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
+            task_populate_switch_ports: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -372,6 +374,7 @@ impl BackgroundTasksInitializer {
             task_session_cleanup,
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
+            task_populate_switch_ports,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1223,7 +1226,7 @@ impl BackgroundTasksInitializer {
             description: "distributes attached subnets to sleds and switch",
             period: config.attached_subnet_manager.period_secs,
             task_impl: Box::new(attached_subnets::Manager::new(
-                resolver,
+                resolver.clone(),
                 datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
@@ -1271,13 +1274,30 @@ impl BackgroundTasksInitializer {
                  than the retention period",
             period: config.audit_log_cleanup.period_secs,
             task_impl: Box::new(audit_log_cleanup::AuditLogCleanup::new(
-                datastore,
+                datastore.clone(),
                 config.audit_log_cleanup.retention_days,
                 config.audit_log_cleanup.max_deleted_per_activation,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_audit_log_cleanup,
+        });
+
+        driver.register(TaskDefinition {
+            name: "populate_switch_ports",
+            description: "one-time population of the `switch_port` table \
+                containing all QSFP ports managed by dendrite",
+            period: std::time::Duration::from_secs(30), // TODO-john
+            task_impl: Box::new(
+                populate_switch_ports::SwitchPortPopulator::new(
+                    rack_id,
+                    datastore.clone(),
+                    resolver.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_populate_switch_ports,
         });
 
         driver
