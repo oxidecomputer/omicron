@@ -512,34 +512,41 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         by_class.entry(class).or_default().unmarked = unmarked;
     }
 
+    // The variable-length `class` column goes last so that wrapping on a
+    // narrow terminal doesn't disrupt the fixed-width numeric columns.
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct ClassRow {
+    struct ClassRow<'a> {
         #[tabled(rename = "KNOWN-TO-OMDB")]
         known: &'static str,
-        class: String,
         total: i64,
         unmarked: i64,
+        class: &'a str,
     }
 
-    let mut rows: Vec<ClassRow> = by_class
-        .into_iter()
+    let mut rows: Vec<ClassRow<'_>> = by_class
+        .iter()
         .map(|(class, ClassCounts { total, unmarked })| {
-            let (known_marker, class_str) = match class {
-                None => ("excluded", "(NULL)".to_string()),
+            let (known_marker, class_str): (&'static str, &str) = match class {
+                None => ("excluded", "(NULL)"),
                 Some(c) => {
                     let k =
                         if known.contains(c.as_str()) { "yes" } else { "no" };
-                    (k, c)
+                    (k, c.as_str())
                 }
             };
-            ClassRow { known: known_marker, class: class_str, total, unmarked }
+            ClassRow {
+                known: known_marker,
+                total: *total,
+                unmarked: *unmarked,
+                class: class_str,
+            }
         })
         .collect();
 
     // Sort: unknown-but-present first (highest unmarked), then known, then NULL.
     rows.sort_by(|a, b| {
-        let priority = |row: &ClassRow| match row.known {
+        let priority = |row: &ClassRow<'_>| match row.known {
             "no" => 0,
             "yes" => 1,
             _ => 2,
@@ -547,7 +554,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
         priority(a)
             .cmp(&priority(b))
             .then_with(|| b.unmarked.cmp(&a.unmarked))
-            .then_with(|| a.class.cmp(&b.class))
+            .then_with(|| a.class.cmp(b.class))
     });
 
     println!(
@@ -566,7 +573,7 @@ async fn cmd_db_ereport_classes(datastore: &DataStore) -> anyhow::Result<()> {
     let seen_known: std::collections::BTreeSet<&str> = rows
         .iter()
         .filter(|r| r.known == "yes")
-        .map(|r| r.class.as_str())
+        .map(|r| r.class)
         .collect();
     let absent: Vec<&&'static str> =
         known.iter().filter(|c| !seen_known.contains(*c)).collect();
