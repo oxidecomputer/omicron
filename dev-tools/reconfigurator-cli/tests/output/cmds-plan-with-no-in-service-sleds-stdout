@@ -8,7 +8,7 @@ loaded example system with:
 
 
 > # Expunge the only sled. Now no sleds match SledFilter::InService.
-> sled-set 89d02b1b-478c-401a-8e28-7a26f74fa41b policy expunged
+> sled-set serial0 policy expunged
 set sled 89d02b1b-478c-401a-8e28-7a26f74fa41b policy to expunged
 
 
@@ -18,9 +18,10 @@ set sled 89d02b1b-478c-401a-8e28-7a26f74fa41b policy to expunged
 generated inventory collection 972ca69a-384c-4a9c-a87d-c2cf21e114e0 from configured sleds
 
 
-> # Plan a new blueprint. Expected: success, with a planning report that
-> # names "no in-service sleds to plan against" as the blocker.
-> blueprint-plan latest 972ca69a-384c-4a9c-a87d-c2cf21e114e0
+> # Plan a new blueprint. We expect this to say that zone adds and updates are
+> # blocked, with the reason being that there are no in-service sleds to plan
+> # against. We expect this not to produce a programming error.
+> blueprint-plan latest latest
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:

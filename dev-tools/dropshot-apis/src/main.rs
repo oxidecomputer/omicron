@@ -174,7 +174,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         }),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Management Gateway Service API",
-            versions: Versions::new_versioned(gateway_api::supported_versions()),
+            versions: Versions::new_versioned(
+                gateway_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some(
                     "API for interacting with the Oxide \
@@ -186,7 +188,11 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: gateway_api_mod::stub_api_description,
             ident: "gateway",
-        }),
+        })
+        // The MGS API ought to be client-side-versioned (see #9708) but
+        // currently isn't. Allow trivial changes through so cosmetic dropshot
+        // spec changes don't force a version bump until #9708 is resolved.
+        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Installinator API",
             versions: Versions::new_versioned(
@@ -268,7 +274,11 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: ntp_admin_api_mod::stub_api_description,
             ident: "ntp-admin",
-        }),
+        })
+        // The NTP Admin API is client-side-versioned and currently frozen. We
+        // allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Oximeter API",
             versions: Versions::new_versioned(

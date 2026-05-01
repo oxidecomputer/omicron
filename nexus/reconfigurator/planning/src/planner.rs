@@ -323,8 +323,8 @@ impl<'a> Planner<'a> {
         // If there are no in-service sleds, there's nothing to plan adds
         // against and downstream allocators (e.g. the rack-subnet lookup in
         // `available_internal_dns_subnets`) will fail. Short-circuit here.
-        // The corresponding blocker reason was already accumulated by
-        // `should_plan_add_or_update` (Condition 5).
+        // The corresponding blocker reason was already recorded by
+        // `should_plan_add_or_update` (see condition 5 in that function).
         let has_in_service_sleds =
             self.input.all_sled_ids(SledFilter::InService).next().is_some();
         let mut add = if has_in_service_sleds

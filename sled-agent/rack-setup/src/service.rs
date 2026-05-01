@@ -67,12 +67,10 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::bootstrap::early_networking::{
-    EarlyNetworkSetup, EarlyNetworkSetupError,
-};
-use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::rack_setup::plan::service::PlanError as ServicePlanError;
-use crate::rack_setup::plan::sled::Plan as SledPlan;
+use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
+use crate::plan::service::PlanError as ServicePlanError;
+use crate::plan::service::ServicePlan;
+use crate::plan::sled::SledPlan;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
 use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
@@ -121,6 +119,7 @@ use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
@@ -129,8 +128,9 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::iter;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -138,8 +138,34 @@ use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
-pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
-pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
+/// Operations RSS performs on the local bootstrap agent during rack setup.
+///
+/// This trait exists so this crate doesn't have to depend on the rest of
+/// `sled-agent`; the sole production implementor is `BootstrapAgentHandle` in
+/// `sled-agent::bootstrap::rss_handle`.
+pub trait LocalBootstrapAgent: Send + Sync {
+    /// Instruct the local bootstrap-agent to initialize sled-agents based on
+    /// the contents of `requests`.
+    ///
+    /// This method consumes the handle and can only be called once with the
+    /// full set of sleds to initialize. Returns `Ok(())` if initializing all
+    /// sleds succeeds; if any sled fails to initialize, an error is returned
+    /// immediately (i.e., the error message will pertain only to the first sled
+    /// that failed to initialize).
+    fn initialize_sleds(
+        self,
+        requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
+    ) -> impl Future<Output = Result<(), String>> + Send;
+
+    /// Reset sled-agents on the rack's other sleds.
+    ///
+    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
+    /// `reset_sleds` per run.
+    fn reset_sleds(
+        self,
+        requests: Vec<SocketAddrV6>,
+    ) -> impl Future<Output = Result<(), String>> + Send;
+}
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -289,13 +315,17 @@ impl RackSetupService {
     /// - `internal_disks_rx`: Tells us about available internal disks
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
+    /// - `our_bootstrap_address`: The bootstrap address of the sled
+    ///   hosting RSS (i.e., this sled).
     /// - `bootstore` - A handle to call bootstore APIs
     /// - `trust_quorum` - A handle to the trust qurom task
-    pub(crate) fn new(
+    #[expect(clippy::too_many_arguments)]
+    pub fn new<T: LocalBootstrapAgent + 'static>(
         log: Logger,
         request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: T,
+        our_bootstrap_address: Ipv6Addr,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
@@ -307,6 +337,7 @@ impl RackSetupService {
                     &request,
                     &internal_disks_rx,
                     local_bootstrap_agent,
+                    our_bootstrap_address,
                     bootstore,
                     trust_quorum,
                     step_tx,
@@ -323,13 +354,16 @@ impl RackSetupService {
         RackSetupService { handle }
     }
 
-    pub(crate) fn new_reset_rack(
+    pub fn new_reset_rack<T: LocalBootstrapAgent + 'static>(
         log: Logger,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: T,
+        our_bootstrap_address: Ipv6Addr,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
-            if let Err(e) = svc.reset(local_bootstrap_agent).await {
+            if let Err(e) =
+                svc.reset(local_bootstrap_agent, our_bootstrap_address).await
+            {
                 warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
@@ -1069,9 +1103,10 @@ impl ServiceInner {
         Ok(())
     }
 
-    async fn reset(
+    async fn reset<T: LocalBootstrapAgent>(
         &self,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: T,
+        our_bootstrap_address: Ipv6Addr,
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
@@ -1081,7 +1116,6 @@ impl ServiceInner {
                 BootstrapInterface::GlobalZone,
             ])
             .await?;
-        let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
             .chain(iter::once(our_bootstrap_address))
             .map(|addr| {
@@ -1176,11 +1210,13 @@ impl ServiceInner {
     //    rack, a marker file is created at "rss_completed_marker_path()". This
     //    indicates that the plan executed successfully, and the only work
     //    remaining is to handoff to Nexus.
-    async fn run(
+    #[expect(clippy::too_many_arguments)]
+    async fn run<T: LocalBootstrapAgent>(
         &self,
         request: &RackInitializeRequestParams,
         internal_disks_rx: &InternalDisksReceiver,
-        local_bootstrap_agent: BootstrapAgentHandle,
+        local_bootstrap_agent: T,
+        our_bootstrap_address: Ipv6Addr,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
@@ -1240,7 +1276,7 @@ impl ServiceInner {
         // Wait for enough peers to create a new plan
         let bootstrap_addrs = match &config.bootstrap_discovery {
             BootstrapAddressDiscovery::OnlyOurs => {
-                BTreeSet::from([local_bootstrap_agent.our_address()])
+                BTreeSet::from([our_bootstrap_address])
             }
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
@@ -1866,7 +1902,7 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use crate::plan::service::{ServicePlan, SledInfo};
     use anyhow::Context;
     use bootstrap_agent_lockstep_types::RecoverySiloConfig;
     use iddqd::IdOrdMap;
@@ -1895,8 +1931,8 @@ mod test {
         // Use env! rather than std::env::var because this might be called from
         // a dependent crate.
         let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path =
-            manifest_dir.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let path = manifest_dir
+            .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         toml::from_str(&contents)
             .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
@@ -2136,13 +2172,13 @@ mod test {
         let manifest = Utf8PathBuf::from(manifest);
 
         let path =
-            manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+            manifest.join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
             .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
 
         let path = manifest
-            .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
+            .join("../../smf/sled-agent/gimlet-standalone/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
             .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
@@ -2259,7 +2295,7 @@ mod test {
     fn test_extra_certs() {
         // The stock non-Gimlet config has no TLS certificates.
         let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../smf/sled-agent/non-gimlet/config-rss.toml");
+            .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let cfg =
             rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
                 panic!(
