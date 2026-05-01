@@ -12,10 +12,7 @@
 ///      over the primary key or a non-partial secondary index means
 ///      we walked the whole table.
 #[track_caller]
-pub fn assert_uses_partial_index_only(
-    explanation: &str,
-    expected_index: &str,
-) {
+pub fn assert_uses_partial_index_only(explanation: &str, expected_index: &str) {
     eprintln!("{explanation}");
 
     let mut last_table_was_partial = false;

@@ -3495,22 +3495,39 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
 
-    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
-        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let FmAnalysisStatus {
+        parent_sitrep_id,
+        inv_collection_id,
+        known_classes,
+        outcome,
+    } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
     pub const INV_ID: &str = "current inventory collection ID:";
-    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    pub const KNOWN_CLASSES: &str = "ereport classes consumed:";
+    pub const WIDTH: usize =
+        const_max_len(&[PARENT_SITREP_ID, INV_ID, KNOWN_CLASSES]) + 1;
     println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
     println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    if known_classes.is_empty() {
+        println!("    {KNOWN_CLASSES:<WIDTH$}(none)");
+    } else {
+        println!(
+            "    {KNOWN_CLASSES:<WIDTH$}({} total)",
+            known_classes.len()
+        );
+        for class in &known_classes {
+            println!("      - {class}");
+        }
+    }
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
