@@ -1954,7 +1954,7 @@
             ]
           },
           "external_networking_generation": {
-            "description": "The generation of the collective set of all external networking required for in-service zones\n\nThis generation number is bumped any time a zone with external networking (currently: Nexus, external DNS, or boundary NTP) is added, expunged, or changed in a way that involves its external connectivity.",
+            "description": "The generation of the collective set of all external networking required for in-service zones\n\nThis generation number is bumped any time a zone with external networking is added, expunged, or changed in a way that affects the way NAT entries have to be configured in dendrite.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
@@ -2324,7 +2324,7 @@
             ]
           },
           "external_networking_generation": {
-            "description": "The current generation of the collective set of external networking configuration across all in-service zones",
+            "description": "The current generation of the collective set of external networking configuration across all in-service zones\n\nSee [`Blueprint::external_networking_generation`].",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
