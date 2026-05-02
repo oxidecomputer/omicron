@@ -21,6 +21,7 @@ use nexus_networking::GatewayClient;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::background::instance_watcher as status;
 use nexus_types::inventory;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
@@ -133,7 +134,7 @@ impl InstanceWatcher {
                     run_check(&opctx, inv_rx, &sled, &vmm, &gateways, &client)
                         .await?;
 
-                let state = match check.outcome {
+                let state = match outcome {
                     CheckOutcome::Success(ref state) => state,
                     CheckOutcome::Failure(_) => {
                         // TODO(eliza): it would be nicer if this used the same
@@ -165,7 +166,7 @@ impl InstanceWatcher {
                                  "saga_id" => %saga_id,
                                  "error" => &error,
                              );
-                             Err(UpdateError::SagaFailed { saga_id, error })
+                             UpdateError::SagaFailed { saga_id, error }
                          })
                     }
                     Err(error) => {
@@ -191,7 +192,7 @@ async fn run_check(
     vmm: &Vmm,
     gateways: &[GatewayClient],
     client: &SledAgentClient,
-) -> Result<CheckOutcome, Incomplete> {
+) -> Result<CheckOutcome, status::Incomplete> {
     if sled.policy() == SledPolicy::Expunged {
         // If the sled has been expunged, any VMMs still on that sled
         // should be marked as `Failed`.
@@ -200,7 +201,7 @@ async fn run_check(
             "instance is assigned to a VMM on an Expunged sled; \
              marking it as Failed";
         );
-        return Ok(CheckOutcome::Failure(Failure::SledExpunged));
+        return Ok(CheckOutcome::Failure(status::Failure::SledExpunged));
     }
 
     // Ask the sled-agent what it has to say for itself.
@@ -229,7 +230,7 @@ async fn run_check(
                  VMM has failed!";
                 error,
             );
-            Ok(CheckOutcome::Failure(Failure::NoSuchInstance))
+            Ok(CheckOutcome::Failure(status::Failure::NoSuchInstance))
         }
         // We were able to contact the sled-agent, but it responded with an
         // error which does *not* tell us that the VMM has failed. Either
@@ -262,7 +263,7 @@ async fn run_check(
                 );
             }
 
-            Err(Incomplete::SledAgentHttpError(status.as_u16()))
+            Err(status::Incomplete::SledAgentHttpError(status.as_u16()))
         }
         // We were unable to communicate with the sled-agent. This could be
         // due to a network partition between us and the sled-agent, or
@@ -302,11 +303,11 @@ async fn run_check(
                          in A0, marking it as Failed";
                         "sled_power_state" => ?state,
                     );
-                    return Ok(CheckOutcome::Failure(Failure::SledOff));
+                    return Ok(CheckOutcome::Failure(status::Failure::SledOff));
                 }
             }
 
-            Err(Incomplete::SledAgentUnreachable)
+            Err(status::Incomplete::SledAgentUnreachable)
         }
         // Any other errors mean that the check is inconclusive.
         Err(SledAgentInstanceError(e)) => {
@@ -316,7 +317,7 @@ async fn run_check(
                 "error" => InlineErrorChain::new(&e),
                 "status" => ?e.status(),
             );
-            Err(Incomplete::ClientError)
+            Err(status::Incomplete::ClientError)
         }
     }
 }
@@ -459,7 +460,7 @@ impl VirtualMachine {
 struct Check {
     target: VirtualMachine,
 
-    check_result: Result<CompletedCheck, Incomplete>,
+    check_result: Result<CompletedCheck, status::Incomplete>,
 }
 
 struct CompletedCheck {
@@ -471,19 +472,24 @@ struct CompletedCheck {
 #[derive(Debug, Clone)]
 enum CheckOutcome {
     Success(SledVmmState),
-    Failure(Failure),
+    Failure(status::Failure),
+}
+
+impl CheckOutcome {
+    fn instance_state(&self) -> InstanceState {
+        match self {
+            Self::Success(state) => InstanceState::from(state.vmm_state.state),
+            Self::Failure(_) => InstanceState::Failed,
+        }
+    }
 }
 
 impl Check {
     fn state_str(&self) -> Cow<'static, str> {
         match self.check_result {
-            Ok(CompletedCheck {
-                outcome: CheckOutcome::Success(ref state),
-                ..
-            }) => InstanceState::from(state.vmm_state.state).label().into(),
-            Ok(CompletedCheck {
-                outcome: CheckOutcome::Failure(_), ..
-            }) => InstanceState::Failed.label().into(),
+            Ok(CompletedCheck { ref outcome, .. }) => {
+                outcome.instance_state().label().into()
+            }
             Err(_) => "unknown".into(),
         }
     }
@@ -498,72 +504,6 @@ impl Check {
                 ..
             }) => reason.as_str(),
             Err(e) => e.as_str(),
-        }
-    }
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
-)]
-enum Failure {
-    /// The sled-agent indicated that it doesn't know about an instance ID that
-    /// we believe it *should* know about. This probably means the sled-agent,
-    /// and potentially the whole sled, has been restarted.
-    NoSuchInstance,
-    /// The instance was assigned to a sled that was expunged. Its VMM has been
-    /// marked as `Failed`, since the sled is no longer present.
-    SledExpunged,
-    /// The instance was assigned to a sled that is not currently in A0.
-    /// Its VMM has been marked as `Failed`, since the computer it's on is not,
-    /// you know...turned on.
-    SledOff,
-}
-
-impl Failure {
-    fn as_str(&self) -> Cow<'static, str> {
-        match self {
-            Self::NoSuchInstance => "no_such_instance".into(),
-            Self::SledExpunged => "sled_expunged".into(),
-            Self::SledOff => "sled_off".into(),
-        }
-    }
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
-)]
-enum Incomplete {
-    /// Something else went wrong while making an HTTP request.
-    ClientError,
-    /// The sled-agent for the sled on which the instance is running was
-    /// unreachable.
-    ///
-    /// This may indicate a network partition between us and that sled, or that
-    /// the sled-agent process has crashed.
-    SledAgentUnreachable,
-    /// The sled-agent responded with an unexpected HTTP error.
-    SledAgentHttpError(u16),
-    /// We attempted to update the instance state in the database, but no
-    /// instance with that UUID existed.
-    ///
-    /// Because the instance UUIDs that we perform checks on come from querying
-    /// the instances table, this would probably indicate that the instance was
-    /// removed from the database between when we listed instances and when the
-    /// check completed.
-    InstanceNotFound,
-    /// Something went wrong while updating the state of the instance in the
-    /// database.
-    UpdateFailed,
-}
-
-impl Incomplete {
-    fn as_str(&self) -> Cow<'static, str> {
-        match self {
-            Self::ClientError => "client_error".into(),
-            Self::SledAgentHttpError(status) => status.to_string().into(),
-            Self::SledAgentUnreachable => "unreachable".into(),
-            Self::InstanceNotFound => "instance_not_found".into(),
-            Self::UpdateFailed => "update_failed".into(),
         }
     }
 }
@@ -744,9 +684,12 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
+    use super::CompletedCheck;
+    use super::InstanceState;
+    use super::VirtualMachine;
+    use super::status;
     use super::virtual_machine::Check;
     use super::virtual_machine::IncompleteCheck;
-    use super::{CheckOutcome, Incomplete, VirtualMachine};
     use oximeter::MetricsError;
     use oximeter::Sample;
     use oximeter::types::Cumulative;
@@ -764,9 +707,29 @@ mod metrics {
 
     #[derive(Debug, Default)]
     struct Instance {
-        checks: BTreeMap<CheckOutcome, Check>,
-        check_errors: BTreeMap<Incomplete, IncompleteCheck>,
+        checks: BTreeMap<CheckOutcomeKey, Check>,
+        check_errors: BTreeMap<status::Incomplete, IncompleteCheck>,
         touched: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum CheckOutcomeKey {
+        Success(InstanceState),
+        Failure(status::Failure),
+        Unknown,
+    }
+
+    impl CheckOutcomeKey {
+        fn for_result<E>(result: &Result<CompletedCheck, E>) -> Self {
+            use super::CheckOutcome;
+            match result.as_ref().map(|check| check.outcome) {
+                Ok(CheckOutcome::Success(success)) => {
+                    Self::Success(success.vmm_state.state.into())
+                }
+                Ok(CheckOutcome::Failure(failure)) => Self::Failure(*failure),
+                Err(_) => Self::Unknown,
+            }
+        }
     }
 
     impl Metrics {
@@ -774,14 +737,14 @@ mod metrics {
             let instance = self.instances.entry(check.target).or_default();
             instance
                 .checks
-                .entry(check.outcome)
+                .entry(CheckOutcomeKey::for_result(&check.check_result))
                 .or_insert_with(|| Check {
                     state: check.state_str(),
                     reason: check.reason_str(),
                     datum: Cumulative::default(),
                 })
                 .datum += 1;
-            if let Err(error) = check.result {
+            if let Err(error) = check.check_result {
                 instance
                     .check_errors
                     .entry(error)
