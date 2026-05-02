@@ -1,0 +1,121 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Test the scenario where every sled is MUPdated, and then one sled
+> # is missing from inventory.
+> #
+> # This produces a blippy BACKCOMPAT note about Nexus generations:
+> #
+> #     blueprint: at Nexus generation 1, found zones with different
+> #     image sources (install dataset vs artifact)
+
+> load-example --seed test-basic --nsleds 3
+loaded example system with:
+- collection: 9e187896-7809-46d0-9210-d75be1b3c4d4
+- blueprint: ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+
+
+> # Hide one sled from inventory.
+> sled-set 89d02b1b-478c-401a-8e28-7a26f74fa41b inventory-hidden
+set sled 89d02b1b-478c-401a-8e28-7a26f74fa41b inventory visibility: visible -> hidden
+
+
+> # Assemble the fake TUF repo and set it as the target release.
+> # (Setting the TUF repo as the target release is important
+> # because it causes the mupdate/update machinery to start working.)
+> tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
+INFO artifacts assembled and archived to `repo-0.0.1.zip`, component: OmicronRepoAssembler
+created repo-0.0.1.zip for system version 0.0.1
+
+> set target-release repo-0.0.1.zip
+INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
+INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 0.0.1, hash: 716e29860eade5de4cf28d2c81f1c3fcaf3a3c07af52961c0e231e3dd0ba4db8, length: 734
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 0.0.1, hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, length: 787
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 0.0.1, hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, length: 787
+INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 0.0.1, hash: 5bfb2fef5a25100e7813636699bd365bbcd623980ae00e876ad705ef591feded, length: 794
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 0.0.1, hash: 143aa9751a0bb16ab3d2c8b56d2874eeab14e1ac3413aa0edf1dbf56900f3fcc, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 0.0.1, hash: 0c43c53453b1113d8ec83d0e3cb8139094b6f4594c304645a33248863141bac6, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 0.0.1, hash: 7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 0.0.1, hash: 040e9ffbd212b790da4fc3a6376c9ff102c852c4ac1f1a1bc84c7d8edc64029f, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 0.0.1, hash: bfc7d2bf0d2e5dde41b8ea85beca7f01262688297f438727fdeb8543c1ceb25e, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 0.0.1, hash: a05417d8d03400b9d556b63563c9958da983a0cdcc3259669966ad45e395c277, length: 1048576
+INFO added artifact, name: clickhouse, kind: zone, version: 0.0.1, hash: 0cc283162daad1dd9d63cd20a484f4e0157b6895c179defa8a99fd220323a6c5, length: 1687
+INFO added artifact, name: clickhouse_keeper, kind: zone, version: 0.0.1, hash: f27ef7d2ce10696c4583ea194cdf61c3907f2143f666af964b8ed3bee1346be0, length: 1691
+INFO added artifact, name: clickhouse_server, kind: zone, version: 0.0.1, hash: bc35f79e04956e284c230f324fe7475ad5cb2ede08e6b4a77addcd9e6f50d33b, length: 1691
+INFO added artifact, name: cockroachdb, kind: zone, version: 0.0.1, hash: a1dc64b896b4bb5d0d295f63b5edeb82b3f945e1f830b06c32f96f9de30b93d1, length: 1690
+INFO added artifact, name: crucible-zone, kind: zone, version: 0.0.1, hash: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4, length: 1691
+INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 0.0.1, hash: 6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d, length: 1696
+INFO added artifact, name: external-dns, kind: zone, version: 0.0.1, hash: 584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7, length: 1690
+INFO added artifact, name: internal-dns, kind: zone, version: 0.0.1, hash: c29c262c79d8f3fa4e0bbec221a286ca6e02b64719b6d35f32cc5e92e36b9173, length: 1690
+INFO added artifact, name: ntp, kind: zone, version: 0.0.1, hash: b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531, length: 1682
+INFO added artifact, name: nexus, kind: zone, version: 0.0.1, hash: 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc, length: 1683
+INFO added artifact, name: oximeter, kind: zone, version: 0.0.1, hash: 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0, length: 1683
+INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
+INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 0.0.1, hash: 3a63db2465b433f7b2f2816f833dcce90e0aa7e7472b1735c63faf93a48bb2ab, length: 726
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 0.0.1, hash: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406, length: 770
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 0.0.1, hash: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406, length: 770
+INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 0.0.1, hash: a58c577f5c33e0a8176f078183a0c94b84ab1e1e7118c441f6b82551fba58f46, length: 794
+INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 0.0.1, hash: 9a559c6734981ec74fee73a56826f8a91beec39a59dea497f67d55c91ab74328, length: 736
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
+INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 0.0.1, hash: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8, length: 792
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 0.0.1, hash: 6f0eebe1001e3d00b02b2dcac5b3d883cb88222fde16a028f5431e87a5feee72, length: 526
+set target release based on repo-0.0.1.zip
+
+
+> # MUPdate all the sleds.
+> sled-update-install-dataset serial0 --to-target-release
+sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: install dataset updated: to target release (system version 0.0.1)
+
+> sled-update-install-dataset serial1 --to-target-release
+sled 2eb69596-f081-4e2d-9425-9994926e0832: install dataset updated: to target release (system version 0.0.1)
+
+> sled-update-install-dataset serial2 --to-target-release
+sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646: install dataset updated: to target release (system version 0.0.1)
+
+
+> # Refresh inventory and run the planner.
+> inventory-generate
+generated inventory collection 972ca69a-384c-4a9c-a87d-c2cf21e114e0 from configured sleds
+
+> blueprint-plan latest latest
+WARN skipping zones eligible for cleanup check (sled not present in latest inventory collection), sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+INFO performed noop zone image source checks on sled, sled_id: 2eb69596-f081-4e2d-9425-9994926e0832, num_total: 16, num_already_artifact: 0, num_eligible: 16, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2eb69596-f081-4e2d-9425-9994926e0832, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2eb69596-f081-4e2d-9425-9994926e0832, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO current sled measurements are in an unknown state, sled_id: 2eb69596-f081-4e2d-9425-9994926e0832
+INFO performed noop zone image source checks on sled, sled_id: 32d8d836-4d8a-4e54-8fa9-f31d79c42646, num_total: 15, num_already_artifact: 0, num_eligible: 15, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 32d8d836-4d8a-4e54-8fa9-f31d79c42646, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 32d8d836-4d8a-4e54-8fa9-f31d79c42646, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO current sled measurements are in an unknown state, sled_id: 32d8d836-4d8a-4e54-8fa9-f31d79c42646
+INFO skipped noop image source check on sled, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, reason: sled not found in inventory
+generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+blueprint source: planner with report:
+planning report:
+* noop converting 16/16 install-dataset zones to artifact store on sled 2eb69596-f081-4e2d-9425-9994926e0832
+* noop converting 15/15 install-dataset zones to artifact store on sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 15 zones
+
+* zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+Measurement updates:
+Waiting on zone add/update blockers
+
+
+
+
+> # Run blippy, which will produce a warning.
+> blueprint-blippy latest
+blippy report for blueprint 86db3308-f817-4626-8838-4085949a6a41: 1 note
+  BACKCOMPAT note: blueprint: at Nexus generation 1, found zones with different image sources:
+  - install dataset:
+      - zone a67ac9b3-427b-4ea6-a891-1c76a22720f5 on sled 89d02b1b-478c-401a-8e28-7a26f74fa41b
+  - artifact: version 0.0.1 (hash: 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc):
+      - zone e246f5e3-0650-4afc-860f-ee7114d309c5 on sled 2eb69596-f081-4e2d-9425-9994926e0832
+      - zone 6c2a57b0-2de0-4409-a6b9-c9aa5614eefa on sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646
+
+

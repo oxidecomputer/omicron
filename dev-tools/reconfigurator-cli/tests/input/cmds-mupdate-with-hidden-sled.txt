@@ -1,0 +1,30 @@
+# Test the scenario where every sled is MUPdated, and then one sled
+# is missing from inventory.
+#
+# This produces a blippy BACKCOMPAT note about Nexus generations:
+#
+#     blueprint: at Nexus generation 1, found zones with different
+#     image sources (install dataset vs artifact)
+
+load-example --seed test-basic --nsleds 3
+
+# Hide one sled from inventory.
+sled-set 89d02b1b-478c-401a-8e28-7a26f74fa41b inventory-hidden
+
+# Assemble the fake TUF repo and set it as the target release.
+# (Setting the TUF repo as the target release is important
+# because it causes the mupdate/update machinery to start working.)
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+set target-release repo-0.0.1.zip
+
+# MUPdate all the sleds.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Refresh inventory and run the planner.
+inventory-generate
+blueprint-plan latest latest
+
+# Run blippy, which will produce a warning.
+blueprint-blippy latest

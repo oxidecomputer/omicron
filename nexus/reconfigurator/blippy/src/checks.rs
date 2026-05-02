@@ -27,6 +27,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::ZoneKind;
@@ -693,72 +694,103 @@ fn check_mupdate_override_host_phase_2_contents(
 }
 
 fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
-    use std::collections::HashMap;
-
-    // Map from generation -> (sled_id, image_source, zone)
-    let mut generation_info: HashMap<
+    let mut by_generation: BTreeMap<
         Generation,
-        Vec<(SledUuid, BlueprintZoneImageSource, &BlueprintZoneConfig)>,
-    > = HashMap::new();
-
-    // Collect all Nexus zones and their generations
-    for (sled_id, zone) in blippy.blueprint().in_service_zones() {
-        if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
-            generation_info.entry(nexus.nexus_generation).or_default().push((
-                sled_id,
-                zone.image_source.clone(),
-                zone,
-            ));
-        }
+        BTreeMap<
+            BlueprintZoneImageSource,
+            BTreeSet<(SledUuid, OmicronZoneUuid)>,
+        >,
+    > = BTreeMap::new();
+    for (sled_id, zone, nexus) in blippy.blueprint().in_service_nexus_zones() {
+        by_generation
+            .entry(nexus.nexus_generation)
+            .or_default()
+            .entry(zone.image_source.clone())
+            .or_default()
+            .insert((sled_id, zone.id));
     }
 
-    // Check that the top-level Nexus generation is consistent with the images
     let active_gen = blippy.blueprint().nexus_generation;
-    if !generation_info.contains_key(&active_gen) {
+    if !by_generation.contains_key(&active_gen) {
         blippy.push_blueprint_note(
             Severity::Fatal,
             BlueprintKind::NoZonesWithActiveNexusGeneration(active_gen),
         );
         return;
+    }
+
+    for (generation, zones_by_source) in by_generation {
+        check_one_nexus_generation(
+            blippy,
+            generation,
+            active_gen,
+            zones_by_source,
+        );
+    }
+}
+
+fn check_one_nexus_generation(
+    blippy: &mut Blippy<'_>,
+    generation: Generation,
+    active_gen: Generation,
+    zones_by_source: BTreeMap<
+        BlueprintZoneImageSource,
+        BTreeSet<(SledUuid, OmicronZoneUuid)>,
+    >,
+) {
+    if generation > active_gen.next() {
+        // Pick a stable representative zone for the note. zones_by_source
+        // is an ordered map so this is deterministic.
+        let (sled_id, zone_id) = *zones_by_source
+            .values()
+            .next()
+            .and_then(|zones| zones.iter().next())
+            .expect("every source has at least one zone associated with it");
+        blippy.push_sled_note(
+            sled_id,
+            Severity::Fatal,
+            SledKind::NexusZoneGenerationTooNew {
+                active_generation: active_gen,
+                zone_generation: generation,
+                id: zone_id,
+            },
+        );
+    }
+
+    // One distinct image source means all zones agree. For the
+    // all-InstallDataset case, we can't tell from a blueprint whether the
+    // zones are running the same version, and rely on the operator to
+    // MUPdate the rack consistently.
+    if zones_by_source.len() < 2 {
+        return;
+    }
+
+    // Two or more Artifact entries means we know that multiple Nexus versions
+    // exist for the same generation. This is FATAL.
+    //
+    // The other mismatch case (exactly one Artifact entry, plus InstallDataset)
+    // is a transient state which can be seen immediately after a full-rack
+    // MUPdate, in case some sleds are missing from inventory. We treat this as
+    // BACKCOMPAT, not FATAL.
+    //
+    // XXX do we need another severity level for this?
+    let artifact_versions = zones_by_source
+        .keys()
+        .filter(|s| matches!(s, BlueprintZoneImageSource::Artifact { .. }))
+        .count();
+    let severity = if artifact_versions >= 2 {
+        Severity::Fatal
+    } else {
+        Severity::BackwardsCompatibility
     };
 
-    // Check each generation for image source consistency
-    for (generation, zones_with_gen) in &generation_info {
-        // Take the first zone as the reference
-        let (ref_sled_id, ref_image_source, ref_zone) = &zones_with_gen[0];
-
-        if *generation > active_gen.next() {
-            blippy.push_sled_note(
-                *ref_sled_id,
-                Severity::Fatal,
-                SledKind::NexusZoneGenerationTooNew {
-                    active_generation: active_gen,
-                    zone_generation: *generation,
-                    id: ref_zone.id,
-                },
-            );
-        }
-
-        if zones_with_gen.len() < 2 {
-            // Only one zone with this generation, no consistency issue
-            continue;
-        }
-
-        // Compare all other zones to the reference
-        for (_sled_id, image_source, zone) in &zones_with_gen[1..] {
-            if image_source != ref_image_source {
-                blippy.push_sled_note(
-                    *ref_sled_id,
-                    Severity::Fatal,
-                    SledKind::NexusZoneGenerationImageSourceMismatch {
-                        zone1: (*ref_zone).clone(),
-                        zone2: (*zone).clone(),
-                        generation: *generation,
-                    },
-                );
-            }
-        }
-    }
+    blippy.push_blueprint_note(
+        severity,
+        BlueprintKind::NexusZoneGenerationImageSourceMismatch {
+            generation,
+            zones_by_source,
+        },
+    );
 }
 
 #[cfg(test)]
@@ -770,6 +802,7 @@ mod tests {
     use ipnet::IpAdd;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
@@ -2082,88 +2115,253 @@ mod tests {
                 .nexus_count(3)
                 .build();
 
-        // Find the Nexus zones
-        let ((sled1, zone1_id), (sled2, zone2_id)) = {
-            let nexus_zones: Vec<_> = blueprint
-                .in_service_zones()
-                .filter_map(|(sled_id, zone)| {
-                    if matches!(zone.zone_type, BlueprintZoneType::Nexus(_)) {
-                        Some((sled_id, zone))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+        let [(sled1, zone1_id), (sled2, zone2_id), (sled3, zone3_id)] =
+            nexus_zone_ids(&blueprint);
 
-            // Should have exactly 3 Nexus zones
-            assert_eq!(nexus_zones.len(), 3);
-
-            // Modify two zones to have the same generation but different image sources
-            let (sled1, zone1) = nexus_zones[0];
-            let (sled2, zone2) = nexus_zones[1];
-
-            ((sled1, zone1.id), (sled2, zone2.id))
+        let generation = Generation::new();
+        let install_dataset = BlueprintZoneImageSource::InstallDataset;
+        let artifact_1_0_0 = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: "1.0.0".parse().unwrap(),
+            },
+            hash: ArtifactHash([0; 32]),
         };
+
+        set_nexus_image_source(
+            &mut blueprint,
+            sled1,
+            zone1_id,
+            generation,
+            install_dataset.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled2,
+            zone2_id,
+            generation,
+            artifact_1_0_0.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled3,
+            zone3_id,
+            generation,
+            install_dataset.clone(),
+        );
+
+        let expected_notes = [Note {
+            // One artifact version + install dataset is a non-fatal note.
+            severity: Severity::BackwardsCompatibility,
+            kind: Kind::Blueprint(
+                BlueprintKind::NexusZoneGenerationImageSourceMismatch {
+                    generation,
+                    zones_by_source: BTreeMap::from([
+                        (
+                            install_dataset,
+                            BTreeSet::from([
+                                (sled1, zone1_id),
+                                (sled3, zone3_id),
+                            ]),
+                        ),
+                        (artifact_1_0_0, BTreeSet::from([(sled2, zone2_id)])),
+                    ]),
+                },
+            ),
+        }];
+
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &expected_notes);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_nexus_generation_image_consistency_multiple_artifact_versions() {
+        static TEST_NAME: &str = "test_nexus_generation_image_consistency_multiple_artifact_versions";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(3)
+                .build();
+
+        let [
+            (sled_install, zone_install_id),
+            (sled_v1, zone_v1_id),
+            (sled_v2, zone_v2_id),
+        ] = nexus_zone_ids(&blueprint);
 
         let generation = Generation::new();
 
-        let zone1 = {
-            // Find the zones in the blueprint and modify them
-            let mut zone1_config = blueprint
-                .sleds
-                .get_mut(&sled1)
-                .unwrap()
-                .zones
-                .get_mut(&zone1_id)
-                .unwrap();
-
-            match &mut zone1_config.zone_type {
-                BlueprintZoneType::Nexus(nexus) => {
-                    nexus.nexus_generation = generation;
-                }
-                _ => unreachable!("this is a Nexus zone"),
-            }
-            zone1_config.image_source =
-                BlueprintZoneImageSource::InstallDataset;
-            zone1_config.clone()
+        let install_dataset = BlueprintZoneImageSource::InstallDataset;
+        let artifact_v1 = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: "1.0.0".parse().unwrap(),
+            },
+            hash: ArtifactHash([0x11; 32]),
+        };
+        let artifact_v2 = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: "2.0.0".parse().unwrap(),
+            },
+            hash: ArtifactHash([0x22; 32]),
         };
 
-        let zone2 = {
-            let mut zone2_config = blueprint
-                .sleds
-                .get_mut(&sled2)
-                .unwrap()
-                .zones
-                .get_mut(&zone2_id)
-                .unwrap();
+        set_nexus_image_source(
+            &mut blueprint,
+            sled_install,
+            zone_install_id,
+            generation,
+            install_dataset.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled_v1,
+            zone_v1_id,
+            generation,
+            artifact_v1.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled_v2,
+            zone_v2_id,
+            generation,
+            artifact_v2.clone(),
+        );
 
-            match &mut zone2_config.zone_type {
-                BlueprintZoneType::Nexus(nexus) => {
-                    nexus.nexus_generation = generation;
-                }
-                _ => unreachable!("this is a Nexus zone"),
-            }
-            zone2_config.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintArtifactVersion::Available {
-                    version: "1.0.0".parse().unwrap(),
+        let expected_notes = [Note {
+            // More than one artifact version is a fatal note.
+            severity: Severity::Fatal,
+            kind: Kind::Blueprint(
+                BlueprintKind::NexusZoneGenerationImageSourceMismatch {
+                    generation,
+                    zones_by_source: BTreeMap::from([
+                        (
+                            install_dataset,
+                            BTreeSet::from([(sled_install, zone_install_id)]),
+                        ),
+                        (artifact_v1, BTreeSet::from([(sled_v1, zone_v1_id)])),
+                        (artifact_v2, BTreeSet::from([(sled_v2, zone_v2_id)])),
+                    ]),
                 },
-                hash: ArtifactHash([0; 32]),
-            };
-            zone2_config.clone()
-        };
+            ),
+        }];
 
-        // Run blippy checks
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &expected_notes);
+
+        logctx.cleanup_successful();
+    }
+
+    // A zone whose Nexus generation equals `active_gen.next()` is on the
+    // boundary of the `generation > active_gen.next()` check in
+    // `check_one_nexus_generation`, and must NOT trigger
+    // `NexusZoneGenerationTooNew`.
+    #[test]
+    fn test_nexus_generation_at_active_next_is_not_too_new() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_at_active_next_is_not_too_new";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(3)
+                .build();
+
+        let [(sled1, zone1_id), (sled2, zone2_id), (sled3, zone3_id)] =
+            nexus_zone_ids(&blueprint);
+
+        let active_gen = blueprint.nexus_generation;
+        let install_dataset = BlueprintZoneImageSource::InstallDataset;
+
+        // Two zones at the active generation, one at active_gen.next().
+        set_nexus_image_source(
+            &mut blueprint,
+            sled1,
+            zone1_id,
+            active_gen,
+            install_dataset.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled2,
+            zone2_id,
+            active_gen,
+            install_dataset.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled3,
+            zone3_id,
+            active_gen.next(),
+            install_dataset,
+        );
+
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &[]);
+
+        logctx.cleanup_successful();
+    }
+
+    // A zone whose Nexus generation is strictly greater than
+    // `active_gen.next()` triggers a Fatal `NexusZoneGenerationTooNew` note.
+    #[test]
+    fn test_nexus_generation_above_active_next_is_too_new() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_above_active_next_is_too_new";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(3)
+                .build();
+
+        let [(sled1, zone1_id), (sled2, zone2_id), (sled3, zone3_id)] =
+            nexus_zone_ids(&blueprint);
+
+        let active_gen = blueprint.nexus_generation;
+        let too_new_gen = active_gen.next().next();
+        let install_dataset = BlueprintZoneImageSource::InstallDataset;
+
+        // Two zones at the active generation, one at active_gen.next().next()
+        // (i.e., strictly greater than active_gen.next()).
+        set_nexus_image_source(
+            &mut blueprint,
+            sled1,
+            zone1_id,
+            active_gen,
+            install_dataset.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled2,
+            zone2_id,
+            active_gen,
+            install_dataset.clone(),
+        );
+        set_nexus_image_source(
+            &mut blueprint,
+            sled3,
+            zone3_id,
+            too_new_gen,
+            install_dataset,
+        );
+
         let expected_notes = [Note {
             severity: Severity::Fatal,
             kind: Kind::Sled {
-                sled_id: sled1,
-                kind: Box::new(
-                    SledKind::NexusZoneGenerationImageSourceMismatch {
-                        zone1,
-                        zone2,
-                        generation,
-                    },
-                ),
+                sled_id: sled3,
+                kind: Box::new(SledKind::NexusZoneGenerationTooNew {
+                    active_generation: active_gen,
+                    zone_generation: too_new_gen,
+                    id: zone3_id,
+                }),
             },
         }];
 
@@ -2173,6 +2371,39 @@ mod tests {
         assert_eq!(report.notes(), &expected_notes);
 
         logctx.cleanup_successful();
+    }
+
+    fn nexus_zone_ids<const N: usize>(
+        blueprint: &Blueprint,
+    ) -> [(SledUuid, OmicronZoneUuid); N] {
+        let zones: Vec<_> = blueprint
+            .in_service_nexus_zones()
+            .map(|(sled_id, zone, _nexus)| (sled_id, zone.id))
+            .collect();
+        zones.try_into().unwrap_or_else(|v: Vec<_>| {
+            panic!("expected {N} Nexus zones, found {}", v.len())
+        })
+    }
+
+    fn set_nexus_image_source(
+        blueprint: &mut Blueprint,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        generation: Generation,
+        image_source: BlueprintZoneImageSource,
+    ) {
+        let mut cfg = blueprint
+            .sleds
+            .get_mut(&sled_id)
+            .expect("sled is in the blueprint")
+            .zones
+            .get_mut(&zone_id)
+            .expect("zone is on the sled");
+        let BlueprintZoneType::Nexus(nexus) = &mut cfg.zone_type else {
+            panic!("zone {zone_id} is a Nexus zone");
+        };
+        nexus.nexus_generation = generation;
+        cfg.image_source = image_source;
     }
 }
 
