@@ -53,6 +53,7 @@ use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -225,9 +226,6 @@ enum InstanceRequest {
     GetFilesystemPool {
         tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
     },
-    CurrentState {
-        tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
-    },
     PutState {
         state: VmmStateRequested,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
@@ -305,9 +303,6 @@ impl InstanceRequest {
 
         match this {
             Self::GetFilesystemPool { tx } => tx
-                .send(Err(error.into()))
-                .map_err(|_| Error::FailedSendClientClosed),
-            Self::CurrentState { tx } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
             Self::PutState { tx, .. } => tx
@@ -569,7 +564,7 @@ struct InstanceRunner {
     dhcp_config: DhcpCfg,
 
     // Internal State management
-    state: InstanceStates,
+    state: Arc<RwLock<InstanceStates>>,
     running_state: Option<RunningState>,
 
     // Connection to Nexus
@@ -660,7 +655,7 @@ impl InstanceRunner {
                     // Note that this timeout is only implicated when Nexus
                     // asks to stop an instance (it is not enabled when someone
                     // forcibly terminates a VM).
-                    self.state.force_state_to_destroyed();
+                    self.state.write().unwrap().force_state_to_destroyed();
                     self.terminate().await;
                     break;
                 }
@@ -712,10 +707,6 @@ impl InstanceRunner {
                         match request {
                             GetFilesystemPool { tx } => {
                                 tx.send(Ok(self.get_filesystem_zpool()))
-                                    .map_err(|_| Error::FailedSendClientClosed)
-                            },
-                            CurrentState{ tx } => {
-                                tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
                             },
                             PutState { state, tx } => {
@@ -829,15 +820,16 @@ impl InstanceRunner {
         // whereas incorrectly removing one VMM from the table will affect only
         // that VMM (and even that VMM's instance will get back on track when
         // Nexus realizes what has happened).
-        if !self.state.vmm_is_halted() {
+        let state = self.state.read().unwrap().clone();
+        if !state.vmm_is_halted() {
             error!(
                 self.log,
                 "instance runner exiting with VMM in non-terminal state";
-                "state" => ?self.current_state()
+                "state" => ?state.sled_instance_state(),
             );
 
             // Assert in tests, at least.
-            debug_assert!(self.state.vmm_is_halted());
+            debug_assert!(state.vmm_is_halted());
         } else {
             info!(self.log, "instance runner exited main loop");
         }
@@ -867,9 +859,6 @@ impl InstanceRunner {
             // the queue,
             let _ = match request {
                 GetFilesystemPool { tx } => tx.send(Ok(None)).map_err(|_| ()),
-                CurrentState { tx } => {
-                    tx.send(Ok(self.current_state())).map_err(|_| ())
-                }
                 PutState { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
@@ -914,7 +903,9 @@ impl InstanceRunner {
         while let Some(TerminateRequest { tx, .. }) = terminate_rx.recv().await
         {
             let _ = tx.send(Ok(VmmUnregisterResponse {
-                updated_runtime: Some(self.current_state()),
+                updated_runtime: Some(
+                    self.state.read().unwrap().sled_instance_state(),
+                ),
             }));
         }
     }
@@ -932,7 +923,7 @@ impl InstanceRunner {
         let result = backoff::retry_notify(
             backoff::retry_policy_internal_service(),
             || async {
-                let state = self.state.sled_instance_state();
+                let state = self.state.read().unwrap().sled_instance_state();
                 info!(self.log, "Publishing instance state update to Nexus";
                     "instance_id" => %self.instance_id(),
                     "propolis_id" => %self.propolis_id,
@@ -1018,12 +1009,13 @@ impl InstanceRunner {
         let InstanceMonitorMessage { update, tx } = request;
         let response = match update {
             InstanceMonitorUpdate::State(state) => {
-                self.observe_state(&ObservedPropolisState::new(&state));
+                let new =
+                    self.observe_state(&ObservedPropolisState::new(&state));
 
                 // If Propolis still has an active VM, just publish this state
                 // update and resume normal operation. Otherwise, go through the
                 // Propolis teardown sequence.
-                if !self.state.vmm_is_halted() {
+                if !new.vmm_is_halted() {
                     self.publish_state_to_nexus().await;
                     ControlFlow::Continue(())
                 } else {
@@ -1081,7 +1073,10 @@ impl InstanceRunner {
 
     /// Processes a Propolis state change observed by the Propolis monitoring
     /// task.
-    fn observe_state(&mut self, state: &ObservedPropolisState) {
+    fn observe_state(
+        &mut self,
+        state: &ObservedPropolisState,
+    ) -> InstanceStates {
         info!(self.log, "observed new Propolis state"; "state" => ?state);
 
         // This shouldn't happen: the monitor can't observe anything before a
@@ -1096,13 +1091,18 @@ impl InstanceRunner {
         //     return;
         // }
 
-        self.state.apply_propolis_observation(state);
+        let next_state = {
+            let mut current = self.state.write().unwrap();
+            current.apply_propolis_observation(state);
+            (&*current).clone()
+        };
         info!(
             self.log,
             "updated state after observing Propolis state change";
             "propolis_id" => %self.propolis_id,
-            "new_vmm_state" => ?self.state.vmm()
+            "new_vmm_state" => ?next_state.vmm()
         );
+        next_state
     }
 
     /// Sends an instance state PUT request to this instance's Propolis.
@@ -1172,6 +1172,8 @@ impl InstanceRunner {
             // instead of unwrapping if it's violated.
             let migration_id = self
                 .state
+                .read()
+                .unwrap()
                 .migration_in()
                 .ok_or_else(|| {
                     Error::Migration(anyhow::anyhow!(
@@ -1781,6 +1783,8 @@ pub struct Instance {
     /// over all other requests to the instance.
     terminate_tx: mpsc::Sender<TerminateRequest>,
 
+    state: Arc<RwLock<InstanceStates>>,
+
     /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
     runner_handle: Arc<tokio::task::JoinHandle<()>>,
@@ -1893,6 +1897,11 @@ impl Instance {
         // the `InstanceRunner`) and awaiting a termination request.
         let (terminate_tx, terminate_rx) = mpsc::channel(QUEUE_SIZE);
 
+        let state = Arc::new(RwLock::new(InstanceStates::new(
+            vmm_runtime,
+            migration_id,
+        )));
+
         let metadata = propolis_client::instance_spec::InstanceMetadata {
             project_id: metadata.project_id,
             silo_id: metadata.silo_id,
@@ -1925,7 +1934,7 @@ impl Instance {
             multicast_groups: local_config.multicast_groups,
             firewall_rules: local_config.firewall_rules,
             dhcp_config,
-            state: InstanceStates::new(vmm_runtime, migration_id),
+            state: state.clone(),
             running_state: None,
             nexus_client,
             available_datasets_rx,
@@ -1945,6 +1954,7 @@ impl Instance {
             tx,
             runner_handle: Arc::new(runner_handle),
             terminate_tx,
+            state,
         })
     }
 
@@ -1965,9 +1975,8 @@ impl Instance {
         &self,
         tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
     ) -> Result<(), Error> {
-        self.tx
-            .try_send(InstanceRequest::CurrentState { tx })
-            .or_else(InstanceRequest::fail_try_send)
+        let state = self.state.read().unwrap().sled_instance_state();
+        tx.send(Ok(state)).map_err(|_| Error::FailedSendClientClosed)
     }
 
     /// Attempts to update the current state of the instance by launching a
@@ -2148,10 +2157,6 @@ impl InstanceRunner {
         }
     }
 
-    fn current_state(&self) -> SledVmmState {
-        self.state.sled_instance_state()
-    }
-
     /// Idempotently ensures that there is an active Propolis zone and that it
     /// has been asked to create the VM described by this instance struct and
     /// the supplied `migration_params`.
@@ -2248,7 +2253,7 @@ impl InstanceRunner {
                 // which is what it would have reached if it *had* existed and
                 // then stopped in an orderly manner.
                 if self.running_state.is_none() {
-                    self.state.force_state_to_destroyed();
+                    self.state.write().unwrap().force_state_to_destroyed();
                     self.terminate().await;
                     (None, None)
                 } else {
@@ -2303,7 +2308,11 @@ impl InstanceRunner {
                         // chosen above. (Note that returning `Ok` here means it
                         // is possible for a state change operation to "succeed"
                         // even though the outcome is a failed instance.)
-                        return Ok(self.state.sled_instance_state());
+                        return Ok(self
+                            .state
+                            .read()
+                            .unwrap()
+                            .sled_instance_state());
                     }
                     _ => {
                         return Err(Error::Propolis(e));
@@ -2312,9 +2321,9 @@ impl InstanceRunner {
             }
         }
         if let Some(s) = next_published {
-            self.state.transition_vmm(s, Utc::now());
+            self.state.write().unwrap().transition_vmm(s, Utc::now());
         }
-        Ok(self.state.sled_instance_state())
+        Ok(self.state.read().unwrap().sled_instance_state())
     }
 
     /// Sets up the Propolis zone that will host this instance's virtual
@@ -2494,7 +2503,9 @@ impl InstanceRunner {
                 self.fail_vmm_and_terminate().await;
                 let result = tx
                     .send(Ok(VmmUnregisterResponse {
-                        updated_runtime: Some(self.state.sled_instance_state()),
+                        updated_runtime: Some(
+                            self.state.read().unwrap().sled_instance_state(),
+                        ),
                     }))
                     .map_err(|_| Error::FailedSendClientClosed);
                 if let Err(err) = result {
@@ -2547,7 +2558,7 @@ impl InstanceRunner {
     /// Forcibly moves this VMM to the Failed state, then goes through the
     /// runner termination sequence.
     async fn fail_vmm_and_terminate(&mut self) {
-        self.state.force_state_to_failed();
+        self.state.write().unwrap().force_state_to_failed();
         self.terminate().await;
     }
 
@@ -3633,7 +3644,10 @@ mod tests {
                 multicast_groups: local_config.multicast_groups,
                 firewall_rules: local_config.firewall_rules,
                 dhcp_config,
-                state: InstanceStates::new(vmm_runtime, migration_id),
+                state: Arc::new(RwLock::new(InstanceStates::new(
+                    vmm_runtime,
+                    migration_id,
+                ))),
                 running_state: None,
                 nexus_client,
                 available_datasets_rx,

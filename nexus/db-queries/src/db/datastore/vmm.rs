@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
 use crate::db::model::VmmState as DbVmmState;
@@ -128,6 +129,37 @@ impl DataStore {
             })?;
 
         Ok(vmm)
+    }
+
+    pub async fn vmm_fetch_with_sled(
+        &self,
+        opctx: &OpContext,
+        vmm_id: &PropolisUuid,
+    ) -> LookupResult<(Vmm, Sled)> {
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let result = dsl::vmm
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                sled_dsl::sled.on(sled_dsl::id
+                    .eq(dsl::sled_id)
+                    .and(sled_dsl::time_deleted.is_null())),
+            )
+            .select((Vmm::as_select(), Sled::as_select()))
+            .first_async::<(Vmm, Sled)>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vmm,
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
+
+        Ok(result)
     }
 
     pub async fn vmm_update_runtime(
