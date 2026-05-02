@@ -220,6 +220,14 @@ async fn cmd_db_ereport_list(
 
     impl<'report> From<EreportRow<'report>> for EreportRowWithMark<'report> {
         fn from(row: EreportRow<'report>) -> Self {
+            // The column is named "MARK" and its values are either "seen" or
+            // "", because I wanted to make it as obvious as possible that an
+            // unmarked ereport may still have been seen in a sitrep. The more
+            // obvious option of a "SEEN" column with values "yes" and "no" is
+            // potentially misleading, as "no" would suggest the ereport has not
+            // been seen, when actually it has not been *marked*. So, the column
+            // is named "MARK". But, I wanted to include the word "seen", so
+            // marked-as-seen ereports have the value "seen".
             let mark =
                 if row.ereport.marked_seen_in.is_some() { "seen" } else { "" };
             Self { mark, ereport: row }
