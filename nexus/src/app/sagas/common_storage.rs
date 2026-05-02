@@ -175,6 +175,56 @@ pub(crate) async fn call_pantry_detach(
         .map(|_response| ())
 }
 
+/// Detach the volume from the Pantry, and it's ok if the Pantry bounced and
+/// lost the attachment.
+pub(crate) async fn call_pantry_detach_ok_if_gone(
+    nexus: &Nexus,
+    log: &slog::Logger,
+    attach_id: Uuid,
+    pantry_address: SocketAddrV6,
+) -> Result<(), ProgenitorOperationRetryError<CruciblePantryClientError>> {
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(
+        log,
+        "sending detach (ok if gone) for {attach_id} to endpoint {endpoint}",
+    );
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    let detach_operation = || async {
+        match client.volume_status(&attach_id.to_string()).await {
+            Err(e) => match e {
+                crucible_pantry_client::Error::ErrorResponse(ref rv) => {
+                    if rv.status() == http::StatusCode::NOT_FOUND {
+                        return Ok(());
+                    }
+
+                    return Err(e);
+                }
+
+                _ => {
+                    return Err(e);
+                }
+            },
+
+            Ok(_) => {
+                // volume still attached, proceed
+            }
+        }
+
+        client.detach(&attach_id.to_string()).await.map(|_| ())
+    };
+
+    let gone_check =
+        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
+
+    ProgenitorOperationRetry::new(detach_operation, gone_check)
+        .run(log)
+        .await
+        .map(|_response| ())
+}
+
 pub(crate) fn find_only_new_region(
     log: &Logger,
     existing_datasets_and_regions: Vec<(

@@ -1166,6 +1166,17 @@ pub struct ServiceFirewallRuleStatus {
     pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
 }
 
+/// The status of a `user_data_export_coordinator` background task
+/// activation
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct UserDataExportCoordinatorStatus {
+    pub create_invoked_ok: Vec<String>,
+    pub delete_invoked_ok: Vec<String>,
+    pub records_marked_for_deletion: usize,
+    pub records_bypassed_ok: Vec<String>,
+    pub errors: Vec<String>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

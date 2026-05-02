@@ -442,6 +442,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
     /// configuration for audit log cleanup (retention) task
     pub audit_log_cleanup: AuditLogCleanupConfig,
+    /// configuration for user data export coordinator task
+    pub user_data_export_coordinator: UserDataExportCoordinatorConfig,
 }
 
 #[serde_as]
@@ -1042,6 +1044,15 @@ pub struct TrustQuorumConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UserDataExportCoordinatorConfig {
+    /// period (in seconds) for periodic activations of this background task
+    /// that managed user data export objects
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1329,6 +1340,7 @@ mod test {
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
+            user_data_export_coordinator.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1609,6 +1621,10 @@ mod test {
                             retention_days: NonZeroU32::new(90).unwrap(),
                             max_deleted_per_activation: 10_000,
                         },
+                        user_data_export_coordinator:
+                            UserDataExportCoordinatorConfig {
+                                period_secs: Duration::from_secs(60),
+                            },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1724,6 +1740,7 @@ mod test {
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
+            user_data_export_coordinator.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"

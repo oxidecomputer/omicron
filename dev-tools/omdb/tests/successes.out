@@ -489,6 +489,10 @@ task: "tuf_repo_pruner"
     determine which TUF repos' artifacts can be pruned
 
 
+task: "user_data_export_coordinator"
+    make the user resources available for export
+
+
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
@@ -1038,6 +1042,17 @@ task: "tuf_repo_pruner"
     repos kept because they're recent target releases: none
     repos kept because they're recent uploads: none
     other repos eligible for pruning: none
+
+task: "user_data_export_coordinator"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total create steps invoked ok: 0
+    total delete steps invoked ok: 0
+    total records affected by expunge: 0
+    total records fast-deleted (resource was deleted): 0
+    errors: 1
+    > error looking up in-service Pantries: proto error: no records found for Query { name: Name("_crucible-pantry._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1719,6 +1734,17 @@ task: "tuf_repo_pruner"
     repos kept because they're recent target releases: none
     repos kept because they're recent uploads: none
     other repos eligible for pruning: none
+
+task: "user_data_export_coordinator"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total create steps invoked ok: 0
+    total delete steps invoked ok: 0
+    total records affected by expunge: 0
+    total records fast-deleted (resource was deleted): 0
+    errors: 1
+    > error looking up in-service Pantries: proto error: no records found for Query { name: Name("_crucible-pantry._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
