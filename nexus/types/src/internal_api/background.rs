@@ -11,6 +11,7 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -1164,6 +1165,96 @@ pub struct ServiceFirewallRuleStatus {
     pub lookup_error: Option<String>,
     /// Errors encountered pushing the set of rules to each sled.
     pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
+}
+
+pub struct InstanceWatcherStatus {
+    pub instance_states: BTreeMap<InstanceState, usize>,
+}
+
+pub mod instance_watcher {
+    use super::*;
+    use std::borrow::Cow;
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Deserialize,
+        Serialize,
+        PartialEq,
+        Eq,
+        PartialOrd,
+        Ord,
+        strum::IntoStaticStr,
+    )]
+    #[strum(serialize_all = "snake_case")]
+    #[serde(rename_all = "snake_case")]
+    pub enum Failure {
+        /// The sled-agent indicated that it doesn't know about an instance ID that
+        /// we believe it *should* know about. This probably means the sled-agent,
+        /// and potentially the whole sled, has been restarted.
+        NoSuchInstance,
+        /// The instance was assigned to a sled that was expunged. Its VMM has been
+        /// marked as `Failed`, since the sled is no longer present.
+        SledExpunged,
+        /// The instance was assigned to a sled that is not currently in A0.
+        /// Its VMM has been marked as `Failed`, since the computer it's on is not,
+        /// you know...turned on.
+        SledOff,
+    }
+
+    impl Failure {
+        pub fn as_str(&self) -> Cow<'static, str> {
+            <&'static str>::from(self).into()
+        }
+    }
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Deserialize,
+        Serialize,
+        PartialEq,
+        Eq,
+        PartialOrd,
+        Ord,
+        strum::IntoStaticStr,
+    )]
+    #[serde(rename_all = "snake_case")]
+    #[strum(serialize_all = "snake_case")]
+    pub enum Incomplete {
+        /// Something else went wrong while making an HTTP request.
+        ClientError,
+        /// The sled-agent for the sled on which the instance is running was
+        /// unreachable.
+        ///
+        /// This may indicate a network partition between us and that sled, or that
+        /// the sled-agent process has crashed.
+        SledAgentUnreachable,
+        /// The sled-agent responded with an unexpected HTTP error.
+        SledAgentHttpError(u16),
+        /// We attempted to update the instance state in the database, but no
+        /// instance with that UUID existed.
+        ///
+        /// Because the instance UUIDs that we perform checks on come from querying
+        /// the instances table, this would probably indicate that the instance was
+        /// removed from the database between when we listed instances and when the
+        /// check completed.
+        InstanceNotFound,
+        /// Something went wrong while updating the state of the instance in the
+        /// database.
+        UpdateFailed,
+    }
+
+    impl Incomplete {
+        pub fn as_str(&self) -> Cow<'static, str> {
+            match self {
+                Self::SledAgentHttpError(status) => status.to_string().into(),
+                other => <&'static str>::from(other).into(),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
