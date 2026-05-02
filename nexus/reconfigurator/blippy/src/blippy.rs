@@ -10,6 +10,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNicEntry;
 use nexus_types::deployment::PlanningInput;
@@ -25,6 +26,7 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -37,7 +39,7 @@ pub struct Note {
     pub kind: Kind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     /// Indicates an issue with a blueprint that should be corrected by a future
     /// planning run.
@@ -114,8 +116,20 @@ impl Kind {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintKind {
-    /// No zones exist in the blueprint using the active Nexus generation
+    /// No zones exist in the blueprint using the active Nexus generation.
     NoZonesWithActiveNexusGeneration(Generation),
+
+    /// Nexus zones at the same generation have two or more distinct image
+    /// sources.
+    ///
+    /// The map groups the zones at this generation by their image source.
+    NexusZoneGenerationImageSourceMismatch {
+        generation: Generation,
+        zones_by_source: BTreeMap<
+            BlueprintZoneImageSource,
+            BTreeSet<(SledUuid, OmicronZoneUuid)>,
+        >,
+    },
 }
 
 impl fmt::Display for BlueprintKind {
@@ -123,6 +137,28 @@ impl fmt::Display for BlueprintKind {
         match self {
             BlueprintKind::NoZonesWithActiveNexusGeneration(r#gen) => {
                 write!(f, "No zones with active nexus generation @ {gen}",)
+            }
+            BlueprintKind::NexusZoneGenerationImageSourceMismatch {
+                generation,
+                zones_by_source,
+            } => {
+                write!(
+                    f,
+                    "at Nexus generation {generation}, found zones with \
+                     different image sources:",
+                )?;
+                for (source, zones) in zones_by_source {
+                    // Display the source with the alternate format ({:#}) to
+                    // show the artifact hash as well.
+                    write!(f, "\n  - {source:#}:")?;
+                    for (sled_id, zone_id) in zones {
+                        write!(
+                            f,
+                            "\n      - zone {zone_id} on sled {sled_id}"
+                        )?;
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -245,12 +281,6 @@ pub enum SledKind {
         active_generation: Generation,
         zone_generation: Generation,
         id: OmicronZoneUuid,
-    },
-    /// Nexus zones with the same generation have different image sources.
-    NexusZoneGenerationImageSourceMismatch {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
-        generation: Generation,
     },
 }
 
@@ -509,18 +539,6 @@ impl fmt::Display for SledKind {
                     f,
                     "Nexus zone {id} has a generation {zone_generation}, which \
                      is too new relative to the active generation {active_generation}"
-                )
-            }
-            SledKind::NexusZoneGenerationImageSourceMismatch {
-                zone1,
-                zone2,
-                generation,
-            } => {
-                write!(
-                    f,
-                    "Nexus zones {} and {} both have generation {generation} but \
-                     different image sources ({:?} vs {:?})",
-                    zone1.id, zone2.id, zone1.image_source, zone2.image_source,
                 )
             }
         }

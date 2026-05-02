@@ -2073,8 +2073,15 @@ impl fmt::Display for BlueprintZoneImageSource {
             BlueprintZoneImageSource::InstallDataset => {
                 write!(f, "install dataset")
             }
-            BlueprintZoneImageSource::Artifact { version, hash: _ } => {
-                write!(f, "artifact: {version}")
+            BlueprintZoneImageSource::Artifact { version, hash } => {
+                // Most callers don't care about the hash, so don't show it by
+                // default. But the hash is sometimes useful. Callers can opt
+                // into it by using the alternate display mode (`{:#}`).
+                write!(f, "artifact: {version}")?;
+                if f.alternate() {
+                    write!(f, " (hash: {hash})")?;
+                }
+                Ok(())
             }
         }
     }
