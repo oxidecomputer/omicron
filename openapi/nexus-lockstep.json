@@ -7166,6 +7166,21 @@
             ]
           },
           {
+            "description": "The system has no target release set, so there are no measurements to plan against.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_target_release"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
             "type": "object",
             "properties": {
               "sled_id": {
