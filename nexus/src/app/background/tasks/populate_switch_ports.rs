@@ -20,8 +20,6 @@ use omicron_common::api::external::Name;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
 const NUM_EXPECTED_QSFP_PORTS: usize = 32;
@@ -30,8 +28,8 @@ pub struct SwitchPortPopulator {
     rack_id: Uuid,
     datastore: Arc<DataStore>,
     resolver: Resolver,
-    did_populate_switch0: AtomicBool,
-    did_populate_switch1: AtomicBool,
+    did_populate_switch0: bool,
+    did_populate_switch1: bool,
 }
 
 impl SwitchPortPopulator {
@@ -44,21 +42,16 @@ impl SwitchPortPopulator {
             rack_id,
             datastore,
             resolver,
-            did_populate_switch0: AtomicBool::new(false),
-            did_populate_switch1: AtomicBool::new(false),
+            did_populate_switch0: false,
+            did_populate_switch1: false,
         }
     }
 
-    async fn activate_impl(&self, opctx: &OpContext) {
-        let need_to_populate_switch0 =
-            !self.did_populate_switch0.load(Ordering::Relaxed);
-        let need_to_populate_switch1 =
-            !self.did_populate_switch1.load(Ordering::Relaxed);
-
+    async fn activate_impl(&mut self, opctx: &OpContext) {
         // Short circuit - if we've already successfully contacted both switch
         // zones and populated the switch ports for them, we have nothing to do
         // ever again.
-        if !need_to_populate_switch0 && !need_to_populate_switch1 {
+        if self.did_populate_switch0 && self.did_populate_switch1 {
             return;
         }
 
@@ -81,8 +74,8 @@ impl SwitchPortPopulator {
 
         // Populate each switch, unless we've already done so successfully.
         for (is_needed, which_switch) in [
-            (need_to_populate_switch0, SwitchSlot::Switch0),
-            (need_to_populate_switch1, SwitchSlot::Switch1),
+            (!self.did_populate_switch0, SwitchSlot::Switch0),
+            (!self.did_populate_switch1, SwitchSlot::Switch1),
         ] {
             if is_needed
                 && let Some(client) = clients_by_switch.get(&which_switch)
@@ -92,11 +85,14 @@ impl SwitchPortPopulator {
                     .await
                 {
                     Ok(()) => {
-                        let success_bool = match which_switch {
-                            SwitchSlot::Switch0 => &self.did_populate_switch0,
-                            SwitchSlot::Switch1 => &self.did_populate_switch1,
+                        match which_switch {
+                            SwitchSlot::Switch0 => {
+                                self.did_populate_switch0 = true;
+                            }
+                            SwitchSlot::Switch1 => {
+                                self.did_populate_switch1 = true;
+                            }
                         };
-                        success_bool.store(true, Ordering::Relaxed);
                     }
                     Err(err) => {
                         warn!(
