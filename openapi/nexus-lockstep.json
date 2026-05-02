@@ -4230,44 +4230,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "ExternalPortDiscovery": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "auto": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string",
-                  "format": "ipv6"
-                }
-              }
-            },
-            "required": [
-              "auto"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "static": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Name"
-                  }
-                }
-              }
-            },
-            "required": [
-              "static"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "FailedHostOsUpdateReason": {
         "description": "Describes the reason why a Host OS failed to update",
         "oneOf": [
@@ -8220,14 +8182,6 @@
             "description": "delegated DNS name for external DNS",
             "type": "string"
           },
-          "external_port_count": {
-            "description": "The external qsfp ports per sidecar",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExternalPortDiscovery"
-              }
-            ]
-          },
           "initial_trust_quorum_configuration": {
             "nullable": true,
             "description": "Data used to write the initial trust quorum configuration to CRDB\n\nThis is optional for two reasons: * For clusters fewer than 3 nodes, we don't support trust quorum. * Trust quorum is not fully complete yet, and we only want this to be used in production once it is complete.",
@@ -8289,7 +8243,6 @@
           "certs",
           "crucible_datasets",
           "external_dns_zone_name",
-          "external_port_count",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
           "physical_disks",

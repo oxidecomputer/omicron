@@ -16,7 +16,7 @@ use nexus_types::external_api::networking;
 use nexus_types::external_api::switch::SwitchLinkState;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
 use sled_agent_types::early_networking::RouterPeerType;
@@ -179,18 +179,6 @@ impl super::Nexus {
         self.db_datastore.switch_port_settings_get(opctx, name_or_id).await
     }
 
-    async fn switch_port_create(
-        &self,
-        opctx: &OpContext,
-        rack_id: Uuid,
-        switch_slot: SwitchSlot,
-        port: Name,
-    ) -> CreateResult<SwitchPort> {
-        self.db_datastore
-            .switch_port_create(opctx, rack_id, switch_slot, port.into())
-            .await
-    }
-
     pub(crate) async fn switch_port_list(
         &self,
         opctx: &OpContext,
@@ -289,27 +277,6 @@ impl super::Nexus {
         // eagerly propagate changes via rpw
         self.background_tasks
             .activate(&self.background_tasks.task_switch_port_settings_manager);
-
-        Ok(())
-    }
-
-    pub(crate) async fn populate_switch_ports(
-        &self,
-        opctx: &OpContext,
-        ports: &[Name],
-        switch: SwitchSlot,
-    ) -> CreateResult<()> {
-        for port in ports {
-            match self
-                .switch_port_create(opctx, self.rack_id, switch, port.clone())
-                .await
-            {
-                Ok(_) => {}
-                // ignore ObjectAlreadyExists but pass through other errors
-                Err(external::Error::ObjectAlreadyExists { .. }) => {}
-                Err(e) => return Err(e),
-            };
-        }
 
         Ok(())
     }
