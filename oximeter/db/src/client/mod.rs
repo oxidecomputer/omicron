@@ -30,6 +30,13 @@ use crate::native::QueryResult;
 use crate::native::block::Block;
 use crate::native::block::ValueArray;
 use crate::query;
+use chrono::Utc;
+use clickhouse_admin_types::retention::Days;
+use clickhouse_admin_types::retention::RetentionPolicy;
+use clickhouse_admin_types::usage::DatabaseUsage;
+use clickhouse_admin_types::usage::OximeterUsage;
+use clickhouse_admin_types::usage::TableUsage;
+use clickhouse_admin_types::usage::TimeseriesUsage;
 use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
@@ -937,21 +944,372 @@ impl Client {
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
+        let mut handle = self.claim_connection().await?;
+        self.is_oximeter_cluster_on_connection(&mut handle).await
+    }
+
+    async fn is_oximeter_cluster_on_connection(
+        &self,
+        handle: &mut Handle,
+    ) -> Result<bool, Error> {
         const QUERY: &str =
             const_format::formatcp!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
-        self.execute_with_block(&mut self.claim_connection().await?, QUERY)
-            .await
-            .and_then(|result| {
-                result
-                    .data
-                    .ok_or_else(|| {
-                        Error::Database(String::from(
-                            "Query for `oximeter` cluster unexpectedly \
-                    returned an empty data block",
-                        ))
-                    })
-                    .map(|block| block.n_rows() > 0)
+        self.execute_with_block(handle, QUERY).await.and_then(|result| {
+            result
+                .data
+                .ok_or_else(|| Error::QueryMissingData {
+                    query: QUERY.to_string(),
+                })
+                .map(|block| block.n_rows() > 0)
+        })
+    }
+
+    /// Set the retention policy for the oximeter database tables.
+    pub async fn set_retention_policy(
+        &self,
+        policy: RetentionPolicy,
+        replicated: bool,
+    ) -> Result<(), Error> {
+        let mut handle = self.claim_connection().await?;
+        let tables =
+            self.list_retention_policy_tables(&mut handle, replicated).await?;
+        for table in tables.iter() {
+            self.set_one_table_retention_policy(
+                &mut handle,
+                &policy,
+                table,
+                replicated,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Set the retention policy on one table.
+    ///
+    /// NOTE: The table name must be fully-qualified with the database, e.g.,
+    /// `oximeter.measurements_u64`.
+    async fn set_one_table_retention_policy(
+        &self,
+        handle: &mut Handle,
+        policy: &RetentionPolicy,
+        table: &str,
+        replicated: bool,
+    ) -> Result<(), Error> {
+        let maybe_on_cluster = if replicated {
+            format!("ON CLUSTER {} ", crate::CLUSTER_NAME)
+        } else {
+            String::new()
+        };
+        let start_time = Self::ttl_start_time_expr_for_table(table)
+            .ok_or_else(|| {
+                Error::Database(format!(
+                    "table '{table}' does not have a known \
+                retention policy start expression"
+                ))
+            })?;
+        let days = u8::from(policy.days);
+        let sql = format!(
+            "ALTER TABLE {table} {maybe_on_cluster}\
+            MODIFY TTL {start_time} + toIntervalDay({days})"
+        );
+        self.execute_native(handle, &sql).await
+    }
+
+    fn ttl_start_time_expr_for_table(table: &str) -> Option<&'static str> {
+        if table.contains("measurements") {
+            Some("toDateTime(timestamp)")
+        } else if table.contains("fields") {
+            Some("last_updated_at")
+        } else if table.contains("query_log") {
+            Some("event_time")
+        } else {
+            None
+        }
+    }
+
+    /// List tables that our retention policy applies to.
+    async fn list_retention_policy_tables(
+        &self,
+        handle: &mut Handle,
+        replicated: bool,
+    ) -> Result<Vec<String>, Error> {
+        let oximeter_tables = self
+            .list_oximeter_database_tables(
+                handle,
+                ListDetails { include_version: false, replicated },
+            )
+            .await?;
+
+        // Skip the timeseries schema table, which doesn't have a TTL, and
+        // prepend the database name.
+        let mut tables = Vec::with_capacity(oximeter_tables.len() - 1);
+        for table in
+            oximeter_tables.into_iter().filter(|n| n != "timeseries_schema")
+        {
+            tables.push(format!("{}.{}", crate::DATABASE_NAME, table));
+        }
+
+        // TTL applies to the query log table too, if it exists.
+        if self.database_has_query_log_table(handle).await? {
+            tables.push(String::from("system.query_log"));
+        }
+        Ok(tables)
+    }
+
+    /// Return true if the database has the `system.query_log` table.
+    async fn database_has_query_log_table(
+        &self,
+        handle: &mut Handle,
+    ) -> Result<bool, Error> {
+        const SQL: &str = "\
+            SELECT 1 \
+            FROM system.tables \
+            WHERE name = 'query_log' \
+            LIMIT 1";
+        let n_rows = self
+            .execute_with_block(handle, SQL)
+            .await?
+            .data
+            .ok_or_else(|| Error::QueryMissingData { query: SQL.to_string() })?
+            .n_rows();
+        Ok(n_rows > 0)
+    }
+
+    /// Return the retention policy for the oximeter database tables.
+    ///
+    /// An error is returned if the database cannot be reached or the policy
+    /// could not be extracted. `None` is returned if there is no retention
+    /// policy set yet, which can happen if the database hasn't been initialized
+    /// yet.
+    pub async fn retention_policy(
+        &self,
+    ) -> Result<Option<RetentionPolicy>, Error> {
+        // We only really need to look at one of the tables, since they all have
+        // the same TTL. Pick a measurements table for simplicity in parsing the
+        // result.
+        const SQL: &str = "\
+            SELECT create_table_query \
+            FROM system.tables \
+            WHERE database = 'oximeter' \
+            AND startsWith(name, 'measurements') \
+            AND position(engine, 'MergeTree') != 0 \
+            LIMIT 1;";
+        let result = self
+            .execute_with_block(&mut self.claim_connection().await?, SQL)
+            .await?;
+        let block = result.data.ok_or_else(|| Error::QueryMissingData {
+            query: SQL.to_string(),
+        })?;
+        let ValueArray::String(rows) = &block
+            .columns
+            .get("create_table_query")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named `create_table_query`".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `create_table_query` to have type string".to_string(),
+            ));
+        };
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        if rows.len() != 1 {
+            return Err(Error::Database(
+                "Expected `create_table_query` to have exactly 1 row"
+                    .to_string(),
+            ));
+        }
+        let days =
+            extract_ttl_in_days_from_measurements_create_table_query(&rows[0])?;
+        Ok(Some(RetentionPolicy { days }))
+    }
+
+    /// Return the resource usage of tables in the database.
+    pub async fn database_table_usage(&self) -> Result<DatabaseUsage, Error> {
+        let started_at = Utc::now();
+        const SQL: &str = "\
+            SELECT \
+                concat(database, '.', name) AS table_name, \
+                ifNull(total_bytes, 0) AS total_bytes, \
+                ifNull(total_rows, 0) AS total_rows \
+            FROM system.tables \
+            WHERE has_own_data";
+        let columns = self
+            .execute_with_block(&mut self.claim_connection().await?, SQL)
+            .await?
+            .data
+            .ok_or_else(|| Error::QueryMissingData { query: SQL.to_string() })?
+            .columns;
+        let ValueArray::String(table_names) = &columns
+            .get("table_name")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'table_name'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `table_name` column to be of type string".to_string(),
+            ));
+        };
+        let ValueArray::UInt64(total_bytes) = &columns
+            .get("total_bytes")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'total_bytes'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `total_bytes` column to be of type UInt64"
+                    .to_string(),
+            ));
+        };
+        let ValueArray::UInt64(total_rows) = &columns
+            .get("total_rows")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'total_rows'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `total_rows` column to be of type UInt64".to_string(),
+            ));
+        };
+        let tables = table_names
+            .iter()
+            .cloned()
+            .zip(total_bytes.iter().copied())
+            .zip(total_rows.iter().copied())
+            .map(|((name, n_bytes), n_rows)| TableUsage {
+                name,
+                n_bytes,
+                n_rows,
             })
+            .collect();
+        let completed_at = Utc::now();
+        Ok(DatabaseUsage { tables, started_at, completed_at })
+    }
+
+    /// Return the resource usage of oximeter timeseries in the database.
+    pub async fn oximeter_timeseries_usage(
+        &self,
+    ) -> Result<OximeterUsage, Error> {
+        let started_at = Utc::now();
+        let mut handle = self.claim_connection().await?;
+        let replicated =
+            self.is_oximeter_cluster_on_connection(&mut handle).await?;
+        let table_names = self
+            .list_oximeter_database_tables(
+                &mut handle,
+                ListDetails { include_version: false, replicated },
+            )
+            .await?;
+        let mut timeseries = iddqd::IdOrdMap::new();
+        for table_name in table_names
+            .into_iter()
+            .filter(|name| name.starts_with("measurements"))
+        {
+            let usage = self
+                .oximeter_timeseries_usage_for_table(&mut handle, table_name)
+                .await?;
+            timeseries.extend(usage);
+        }
+        let completed_at = Utc::now();
+        Ok(OximeterUsage { timeseries, started_at, completed_at })
+    }
+
+    async fn oximeter_timeseries_usage_for_table(
+        &self,
+        handle: &mut Handle,
+        table_name: String,
+    ) -> Result<Vec<TimeseriesUsage>, Error> {
+        let query = format!(
+            "\
+            WITH (\
+                SELECT intDivOrZero(sum(total_bytes), sum(total_rows)) \
+                FROM system.tables \
+                WHERE has_own_data \
+                AND database = '{}' \
+                AND table = '{}'\
+            ) AS bytes_per_row \
+            SELECT \
+                timeseries_name, \
+                count() AS n_samples, \
+                ifNull(n_samples * bytes_per_row, 0) AS n_bytes \
+            FROM {}.{} \
+            GROUP BY timeseries_name",
+            crate::DATABASE_NAME,
+            table_name,
+            crate::DATABASE_NAME,
+            table_name,
+        );
+        let columns = self
+            .execute_with_block(handle, &query)
+            .await?
+            .data
+            .ok_or_else(|| Error::QueryMissingData { query })?
+            .columns;
+
+        let ValueArray::String(timeseries_names) = &columns
+            .get("timeseries_name")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'timeseries_name'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `timeseries_name` column to be of type String"
+                    .to_string(),
+            ));
+        };
+        let ValueArray::UInt64(n_samples) = &columns
+            .get("n_samples")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'n_samples'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `n_samples` column to be of type UInt64".to_string(),
+            ));
+        };
+        let ValueArray::UInt64(n_bytes) = &columns
+            .get("n_bytes")
+            .ok_or_else(|| {
+                Error::Database("Expected a column named 'n_bytes'".to_string())
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `n_bytes` column to be of type UInt64".to_string(),
+            ));
+        };
+        let usage_by_timeseries = timeseries_names
+            .iter()
+            .cloned()
+            .zip(n_samples.iter().copied())
+            .zip(n_bytes.iter().copied())
+            .map(|((name, n_samples), n_bytes)| TimeseriesUsage {
+                name,
+                n_bytes,
+                n_samples,
+            })
+            .collect();
+        Ok(usage_by_timeseries)
     }
 
     // Select the timeseries, including keys and field values, that match the given field-selection
@@ -1358,6 +1716,46 @@ impl Client {
     async fn claim_connection(&self) -> Result<Handle, Error> {
         self.pool.claim().await.map_err(Error::from)
     }
+}
+
+// Helper function to extract the TTL in days from a create-table query.
+//
+// The create-table query is structured like this:
+//
+// ```
+// CREATE TABLE ...
+// ENGINE = ...
+// TTL toDate(timestamp) + toIntervalDay(<N>)
+// SETTINGS ...
+// ```
+//
+// We're picking out the number of days from the function argument as a string.
+fn extract_ttl_in_days_from_measurements_create_table_query(
+    row: &str,
+) -> Result<Days, Error> {
+    const NEEDLE: &str = "TTL toDateTime(timestamp) + toIntervalDay(";
+    let needle_start = row.find(NEEDLE).ok_or_else(|| {
+        Error::Database(format!(
+            "could not find TTL expression in query: '{row}'"
+        ))
+    })?;
+    let n_days_start = needle_start + NEEDLE.len();
+    let close_paren_start = row[n_days_start..].find(")").ok_or_else(|| {
+        Error::Database(format!(
+            "could not find closing paren in TTL expression: '{row}'"
+        ))
+    })?;
+    let val = u8::from_str_radix(&row[n_days_start..][..close_paren_start], 10)
+        .map_err(|e| {
+            Error::Database(format!(
+                "failed to parse days from TTL: '{row}', error: '{e}'"
+            ))
+        })?;
+    Days::new(val).ok_or_else(|| {
+        Error::Database(format!(
+            "expected nonzero number of days for a TTL: {val}"
+        ))
+    })
 }
 
 /// Helper argument to `Client::list_oximeter_database_tables`.
@@ -4951,5 +5349,37 @@ mod tests {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_extract_ttl_in_days_from_create_table_query() {
+        assert_eq!(
+            30u8,
+            u8::from(extract_ttl_in_days_from_measurements_create_table_query(
+                "some junk TTL toDateTime(timestamp) + toIntervalDay(30) other stuff"
+            ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(extract_ttl_in_days_from_measurements_create_table_query(
+                "some junk TTL toDateTime(timestamp) + toIntervalDay(7) other stuff"
+            ).unwrap()),
+        );
+
+        for invalid in [
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(-1) other stuf",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay('foo') other stuf",
+            "some junk TTL toDateTime(timestamp) + other stuff toIntervalDay(1)",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(100)",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(3000)",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(3.0)",
+        ] {
+            assert!(
+                extract_ttl_in_days_from_measurements_create_table_query(
+                    invalid
+                )
+                .is_err()
+            )
+        }
     }
 }

@@ -9,10 +9,12 @@ use clickhouse_admin_types::keeper::{
     ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfigurableSettings,
     Lgif, RaftConfig,
 };
+use clickhouse_admin_types::retention::RetentionPolicy;
 use clickhouse_admin_types::server::{
     DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
     SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
+use clickhouse_admin_types::usage::{DatabaseUsageResult, OximeterUsageResult};
 use dropshot::{
     ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,
     HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
@@ -100,6 +102,35 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let replicated = true;
         ctx.init_db(replicated).await?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        rqctx
+            .context()
+            .set_retention_policy(policy.into_inner())
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
+
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RetentionPolicy>, HttpError> {
+        rqctx.context().retention_policy().await.map(HttpResponseOk)
+    }
+
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatabaseUsageResult>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().database_usage()))
+    }
+
+    async fn oximeter_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterUsageResult>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().oximeter_usage()))
     }
 }
 
@@ -197,5 +228,34 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         let output =
             ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
         Ok(HttpResponseOk(output))
+    }
+
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        rqctx
+            .context()
+            .set_retention_policy(policy.into_inner())
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
+
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RetentionPolicy>, HttpError> {
+        rqctx.context().retention_policy().await.map(HttpResponseOk)
+    }
+
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatabaseUsageResult>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().database_usage()))
+    }
+
+    async fn oximeter_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterUsageResult>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().oximeter_usage()))
     }
 }

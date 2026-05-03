@@ -60,8 +60,9 @@ pub async fn start_server_admin_server(
         }
     }
 
-    let context = ServerContext::new(&log, binary_path, listen_address)
-        .map_err(StartError::InitializeContext)?;
+    let context =
+        ServerContext::new_replicated(&log, binary_path, listen_address)
+            .map_err(StartError::InitializeContext)?;
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_server_api(),
         Arc::new(context),
@@ -146,8 +147,9 @@ pub async fn start_single_admin_server(
         }
     }
 
-    let context = ServerContext::new(&log, binary_path, listen_address)
-        .map_err(StartError::InitializeContext)?;
+    let context =
+        ServerContext::new_single_node(&log, binary_path, listen_address)
+            .map_err(StartError::InitializeContext)?;
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),

@@ -40,6 +40,7 @@ clickhouse-admin-test-utils.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
+oximeter.workspace = true
 oximeter-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true

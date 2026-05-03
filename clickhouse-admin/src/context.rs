@@ -6,9 +6,15 @@ use crate::{ClickhouseCli, Clickward};
 
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
+use chrono::Utc;
 use clickhouse_admin_types::config::GenerateConfigResult;
 use clickhouse_admin_types::keeper::KeeperConfigurableSettings;
+use clickhouse_admin_types::retention::RetentionPolicy;
 use clickhouse_admin_types::server::ServerConfigurableSettings;
+use clickhouse_admin_types::usage::{
+    DatabaseUsage, DatabaseUsageError, DatabaseUsageResult, OximeterUsage,
+    OximeterUsageError, OximeterUsageResult,
+};
 use clickhouse_admin_types::{
     CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
     CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
@@ -16,17 +22,18 @@ use clickhouse_admin_types::{
 use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
 use illumos_utils::svcadm::Svcadm;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
 use oximeter_db::OXIMETER_VERSION;
-use slog::Logger;
+use slog::{Logger, debug, warn};
 use slog::{error, info};
 use slog_error_chain::InlineErrorChain;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
+use std::time::Duration;
 use tokio::sync::{oneshot, watch};
+use tokio::time::MissedTickBehavior;
 
 pub struct KeeperServerContext {
     clickward: Clickward,
@@ -108,28 +115,51 @@ impl KeeperServerContext {
     }
 }
 
+// Database usage calculated periodically.
+#[derive(Debug, Default, Clone)]
+struct Usage {
+    database: DatabaseUsageResult,
+    oximeter: OximeterUsageResult,
+}
+
 pub struct ServerContext {
     clickhouse_cli: ClickhouseCli,
     clickward: Clickward,
     clickhouse_address: SocketAddrV6,
     log: Logger,
+    _replicated: bool,
     generate_config_tx: Sender<GenerateConfigRequest>,
     generation_rx: watch::Receiver<Option<Generation>>,
     db_init_tx: Sender<DbInitRequest>,
+    retention_tx: Sender<RetentionRequest>,
+    usage_rx: watch::Receiver<Usage>,
 }
 
 impl ServerContext {
-    pub fn new(
+    pub fn new_replicated(
         log: &Logger,
         binary_path: Utf8PathBuf,
         listen_address: SocketAddrV6,
     ) -> Result<Self> {
-        let clickhouse_cli =
-            ClickhouseCli::new(binary_path, listen_address, log);
+        Self::new(log, binary_path, listen_address, true)
+    }
 
-        let ip = listen_address.ip();
-        let clickhouse_address =
-            SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
+    pub fn new_single_node(
+        log: &Logger,
+        binary_path: Utf8PathBuf,
+        listen_address: SocketAddrV6,
+    ) -> Result<Self> {
+        Self::new(log, binary_path, listen_address, false)
+    }
+
+    fn new(
+        log: &Logger,
+        binary_path: Utf8PathBuf,
+        clickhouse_address: SocketAddrV6,
+        replicated: bool,
+    ) -> Result<Self> {
+        let clickhouse_cli =
+            ClickhouseCli::new(binary_path, clickhouse_address, log);
         let clickward = Clickward::new();
         let log = log.new(slog::o!("component" => "ServerContext"));
 
@@ -151,15 +181,31 @@ impl ServerContext {
 
         let (db_init_tx, db_init_rx) = flume::bounded(0);
         tokio::spawn(long_running_db_init_task(db_init_rx));
+        let (retention_tx, retention_rx) = flume::bounded(0);
+        tokio::spawn(long_running_retention_task(
+            retention_rx,
+            clickhouse_address,
+            replicated,
+            log.new(slog::o!("component" => "retention-task")),
+        ));
+        let (usage_tx, usage_rx) = watch::channel(Usage::default());
+        tokio::spawn(long_running_usage_task(
+            usage_tx,
+            clickhouse_address,
+            log.new(slog::o!("component" => "usage-task")),
+        ));
 
         Ok(Self {
             clickhouse_cli,
             clickward,
             clickhouse_address,
             log,
+            _replicated: replicated,
             generate_config_tx,
             generation_rx,
             db_init_tx,
+            retention_tx,
+            usage_rx,
         })
     }
 
@@ -229,6 +275,59 @@ impl ServerContext {
 
     pub fn generation(&self) -> Option<Generation> {
         *self.generation_rx.borrow()
+    }
+
+    /// Update the retention policy of the oximeter database tables.
+    pub async fn set_retention_policy(
+        &self,
+        policy: RetentionPolicy,
+    ) -> Result<(), HttpError> {
+        let (tx, rx) = oneshot::channel();
+        self.retention_tx
+            .try_send(RetentionRequest::Set { policy, tx })
+            .map_err(|_| {
+                HttpError::for_unavail(
+                    None,
+                    "Retention policy request channel is full".to_string(),
+                )
+            })?;
+        rx.await
+            .map_err(|_| {
+                HttpError::for_internal_error(
+                    "Retention policy reply channel closed".to_string(),
+                )
+            })
+            .flatten()
+    }
+
+    /// Request the retention policy from the database.
+    pub async fn retention_policy(&self) -> Result<RetentionPolicy, HttpError> {
+        let (tx, rx) = oneshot::channel();
+        self.retention_tx.try_send(RetentionRequest::Get { tx }).map_err(
+            |_| {
+                HttpError::for_unavail(
+                    None,
+                    "Retention policy request channel is full".to_string(),
+                )
+            },
+        )?;
+        rx.await
+            .map_err(|_| {
+                HttpError::for_internal_error(
+                    "Retention policy reply channel closed".to_string(),
+                )
+            })
+            .flatten()
+    }
+
+    /// Return the usage of the oximeter database.
+    pub fn database_usage(&self) -> DatabaseUsageResult {
+        self.usage_rx.borrow().database.clone()
+    }
+
+    /// Return the usage of the timeseries in the oximeter database.
+    pub fn oximeter_usage(&self) -> OximeterUsageResult {
+        self.usage_rx.borrow().oximeter.clone()
     }
 }
 
@@ -505,12 +604,234 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
     Ok(Some(generation))
 }
 
+#[derive(Debug)]
+enum RetentionRequest {
+    Set { policy: RetentionPolicy, tx: oneshot::Sender<Result<(), HttpError>> },
+    Get { tx: oneshot::Sender<Result<RetentionPolicy, HttpError>> },
+}
+
+async fn long_running_retention_task(
+    rx: Receiver<RetentionRequest>,
+    clickhouse_address: SocketAddrV6,
+    replicated: bool,
+    log: Logger,
+) {
+    debug!(log, "task starting, creating Oximeter client");
+    let client = OximeterClient::new(clickhouse_address.into(), &log);
+    debug!(log, "created client, starting recv loop");
+    while let Ok(request) = rx.recv_async().await {
+        debug!(
+            log,
+            "received request for retention policy";
+            "request" => ?&request,
+        );
+        match request {
+            RetentionRequest::Set { policy, tx } => {
+                set_retention_policy(&log, &client, policy, replicated, tx)
+                    .await;
+            }
+            RetentionRequest::Get { tx } => {
+                get_retention_policy(&log, &client, tx).await;
+            }
+        }
+    }
+    error!(log, "retention policy request channel closed, exiting");
+}
+
+async fn set_retention_policy(
+    log: &Logger,
+    client: &OximeterClient,
+    policy: RetentionPolicy,
+    replicated: bool,
+    tx: oneshot::Sender<Result<(), HttpError>>,
+) {
+    debug!(log, "setting database retention policy"; "policy" => ?&policy);
+    let result = match client.set_retention_policy(policy, replicated).await {
+        Ok(_) => {
+            debug!(log, "set retention policy");
+            Ok(())
+        }
+        Err(e) => {
+            let new_err = InlineErrorChain::new(&e);
+            error!(
+                log,
+                "failed to set retention policy";
+                "error" => &new_err,
+            );
+            let http_err = match &e {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_)
+                | oximeter_db::Error::DatabaseVersionMismatch { .. } => {
+                    HttpError::for_unavail(None, new_err.to_string())
+                }
+                _ => HttpError::for_internal_error(new_err.to_string()),
+            };
+            Err(http_err)
+        }
+    };
+    if tx.send(result).is_ok() {
+        debug!(log, "sent retention policy on reply channel");
+    } else {
+        error!(log, "failed to send retention policy on reply channel");
+    }
+}
+
+async fn get_retention_policy(
+    log: &Logger,
+    client: &OximeterClient,
+    tx: oneshot::Sender<Result<RetentionPolicy, HttpError>>,
+) {
+    debug!(log, "fetching retention policy from database");
+    let result = match client.retention_policy().await {
+        Ok(Some(policy)) => {
+            debug!(log, "fetched retention policy"; "policy" => ?&policy);
+            Ok(policy)
+        }
+        Ok(None) => {
+            warn!(
+                log,
+                "database is not yet populated, retention policy \
+                is unavailable"
+            );
+            Err(HttpError::for_unavail(
+                None,
+                "Database is not yet populated".to_string(),
+            ))
+        }
+        Err(e) => {
+            let new_err = InlineErrorChain::new(&e);
+            error!(
+                log,
+                "failed to set retention policy";
+                "error" => &new_err,
+            );
+            let http_err = match &e {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_)
+                | oximeter_db::Error::DatabaseVersionMismatch { .. } => {
+                    HttpError::for_unavail(None, new_err.to_string())
+                }
+                _ => HttpError::for_internal_error(new_err.to_string()),
+            };
+            Err(http_err)
+        }
+    };
+    if tx.send(result).is_ok() {
+        debug!(log, "sent retention policy on reply channel");
+    } else {
+        error!(log, "failed to send retention policy on reply channel");
+    }
+}
+
+// Interval on which we attempt to update the database usage.
+//
+// This is a WAG, but the computations can be fairly heavy and it's unlikely
+// that they'll change much on this timescale. Adding may GiB per minute would
+// be extremely surprising.
+const USAGE_UPDATE_INTERVAL: Duration = Duration::from_mins(2);
+
+async fn long_running_usage_task(
+    tx: watch::Sender<Usage>,
+    clickhouse_address: SocketAddrV6,
+    log: Logger,
+) {
+    let mut timer = tokio::time::interval(USAGE_UPDATE_INTERVAL);
+    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let client = OximeterClient::new(clickhouse_address.into(), &log);
+    loop {
+        timer.tick().await;
+        let database_result = compute_database_table_usage(&client, &log).await;
+        let oximeter_result =
+            compute_oximeter_timeseries_usage(&client, &log).await;
+        tx.send_modify(|current| {
+            // Update the database usage field.
+            match database_result {
+                Ok(usage) => current.database.last_success = Some(usage),
+                Err(error) => {
+                    current.database.last_error = Some(DatabaseUsageError {
+                        timestamp: Utc::now(),
+                        error,
+                    });
+                }
+            }
+            // And the per-timeseries usage field.
+            match oximeter_result {
+                Ok(usage) => current.oximeter.last_success = Some(usage),
+                Err(error) => {
+                    current.oximeter.last_error = Some(OximeterUsageError {
+                        timestamp: Utc::now(),
+                        error,
+                    });
+                }
+            }
+        })
+    }
+}
+
+async fn compute_oximeter_timeseries_usage(
+    client: &OximeterClient,
+    log: &Logger,
+) -> Result<OximeterUsage, String> {
+    debug!(log, "starting oximeter timeseries usage computation");
+    match client.oximeter_timeseries_usage().await {
+        Ok(usage) => {
+            debug!(log, "finished oximeter timeseries usage computation");
+            Ok(usage)
+        }
+        Err(e) => {
+            let e = InlineErrorChain::new(&e);
+            error!(
+                log,
+                "failed to compute oximeter timeseries usage";
+                "error" => &e,
+            );
+            Err(e.to_string())
+        }
+    }
+}
+
+async fn compute_database_table_usage(
+    client: &OximeterClient,
+    log: &Logger,
+) -> Result<DatabaseUsage, String> {
+    debug!(log, "starting database table usage computation");
+    match client.database_table_usage().await {
+        Ok(usage) => {
+            debug!(log, "finished database table usage computation");
+            Ok(usage)
+        }
+        Err(e) => {
+            let e = InlineErrorChain::new(&e);
+            error!(
+                log,
+                "failed to compute database table usage";
+                "error" => &e,
+            );
+            Err(e.to_string())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::read_generation_from_file;
+    use crate::context::ServerContext;
+    use crate::context::USAGE_UPDATE_INTERVAL;
     use camino::Utf8PathBuf;
     use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
+    use clickhouse_admin_types::retention::Days;
+    use clickhouse_admin_types::retention::RetentionPolicy;
+    use dropshot::ErrorStatusCode;
     use omicron_common::api::external::Generation;
+    use omicron_test_utils::dev;
+    use oximeter::Sample;
+    use oximeter::types::Cumulative;
+    use oximeter_db::Client as OximeterClient;
+    use oximeter_db::DbWrite as _;
+    use slog::Logger;
+    use slog::info;
+    use std::collections::BTreeMap;
+    use std::net::SocketAddrV6;
     use std::str::FromStr;
 
     #[test]
@@ -576,5 +897,265 @@ mod tests {
             format!("{}", root_cause),
             "first line of configuration file 'types/testutils/malformed_3.xml' is malformed: <!-- generation:2 --> -->"
         );
+    }
+
+    #[tokio::test]
+    async fn test_retention_policy() {
+        let logctx = dev::test_setup_log("test_retention_policy");
+        let log = &logctx.log;
+        let mut clickhouse =
+            dev::clickhouse::ClickHouseDeployment::new_single_node(&logctx)
+                .await
+                .expect("failed to start ClickHouse");
+        info!(log, "started clickhouse"; "address" => %clickhouse.native_address());
+        let context = ServerContext::new_single_node(
+            log,
+            "bogus-path".into(),
+            clickhouse.native_address(),
+        )
+        .expect("failed to create server context");
+
+        // Need to wait a beat for the inner tasks to actually start.
+        //
+        // TODO-correctness: This is a race waiting to happen.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let err = context.retention_policy().await.expect_err(
+            "retention policy should fail before the DB is initialized",
+        );
+        assert!(matches!(
+            err.status_code,
+            ErrorStatusCode::SERVICE_UNAVAILABLE
+        ));
+
+        context.init_db(false).await.expect("failed to initialize database");
+        let policy = context
+            .retention_policy()
+            .await
+            .expect("failed to get retention policy");
+        assert_eq!(policy.days, Days::new(30).unwrap());
+
+        let days = Days::new(3).unwrap();
+        let new = RetentionPolicy { days };
+        context
+            .set_retention_policy(new)
+            .await
+            .expect("failed to set new retention policy");
+        let policy = context
+            .retention_policy()
+            .await
+            .expect("failed to get retention policy");
+        assert_eq!(policy.days, days);
+
+        clickhouse.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_usage() {
+        let logctx = dev::test_setup_log("test_database_usage");
+        let log = &logctx.log;
+        let mut clickhouse =
+            dev::clickhouse::ClickHouseDeployment::new_single_node(&logctx)
+                .await
+                .expect("failed to start ClickHouse");
+        info!(log, "started clickhouse"; "address" => %clickhouse.native_address());
+        let context = ServerContext::new_single_node(
+            log,
+            "bogus-path".into(),
+            clickhouse.native_address(),
+        )
+        .expect("failed to create server context");
+
+        let usage = context.database_usage();
+        assert!(usage.last_success.is_none());
+        assert!(usage.last_error.is_none());
+
+        // Need to wait a beat for the inner tasks to actually start.
+        //
+        // TODO-correctness: This is a race waiting to happen.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        context.init_db(false).await.unwrap();
+        let usage = context.database_usage();
+        println!("{usage:#?}");
+        assert!(usage.last_success.is_some());
+        assert!(
+            usage
+                .last_success
+                .expect("Should have successfully computed something")
+                .tables
+                .is_empty()
+        );
+
+        // Jump forward until we actually do compute the usage again.
+        tokio::time::pause();
+        let now = tokio::time::Instant::now();
+        while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::resume();
+        let usage = context.database_usage();
+        println!("{usage:#?}");
+        let tables = &usage
+            .last_success
+            .as_ref()
+            .expect("Should have computed something")
+            .tables;
+        tables.contains_key(&String::from("oximeter.measurements_u64"));
+        tables.contains_key(&String::from("oximeter.measurements_u64"));
+        let version = tables.get(&String::from("oximeter.version")).unwrap();
+        assert_eq!(version.n_rows, 1);
+
+        // Kill the database, and force another collection.
+        clickhouse.cleanup().await.unwrap();
+        tokio::time::pause();
+        let now = tokio::time::Instant::now();
+        while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::resume();
+        let usage = context.database_usage();
+        println!("{usage:#?}");
+        assert!(
+            usage.last_success.is_some(),
+            "Should still have last successful result"
+        );
+        let Some(err) = usage.last_error.as_ref() else {
+            panic!("expected an error to have occurred, but found None");
+        };
+        assert!(err.error.starts_with("Failed to check out"));
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_oximeter_timeseries_usage() {
+        let logctx = dev::test_setup_log("test_oximeter_timeseries_usage");
+        let log = &logctx.log;
+        let mut clickhouse =
+            dev::clickhouse::ClickHouseDeployment::new_single_node(&logctx)
+                .await
+                .expect("failed to start ClickHouse");
+        info!(log, "started clickhouse"; "address" => %clickhouse.native_address());
+        let context = ServerContext::new_single_node(
+            log,
+            "bogus-path".into(),
+            clickhouse.native_address(),
+        )
+        .expect("failed to create server context");
+
+        let usage = context.oximeter_usage();
+        assert!(usage.last_success.is_none());
+        assert!(usage.last_error.is_none());
+
+        // Need to wait a beat for the inner tasks to actually start.
+        //
+        // TODO-correctness: This is a race waiting to happen.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        context.init_db(false).await.unwrap();
+        let usage = context.oximeter_usage();
+        println!("{usage:#?}");
+        assert!(usage.last_success.is_some());
+        assert!(
+            usage
+                .last_success
+                .expect("Should have successfully computed something")
+                .timeseries
+                .is_empty()
+        );
+
+        // Insert some "samples" into a few different tables.
+        let per_timeseries =
+            insert_test_samples(context.clickhouse_address(), &context.log)
+                .await;
+        println!("expected: {per_timeseries:#?}");
+
+        // Jump forward until we actually do compute the usage again.
+        tokio::time::pause();
+        let now = tokio::time::Instant::now();
+        while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::resume();
+        let usage = context.oximeter_usage();
+        let timeseries = &usage
+            .last_success
+            .as_ref()
+            .expect("Should have computed something")
+            .timeseries;
+        println!("actual: {timeseries:#?}");
+
+        for (name, n_samples) in per_timeseries.iter() {
+            let actual = timeseries.get(name).unwrap_or_else(|| {
+                panic!("Should have computed a timeseries named '{name}'")
+            });
+            assert_eq!(&actual.name, name);
+            assert_eq!(&actual.n_samples, n_samples);
+        }
+
+        // There should not be any other timeseries computed.
+        assert_eq!(timeseries.len(), per_timeseries.len());
+
+        // Kill the database, and force another collection.
+        clickhouse.cleanup().await.unwrap();
+        tokio::time::pause();
+        let now = tokio::time::Instant::now();
+        while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::resume();
+        let usage = context.database_usage();
+        println!("{usage:#?}");
+        assert!(
+            usage.last_success.is_some(),
+            "Should still have last successful result"
+        );
+        let Some(err) = usage.last_error.as_ref() else {
+            panic!("expected an error to have occurred, but found None");
+        };
+        assert!(err.error.starts_with("Failed to check out"));
+
+        logctx.cleanup_successful();
+    }
+
+    #[derive(oximeter::Target)]
+    struct Target {
+        pub name: String,
+        pub level: u8,
+    }
+
+    #[derive(oximeter::Metric)]
+    struct FirstMetric {
+        pub datum: Cumulative<f64>,
+    }
+
+    #[derive(oximeter::Metric)]
+    struct SecondMetric {
+        pub datum: u16,
+    }
+
+    // Insert some test samples for the oximeter usage test.
+    //
+    // This returns the number of samples we expect to see for each timeseries
+    // we insert.
+    async fn insert_test_samples(
+        addr: SocketAddrV6,
+        log: &Logger,
+    ) -> BTreeMap<String, u64> {
+        let client = OximeterClient::new(addr.into(), log);
+        let target = Target { name: "foo".into(), level: 3 };
+        let first_metric = FirstMetric { datum: Cumulative::new(1.0) };
+        let second_metric = SecondMetric { datum: 3 };
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            samples.push(Sample::new(&target, &first_metric).unwrap());
+        }
+        for _ in 0..10 {
+            samples.push(Sample::new(&target, &second_metric).unwrap());
+        }
+        client.insert_samples(&samples).await.unwrap();
+        let mut out = BTreeMap::new();
+        out.insert(samples[0].timeseries_name.to_string(), 3);
+        out.insert(samples[3].timeseries_name.to_string(), 10);
+        out
     }
 }
