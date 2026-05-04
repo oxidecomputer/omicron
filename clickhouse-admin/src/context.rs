@@ -22,7 +22,7 @@ use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::api::external::Generation;
-use oximeter_db::Client as OximeterClient;
+use oximeter_db::Client as OximeterDbClient;
 use oximeter_db::OXIMETER_VERSION;
 use slog::{Logger, debug, warn};
 use slog::{error, info};
@@ -496,7 +496,7 @@ async fn init_db(
 ) -> Result<(), HttpError> {
     // We initialise the Oximeter client here instead of keeping it as part of the context as
     // this client is not cloneable, copyable by design.
-    let client = OximeterClient::new(clickhouse_address.into(), &log);
+    let client = OximeterDbClient::new(clickhouse_address.into(), &log);
 
     // Initialize the database only if it was not previously initialized.
     // TODO: Migrate schema to newer version without wiping data.
@@ -605,7 +605,7 @@ async fn long_running_retention_task(
     log: Logger,
 ) {
     debug!(log, "task starting, creating Oximeter client");
-    let client = OximeterClient::new(clickhouse_address.into(), &log);
+    let client = OximeterDbClient::new(clickhouse_address.into(), &log);
     debug!(log, "created client, starting recv loop");
     while let Ok(request) = rx.recv_async().await {
         debug!(
@@ -628,7 +628,7 @@ async fn long_running_retention_task(
 
 async fn set_retention_policy(
     log: &Logger,
-    client: &OximeterClient,
+    client: &OximeterDbClient,
     policy: RetentionPolicy,
     replicated: bool,
     tx: oneshot::Sender<Result<(), HttpError>>,
@@ -666,7 +666,7 @@ async fn set_retention_policy(
 
 async fn get_retention_policy(
     log: &Logger,
-    client: &OximeterClient,
+    client: &OximeterDbClient,
     tx: oneshot::Sender<Result<RetentionPolicy, HttpError>>,
 ) {
     debug!(log, "fetching retention policy from database");
@@ -724,7 +724,7 @@ async fn long_running_usage_task(
 ) {
     let mut timer = tokio::time::interval(USAGE_UPDATE_INTERVAL);
     timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let client = OximeterClient::new(clickhouse_address.into(), &log);
+    let client = OximeterDbClient::new(clickhouse_address.into(), &log);
     loop {
         timer.tick().await;
         let database_result = compute_database_table_usage(&client, &log).await;
@@ -739,7 +739,7 @@ async fn long_running_usage_task(
 }
 
 async fn compute_database_table_usage(
-    client: &OximeterClient,
+    client: &OximeterDbClient,
     log: &Logger,
 ) -> Result<DatabaseUsage, String> {
     debug!(log, "starting database table usage computation");
@@ -856,10 +856,24 @@ mod tests {
         )
         .expect("failed to create server context");
 
-        // Need to wait a beat for the inner tasks to actually start.
-        //
-        // TODO-correctness: This is a race waiting to happen.
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        // We need to wait until there's a receiver on the other end of the
+        // retention request queue. So attempt this until we _don't_ get the
+        // "request queue is full" message.
+        dev::poll::wait_for_condition(
+            || async {
+                match context.retention_policy().await {
+                    Err(e) if e.internal_message.contains("is full") => {
+                        Err(dev::poll::CondCheckError::<()>::NotYet)
+                    }
+                    Err(_) | Ok(_) => Ok(()),
+                }
+            },
+            &std::time::Duration::from_millis(10),
+            &std::time::Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+
         let err = context.retention_policy().await.expect_err(
             "retention policy should fail before the DB is initialized",
         );
@@ -911,11 +925,23 @@ mod tests {
         assert!(usage.last_success.is_none());
         assert!(usage.last_error.is_none());
 
-        // Need to wait a beat for the inner tasks to actually start.
-        //
-        // TODO-correctness: This is a race waiting to happen.
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        context.init_db(false).await.unwrap();
+        // We need to wait until there's a receiver on the other end of the
+        // database populator queue.
+        dev::poll::wait_for_condition(
+            || async {
+                match context.init_db(false).await {
+                    Err(e) if e.internal_message.contains("channel full") => {
+                        Err(dev::poll::CondCheckError::<()>::NotYet)
+                    }
+                    Err(_) | Ok(_) => Ok(()),
+                }
+            },
+            &std::time::Duration::from_millis(10),
+            &std::time::Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+
         let usage = context.database_usage();
         println!("{usage:#?}");
         assert!(usage.last_success.is_some());

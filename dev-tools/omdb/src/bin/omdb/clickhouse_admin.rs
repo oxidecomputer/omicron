@@ -30,6 +30,13 @@ pub struct ClickHouseAdminArgs {
     )]
     clickhouse_admin_url: Option<String>,
 
+    /// Run this against the replicated ClickHouse admin server.
+    ///
+    /// The default is to run this against the single-node. This option
+    /// conflicts with specifying the admin URL manually.
+    #[arg(long, conflicts_with = "clickhouse_admin_url")]
+    use_replicated: bool,
+
     #[command(subcommand)]
     command: ClickHouseAdminCommands,
 }
@@ -58,22 +65,26 @@ impl ClickHouseAdminArgs {
         omdb: &Omdb,
         log: &Logger,
     ) -> Result<Client, anyhow::Error> {
+        let (maybe_replicated, srvname) = if self.use_replicated {
+            ("replicated ", ServiceName::ClickhouseAdminServer)
+        } else {
+            ("", ServiceName::ClickhouseAdminSingleServer)
+        };
         let server_url = match &self.clickhouse_admin_url {
             Some(cli_or_env_url) => cli_or_env_url.clone(),
             None => {
                 eprintln!(
-                    "note: clickhouse-admin URL not specified.  Will pick one from DNS."
+                    "note: {}clickhouse-admin URL not specified.  Will pick one from DNS.",
+                    maybe_replicated,
                 );
-                let addr = omdb
-                    .dns_lookup_one(
-                        log.clone(),
-                        ServiceName::ClickhouseAdminSingleServer,
-                    )
-                    .await?;
+                let addr = omdb.dns_lookup_one(log.clone(), srvname).await?;
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using clickhouse-admin URL {}", &server_url);
+        eprintln!(
+            "note: using {}clickhouse-admin URL {}",
+            maybe_replicated, &server_url
+        );
 
         let client = Client::new(
             &server_url,
@@ -104,12 +115,12 @@ impl ClickHouseAdminArgs {
     }
 
     async fn retention_policy(&self, client: &Client) -> anyhow::Result<()> {
-        let ret = client
+        let types::RetentionPolicy { days } = client
             .retention_policy()
             .await
             .context("fetching retention policy")?
             .into_inner();
-        println!("Retention: {:>2} days", ret.days);
+        println!("Retention: {:>2} days", days);
         Ok(())
     }
 

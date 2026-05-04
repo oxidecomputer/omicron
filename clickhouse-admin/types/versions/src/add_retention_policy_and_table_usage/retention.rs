@@ -16,6 +16,7 @@ pub struct RetentionPolicy {
 
 /// A number of days used for a retention period.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(try_from = "u8")]
 pub struct Days(NonZeroU8);
 
 // Use a custom schema to ensure we never deserialize out-of-range values.
@@ -38,6 +39,15 @@ impl JsonSchema for Days {
 impl From<Days> for u8 {
     fn from(val: Days) -> u8 {
         val.0.get()
+    }
+}
+
+impl TryFrom<u8> for Days {
+    type Error = String;
+
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        Self::new(val)
+            .ok_or_else(|| format!("days must be in the range [1, {MAX_DAYS}]"))
     }
 }
 

@@ -8,7 +8,8 @@
 //!
 //! When adding a new API version N with added or changed types:
 //!
-//! 1. Create `<version_name>/mod.rs`, where `<version_name>` is the lowercase form of the new version's identifier, as defined in the API trait's
+//! 1. Create `<version_name>/mod.rs`, where `<version_name>` is the lowercase
+//!    form of the new version's identifier, as defined in the API trait's
 //!    `api_versions!` macro.
 //!
 //! 2. Add to the end of this list:

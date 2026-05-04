@@ -971,16 +971,27 @@ impl Client {
         let mut handle = self.claim_connection().await?;
         let tables =
             self.list_retention_policy_tables(&mut handle, replicated).await?;
+        let mut res = Ok(());
         for table in tables.iter() {
-            self.set_one_table_retention_policy(
-                &mut handle,
-                &policy,
-                table,
-                replicated,
-            )
-            .await?;
+            if let Err(e) = self
+                .set_one_table_retention_policy(
+                    &mut handle,
+                    &policy,
+                    table,
+                    replicated,
+                )
+                .await
+            {
+                error!(
+                    self.log,
+                    "failed to set retention policy on table";
+                    "table_name" => table,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                res = Err(e);
+            }
         }
-        Ok(())
+        res
     }
 
     /// Set the retention policy on one table.
@@ -1003,7 +1014,7 @@ impl Client {
             .ok_or_else(|| {
                 Error::Database(format!(
                     "table '{table}' does not have a known \
-                retention policy start expression"
+                    retention policy start expression"
                 ))
             })?;
         let days = u8::from(policy.days);
@@ -1083,9 +1094,10 @@ impl Client {
     pub async fn retention_policy(
         &self,
     ) -> Result<Option<RetentionPolicy>, Error> {
-        // We only really need to look at one of the tables, since they all have
-        // the same TTL. Pick a measurements table for simplicity in parsing the
-        // result.
+        // It's possible today that different tables actually have different
+        // TTLs, because we short-circuit if we fail to set the TTL partway
+        // through the list of tables. We're hoping that they're all the same,
+        // and picking a measurements table for simplicity.
         const SQL: &str = "\
             SELECT create_table_query \
             FROM system.tables \
@@ -5267,5 +5279,42 @@ mod tests {
                 .is_err()
             )
         }
+    }
+
+    #[test]
+    fn can_extract_ttl_from_all_oximeter_tables() {
+        let dbinit = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("schema")
+            .join("single-node")
+            .join("db-init.sql");
+        let sql = std::fs::read_to_string(&dbinit).unwrap_or_else(|_| {
+            panic!("failed to read SQL from {}", dbinit.display())
+        });
+        let actual = sql
+            .lines()
+            .filter_map(|line| {
+                if !line.starts_with("CREATE TABLE") {
+                    return None;
+                }
+                let (_before, table) =
+                    line.rsplit_once(' ').unwrap_or_else(|| {
+                        panic!(
+                            "should have lines like \
+                        'CREATE TABLE IF NOT EXISTS <table_name>', \
+                        found '{}'",
+                            line,
+                        )
+                    });
+                let ttl_expr = Client::ttl_start_time_expr_for_table(table)
+                    .unwrap_or_else(|| "none");
+                Some(format!("{table} -> {ttl_expr}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let checked_in_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-output")
+            .join("ttl-expr-for-tables.txt");
+        expectorate::assert_contents(checked_in_file, &actual);
     }
 }
