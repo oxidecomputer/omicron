@@ -990,7 +990,7 @@ mod tests {
         tokio::time::pause();
         let now = tokio::time::Instant::now();
         while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::advance(std::time::Duration::from_millis(10)).await;
         }
         tokio::time::resume();
         let usage = context.database_usage();
@@ -1010,7 +1010,7 @@ mod tests {
         tokio::time::pause();
         let now = tokio::time::Instant::now();
         while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::advance(std::time::Duration::from_millis(10)).await;
         }
         tokio::time::resume();
         let usage = context.database_usage();
@@ -1073,7 +1073,7 @@ mod tests {
         tokio::time::pause();
         let now = tokio::time::Instant::now();
         while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::advance(std::time::Duration::from_millis(10)).await;
         }
         tokio::time::resume();
         let usage = context.oximeter_usage();
@@ -1100,7 +1100,7 @@ mod tests {
         tokio::time::pause();
         let now = tokio::time::Instant::now();
         while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::advance(std::time::Duration::from_millis(10)).await;
         }
         tokio::time::resume();
         let usage = context.database_usage();

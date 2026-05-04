@@ -268,8 +268,9 @@ fn test_format_bytes() {
     assert_eq!(format_bytes(1), "1 B");
     assert_eq!(format_bytes(1023), "1023 B");
     assert_eq!(format_bytes(1_024), "1.00 KiB");
-    assert_eq!(format_bytes((1024 * 99) + 1), "99.99 KiB");
+    assert_eq!(format_bytes((1024 * 99) + 100), "99.10 KiB");
     assert_eq!(format_bytes(1024 * 100), "100.00 KiB");
-    assert_eq!(format_bytes(1024 * 1024 - 1), "999.99 KiB");
+    assert_eq!(format_bytes(1024 * 1000 - 10), "999.99 KiB");
     assert_eq!(format_bytes(1024 * 1024), "1.00 MiB");
+    assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GiB");
 }
