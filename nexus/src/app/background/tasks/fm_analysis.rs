@@ -31,8 +31,6 @@ pub struct FmAnalysis {
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
     activators: Activators,
     nexus_id: OmicronZoneUuid,
-    /// When false, `activate()` short-circuits and reports the task as
-    /// disabled.
     analysis_enabled: bool,
 }
 
@@ -372,9 +370,6 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SitrepUuid;
 
-    /// These tests exercise the analysis path; the toggle stays on so
-    /// `actually_activate()` (which is what the tests call directly) is
-    /// reached by the same code path it would be in production-with-toggle-on.
     const ANALYSIS_ENABLED: bool = true;
 
     fn activators() -> Activators {

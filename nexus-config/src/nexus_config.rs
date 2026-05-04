@@ -969,12 +969,8 @@ impl Default for MulticastGroupReconcilerConfig {
 }
 
 /// Default for [`FmTasksConfig::analysis_enabled`].
-///
-/// To re-enable fault management analysis fleet-wide once the subsystem is
-/// ready (see omicron#10348), change the body of this function to return
-/// `true`.  This is the single source of truth for both the serde
-/// "missing field" default and `FmTasksConfig::default()`.
 fn default_fm_analysis_enabled() -> bool {
+    // TODO(10349): Flip to true
     false
 }
 
