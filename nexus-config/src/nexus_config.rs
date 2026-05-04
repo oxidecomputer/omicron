@@ -970,7 +970,7 @@ impl Default for MulticastGroupReconcilerConfig {
 
 /// Default for [`FmTasksConfig::analysis_enabled`].
 fn default_fm_analysis_enabled() -> bool {
-    // TODO(10349): Flip to true
+    // TODO(#10349): Flip to true
     false
 }
 
