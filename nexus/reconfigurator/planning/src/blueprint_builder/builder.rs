@@ -42,6 +42,7 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::OximeterReadMode;
@@ -575,6 +576,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -969,7 +971,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        Blueprint {
+        let mut blueprint = Blueprint {
             id: blueprint_id,
             sleds,
             pending_mgs_updates: self.pending_mgs_updates,
@@ -979,6 +981,9 @@ impl<'a> BlueprintBuilder<'a> {
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
+            external_networking_generation: self
+                .parent_blueprint
+                .external_networking_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
@@ -994,7 +999,31 @@ impl<'a> BlueprintBuilder<'a> {
                 .collect::<Vec<String>>()
                 .join(", "),
             source,
+        };
+
+        // Do we need to bump `external_networking_generation`? We need to
+        // compare the current external networking config against our parent
+        // blueprint.
+        //
+        // It's a little awkward to mutate a fully-created `Blueprint`,
+        // particularly since we think of them as immutable. But:
+        //
+        // (a) We're still inside `build()` - the blueprint is still
+        //     conceptually immutable to the rest of the system
+        // (b) Performing this check on the fully-realized child blueprint
+        //     makes it easy to ensure we're checking _exactly_ the same thing:
+        //     `is_external_networking_config_different()` can call the same
+        //     `Blueprint::*` helper methods to determine whether there were
+        //     changes.
+        if is_external_networking_config_different(
+            self.parent_blueprint,
+            &blueprint,
+        ) {
+            blueprint.external_networking_generation =
+                blueprint.external_networking_generation.next();
         }
+
+        blueprint
     }
 
     pub fn current_sled_state(
@@ -2677,6 +2706,41 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
             }
         }
     }
+}
+
+fn is_external_networking_config_different(
+    blueprint1: &Blueprint,
+    blueprint2: &Blueprint,
+) -> bool {
+    // Helper function to condense a blueprint into just a set of all its
+    // external networking config, suitable only for comparison.
+    //
+    // This check is overly cautious: we never mutate a zone's properties in
+    // place, and instead always expunge it and add a new one to change
+    // properties, so it would be sufficient to only check that the set of zone
+    // IDs that have external networking matches. But it's harmless to check
+    // that the actual networking properties themselves haven't changed, either,
+    // and if in the future we allow mutating properties without expunging, this
+    // check will still be correct.
+    fn all_external_networking_config(
+        blueprint: &Blueprint,
+    ) -> BTreeSet<(
+        SledUuid,
+        OmicronZoneUuid,
+        OmicronZoneExternalIp,
+        &NetworkInterface,
+    )> {
+        blueprint
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (ip, nic) = zone_config.zone_type.external_networking()?;
+                Some((sled_id, zone_config.id, ip, nic))
+            })
+            .collect()
+    }
+
+    all_external_networking_config(blueprint1)
+        != all_external_networking_config(blueprint2)
 }
 
 #[cfg(test)]

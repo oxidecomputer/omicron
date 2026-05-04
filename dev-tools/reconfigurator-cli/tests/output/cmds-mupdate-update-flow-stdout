@@ -1532,13 +1532,14 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-sim
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   4
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-sim
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   4
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1917,13 +1918,14 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-sim
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed all noop measurements updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   4
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-sim
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed all noop measurements updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   4
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -2336,13 +2338,14 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-sim
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: performed 7 noop zone image source updates
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   4
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-sim
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: performed 7 noop zone image source updates
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   4
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -2805,13 +2808,14 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-sim
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   update Sled 0 (serial0) RoT bootloader to 2.0.0
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   4
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-sim
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   update Sled 0 (serial0) RoT bootloader to 2.0.0
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   4
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):

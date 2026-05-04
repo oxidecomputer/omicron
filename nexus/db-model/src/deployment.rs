@@ -92,6 +92,7 @@ pub struct Blueprint {
     pub target_release_minimum_generation: Generation,
     pub nexus_generation: Generation,
     pub source: DbBpSource,
+    pub external_networking_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -113,6 +114,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             ),
             nexus_generation: Generation(bp.nexus_generation),
             source: DbBpSource::from(&bp.source),
+            external_networking_generation: Generation(
+                bp.external_networking_generation,
+            ),
         }
     }
 }
@@ -137,6 +141,8 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             creator: value.creator,
             comment: value.comment,
             source: value.source.into(),
+            external_networking_generation: *value
+                .external_networking_generation,
         }
     }
 }
