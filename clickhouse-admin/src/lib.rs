@@ -72,7 +72,7 @@ pub async fn start_server_admin_server(
     .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
-            clickhouse_admin_api::VERSION_INITIAL,
+            clickhouse_admin_api::latest_version(),
         ),
     )))
     .start()
@@ -115,7 +115,7 @@ pub async fn start_keeper_admin_server(
     .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
-            clickhouse_admin_api::VERSION_INITIAL,
+            clickhouse_admin_api::latest_version(),
         ),
     )))
     .start()
@@ -159,7 +159,7 @@ pub async fn start_single_admin_server(
     .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
-            clickhouse_admin_api::VERSION_INITIAL,
+            clickhouse_admin_api::latest_version(),
         ),
     )))
     .start()
