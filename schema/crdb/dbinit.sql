@@ -5167,7 +5167,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
-    'uninitialized',
     'offline',
     'degraded',
     'maintenance'
@@ -8554,7 +8553,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '253.0.0', NULL)
+    (TRUE, NOW(), NOW(), '255.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

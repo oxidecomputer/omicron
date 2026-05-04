@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Data migration test for BGP unnumbered peer cleanup (migration 253).
+//! Data migration test for BGP unnumbered peer cleanup (migration 255).
 //!
 //! This migration normalizes the `addr` representation of BGP unnumbered peers
 //! to `NULL` across four tables and adds CHECK constraints to reject the
@@ -42,41 +42,41 @@ pub(crate) fn checks() -> DataMigrationFns {
 // Shared parent IDs. No FK constraints exist on these tables, so the
 // referenced rows don't need to exist.
 const PORT_SETTINGS: Uuid =
-    Uuid::from_u128(0x25300001_0000_0000_0000_000000000001);
+    Uuid::from_u128(0x25500001_0000_0000_0000_000000000001);
 const BGP_CONFIG_1: Uuid =
-    Uuid::from_u128(0x25300001_0000_0000_0000_000000000002);
+    Uuid::from_u128(0x25500001_0000_0000_0000_000000000002);
 const BGP_CONFIG_2: Uuid =
-    Uuid::from_u128(0x25300001_0000_0000_0000_000000000003);
+    Uuid::from_u128(0x25500001_0000_0000_0000_000000000003);
 
 // bgp_peer_config row IDs
 const PEER_NUMBERED_1: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000001);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000001);
 const PEER_NUMBERED_2: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000002);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000002);
 const PEER_SINGLE_NULL: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000003);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000003);
 const PEER_SINGLE_V4: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000004);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000004);
 const PEER_SINGLE_V6: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000005);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000005);
 const PEER_NULL_V4_NULL: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000006);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000006);
 const PEER_NULL_V4_V4: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000007);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000007);
 const PEER_NULL_V6_NULL: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000008);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000008);
 const PEER_NULL_V6_V6: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_000000000009);
+    Uuid::from_u128(0x25500002_0000_0000_0000_000000000009);
 const PEER_NULL_BOTH_NULL: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_00000000000a);
+    Uuid::from_u128(0x25500002_0000_0000_0000_00000000000a);
 const PEER_NULL_BOTH_V4: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_00000000000b);
+    Uuid::from_u128(0x25500002_0000_0000_0000_00000000000b);
 const PEER_NULL_BOTH_V6: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_00000000000c);
+    Uuid::from_u128(0x25500002_0000_0000_0000_00000000000c);
 const PEER_V4_V6_V4: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_00000000000d);
+    Uuid::from_u128(0x25500002_0000_0000_0000_00000000000d);
 const PEER_V4_V6_V6: Uuid =
-    Uuid::from_u128(0x25300002_0000_0000_0000_00000000000e);
+    Uuid::from_u128(0x25500002_0000_0000_0000_00000000000e);
 
 fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
@@ -168,7 +168,7 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 "
             ))
             .await
-            .expect("failed to insert test data for migration 251");
+            .expect("failed to insert test data for migration 255");
     })
 }
 
@@ -319,7 +319,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 "
             ))
             .await
-            .expect("cleanup migration 251 test data");
+            .expect("cleanup migration 255 test data");
     })
 }
 

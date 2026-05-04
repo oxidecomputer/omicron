@@ -263,21 +263,20 @@ impl FmAnalysis {
             };
         }
 
-        // TODO(eliza): diff the sitrep against the parent, and return
-        // `Unchanged` if it's the same.
-        let unchanged = true;
-        if unchanged {
-            slog::info!(
-                &opctx.log,
-                "fault management analysis produced no changes from the \
-                 current sitrep"
-            );
-            return status::AnalysisStatus {
-                start_time,
-                end_time,
-                report,
-                outcome: status::AnalysisOutcome::Unchanged,
-            };
+        if let Some(parent) = inputs.parent_sitrep() {
+            if parent.compare_state() == sitrep {
+                slog::info!(
+                    &opctx.log,
+                    "fault management analysis produced no changes from the \
+                     current sitrep"
+                );
+                return status::AnalysisStatus {
+                    start_time,
+                    end_time,
+                    report,
+                    outcome: status::AnalysisOutcome::Unchanged,
+                };
+            }
         }
 
         let sitrep_id = sitrep.id();
