@@ -14,7 +14,7 @@ use clickhouse_admin_types::server::{
     DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
     SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
-use clickhouse_admin_types::usage::{DatabaseUsageResult, OximeterUsageResult};
+use clickhouse_admin_types::usage::DatabaseUsageResult;
 use dropshot::{
     ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,
     HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
@@ -125,12 +125,6 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<DatabaseUsageResult>, HttpError> {
         Ok(HttpResponseOk(rqctx.context().database_usage()))
-    }
-
-    async fn oximeter_usage(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OximeterUsageResult>, HttpError> {
-        Ok(HttpResponseOk(rqctx.context().oximeter_usage()))
     }
 }
 
@@ -251,11 +245,5 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<DatabaseUsageResult>, HttpError> {
         Ok(HttpResponseOk(rqctx.context().database_usage()))
-    }
-
-    async fn oximeter_usage(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OximeterUsageResult>, HttpError> {
-        Ok(HttpResponseOk(rqctx.context().oximeter_usage()))
     }
 }

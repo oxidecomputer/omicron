@@ -264,30 +264,6 @@
           }
         }
       }
-    },
-    "/usage/oximeter-timeseries": {
-      "put": {
-        "summary": "Return the resource usage of oximeter timeseries.",
-        "operationId": "oximeter_usage",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OximeterUsageResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -773,87 +749,6 @@
           "shard"
         ]
       },
-      "OximeterUsage": {
-        "description": "The resource usage of all oximeter timeseries.",
-        "type": "object",
-        "properties": {
-          "completed_at": {
-            "description": "The time at which the usage calculation was completed.",
-            "type": "string",
-            "format": "date-time"
-          },
-          "started_at": {
-            "description": "The time at which the usage calculation was started.",
-            "type": "string",
-            "format": "date-time"
-          },
-          "timeseries": {
-            "title": "IdOrdMap",
-            "description": "Usage for each timeseries.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/TimeseriesUsage"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TimeseriesUsage"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "completed_at",
-          "started_at",
-          "timeseries"
-        ]
-      },
-      "OximeterUsageError": {
-        "description": "An error when computing the usage of all oximeter timeseries.",
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "error",
-          "timestamp"
-        ]
-      },
-      "OximeterUsageResult": {
-        "description": "The result of ongoing attempts to compute oximeter timeseries usage.",
-        "type": "object",
-        "properties": {
-          "last_error": {
-            "nullable": true,
-            "description": "The last error when computing the usage.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/OximeterUsageError"
-              }
-            ]
-          },
-          "last_success": {
-            "nullable": true,
-            "description": "The last successful result computing the usage.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/OximeterUsage"
-              }
-            ]
-          }
-        }
-      },
       "RaftServerConfig": {
         "type": "object",
         "properties": {
@@ -1153,33 +1048,6 @@
         "required": [
           "n_bytes",
           "n_rows",
-          "name"
-        ]
-      },
-      "TimeseriesUsage": {
-        "description": "The resource usage of an oximeter timeseries.",
-        "type": "object",
-        "properties": {
-          "n_bytes": {
-            "description": "The approximate number of bytes consumed on disk.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "n_samples": {
-            "description": "The number of samples in the timeseries.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "name": {
-            "description": "The name of the timeseries.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "n_bytes",
-          "n_samples",
           "name"
         ]
       },

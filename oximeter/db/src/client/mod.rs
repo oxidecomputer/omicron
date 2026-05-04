@@ -34,9 +34,7 @@ use chrono::Utc;
 use clickhouse_admin_types::retention::Days;
 use clickhouse_admin_types::retention::RetentionPolicy;
 use clickhouse_admin_types::usage::DatabaseUsage;
-use clickhouse_admin_types::usage::OximeterUsage;
 use clickhouse_admin_types::usage::TableUsage;
-use clickhouse_admin_types::usage::TimeseriesUsage;
 use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
@@ -1198,118 +1196,6 @@ impl Client {
             .collect();
         let completed_at = Utc::now();
         Ok(DatabaseUsage { tables, started_at, completed_at })
-    }
-
-    /// Return the resource usage of oximeter timeseries in the database.
-    pub async fn oximeter_timeseries_usage(
-        &self,
-    ) -> Result<OximeterUsage, Error> {
-        let started_at = Utc::now();
-        let mut handle = self.claim_connection().await?;
-        let replicated =
-            self.is_oximeter_cluster_on_connection(&mut handle).await?;
-        let table_names = self
-            .list_oximeter_database_tables(
-                &mut handle,
-                ListDetails { include_version: false, replicated },
-            )
-            .await?;
-        let mut timeseries = iddqd::IdOrdMap::new();
-        for table_name in table_names
-            .into_iter()
-            .filter(|name| name.starts_with("measurements"))
-        {
-            let usage = self
-                .oximeter_timeseries_usage_for_table(&mut handle, table_name)
-                .await?;
-            timeseries.extend(usage);
-        }
-        let completed_at = Utc::now();
-        Ok(OximeterUsage { timeseries, started_at, completed_at })
-    }
-
-    async fn oximeter_timeseries_usage_for_table(
-        &self,
-        handle: &mut Handle,
-        table_name: String,
-    ) -> Result<Vec<TimeseriesUsage>, Error> {
-        let query = format!(
-            "\
-            WITH (\
-                SELECT intDivOrZero(sum(total_bytes), sum(total_rows)) \
-                FROM system.tables \
-                WHERE has_own_data \
-                AND database = '{}' \
-                AND table = '{}'\
-            ) AS bytes_per_row \
-            SELECT \
-                timeseries_name, \
-                count() AS n_samples, \
-                ifNull(n_samples * bytes_per_row, 0) AS n_bytes \
-            FROM {}.{} \
-            GROUP BY timeseries_name",
-            crate::DATABASE_NAME,
-            table_name,
-            crate::DATABASE_NAME,
-            table_name,
-        );
-        let columns = self
-            .execute_with_block(handle, &query)
-            .await?
-            .data
-            .ok_or_else(|| Error::QueryMissingData { query })?
-            .columns;
-
-        let ValueArray::String(timeseries_names) = &columns
-            .get("timeseries_name")
-            .ok_or_else(|| {
-                Error::Database(
-                    "Expected a column named 'timeseries_name'".to_string(),
-                )
-            })?
-            .values
-        else {
-            return Err(Error::Database(
-                "Expected `timeseries_name` column to be of type String"
-                    .to_string(),
-            ));
-        };
-        let ValueArray::UInt64(n_samples) = &columns
-            .get("n_samples")
-            .ok_or_else(|| {
-                Error::Database(
-                    "Expected a column named 'n_samples'".to_string(),
-                )
-            })?
-            .values
-        else {
-            return Err(Error::Database(
-                "Expected `n_samples` column to be of type UInt64".to_string(),
-            ));
-        };
-        let ValueArray::UInt64(n_bytes) = &columns
-            .get("n_bytes")
-            .ok_or_else(|| {
-                Error::Database("Expected a column named 'n_bytes'".to_string())
-            })?
-            .values
-        else {
-            return Err(Error::Database(
-                "Expected `n_bytes` column to be of type UInt64".to_string(),
-            ));
-        };
-        let usage_by_timeseries = timeseries_names
-            .iter()
-            .cloned()
-            .zip(n_samples.iter().copied())
-            .zip(n_bytes.iter().copied())
-            .map(|((name, n_samples), n_bytes)| TimeseriesUsage {
-                name,
-                n_bytes,
-                n_samples,
-            })
-            .collect();
-        Ok(usage_by_timeseries)
     }
 
     // Select the timeseries, including keys and field values, that match the given field-selection

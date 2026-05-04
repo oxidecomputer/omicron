@@ -232,16 +232,6 @@ pub trait ClickhouseAdminServerApi {
     async fn database_usage(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
-
-    /// Return the resource usage of oximeter timeseries.
-    #[endpoint {
-        method = PUT,
-        path = "/usage/oximeter-timeseries",
-        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
-    }]
-    async fn oximeter_usage(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::usage::OximeterUsageResult>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server
@@ -308,14 +298,4 @@ pub trait ClickhouseAdminSingleApi {
     async fn database_usage(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
-
-    /// Return the resource usage of oximeter timeseries.
-    #[endpoint {
-        method = PUT,
-        path = "/usage/oximeter-timeseries",
-        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
-    }]
-    async fn oximeter_usage(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::usage::OximeterUsageResult>, HttpError>;
 }

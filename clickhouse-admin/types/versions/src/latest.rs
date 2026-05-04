@@ -59,9 +59,5 @@ pub mod usage {
     pub use crate::v2::usage::DatabaseUsage;
     pub use crate::v2::usage::DatabaseUsageError;
     pub use crate::v2::usage::DatabaseUsageResult;
-    pub use crate::v2::usage::OximeterUsage;
-    pub use crate::v2::usage::OximeterUsageError;
-    pub use crate::v2::usage::OximeterUsageResult;
     pub use crate::v2::usage::TableUsage;
-    pub use crate::v2::usage::TimeseriesUsage;
 }

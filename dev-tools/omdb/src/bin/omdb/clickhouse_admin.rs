@@ -13,7 +13,6 @@ use clap::Subcommand;
 use clickhouse_admin_single_client::Client;
 use clickhouse_admin_single_client::types;
 use clickhouse_admin_single_client::types::DatabaseUsageResult;
-use clickhouse_admin_single_client::types::OximeterUsageResult;
 use internal_dns_types::names::ServiceName;
 use slog::Logger;
 use tabled::Table;
@@ -51,8 +50,6 @@ enum ClickHouseAdminCommands {
     SetRetentionPolicy(RetentionPolicy),
     /// Fetch the current database table usage.
     DatabaseUsage,
-    /// Fetch the current usage for each Oximeter timeseries.
-    OximeterUsage,
 }
 
 impl ClickHouseAdminArgs {
@@ -97,13 +94,11 @@ impl ClickHouseAdminArgs {
                 self.retention_policy(&client).await
             }
             ClickHouseAdminCommands::SetRetentionPolicy(retention) => {
+                let _token = omdb.check_allow_destructive()?;
                 self.set_retention_policy(&client, retention).await
             }
             ClickHouseAdminCommands::DatabaseUsage => {
                 self.database_usage(&client).await
-            }
-            ClickHouseAdminCommands::OximeterUsage => {
-                self.oximeter_usage(&client).await
             }
         }
     }
@@ -124,7 +119,8 @@ impl ClickHouseAdminArgs {
             .await
             .context("fetching database usage")?
             .into_inner();
-        println!("  Last usage");
+        println!();
+        println!("Last usage");
         if let Some(u) = last_success {
             let mut rows = Vec::with_capacity(u.tables.len());
             for table in u.tables {
@@ -141,28 +137,29 @@ impl ClickHouseAdminArgs {
                 .to_string();
 
             println!(
-                "     Started: {}",
+                "   Started: {}",
                 u.started_at.to_rfc3339_opts(SecondsFormat::Millis, true)
             );
             println!(
-                "   Completed: {}",
+                " Completed: {}",
                 u.completed_at.to_rfc3339_opts(SecondsFormat::Millis, true)
             );
             println!();
             println!("{table}");
         } else {
-            println!("   Never computed");
+            println!(" Never computed");
         }
 
-        println!("  Last error");
+        println!();
+        println!("Last error");
         if let Some(e) = last_error {
             println!(
-                "    Timestamp: {}",
+                "  Timestamp: {}",
                 e.timestamp.to_rfc3339_opts(SecondsFormat::Millis, true)
             );
-            println!("      Message: {}", e.error);
+            println!("    Message: {}", e.error);
         } else {
-            println!("    None");
+            println!("  None");
         }
         Ok(())
     }
@@ -179,55 +176,6 @@ impl ClickHouseAdminArgs {
             .await
             .context("setting retention policy")
             .map(|_| ())
-    }
-
-    async fn oximeter_usage(&self, client: &Client) -> anyhow::Result<()> {
-        let OximeterUsageResult { last_error, last_success } = client
-            .oximeter_usage()
-            .await
-            .context("fetching oximeter usage")?
-            .into_inner();
-        println!("  Last usage");
-        if let Some(u) = last_success {
-            let mut rows = Vec::with_capacity(u.timeseries.len());
-            for timeseries in u.timeseries {
-                let row = TimeseriesUsage {
-                    timeseries_name: timeseries.name,
-                    n_bytes: format_bytes(timeseries.n_bytes),
-                    n_samples: timeseries.n_samples,
-                };
-                rows.push(row);
-            }
-            let table = Table::new(rows)
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string();
-
-            println!(
-                "     Started: {}",
-                u.started_at.to_rfc3339_opts(SecondsFormat::Millis, true)
-            );
-            println!(
-                "   Completed: {}",
-                u.completed_at.to_rfc3339_opts(SecondsFormat::Millis, true)
-            );
-            println!();
-            println!("{table}");
-        } else {
-            println!("   Never computed");
-        }
-
-        println!("  Last error");
-        if let Some(e) = last_error {
-            println!(
-                "    Timestamp: {}",
-                e.timestamp.to_rfc3339_opts(SecondsFormat::Millis, true)
-            );
-            println!("      Message: {}", e.error);
-        } else {
-            println!("    None");
-        }
-        Ok(())
     }
 }
 
@@ -252,14 +200,6 @@ struct TableUsage {
     table_name: String,
     n_bytes: String,
     n_rows: u64,
-}
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct TimeseriesUsage {
-    timeseries_name: String,
-    n_bytes: String,
-    n_samples: u64,
 }
 
 #[cfg(test)]
