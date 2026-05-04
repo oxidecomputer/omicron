@@ -391,6 +391,12 @@
           }
         }
       },
+      "Days": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 30
+      },
       "DistributedDdlQueue": {
         "description": "Contains information about distributed ddl queries (ON CLUSTER clause) that were executed on a cluster.",
         "type": "object",
@@ -898,9 +904,11 @@
         "properties": {
           "days": {
             "description": "The retention period, in days.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 1
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Days"
+              }
+            ]
           }
         },
         "required": [

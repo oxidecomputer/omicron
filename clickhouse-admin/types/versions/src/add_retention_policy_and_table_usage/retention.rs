@@ -15,9 +15,25 @@ pub struct RetentionPolicy {
 }
 
 /// A number of days used for a retention period.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[schemars(transparent, range(min = 1, max = "MAX_DAYS"))]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Days(NonZeroU8);
+
+// Use a custom schema to ensure we never deserialize out-of-range values.
+impl JsonSchema for Days {
+    fn schema_name() -> String {
+        String::from("Days")
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let mut schema = u8::json_schema(generator).into_object();
+        let number = schema.number.as_mut().expect("this is a number");
+        number.minimum = Some(1.0);
+        number.maximum = Some(MAX_DAYS.into());
+        schema.into()
+    }
+}
 
 impl From<Days> for u8 {
     fn from(val: Days) -> u8 {
