@@ -3741,11 +3741,11 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
     match sitrep_id {
         Some(id) => {
             println!("    current sitrep: {id}");
-            // The tracker line only appears when a sitrep was processed
-            // — without one, the activation never reaches the advance
-            // call, and there is nothing meaningful to print.
             match latest_processed_sitrep_version {
                 Some(v) => {
+                    // We show this line when `fm_rendezvous_progress_advance`
+                    // succeeded, meaning that either the sitrep successfully
+                    // executed, or it was stale and the work was skipped.
                     println!("    latest fully-processed sitrep version: {v}",)
                 }
                 None => {
