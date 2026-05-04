@@ -26,6 +26,7 @@ pub struct FmAnalysis {
     sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
     sitrep_loader: Activator,
+    analysis_enabled: bool,
 }
 
 impl BackgroundTask for FmAnalysis {
@@ -34,7 +35,19 @@ impl BackgroundTask for FmAnalysis {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async {
-            let status = self.actually_activate(opctx).await;
+            let status = if self.analysis_enabled {
+                self.actually_activate(opctx).await
+            } else {
+                slog::info!(
+                    opctx.log,
+                    "fault management analysis explicitly disabled by config",
+                );
+                FmAnalysisStatus {
+                    parent_sitrep_id: None,
+                    inv_collection_id: None,
+                    outcome: status::Outcome::Disabled,
+                }
+            };
             match serde_json::to_value(status) {
                 Ok(val) => val,
                 Err(err) => {
@@ -55,8 +68,9 @@ impl FmAnalysis {
         sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         sitrep_loader: Activator,
+        analysis_enabled: bool,
     ) -> Self {
-        Self { datastore, sitrep_rx, inv_rx, sitrep_loader }
+        Self { datastore, sitrep_rx, inv_rx, sitrep_loader, analysis_enabled }
     }
 
     async fn actually_activate(

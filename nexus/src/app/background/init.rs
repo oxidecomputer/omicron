@@ -1142,6 +1142,7 @@ impl BackgroundTasksInitializer {
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
             task_fm_sitrep_loader.clone(),
+            config.fm.analysis_enabled,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",

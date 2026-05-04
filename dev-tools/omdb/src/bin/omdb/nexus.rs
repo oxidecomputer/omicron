@@ -3486,6 +3486,13 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    ===== ========== ======== =======");
     let (prep_status, analysis_outcome) = match outcome {
+        Outcome::Disabled => {
+            println!(
+                "    fault management analysis explicitly disabled \
+                 by config!"
+            );
+            return;
+        }
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
