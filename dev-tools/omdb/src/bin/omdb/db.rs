@@ -7865,25 +7865,24 @@ async fn cmd_db_vmm_info(
         include_sled_id: bool,
     ) {
         use db::model::ByteCount;
-        let db::model::SledResourceVmm {
-            id: _,
-            sled_id,
-            resources:
-                db::model::Resources {
-                    hardware_threads,
-                    rss_ram: ByteCount(rss),
-                    reservoir_ram: ByteCount(reservoir),
-                },
-            instance_id: _,
-        } = resource;
+
+        let sled_id = &resource.sled_id;
+        let db::model::Resources {
+            hardware_threads,
+            rss_ram: ByteCount(rss),
+            reservoir_ram: ByteCount(reservoir),
+        } = &resource.resources;
+
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";
         const RSS: &'static str = "RSS RAM";
         const RESERVOIR: &'static str = "reservoir RAM";
         const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
+
         if include_sled_id {
             println!("    {SLED_ID:>WIDTH$}: {sled_id}");
         }
+
         println!("    {THREADS:>WIDTH$}: {hardware_threads}");
         println!("    {RSS:>WIDTH$}: {rss}");
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");

@@ -307,13 +307,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- If we tried to backfill + make this column non-nullable while that saga
     -- was mid-execution, we would still have some rows in this table with nullable
     -- values that would be more complex to fix.
-    instance_id UUID
+    instance_id UUID,
+
+    -- The instance's state generation number at the moment of reservation
+    instance_state_generation INT
 );
 
 -- Allow looking up all VMM resources which reside on a sled
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.sled_resource_vmm (
     sled_id,
     id
+);
+
+-- Allow a single VMM reservation per instance state generation
+CREATE UNIQUE INDEX IF NOT EXISTS single_vmm_reservation_per_generation ON omicron.public.sled_resource_vmm (
+    instance_id,
+    instance_state_generation
 );
 
 -- Allow looking up all resources by instance
@@ -8623,7 +8632,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '261.0.0', NULL)
+    (TRUE, NOW(), NOW(), '262.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

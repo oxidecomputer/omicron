@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::Generation;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{ByteCount, SqlU32};
 use nexus_db_schema::schema::sled_resource_vmm;
@@ -34,6 +35,14 @@ impl Resources {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum SledResourceVmmInstanceStateGeneration {
+    /// Row was created prior to Nexus recording this
+    Unspecified,
+
+    Specified(Generation),
+}
+
 /// Describes sled resource usage by a VMM
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = sled_resource_vmm)]
@@ -45,6 +54,9 @@ pub struct SledResourceVmm {
     pub resources: Resources,
 
     pub instance_id: Option<DbInstanceUuid>,
+
+    /// The instance's state_generation at the moment of reservation
+    instance_state_generation: Option<Generation>,
 }
 
 impl SledResourceVmm {
@@ -53,12 +65,14 @@ impl SledResourceVmm {
         instance_id: InstanceUuid,
         sled_id: SledUuid,
         resources: Resources,
+        instance_state_generation: Generation,
     ) -> Self {
         Self {
             id: id.into(),
             instance_id: Some(instance_id.into()),
             sled_id: sled_id.into(),
             resources,
+            instance_state_generation: Some(instance_state_generation),
         }
     }
 
@@ -72,5 +86,17 @@ impl SledResourceVmm {
 
     pub fn instance_id(&self) -> Option<InstanceUuid> {
         self.instance_id.map(|x| x.into())
+    }
+
+    pub fn instance_state_generation(
+        &self,
+    ) -> SledResourceVmmInstanceStateGeneration {
+        match &self.instance_state_generation {
+            Some(generation) => {
+                SledResourceVmmInstanceStateGeneration::Specified(*generation)
+            }
+
+            None => SledResourceVmmInstanceStateGeneration::Unspecified,
+        }
     }
 }

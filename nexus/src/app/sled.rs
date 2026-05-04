@@ -211,6 +211,7 @@ impl super::Nexus {
     pub(crate) async fn reserve_on_random_sled(
         &self,
         instance_id: InstanceUuid,
+        instance_state_generation: db::model::Generation,
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
@@ -219,6 +220,7 @@ impl super::Nexus {
             .sled_reservation_create(
                 &self.opctx_alloc,
                 instance_id,
+                instance_state_generation,
                 propolis_id,
                 resources,
                 constraints,

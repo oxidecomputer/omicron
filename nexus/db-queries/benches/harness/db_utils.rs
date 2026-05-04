@@ -73,6 +73,7 @@ pub async fn create_reservation(
             .sled_reservation_create(
                 &opctx,
                 instance_id,
+                nexus_db_model::Generation::new(),
                 vmm_id,
                 small_resource_request(),
                 SledReservationConstraintBuilder::new().build(),

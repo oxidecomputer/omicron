@@ -6,6 +6,7 @@
 
 use crate::db::model::Resources;
 use crate::db::model::SledResourceVmm;
+use crate::db::model::SledResourceVmmInstanceStateGeneration;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TrustedStr;
 use crate::db::raw_query_builder::TypedSqlQuery;
@@ -833,8 +834,9 @@ pub fn sled_insert_resource_query(
 
     // Finally, perform the INSERT if it's still valid.
     query.sql("
-        INSERT INTO sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
+        INSERT INTO sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id, instance_state_generation)
         SELECT
+            ").param().sql(",
             ").param().sql(",
             ").param().sql(",
             ").param().sql(",
@@ -848,7 +850,14 @@ pub fn sled_insert_resource_query(
     .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
     .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
     .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(instance_id);
+    .bind::<sql_types::Uuid, _>(instance_id)
+    .bind::<sql_types::Nullable<sql_types::BigInt>, _>(
+        match resource.instance_state_generation() {
+            SledResourceVmmInstanceStateGeneration::Specified(generation) =>
+                Some(generation),
+            SledResourceVmmInstanceStateGeneration::Unspecified => None,
+        }
+    );
 
     query.query()
 }
@@ -950,6 +959,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
+            model::Generation::new(),
         );
 
         // with no local storage
@@ -1022,6 +1032,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
+            model::Generation::new(),
         );
 
         let query = sled_insert_resource_query(

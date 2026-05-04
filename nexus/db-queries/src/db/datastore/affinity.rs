@@ -1314,6 +1314,7 @@ mod tests {
                     ByteCount::from_kibibytes_u32(1).into(),
                     ByteCount::from_kibibytes_u32(1).into(),
                 ),
+                nexus_db_model::Generation::new(),
             ))
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),

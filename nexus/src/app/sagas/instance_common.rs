@@ -12,8 +12,9 @@ use crate::app::instance_network::InstanceNetworkFilters;
 use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, IpNet, NatEntry,
-    SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
+    ByteCount, ExternalIp, Generation, InstanceState, IpAttachState, IpNet,
+    NatEntry, SledReservationConstraints, SledResourceVmm, VmmCpuPlatform,
+    VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
@@ -42,6 +43,7 @@ pub(super) struct VmmAndSledIds {
 pub async fn reserve_vmm_resources(
     nexus: &Nexus,
     instance_id: InstanceUuid,
+    instance_state_generation: Generation,
     propolis_id: PropolisUuid,
     ncpus: u32,
     guest_memory: ByteCount,
@@ -74,6 +76,7 @@ pub async fn reserve_vmm_resources(
     let resource = nexus
         .reserve_on_random_sled(
             instance_id,
+            instance_state_generation,
             propolis_id,
             resources,
             constraints,
