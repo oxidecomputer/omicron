@@ -1930,13 +1930,14 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   nexus-test-utils
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   initial test blueprint
-    internal DNS version:::   1
-    external DNS version:::   2
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   nexus-test-utils
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   initial test blueprint
+    internal DNS version::::   1
+    external DNS version::::   2
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -2076,13 +2077,14 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   nexus-test-utils
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   initial test blueprint
-    internal DNS version:::   1
-    external DNS version:::   2
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   nexus-test-utils
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   initial test blueprint
+    internal DNS version::::   1
+    external DNS version::::   2
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 

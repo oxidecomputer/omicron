@@ -5262,7 +5262,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     nexus_generation INT8 NOT NULL,
 
     -- The source of this blueprint
-    source omicron.public.bp_source NOT NULL
+    source omicron.public.bp_source NOT NULL,
+
+    -- The generation of the collective set of all external networking config
+    -- described by the blueprint
+    external_networking_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -8474,7 +8478,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '254.0.0', NULL)
+    (TRUE, NOW(), NOW(), '255.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
