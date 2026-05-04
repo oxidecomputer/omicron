@@ -169,10 +169,9 @@ impl ClickHouseAdminArgs {
         client: &Client,
         retention: &RetentionPolicy,
     ) -> anyhow::Result<()> {
+        let days = types::Days(retention.days);
         client
-            .set_retention_policy(&types::RetentionPolicy {
-                days: retention.days,
-            })
+            .set_retention_policy(&types::RetentionPolicy { days })
             .await
             .context("setting retention policy")
             .map(|_| ())
