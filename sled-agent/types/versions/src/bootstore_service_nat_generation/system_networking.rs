@@ -50,8 +50,9 @@ pub struct SystemNetworkingConfig {
     //    they all start, it computes a service plan, at which point it can fill
     //    this field in.
     // 2. Backwards compatibility: prior versions of this type did not store
-    //    this information at all, and we must be able to cleanly handle that at
-    //    runtime.
+    //    this information at all. If the bootstore contains an earlier
+    //    `SystemNetworkingConfig` that we need to convert to the latest
+    //    version, `blueprint_external_networking_config` will be `None`.
     //
     // In the future, if we can find a way to relax RSS, we can eventually make
     // this field non-optional (once we're confident all deployed systems are
