@@ -8875,6 +8875,7 @@ dependencies = [
  "nexus-db-schema",
  "nexus-inventory",
  "nexus-lockstep-client",
+ "nexus-networking",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
  "nexus-test-utils",
@@ -8907,6 +8908,7 @@ dependencies = [
  "steno",
  "strum 0.27.2",
  "subprocess",
+ "support-bundle-collection",
  "support-bundle-viewer",
  "supports-color 3.0.2",
  "tabled 0.15.0",
@@ -8919,6 +8921,7 @@ dependencies = [
  "url",
  "uuid",
  "vergen-gitcl",
+ "zip 4.6.1",
 ]
 
 [[package]]
