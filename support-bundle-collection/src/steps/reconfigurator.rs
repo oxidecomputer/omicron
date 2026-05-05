@@ -4,8 +4,8 @@
 
 //! Collect reconfigurator state for support bundles
 
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
-use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
+use crate::collection::BundleCollection;
+use crate::step::CollectionStepOutput;
 
 use anyhow::Context;
 use camino::Utf8Path;

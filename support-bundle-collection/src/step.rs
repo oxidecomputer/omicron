@@ -4,7 +4,7 @@
 
 //! Support bundle collection step execution framework
 
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
+use crate::collection::BundleCollection;
 
 use camino::Utf8Path;
 use chrono::DateTime;

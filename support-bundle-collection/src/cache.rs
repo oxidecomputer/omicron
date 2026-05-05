@@ -7,7 +7,7 @@
 //! This is used to share data which may be used by multiple
 //! otherwise independent steps.
 
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
+use crate::collection::BundleCollection;
 
 use gateway_client::Client as MgsClient;
 use internal_dns_types::names::ServiceName;

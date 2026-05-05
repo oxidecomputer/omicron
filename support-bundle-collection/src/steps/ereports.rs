@@ -4,13 +4,14 @@
 
 //! Collect ereports for support bundles
 
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
-use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
+use crate::collection::BundleCollection;
+use crate::step::CollectionStepOutput;
 use nexus_types::fm::ereport::EreportFilters;
 
 use anyhow::Context;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use dropshot::PaginationOrder;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
@@ -75,10 +76,8 @@ async fn save_ereports(
     dir: Utf8PathBuf,
     status: &mut SupportBundleEreportStatus,
 ) -> anyhow::Result<()> {
-    let mut paginator = Paginator::new(
-        datastore::SQL_BATCH_SIZE,
-        dropshot::PaginationOrder::Ascending,
-    );
+    let mut paginator =
+        Paginator::new(datastore::SQL_BATCH_SIZE, PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let pagparams = p.current_pagparams();
         let ereports = tokio::select! {

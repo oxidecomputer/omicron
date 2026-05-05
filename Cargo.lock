@@ -8765,6 +8765,7 @@ dependencies = [
  "steno",
  "strum 0.27.2",
  "subprocess",
+ "support-bundle-collection",
  "swrite",
  "tempfile",
  "term 0.7.0",
@@ -14495,6 +14496,46 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "support-bundle-collection"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "dropshot 0.17.0",
+ "futures",
+ "gateway-client",
+ "gateway-types",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "jiff",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-networking",
+ "nexus-reconfigurator-preparation",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "parallel-task-set",
+ "pq-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sled-agent-client",
+ "slog",
+ "slog-error-chain",
+ "tokio",
+ "tokio-util",
+ "tufaceous-artifact",
+ "uuid",
+ "zip 4.6.1",
+]
 
 [[package]]
 name = "support-bundle-viewer"

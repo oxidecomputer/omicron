@@ -4,10 +4,10 @@
 
 //! Collect host information from sleds for support bundles
 
-use crate::app::background::tasks::support_bundle::cache::Cache;
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
-use crate::app::background::tasks::support_bundle::step::CollectionStep;
-use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
+use crate::cache::Cache;
+use crate::collection::BundleCollection;
+use crate::step::CollectionStep;
+use crate::step::CollectionStepOutput;
 
 use anyhow::Context;
 use anyhow::bail;

@@ -6,11 +6,9 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use camino::Utf8DirEntry;
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
-use camino_tempfile::tempfile_in;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -38,16 +36,14 @@ use slog_error_chain::InlineErrorChain;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use support_bundle_collection::BundleCollection;
+use support_bundle_collection::BundleInfo;
+use support_bundle_collection::zip::bundle_to_zipfile;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
 use tokio_util::sync::CancellationToken;
 use tufaceous_artifact::ArtifactHash;
-use zip::ZipWriter;
-use zip::write::FullFileOptions;
-
-use super::support_bundle::collection::BundleCollection;
-use super::support_bundle::collection::BundleInfo;
 
 /// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
 /// rather than "/tmp", which would keep this collected data in-memory.
@@ -648,71 +644,6 @@ async fn check_for_cancellation(
     }
 }
 
-// Takes a directory "dir", and zips the contents into a single zipfile
-// stored as a tempfile under `tempdir`.
-fn bundle_to_zipfile(
-    dir: &Utf8TempDir,
-    tempdir: &Utf8Path,
-) -> anyhow::Result<std::fs::File> {
-    let tempfile = tempfile_in(tempdir)?;
-    let mut zip = ZipWriter::new(tempfile);
-
-    recursively_add_directory_to_zipfile(&mut zip, dir.path(), dir.path())?;
-
-    Ok(zip.finish()?)
-}
-
-fn recursively_add_directory_to_zipfile(
-    zip: &mut ZipWriter<std::fs::File>,
-    root_path: &Utf8Path,
-    dir_path: &Utf8Path,
-) -> anyhow::Result<()> {
-    // Readdir might return entries in a non-deterministic order.
-    // Let's sort it for the zipfile, to be nice.
-    let mut entries = dir_path
-        .read_dir_utf8()?
-        .filter_map(Result::ok)
-        .collect::<Vec<Utf8DirEntry>>();
-    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-
-    for entry in &entries {
-        // Remove the "/tmp/..." prefix from the path when we're storing it in the
-        // zipfile.
-        let dst = entry.path().strip_prefix(root_path)?;
-
-        let file_type = entry.file_type()?;
-        if file_type.is_file() {
-            let src = entry.path();
-
-            let zip_time = entry
-                .path()
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|sys_time| jiff::Zoned::try_from(sys_time).ok())
-                .and_then(|zoned| {
-                    zip::DateTime::try_from(zoned.datetime()).ok()
-                })
-                .unwrap_or_else(zip::DateTime::default);
-
-            let opts = FullFileOptions::default()
-                .last_modified_time(zip_time)
-                .compression_method(zip::CompressionMethod::Deflated)
-                .large_file(true);
-
-            zip.start_file_from_path(dst, opts)?;
-            let mut file = std::fs::File::open(&src)?;
-            std::io::copy(&mut file, zip)?;
-        }
-        if file_type.is_dir() {
-            let opts = FullFileOptions::default();
-            zip.add_directory_from_path(dst, opts)?;
-            recursively_add_directory_to_zipfile(zip, root_path, entry.path())?;
-        }
-    }
-    Ok(())
-}
-
 async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     let mut buf = vec![0u8; 65536];
     let mut ctx = Sha256::new();
@@ -774,7 +705,6 @@ impl BackgroundTask for SupportBundleCollector {
 mod test {
     use super::*;
 
-    use crate::app::background::tasks::support_bundle::perfetto;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
     use nexus_db_model::PhysicalDisk;
@@ -805,6 +735,7 @@ mod test {
     };
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
+    use support_bundle_collection::perfetto;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -2153,30 +2084,5 @@ mod test {
             sled_step.status,
             SupportBundleCollectionStepStatus::Skipped
         );
-    }
-
-    // Ensure that we can convert a temporary directory into a zipfile
-    #[test]
-    fn test_zipfile_creation() {
-        let dir = camino_tempfile::tempdir().unwrap();
-        let tempdir_for_zip = camino_tempfile::tempdir().unwrap();
-
-        std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
-        std::fs::create_dir_all(dir.path().join("dir-b")).unwrap();
-        std::fs::write(dir.path().join("dir-a").join("file-a"), "some data")
-            .unwrap();
-        std::fs::write(dir.path().join("file-b"), "more data").unwrap();
-
-        let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path())
-            .expect("Should have been able to bundle zipfile");
-        let archive = zip::read::ZipArchive::new(zipfile).unwrap();
-
-        // We expect the order to be deterministically alphabetical
-        let mut names = archive.file_names();
-        assert_eq!(names.next(), Some("dir-a/"));
-        assert_eq!(names.next(), Some("dir-a/file-a"));
-        assert_eq!(names.next(), Some("dir-b/"));
-        assert_eq!(names.next(), Some("file-b"));
-        assert_eq!(names.next(), None);
     }
 }
