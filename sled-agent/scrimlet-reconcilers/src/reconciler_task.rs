@@ -21,6 +21,7 @@
 //! [`ReconcilerTask::run()`] handles 1 and 3, and service-specific
 //! implementations of [`Reconciler`] provide 2.
 
+use crate::handle::ScrimletReconcilersMode;
 use crate::status::ReconcilerActivationReason;
 use crate::status::ReconcilerCurrentStatus;
 use crate::status::ReconcilerInertReason;
@@ -30,7 +31,6 @@ use crate::status::ReconciliationCompletedStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use chrono::Utc;
-use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::error;
@@ -51,11 +51,11 @@ pub(crate) trait Reconciler: Send + 'static {
 
     /// Construct a new instance of this `Reconciler`.
     ///
-    /// Typically builds a client for the relevant service based on
-    /// `switch_zone_underlay_ip` and record `switch_slot` for use inside future
-    /// calls to `do_reconciliation()`.
+    /// Typically builds a client for the relevant service based on `mode` and
+    /// record `switch_slot` for use inside future calls to
+    /// `do_reconciliation()`.
     fn new(
-        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self;
@@ -87,14 +87,14 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     pub(crate) fn spawn(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
         system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
-        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        mode: ScrimletReconcilersMode,
         this_sled_switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
         Self::spawn_impl(
             scrimlet_status_rx,
             system_networking_config_rx,
-            switch_zone_underlay_ip,
+            mode,
             this_sled_switch_slot,
             parent_log,
             T::new,
@@ -107,17 +107,13 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     fn spawn_impl<F>(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
         system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
-        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        mode: ScrimletReconcilersMode,
         this_sled_switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
         inner_constructor: F,
     ) -> Self
     where
-        F: FnOnce(
-                ThisSledSwitchZoneUnderlayIpAddr,
-                ThisSledSwitchSlot,
-                &Logger,
-            ) -> T
+        F: FnOnce(ScrimletReconcilersMode, ThisSledSwitchSlot, &Logger) -> T
             + Send
             + Sync
             + 'static,
@@ -134,11 +130,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             scrimlet_status_rx,
             system_networking_config_rx,
             status_tx,
-            inner: inner_constructor(
-                switch_zone_underlay_ip,
-                this_sled_switch_slot,
-                parent_log,
-            ),
+            inner: inner_constructor(mode, this_sled_switch_slot, parent_log),
             log,
         };
 

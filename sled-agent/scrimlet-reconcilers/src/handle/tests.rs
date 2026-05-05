@@ -36,36 +36,20 @@ impl Harness {
             });
 
         let mock_mgs = MockServer::start();
-        let mut handle = ScrimletReconcilers::new(log);
-
-        // Override how `handle` will attempt to contact MGS to point it at our
-        // mock server instead.
-        handle.override_make_mgs_client = {
-            let url = format!("http://{}", mock_mgs.address());
-            let client = gateway_client::Client::new_with_client(
-                &url,
-                // Tricky bit: we use tokio's paused time in tests below both
-                // for consistency and test speed, but by default progenitor
-                // clients have a 15-second connection timeout. That passes
-                // _instantly_ if time is paused, which doesn't let us establish
-                // real TCP connections to the httpmock server, causing tests to
-                // spam connections as fast as possible. Pass a default reqwest
-                // client, which has no such timeout, allowing connections to
-                // wait (and succeed or fail as intended).
-                reqwest::Client::new(),
-                log.new(slog::o!("component" => "test-mgs-client")),
-            );
-            Some(Box::new(move || client.clone()))
-        };
+        let handle = ScrimletReconcilers::new(log);
 
         Self { handle, networking_config_tx, mock_mgs }
     }
 
     fn sled_agent_networking_info(&self) -> SledAgentNetworkingInfo {
+        let dummy_addr = "0.0.0.0:0".parse().unwrap();
         SledAgentNetworkingInfo {
             system_networking_config_rx: self.networking_config_tx.subscribe(),
-            switch_zone_underlay_ip:
-                ThisSledSwitchZoneUnderlayIpAddr::TEST_FAKE,
+            mode: ScrimletReconcilersMode::Test {
+                mgs_addr: *self.mock_mgs.address(),
+                dpd_addr: dummy_addr,
+                mgd_addr: dummy_addr,
+            },
         }
     }
 

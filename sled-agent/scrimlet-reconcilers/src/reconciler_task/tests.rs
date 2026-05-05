@@ -23,7 +23,7 @@ impl Reconciler for MockReconciler {
     const RE_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
     fn new(
-        _switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        _mode: ScrimletReconcilersMode,
         _switch_slot: ThisSledSwitchSlot,
         _parent_log: &Logger,
     ) -> Self {
@@ -97,10 +97,15 @@ impl Harness {
 
         let task = {
             let do_reconciliation_calls = Arc::clone(&do_reconciliation_calls);
+            let dummy_addr = "0.0.0.0:0".parse().unwrap();
             ReconcilerTaskHandle::spawn_impl(
                 scrimlet_status_rx,
                 system_networking_config_rx,
-                ThisSledSwitchZoneUnderlayIpAddr::TEST_FAKE,
+                ScrimletReconcilersMode::Test {
+                    mgs_addr: dummy_addr,
+                    dpd_addr: dummy_addr,
+                    mgd_addr: dummy_addr,
+                },
                 ThisSledSwitchSlot::TEST_FAKE,
                 log,
                 |_ip, _slot, _log| MockReconciler {

@@ -52,6 +52,7 @@ mod uplinkd_reconciler;
 
 pub use dpd_reconciler::DpdReconcilerStatus;
 pub use handle::ScrimletReconcilers;
+pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;
 pub use mgd_reconciler::MgdReconcilerStatus;
 pub use status::DetermineSwitchSlotStatus;

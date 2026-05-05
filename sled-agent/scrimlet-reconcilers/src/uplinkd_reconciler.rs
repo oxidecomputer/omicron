@@ -7,9 +7,9 @@
 //! Unlike most reconcilers in this crate, `uplinkd`'s configuration is managed
 //! via SMF, not a dropshot server.
 
+use crate::ScrimletReconcilersMode;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
-use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::time::Duration;
@@ -31,10 +31,12 @@ impl Reconciler for UplinkdReconciler {
     const RE_RECONCILE_INTERVAL: std::time::Duration = Duration::from_secs(30);
 
     fn new(
-        _switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+        _mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
         _parent_log: &Logger,
     ) -> Self {
+        // TODO: Remain inert if `mode` is `ScrimletReconcilersMode::Test`,
+        // since that indicates there's no real zone to connect to.
         Self { _switch_slot: switch_slot }
     }
 

@@ -14,22 +14,146 @@ use crate::status::ScrimletReconcilersStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use crate::uplinkd_reconciler::UplinkdReconciler;
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::sync::watch;
+
+/// Mode in which the scrimlet reconcilers should run.
+///
+/// This exists to support tests where we don't have a real switch zone like
+/// we expect to have on real hardware. The production sled-agent will always
+/// pass `SwitchZone(ip)`; in this mode, we'll run reconcilers that talk to
+/// services at the provided IP with their well-known ports and that communicate
+/// with SMF within the switch zone. In the `Test { .. }` mode, we'll point the
+/// reconcilers at the specified addresses for some services, and won't run the
+/// SMF-based reconcilers at all.
+#[derive(Debug, Clone, Copy)]
+pub enum ScrimletReconcilersMode {
+    SwitchZone(ThisSledSwitchZoneUnderlayIpAddr),
+    #[cfg(any(test, feature = "testing"))]
+    Test {
+        mgs_addr: SocketAddr,
+        dpd_addr: SocketAddr,
+        mgd_addr: SocketAddr,
+    },
+}
+
+impl ScrimletReconcilersMode {
+    // Build a `reqwest` client with different timeout settings depending on
+    // whether we're expecting to contact a real service or a test one.
+    fn reqwest_client(&self) -> reqwest::Client {
+        match self {
+            ScrimletReconcilersMode::SwitchZone(_) => {
+                // Build a custom reqwest client, primarily to set a lower
+                // `pool_idle_timeout`. dropshot's default connection timeout is
+                // 30 seconds. We want to ensure we don't hit
+                // <https://github.com/hyperium/hyper/issues/2136> in any
+                // reconcilers that try to re-reconcile on a 30 second interval,
+                // so we choose a much lower `pool_idle_timeout`: 10 seconds is
+                // long enough to reuse a connection for all the requests made
+                // during one reconciliation pass, but is short enough we should
+                // discard it before the server wants to time us out.
+                //
+                // The 15 second connect and read timeout are consistent with
+                // progenitor's normal defaults.
+                reqwest::ClientBuilder::new()
+                    .connect_timeout(Duration::from_secs(15))
+                    .read_timeout(Duration::from_secs(15))
+                    .pool_idle_timeout(Duration::from_secs(10))
+                    .build()
+                    .expect("reqwest parameters are valid")
+            }
+            #[cfg(any(test, feature = "testing"))]
+            ScrimletReconcilersMode::Test { .. } => {
+                // Some of our tests use tokio's paused time. We want to
+                // construct a reqwest client that does not specify any timeouts
+                // at all, allowing it to wait forever; this plays nicely with
+                // paused time. (Paused time + timeouts cause the timeouts to
+                // elapse instantly, which doesn't mesh well with establishing
+                // TCP connections.)
+                reqwest::Client::new()
+            }
+        }
+    }
+
+    pub(crate) fn mgs_client(
+        self,
+        parent_log: &Logger,
+    ) -> gateway_client::Client {
+        let addr: SocketAddr = match self {
+            ScrimletReconcilersMode::SwitchZone(ip) => {
+                SocketAddrV6::new(ip.into(), MGS_PORT, 0, 0).into()
+            }
+            #[cfg(any(test, feature = "testing"))]
+            ScrimletReconcilersMode::Test { mgs_addr, .. } => mgs_addr,
+        };
+        let baseurl = format!("http://{addr}");
+        gateway_client::Client::new_with_client(
+            &baseurl,
+            self.reqwest_client(),
+            parent_log
+                .new(slog::o!("component" => "ThisSledSwitchSlotMgsClient")),
+        )
+    }
+
+    pub(crate) fn dpd_client(self, parent_log: &Logger) -> dpd_client::Client {
+        use omicron_common::OMICRON_DPD_TAG;
+
+        let addr: SocketAddr = match self {
+            ScrimletReconcilersMode::SwitchZone(ip) => {
+                SocketAddrV6::new(ip.into(), DENDRITE_PORT, 0, 0).into()
+            }
+            #[cfg(any(test, feature = "testing"))]
+            ScrimletReconcilersMode::Test { dpd_addr, .. } => dpd_addr,
+        };
+        let baseurl = format!("http://{addr}");
+        dpd_client::Client::new_with_client(
+            &baseurl,
+            self.reqwest_client(),
+            dpd_client::ClientState {
+                tag: OMICRON_DPD_TAG.to_owned(),
+                log: parent_log
+                    .new(slog::o!("component" => "DpdReconcilerClient")),
+            },
+        )
+    }
+
+    pub(crate) fn mgd_client(
+        self,
+        parent_log: &Logger,
+    ) -> mg_admin_client::Client {
+        let addr: SocketAddr = match self {
+            ScrimletReconcilersMode::SwitchZone(ip) => {
+                SocketAddrV6::new(ip.into(), MGD_PORT, 0, 0).into()
+            }
+            #[cfg(any(test, feature = "testing"))]
+            ScrimletReconcilersMode::Test { mgd_addr, .. } => mgd_addr,
+        };
+        let baseurl = format!("http://{addr}");
+        mg_admin_client::Client::new_with_client(
+            &baseurl,
+            self.reqwest_client(),
+            parent_log.new(slog::o!("component" => "MgdReconcilerClient")),
+        )
+    }
+}
 
 /// Information required to enable all the scrimlet reconciler tasks provided
 /// by this crate.
-///
 #[derive(Debug, Clone)]
 pub struct SledAgentNetworkingInfo {
     pub system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
-    pub switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
+    pub mode: ScrimletReconcilersMode,
 }
 
 /// Handle to tasks that reconcile network configuration with services within a
@@ -78,11 +202,6 @@ pub struct ScrimletReconcilers {
     running_reconcilers: Arc<OnceLock<RunningReconcilers>>,
 
     parent_log: Logger,
-
-    // Hook for unit tests to modify how we construct an MGS client when
-    // determining our switch slot.
-    #[cfg(test)]
-    override_make_mgs_client: Option<Box<dyn Fn() -> gateway_client::Client>>,
 }
 
 impl ScrimletReconcilers {
@@ -97,8 +216,6 @@ impl ScrimletReconcilers {
             determining_switch_slot: OnceLock::new(),
             running_reconcilers: Arc::new(OnceLock::new()),
             parent_log: parent_log.clone(),
-            #[cfg(test)]
-            override_make_mgs_client: None,
         }
     }
 
@@ -173,8 +290,6 @@ impl ScrimletReconcilers {
             );
         }
 
-        let mgs_client = self.make_mgs_client(info.switch_zone_underlay_ip);
-
         // We now know this is the one and only time we've been called; spawn a
         // task that waits until we're a scrimlet, then waits until we can
         // determine our switch slot, then spawns all the running reconcilers
@@ -187,42 +302,10 @@ impl ScrimletReconcilers {
             Arc::clone(&self.running_reconcilers),
             determining_switch_slot_tx,
             self.scrimlet_status_tx.subscribe(),
-            mgs_client,
+            info.mode.mgs_client(&self.parent_log),
             info,
             self.parent_log.clone(),
         ));
-    }
-
-    #[cfg(test)]
-    fn make_mgs_client(
-        &self,
-        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
-    ) -> gateway_client::Client {
-        if let Some(make_client) = &self.override_make_mgs_client {
-            make_client()
-        } else {
-            self.make_real_mgs_client(switch_zone_underlay_ip)
-        }
-    }
-
-    #[cfg(not(test))]
-    fn make_mgs_client(
-        &self,
-        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
-    ) -> gateway_client::Client {
-        self.make_real_mgs_client(switch_zone_underlay_ip)
-    }
-
-    fn make_real_mgs_client(
-        &self,
-        switch_zone_underlay_ip: ThisSledSwitchZoneUnderlayIpAddr,
-    ) -> gateway_client::Client {
-        let baseurl = format!("http://[{switch_zone_underlay_ip}]:{MGS_PORT}");
-        gateway_client::Client::new(
-            &baseurl,
-            self.parent_log
-                .new(slog::o!("component" => "ThisSledSwitchSlotMgsClient")),
-        )
     }
 }
 
@@ -291,14 +374,14 @@ impl RunningReconcilers {
         let dpd_reconciler = ReconcilerTaskHandle::<DpdReconciler>::spawn(
             scrimlet_status_rx.clone(),
             networking_info.system_networking_config_rx.clone(),
-            networking_info.switch_zone_underlay_ip,
+            networking_info.mode,
             this_sled_switch_slot,
             parent_log,
         );
         let mgd_reconciler = ReconcilerTaskHandle::<MgdReconciler>::spawn(
             scrimlet_status_rx.clone(),
             networking_info.system_networking_config_rx.clone(),
-            networking_info.switch_zone_underlay_ip,
+            networking_info.mode,
             this_sled_switch_slot,
             parent_log,
         );
@@ -306,7 +389,7 @@ impl RunningReconcilers {
             ReconcilerTaskHandle::<UplinkdReconciler>::spawn(
                 scrimlet_status_rx,
                 networking_info.system_networking_config_rx,
-                networking_info.switch_zone_underlay_ip,
+                networking_info.mode,
                 this_sled_switch_slot,
                 parent_log,
             );
