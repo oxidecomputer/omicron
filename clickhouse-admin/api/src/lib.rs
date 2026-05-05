@@ -27,6 +27,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT), // NOTE: read the note at the start of this macro!
+    (2, ADD_RETENTION_POLICY_AND_TABLE_USAGE),
     (1, INITIAL),
 ]);
 
@@ -200,6 +201,37 @@ pub trait ClickhouseAdminServerApi {
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<latest::retention::RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::retention::RetentionPolicy>, HttpError>;
+
+    /// Return the resource usage of database tables.
+    #[endpoint {
+        method = GET,
+        path = "/usage/database",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server
@@ -235,4 +267,35 @@ pub trait ClickhouseAdminSingleApi {
         path_params: Path<latest::server::MetricInfoPath>,
         query_params: Query<latest::server::TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<latest::retention::RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::retention::RetentionPolicy>, HttpError>;
+
+    /// Return the resource usage of database tables.
+    #[endpoint {
+        method = GET,
+        path = "/usage/database",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
 }
