@@ -13700,6 +13700,8 @@ dependencies = [
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3)",
  "dropshot 0.17.0",
  "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
  "gateway-types",
  "httpmock",
  "mg-admin-client",

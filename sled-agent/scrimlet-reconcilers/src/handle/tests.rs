@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::Ipv6Addr;
 use std::time::Duration;
 
 use super::*;
@@ -9,19 +10,49 @@ use assert_matches::assert_matches;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::test_util::LogContext;
+use gateway_messages::SpPort;
+use gateway_test_utils::setup::GatewayTestContext;
 use httpmock::Mock;
 use httpmock::MockServer;
 use omicron_test_utils::dev;
 use sled_agent_types::early_networking::RackNetworkConfig;
 
-struct Harness {
-    handle: ScrimletReconcilers,
-    networking_config_tx: watch::Sender<SystemNetworkingConfig>,
-    mock_mgs: MockServer,
+// For "happy path" tests, we spin up a real MGS instances (pointed at a
+// simulated SP).
+//
+// For "sad path" tests, we use a mock MGS so we can inject failures.
+trait MgsFlavor {
+    fn address(&self) -> SocketAddr;
+    async fn teardown(self);
 }
 
-impl Harness {
-    fn new(log: &Logger) -> Self {
+impl MgsFlavor for GatewayTestContext {
+    fn address(&self) -> SocketAddr {
+        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0))
+    }
+
+    async fn teardown(self) {
+        GatewayTestContext::teardown(self).await
+    }
+}
+
+impl MgsFlavor for MockServer {
+    fn address(&self) -> SocketAddr {
+        *MockServer::address(self)
+    }
+
+    async fn teardown(self) {}
+}
+
+struct Harness<T> {
+    handle: ScrimletReconcilers,
+    networking_config_tx: watch::Sender<SystemNetworkingConfig>,
+    mgs: T,
+    logctx: LogContext,
+}
+
+impl<T: MgsFlavor> Harness<T> {
+    fn new_common(logctx: LogContext, mgs: T) -> Self {
         let (networking_config_tx, _) =
             watch::channel(SystemNetworkingConfig {
                 rack_network_config: RackNetworkConfig {
@@ -35,10 +66,14 @@ impl Harness {
                 service_zone_nat_entries: None,
             });
 
-        let mock_mgs = MockServer::start();
-        let handle = ScrimletReconcilers::new(log);
+        let handle = ScrimletReconcilers::new(&logctx.log);
 
-        Self { handle, networking_config_tx, mock_mgs }
+        Self { handle, networking_config_tx, mgs, logctx }
+    }
+
+    async fn teardown(self) {
+        self.logctx.cleanup_successful();
+        self.mgs.teardown().await;
     }
 
     fn sled_agent_networking_info(&self) -> SledAgentNetworkingInfo {
@@ -46,7 +81,7 @@ impl Harness {
         SledAgentNetworkingInfo {
             system_networking_config_rx: self.networking_config_tx.subscribe(),
             mode: ScrimletReconcilersMode::Test {
-                mgs_addr: *self.mock_mgs.address(),
+                mgs_addr: self.mgs.address(),
                 dpd_addr: dummy_addr,
                 mgd_addr: dummy_addr,
             },
@@ -59,7 +94,7 @@ impl Harness {
     {
         let mut status = self.handle.status();
         let start = tokio::time::Instant::now();
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(30) {
             if matches(&status) {
                 return;
             }
@@ -68,11 +103,28 @@ impl Harness {
         }
         panic!("timeout waiting for task status (got {status:?})");
     }
+}
+
+impl Harness<GatewayTestContext> {
+    async fn new_real_mgs(logctx: LogContext) -> Self {
+        let ctx = gateway_test_utils::setup::test_setup(
+            logctx.test_name(),
+            SpPort::One,
+        )
+        .await;
+        Self::new_common(logctx, ctx)
+    }
+}
+
+impl Harness<MockServer> {
+    fn new_mock_mgs(logctx: LogContext) -> Self {
+        Self::new_common(logctx, MockServer::start())
+    }
 
     fn mock_mgs_set_switch_slot(&self, slot: u16) -> Mock<'_> {
         let body =
             serde_json::json!({ "type": "switch", "slot": slot }).to_string();
-        self.mock_mgs.mock(|when, then| {
+        self.mgs.mock(|when, then| {
             when.method(httpmock::Method::GET).path("/local/switch-id");
             then.status(200)
                 .header("content-type", "application/json")
@@ -81,7 +133,7 @@ impl Harness {
     }
 
     fn mock_mgs_set_503(&self) -> Mock<'_> {
-        self.mock_mgs.mock(|when, then| {
+        self.mgs.mock(|when, then| {
             when.method(httpmock::Method::GET).path("/local/switch-id");
             then.status(503).header("content-type", "application/json").body(
                 serde_json::json!({
@@ -129,7 +181,7 @@ async fn calling_set_sled_agent_networking_info_once_multiple_times_panics() {
         "calling_set_sled_agent_networking_info_once_multiple_times_panics",
         &log_config,
     );
-    let harness = Harness::new(&logctx.log);
+    let harness = Harness::new_mock_mgs(logctx);
 
     harness.handle.set_sled_agent_networking_info_once(
         harness.sled_agent_networking_info(),
@@ -143,7 +195,7 @@ async fn calling_set_sled_agent_networking_info_once_multiple_times_panics() {
 #[tokio::test]
 async fn non_scrimlet_two_phase_initialization() {
     let logctx = dev::test_setup_log("non_scrimlet_two_phase_initialization");
-    let harness = Harness::new(&logctx.log);
+    let harness = Harness::new_mock_mgs(logctx);
 
     // initial status
     assert_matches!(
@@ -163,20 +215,17 @@ async fn non_scrimlet_two_phase_initialization() {
         )
     );
 
-    logctx.cleanup_successful();
+    harness.teardown().await;
 }
 
 // Happy-path test for scrimlets where we find out we're a scrimlet after
 // getting our networking info.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn scrimlet_three_phase_initialization_info_then_scrimlet() {
     let logctx = dev::test_setup_log(
         "scrimlet_three_phase_initialization_info_then_scrimlet",
     );
-    let harness = Harness::new(&logctx.log);
-
-    // Configure our mock MGS to claim to be switch slot 0.
-    let success_mock = harness.mock_mgs_set_switch_slot(0);
+    let harness = Harness::new_real_mgs(logctx).await;
 
     // initial status
     assert_matches!(
@@ -198,28 +247,23 @@ async fn scrimlet_three_phase_initialization_info_then_scrimlet() {
 
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
 
-    // We should contact MGS, then transition to the running state.
-    harness.wait_for_mock_to_be_called(&success_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(status, ScrimletReconcilersStatus::Running { .. })
         })
         .await;
 
-    logctx.cleanup_successful();
+    harness.teardown().await;
 }
 
 // Happy-path test for scrimlets where we find out we're a scrimlet before
 // getting our networking info.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn scrimlet_three_phase_initialization_scrimlet_then_info() {
     let logctx = dev::test_setup_log(
         "scrimlet_three_phase_initialization_scrimlet_then_info",
     );
-    let harness = Harness::new(&logctx.log);
-
-    // Configure our mock MGS to claim to be switch slot 0.
-    let success_mock = harness.mock_mgs_set_switch_slot(0);
+    let harness = Harness::new_real_mgs(logctx).await;
 
     // Become a scrimlet right away.
     harness.handle.set_scrimlet_status(ScrimletStatus::Scrimlet);
@@ -235,21 +279,20 @@ async fn scrimlet_three_phase_initialization_scrimlet_then_info() {
     );
 
     // We're already a scrimlet, so we contact MGS then transition to Running.
-    harness.wait_for_mock_to_be_called(&success_mock).await;
     harness
         .wait_for_task_status(|status| {
             matches!(status, ScrimletReconcilersStatus::Running { .. })
         })
         .await;
 
-    logctx.cleanup_successful();
+    harness.teardown().await;
 }
 
 // Scrimlet test case where MGS fails the first time we ask then succeeds later.
 #[tokio::test(start_paused = true)]
 async fn scrimlet_mgs_fails_first_attempt() {
     let logctx = dev::test_setup_log("scrimlet_mgs_fails_first_attempt");
-    let harness = Harness::new(&logctx.log);
+    let harness = Harness::new_mock_mgs(logctx);
 
     // Configure our mock MGS to return an HTTP 503.
     let mut error_mock = harness.mock_mgs_set_503();
@@ -302,7 +345,7 @@ async fn scrimlet_mgs_fails_first_attempt() {
         })
         .await;
 
-    logctx.cleanup_successful();
+    harness.teardown().await;
 }
 
 // Scrimlet test case where MGS fails, then we become "not a scrimlet", then we
@@ -311,7 +354,7 @@ async fn scrimlet_mgs_fails_first_attempt() {
 async fn scrimlet_mgs_fails_then_we_become_not_a_scrimlet() {
     let logctx =
         dev::test_setup_log("scrimlet_mgs_fails_then_we_become_not_a_scrimlet");
-    let harness = Harness::new(&logctx.log);
+    let harness = Harness::new_mock_mgs(logctx);
 
     // Configure our mock MGS to return an HTTP 503.
     let mut error_mock = harness.mock_mgs_set_503();
@@ -379,5 +422,5 @@ async fn scrimlet_mgs_fails_then_we_become_not_a_scrimlet() {
         })
         .await;
 
-    logctx.cleanup_successful();
+    harness.teardown().await;
 }
