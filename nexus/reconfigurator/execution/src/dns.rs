@@ -988,9 +988,8 @@ mod test {
         //    the previous pass (i.e., that corresponds to an Omicron zone).
         //
         // There are some ServiceNames missing here because they are not part of
-        // our representative config (e.g., ClickhouseKeeper) or they don't
-        // currently have DNS record at all (e.g., SledAgent, Maghemite, Mgd,
-        // Tfport).
+        // our representative config (e.g., ClickhouseKeeper) or because they
+        // do not currently have a DNS record at all (e.g., SledAgent).
         let mut srv_kinds_expected = BTreeSet::from([
             ServiceName::Clickhouse,
             ServiceName::ClickhouseNative,
@@ -1001,6 +1000,8 @@ mod test {
             ServiceName::NexusLockstep,
             ServiceName::Oximeter,
             ServiceName::Dendrite,
+            ServiceName::Mgd,
+            ServiceName::Ddm,
             ServiceName::CruciblePantry,
             ServiceName::BoundaryNtp,
             ServiceName::InternalNtp,

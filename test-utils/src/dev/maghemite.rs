@@ -4,11 +4,13 @@
 
 //! Tools for managing Maghemite during development
 
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Context;
+use slog::{Discard, Logger, o};
 use tempfile::TempDir;
 use tokio::{
     fs::File,
@@ -163,12 +165,90 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
     }
 }
 
+/// In-process stand-in for the `ddmd` (Delay Driven Multipath daemon)
+/// admin API.
+///
+/// `ddmd` runs in sled global zones and switch zones in real deployments,
+/// and depends on illumos networking facilities not available in a generic
+/// dev test toolchain the way `mgd` is. This binds a dropshot server on an
+/// auto-assigned port so the test suite has a real socket to publish in
+/// internal DNS as `ServiceName::Ddm`.
+///
+/// This currently has no registered routes. Any integration needing
+/// concrete endpoints (e.g., peer lists) must extend the `ApiDescription`.
+pub struct DdmInstance {
+    pub port: u16,
+    server: Option<dropshot::HttpServer<()>>,
+}
+
+impl DdmInstance {
+    /// Start a DDM sim server bound to a random localhost port.
+    pub async fn start() -> Result<Self, anyhow::Error> {
+        let dropshot_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::LOCALHOST,
+                0,
+                0,
+                0,
+            )),
+            ..Default::default()
+        };
+
+        let api: dropshot::ApiDescription<()> = dropshot::ApiDescription::new();
+        let log = Logger::root(Discard, o!());
+
+        let server = dropshot::ServerBuilder::new(api, (), log)
+            .config(dropshot_config)
+            .start()
+            .context("failed to start DDM sim server")?;
+
+        let port = server.local_addr().port();
+        Ok(Self { port, server: Some(server) })
+    }
+
+    pub async fn cleanup(&mut self) {
+        if let Some(server) = self.server.take() {
+            server.close().await.expect("failed to close DDM sim server");
+        }
+    }
+}
+
+impl Drop for DdmInstance {
+    fn drop(&mut self) {
+        if self.server.is_some() {
+            eprintln!(
+                "WARN: dropped DdmInstance without cleaning it up first \
+                (the dropshot server's tokio task may still be running)"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::DdmInstance;
     use super::find_mgd_port_in_log;
     use std::io::Write;
     use std::process::Stdio;
     use tempfile::NamedTempFile;
+
+    /// Smoke-test `DdmInstance`. We bind and serve a 404 for an unregistered
+    /// route, then shut down cleanly.
+    #[tokio::test]
+    async fn test_ddm_sim_binds_and_serves_404() {
+        let mut sim = DdmInstance::start().await.expect("DDM sim starts");
+        assert!(sim.port > 0, "DDM sim should auto-assign a port");
+
+        let url = format!("http://[::1]:{}/peers", sim.port);
+        let resp = reqwest::get(&url).await.expect("server reachable");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "no routes registered yet: expected 404"
+        );
+
+        sim.cleanup().await;
+    }
 
     const EXPECTED_PORT: u16 = 4676;
 

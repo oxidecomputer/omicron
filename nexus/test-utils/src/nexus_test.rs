@@ -117,6 +117,7 @@ pub struct ControlPlaneTestContext<N> {
     /// Ports of stopped dendrite instances (for use by start_dendrite)
     pub stopped_dendrite_ports: RwLock<HashMap<SwitchSlot, u16>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: TransientDnsServer,
     pub internal_dns: TransientDnsServer,
@@ -319,6 +320,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut ddm) in self.ddm {
+            ddm.cleanup().await;
         }
         self.logctx.cleanup_successful();
     }
