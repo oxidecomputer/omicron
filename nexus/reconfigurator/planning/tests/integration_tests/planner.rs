@@ -212,6 +212,7 @@ fn test_basic_add_sled() {
     let blueprint2 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expected no changes):\n{}", summary.display());
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
@@ -241,6 +242,7 @@ fn test_basic_add_sled() {
         &summary.display().to_string(),
     );
 
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.added.len(), 1);
     assert_eq!(summary.total_disks_added(), 10);
 
@@ -288,6 +290,7 @@ fn test_basic_add_sled() {
         "tests/output/planner_basic_add_sled_3_5.txt",
         &summary.display().to_string(),
     );
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 1);
@@ -368,6 +371,10 @@ fn test_add_multiple_nexus_to_one_sled() {
 
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (added additional Nexus zones):\n{}", summary.display());
+    assert_eq!(
+        *summary.diff.external_networking_generation.after,
+        summary.diff.external_networking_generation.before.next(),
+    );
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 1);
@@ -433,6 +440,10 @@ fn test_spread_additional_nexus_zones_across_sleds() {
 
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (added additional Nexus zones):\n{}", summary.display());
+    assert_eq!(
+        *summary.diff.external_networking_generation.after,
+        summary.diff.external_networking_generation.before.next(),
+    );
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 3);
@@ -547,6 +558,10 @@ fn test_spread_internal_dns_zones_across_sleds() {
             Ok(())
         })
         .expect("expunged zones");
+    assert_eq!(
+        blueprint1.external_networking_generation,
+        blueprint2.external_networking_generation
+    );
     assert_eq!(nexpunged, 2);
 
     // Deploy this blueprint and generate a new inventory from it.
@@ -559,6 +574,7 @@ fn test_spread_internal_dns_zones_across_sleds() {
         "2 -> 3 (added additional internal DNS zones):\n{}",
         summary.display()
     );
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 2);
@@ -634,6 +650,13 @@ fn test_reuse_external_ips_from_expunged_zones() {
         }
     );
 
+    // Expunging a Nexus zone changes the external networking config, so should
+    // bump the generation.
+    assert_eq!(
+        diff.after.external_networking_generation,
+        diff.before.external_networking_generation.next(),
+    );
+
     // Set the target Nexus zone count to one that will completely exhaust
     // the service IP pool. This will force reuse of the IP that was
     // allocated to the expunged Nexus zone.
@@ -669,6 +692,12 @@ fn test_reuse_external_ips_from_expunged_zones() {
     println!(
         "zone {} reused external IP {} from expunged zone {}",
         new_zone.id, expunged_ip, zone.id
+    );
+
+    // This changes the external networking config again.
+    assert_eq!(
+        diff.after.external_networking_generation,
+        diff.before.external_networking_generation.next(),
     );
 
     // Test a no-op planning iteration.
@@ -791,6 +820,10 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
         3,
         "can't find external DNS zones in new blueprint"
     );
+    assert_eq!(
+        blueprint1a.external_networking_generation,
+        blueprint1.external_networking_generation.next(),
+    );
 
     // Plan with external DNS.
     let blueprint2 = sim.run_planner().expect("planning succeeded");
@@ -805,6 +838,10 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
             .count(),
         3,
         "can't find external DNS zones in planned blueprint"
+    );
+    assert_eq!(
+        diff.after.external_networking_generation,
+        diff.before.external_networking_generation.next(),
     );
 
     // Expunge the first sled and re-plan. That gets us two expunged
@@ -830,6 +867,10 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
             })
             .count(),
         2
+    );
+    assert_eq!(
+        diff.after.external_networking_generation,
+        diff.before.external_networking_generation.next(),
     );
 
     // The IP addresses of the new external DNS zones should be the
@@ -917,6 +958,7 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     let blueprint2 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (some new disks, one expunged):\n{}", summary.display());
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.modified().count(), 1);
 
     // We should be adding a Crucible zone for each new in-service disk.
@@ -999,6 +1041,7 @@ fn test_dataset_settings_modified_in_place() {
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 1);
 
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.total_zones_added(), 0);
     assert_eq!(summary.total_zones_removed(), 0);
     assert_eq!(summary.total_zones_modified(), 0);
@@ -1225,6 +1268,7 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
 
     // We should be removing a single zone, associated with the Crucible
     // using that device.
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.total_zones_added(), 0);
     assert_eq!(summary.total_zones_removed(), 0);
     assert_eq!(summary.total_zones_modified(), 1);
@@ -1305,6 +1349,7 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     sim_update_collection_from_blueprint(&mut sim, &blueprint2);
     let blueprint3 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint3.diff_since_blueprint(&blueprint2);
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.total_zones_added(), 0);
     assert_eq!(summary.total_zones_removed(), 0);
     assert_eq!(summary.total_zones_modified(), 1);
@@ -1580,6 +1625,11 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
     // cleanup, and we aren't performing garbage collection on zones or
     // sleds at the moment.
 
+    assert_eq!(
+        *summary.diff.external_networking_generation.after,
+        summary.diff.external_networking_generation.before.next(),
+    );
+
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 3);
@@ -1711,6 +1761,10 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
         "tests/output/planner_nonprovisionable_2_2a.txt",
         &diff.display().to_string(),
     );
+    assert_eq!(
+        diff.after.external_networking_generation,
+        diff.before.external_networking_generation,
+    );
 
     // ---
 
@@ -1809,6 +1863,10 @@ fn planner_decommissions_sleds() {
         blueprint2.sleds[&expunged_sled_id].state,
         SledState::Decommissioned
     );
+    assert_eq!(
+        diff.after.external_networking_generation,
+        diff.before.external_networking_generation.next(),
+    );
 
     // Set the state of the expunged sled to decommissioned, and run the
     // planner again.
@@ -1828,6 +1886,7 @@ fn planner_decommissions_sleds() {
         "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
         summary.display()
     );
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
@@ -1860,6 +1919,7 @@ fn planner_decommissions_sleds() {
         "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
         summary.display()
     );
+    assert!(summary.diff.external_networking_generation.is_unchanged());
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
@@ -2706,7 +2766,13 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     // Run the planner. It should expunge all zones on the disk we just
     // expunged, including our Nexus zone, but not mark them as ready for
     // cleanup yet.
-    let _pre_blueprint2 = sim.run_planner().expect("planning succeeded");
+    let pre_blueprint2 = sim.run_planner().expect("planning succeeded");
+
+    // Expunging Nexus does change the external networking config.
+    assert_eq!(
+        pre_blueprint2.external_networking_generation,
+        blueprint1.external_networking_generation.next(),
+    );
 
     // Mark the disk we expected as "ready for cleanup"; this isn't what
     // we're testing, and failing to do this will interfere with some of the
@@ -2849,6 +2915,12 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     assert_eq!(
         blueprint3.sleds.get(&sled_id).unwrap().sled_agent_generation,
         bp2_sled_config.generation
+    );
+    // Marking a zone as "ready for cleanup" does not change the external
+    // networking configuration.
+    assert_eq!(
+        blueprint3.external_networking_generation,
+        blueprint2.external_networking_generation,
     );
 
     sim_assert_planning_makes_no_changes(
@@ -3455,6 +3527,7 @@ fn test_update_crucible_pantry_before_nexus() {
 
         {
             let summary = blueprint.diff_since_blueprint(&parent);
+            assert!(summary.diff.external_networking_generation.is_unchanged());
             eprintln!("diff to {blueprint_name}: {}", summary.display());
             for sled in summary.diff.sleds.modified_values_diff() {
                 assert!(sled.zones.removed.is_empty());
@@ -3555,6 +3628,10 @@ fn test_update_crucible_pantry_before_nexus() {
             modified_sleds += 1;
         }
         assert_eq!(modified_sleds, expected_new_nexus_zones);
+        assert_eq!(
+            new_blueprint.external_networking_generation,
+            blueprint.external_networking_generation.next()
+        );
     }
     blueprint = new_blueprint;
 
@@ -3580,6 +3657,12 @@ fn test_update_crucible_pantry_before_nexus() {
             *summary.diff.nexus_generation.after,
         );
         assert!(summary.diff.sleds.modified_values_diff().next().is_none());
+        // Bumping the nexus generation doesn't change which zones are
+        // in-service, so doesn't change the external networking config.
+        assert_eq!(
+            new_blueprint.external_networking_generation,
+            blueprint.external_networking_generation,
+        );
     }
     blueprint = new_blueprint;
 
@@ -3590,7 +3673,9 @@ fn test_update_crucible_pantry_before_nexus() {
 
         {
             let summary = blueprint.diff_since_blueprint(&parent);
+            eprintln!("{}", summary.display());
             assert!(summary.has_changes(), "No changes at iteration {i}");
+            let mut did_external_networking_change = false;
             for sled in summary.diff.sleds.modified_values_diff() {
                 assert!(sled.zones.added.is_empty());
                 assert!(sled.zones.removed.is_empty());
@@ -3611,13 +3696,15 @@ fn test_update_crucible_pantry_before_nexus() {
                     ));
 
                     // If the zone was previously in-service, it gets
-                    // expunged.
+                    // expunged, which changes the external networking config.
                     if modified_zone.disposition.before.is_in_service() {
-                        assert!(modified_zone.disposition.after.is_expunged(),);
+                        assert!(modified_zone.disposition.after.is_expunged());
+                        did_external_networking_change = true;
                     }
 
                     // If the zone was previously expunged and not ready for
-                    // cleanup, it should be marked ready-for-cleanup
+                    // cleanup, it should be marked ready-for-cleanup. This does
+                    // not change the external networking config.
                     if modified_zone.disposition.before.is_expunged()
                         && !modified_zone
                             .disposition
@@ -3632,6 +3719,17 @@ fn test_update_crucible_pantry_before_nexus() {
                         );
                     }
                 }
+            }
+
+            if did_external_networking_change {
+                assert_eq!(
+                    *summary.diff.external_networking_generation.after,
+                    summary.diff.external_networking_generation.before.next(),
+                );
+            } else {
+                assert!(
+                    summary.diff.external_networking_generation.is_unchanged()
+                );
             }
         }
         parent = blueprint;
@@ -4290,6 +4388,11 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
+
+        assert_eq!(
+            *summary.diff.external_networking_generation.after,
+            summary.diff.external_networking_generation.before.next(),
+        );
     }
     let blueprint = new_blueprint;
     sim_update_collection_from_blueprint(&mut sim, &blueprint);
@@ -4329,6 +4432,11 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_added(), 2);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 2);
+
+        assert_eq!(
+            *summary.diff.external_networking_generation.after,
+            summary.diff.external_networking_generation.before.next(),
+        );
     }
     let blueprint = new_blueprint;
     sim_update_collection_from_blueprint(&mut sim, &blueprint);
@@ -4360,6 +4468,11 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 2);
+
+        assert_eq!(
+            *summary.diff.external_networking_generation.after,
+            summary.diff.external_networking_generation.before.next(),
+        );
     }
     let blueprint = new_blueprint;
     sim_update_collection_from_blueprint(&mut sim, &blueprint);
@@ -4393,6 +4506,11 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_added(), 2);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
+
+        assert_eq!(
+            *summary.diff.external_networking_generation.after,
+            summary.diff.external_networking_generation.before.next(),
+        );
     }
     let blueprint = new_blueprint;
     sim_update_collection_from_blueprint(&mut sim, &blueprint);
@@ -4421,6 +4539,7 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
+        assert!(summary.diff.external_networking_generation.is_unchanged());
     }
     let blueprint = new_blueprint;
     sim_update_collection_from_blueprint(&mut sim, &blueprint);
