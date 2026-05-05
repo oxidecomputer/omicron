@@ -12,6 +12,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 nexus-config.workspace = true
 nexus-db-queries.workspace = true
 nexus-types.workspace = true

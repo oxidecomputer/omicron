@@ -11,7 +11,6 @@ use clap::ColorChoice;
 use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
-use gateway_client::types::SpIgnition;
 use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
@@ -212,7 +211,7 @@ impl Inventory {
         let c = &mgs_client;
         let sp_infos = futures::stream::iter(
             sp_list_ignition.iter().filter_map(|ignition| {
-                if matches!(ignition.details, SpIgnition::Yes { .. }) {
+                if ignition.details.is_sp_running() {
                     Some(ignition.id)
                 } else {
                     None

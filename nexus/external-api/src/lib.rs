@@ -32,6 +32,7 @@ use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
+use nexus_types_versions::v2026_02_13_01;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -41,6 +42,7 @@ use omicron_common::api::external::{
     *,
 };
 use openapiv3::OpenAPI;
+use slog_error_chain::InlineErrorChain;
 
 /// Types that convert to/from `omicron-common` types and thus cannot live in
 /// `nexus-types-versions`. These will go away once `omicron-common-versions`
@@ -79,6 +81,11 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_04_30_00, PROBE_AND_SAML_DOCS),
+    (2026_04_29_00, METRICS_ADD_JOULES),
+    (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
+    (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),
+    (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
     (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
     (2026_03_23_00, RENAME_PREFIX_LEN),
@@ -4577,7 +4584,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -4586,6 +4593,35 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn networking_switch_port_settings_create_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_02_13_01::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_02_13_01::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+        .map(|response| response.map(From::from))
+    }
 
     /// Create switch port settings (old version with required BgpPeer.addr)
     #[endpoint {
@@ -4604,7 +4640,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2025_11_20_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        match Self::networking_switch_port_settings_create(
+        match Self::networking_switch_port_settings_create_v2026_02_13_01(
             rqctx,
             new_settings.map(Into::into),
         )
@@ -4649,12 +4685,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn networking_switch_port_settings_view_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_02_13_01::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     /// Get information about switch port (old version with required BgpPeer.addr)
     #[endpoint {
@@ -4671,8 +4726,11 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2025_11_20_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        match Self::networking_switch_port_settings_view(rqctx, path_params)
-            .await
+        match Self::networking_switch_port_settings_view_v2026_02_13_01(
+            rqctx,
+            path_params,
+        )
+        .await
         {
             Ok(HttpResponseOk(result)) => {
                 Ok(HttpResponseOk(result.try_into()?))
@@ -6742,7 +6800,9 @@ pub trait NexusExternalApi {
         >,
         other_params: Query<latest::silo::OptionalSiloSelector>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
         HttpError,
     >;
 
@@ -6765,7 +6825,9 @@ pub trait NexusExternalApi {
         >,
         other_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
         HttpError,
     >;
 
@@ -6774,14 +6836,66 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/timeseries/schemas",
         tags = ["system/metrics"],
+        versions = VERSION_METRICS_ADD_JOULES..
     }]
     async fn system_timeseries_schema_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<TimeseriesSchemaPaginationParams>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::TimeseriesSchema>>,
+        HttpResponseOk<
+            ResultsPage<
+                oximeter_types_versions::latest::schema::TimeseriesSchema,
+            >,
+        >,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "system_timeseries_schema_list",
+        method = GET,
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
+        versions = ..VERSION_METRICS_ADD_JOULES
+    }]
+    async fn system_timeseries_schema_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<
+                EmptyScanParams,
+                oximeter_types_versions::v1::schema::TimeseriesName,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::v1::schema::TimeseriesSchema>,
+        >,
+        HttpError,
+    > {
+        use oximeter_types_versions::v1::schema::TimeseriesSchema;
+        use oximeter_types_versions::v2::schema::UnitsConversionJoulesError;
+
+        let page =
+            Self::system_timeseries_schema_list(rqctx, pag_params).await?.0;
+        let items = page
+            .items
+            .into_iter()
+            .map(|item| {
+                TimeseriesSchema::try_from(item).map_err(
+                    |UnitsConversionJoulesError| {
+                        HttpError::for_client_error(
+                            None,
+                            dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                            "client version out of date: schema contains \
+                             new types of units (joules)"
+                                .to_string(),
+                        )
+                    },
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
 
@@ -8227,5 +8341,7 @@ pub type SubnetPoolMemberPaginationParams =
     PaginationParams<EmptyScanParams, oxnet::IpNet>;
 
 /// Type used to paginate request to list timeseries schema
-pub type TimeseriesSchemaPaginationParams =
-    PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
+pub type TimeseriesSchemaPaginationParams = PaginationParams<
+    EmptyScanParams,
+    oximeter_types_versions::latest::schema::TimeseriesName,
+>;

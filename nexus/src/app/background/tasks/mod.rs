@@ -21,6 +21,7 @@ pub mod dns_propagation;
 pub mod dns_servers;
 pub mod ereport_ingester;
 pub mod external_endpoints;
+pub mod fm_analysis;
 pub mod fm_rendezvous;
 pub mod fm_sitrep_gc;
 pub mod fm_sitrep_load;

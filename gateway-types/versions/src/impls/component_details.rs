@@ -40,12 +40,12 @@ impl TryFrom<gateway_messages::ComponentDetails> for SpComponentDetails {
             ComponentDetails::Measurement(m) => Ok(match m.value {
                 Ok(value) => Self::Measurement(Measurement {
                     name: m.name,
-                    kind: m.kind.into(),
+                    kind: m.kind.try_into()?,
                     value,
                 }),
                 Err(err) => Self::MeasurementError(MeasurementError {
                     name: m.name,
-                    kind: m.kind.into(),
+                    kind: m.kind.try_into()?,
                     error: err.into(),
                 }),
             }),
@@ -54,11 +54,19 @@ impl TryFrom<gateway_messages::ComponentDetails> for SpComponentDetails {
                     description: format!("last post code: {inner:?}"),
                 })
             }
+            ComponentDetails::PostCode(inner) => {
+                Err(UnsupportedComponentDetails {
+                    description: format!("post code: {inner:?}"),
+                })
+            }
             ComponentDetails::GpioToggleCount(inner) => {
                 Err(UnsupportedComponentDetails {
                     description: format!("GPIO toggle count: {inner:?}"),
                 })
             }
+            ComponentDetails::Pcie(inner) => Err(UnsupportedComponentDetails {
+                description: format!("pcie: {inner:?}"),
+            }),
         }
     }
 }
@@ -218,10 +226,16 @@ impl From<gateway_messages::monorail_port_status::PortStatusErrorCode>
     }
 }
 
-impl From<gateway_messages::measurement::MeasurementKind> for MeasurementKind {
-    fn from(kind: gateway_messages::measurement::MeasurementKind) -> Self {
+impl TryFrom<gateway_messages::measurement::MeasurementKind>
+    for MeasurementKind
+{
+    type Error = UnsupportedComponentDetails;
+
+    fn try_from(
+        kind: gateway_messages::measurement::MeasurementKind,
+    ) -> Result<Self, Self::Error> {
         use gateway_messages::measurement::MeasurementKind;
-        match kind {
+        let kind = match kind {
             MeasurementKind::Temperature => Self::Temperature,
             MeasurementKind::Power => Self::Power,
             MeasurementKind::Current => Self::Current,
@@ -230,7 +244,19 @@ impl From<gateway_messages::measurement::MeasurementKind> for MeasurementKind {
             MeasurementKind::InputVoltage => Self::InputVoltage,
             MeasurementKind::Speed => Self::Speed,
             MeasurementKind::CpuTctl => Self::CpuTctl,
-        }
+            MeasurementKind::Pwm
+            | MeasurementKind::InputPower
+            | MeasurementKind::OutputEnergy
+            | MeasurementKind::InputEnergy => {
+                // We should bump the MGS API version to add these new
+                // measurement kinds, but can't yet due to
+                // <https://github.com/oxidecomputer/omicron/issues/9708>.
+                return Err(UnsupportedComponentDetails {
+                    description: format!("MGS does not yet support {kind:?}"),
+                });
+            }
+        };
+        Ok(kind)
     }
 }
 

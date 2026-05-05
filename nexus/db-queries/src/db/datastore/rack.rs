@@ -55,7 +55,6 @@ use nexus_types::external_api::policy::{RoleAssignment, SiloRole};
 use nexus_types::external_api::silo as silo_types;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
-use nexus_types::inventory::NetworkInterface;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
@@ -73,6 +72,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::NetworkInterface;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -1126,6 +1126,7 @@ mod test {
                     external_dns_version: *Generation::new(),
                     target_release_minimum_generation: *Generation::new(),
                     nexus_generation: *Generation::new(),
+                    external_networking_generation: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
                     oximeter_read_version: *Generation::new(),

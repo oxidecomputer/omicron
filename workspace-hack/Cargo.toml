@@ -60,8 +60,8 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -71,21 +71,21 @@ hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.8.1", features = ["full"] }
-iddqd = { version = "0.3.17", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.18", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.1.0" }
-indexmap = { version = "2.13.0", features = ["serde"] }
+indexmap = { version = "2.14.0", features = ["serde"] }
 inout = { version = "0.1.4", default-features = false, features = ["std"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools = { version = "0.13.0" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.180", features = ["extra_traits"] }
+libc = { version = "0.2.185", features = ["extra_traits"] }
 log = { version = "0.4.29", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.8.0" }
 newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
-nix = { version = "0.31.1", features = ["fs", "net", "signal"] }
+nix = { version = "0.31.2", features = ["fs", "net", "signal"] }
 num-bigint-dig = { version = "0.8.6", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
@@ -104,6 +104,7 @@ ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd",
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
 proptest = { version = "1.10.0" }
+quote = { version = "1.0.45" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
 rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
@@ -119,7 +120,7 @@ rustls = { version = "0.23.37", features = ["ring"] }
 rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
-semver = { version = "1.0.27", features = ["serde"] }
+semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.149", features = ["alloc", "raw_value", "unbounded_depth"] }
@@ -140,7 +141,7 @@ strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["d
 subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.49.0", features = ["full", "test-util"] }
+tokio = { version = "1.52.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.16", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
@@ -154,7 +155,7 @@ url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
 usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
 usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.21.0", features = ["serde", "v4"] }
+uuid = { version = "1.23.0", features = ["serde", "v4"] }
 winnow = { version = "0.7.14" }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.8.40", default-features = false, features = ["derive", "simd"] }
@@ -206,8 +207,8 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -218,21 +219,21 @@ hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.8.1", features = ["full"] }
-iddqd = { version = "0.3.17", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.18", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.1.0" }
-indexmap = { version = "2.13.0", features = ["serde"] }
+indexmap = { version = "2.14.0", features = ["serde"] }
 inout = { version = "0.1.4", default-features = false, features = ["std"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools = { version = "0.13.0" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.180", features = ["extra_traits"] }
+libc = { version = "0.2.185", features = ["extra_traits"] }
 log = { version = "0.4.29", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.8.0" }
 newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
-nix = { version = "0.31.1", features = ["fs", "net", "signal"] }
+nix = { version = "0.31.2", features = ["fs", "net", "signal"] }
 num-bigint-dig = { version = "0.8.6", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
@@ -251,6 +252,7 @@ ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd",
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
 proptest = { version = "1.10.0" }
+quote = { version = "1.0.45" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
 rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
@@ -266,7 +268,7 @@ rustls = { version = "0.23.37", features = ["ring"] }
 rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
-semver = { version = "1.0.27", features = ["serde"] }
+semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.149", features = ["alloc", "raw_value", "unbounded_depth"] }
@@ -290,7 +292,7 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extr
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.27", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.49.0", features = ["full", "test-util"] }
+tokio = { version = "1.52.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.16", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
@@ -304,7 +306,7 @@ url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
 usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
 usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.21.0", features = ["serde", "v4"] }
+uuid = { version = "1.23.0", features = ["serde", "v4"] }
 vergen = { version = "9.0.6", features = ["cargo", "rustc"] }
 vergen-lib = { version = "0.1.6", features = ["cargo", "git", "rustc"] }
 winnow = { version = "0.7.14" }
@@ -321,8 +323,7 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -335,8 +336,7 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -347,8 +347,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 errno = { version = "0.3.14" }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -359,8 +358,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 errno = { version = "0.3.14" }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -371,8 +369,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 errno = { version = "0.3.14" }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -383,8 +380,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 errno = { version = "0.3.14" }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -398,8 +394,7 @@ errno = { version = "0.3.14" }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.1", default-features = false, features = ["std", "sys_rng"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
@@ -415,8 +410,7 @@ errno = { version = "0.3.14" }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.1", default-features = false, features = ["std", "sys_rng"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
-mio = { version = "1.1.1", features = ["net", "os-ext"] }
+mio = { version = "1.2.0", features = ["net", "os-ext"] }
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }

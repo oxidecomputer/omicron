@@ -1095,22 +1095,6 @@ pub enum InstanceState {
     Destroyed,
 }
 
-impl From<crate::api::internal::nexus::VmmState> for InstanceState {
-    fn from(state: crate::api::internal::nexus::VmmState) -> Self {
-        use crate::api::internal::nexus::VmmState as InternalVmmState;
-        match state {
-            InternalVmmState::Starting => Self::Starting,
-            InternalVmmState::Running => Self::Running,
-            InternalVmmState::Stopping => Self::Stopping,
-            InternalVmmState::Stopped => Self::Stopped,
-            InternalVmmState::Rebooting => Self::Rebooting,
-            InternalVmmState::Migrating => Self::Migrating,
-            InternalVmmState::Failed => Self::Failed,
-            InternalVmmState::Destroyed => Self::Destroyed,
-        }
-    }
-}
-
 impl Display for InstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
@@ -1848,6 +1832,9 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
+/// Maximum number of entries in each filter field of a [`VpcFirewallRuleFilter`].
+pub const VPC_FIREWALL_RULE_MAX_FILTER_LEN: usize = 256;
+
 /// Filters reduce the scope of a firewall rule. Without filters, the rule
 /// applies to all packets to the targets (or from the targets, if it's an
 /// outbound rule). With multiple filters, the rule applies only to packets
@@ -1857,15 +1844,15 @@ pub struct VpcFirewallRuleFilter {
     /// If present, host filters match the "other end" of traffic from the
     /// target’s perspective: for an inbound rule, they match the source of
     /// traffic. For an outbound rule, they match the destination.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
     /// If present, the networking protocols this rule applies to.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
     /// If present, the destination ports or port ranges this rule applies to.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub ports: Option<Vec<L4PortRange>>,
 }
 
@@ -2372,7 +2359,11 @@ impl JsonSchema for IcmpParamRange {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct MacAddr(pub macaddr::MacAddr6);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(any(test, feature = "testing"), map(|x: [u8; 6]| x.into()))]
+    pub macaddr::MacAddr6,
+);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2539,7 +2530,10 @@ impl JsonSchema for MacAddr {
     JsonSchema,
     Diffable,
 )]
-pub struct Vni(u32);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Vni(
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=Vni::MAX_VNI))] u32,
+);
 
 impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
@@ -3280,6 +3274,7 @@ pub struct TufArtifactMeta {
     pub sign: Option<Vec<u8>>,
 }
 
+/// A networking probe
 #[derive(
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
 )]

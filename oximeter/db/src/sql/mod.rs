@@ -131,6 +131,13 @@ impl std::fmt::Display for RestrictedQuery {
     }
 }
 
+impl RestrictedQuery {
+    /// Return the timeseries names referenced by this query.
+    pub fn timeseries(&self) -> impl Iterator<Item = &TimeseriesName> {
+        self.timeseries.iter()
+    }
+}
+
 macro_rules! unsupported {
     ($msg:literal) => {
         Err(OxdbError::from(Error::UnsupportedSql($msg)))

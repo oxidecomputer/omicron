@@ -3153,7 +3153,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     -- and later managing its storage.
     assigned_nexus UUID,
 
-    user_comment TEXT
+    user_comment TEXT,
+
+    -- If this bundle was requested by an FM case, the case UUID.
+    fm_case_id UUID
 
 );
 
@@ -3170,6 +3173,41 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
     time_created
+);
+
+-- Child data selection tables owned by `support_bundle`. The flags table stores
+-- boolean columns for payload-less categories; the host_info and ereports tables
+-- use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
+    bundle_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (bundle_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_info (
+    bundle_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (bundle_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
 
 /*******************************************************************/
@@ -3674,7 +3712,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     port_settings_id UUID,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
-    addr INET,
+    -- We represent unnumbered peers as `NULL`; formerly we used a sentinel
+    -- value of `0.0.0.0` in some tables (although not this one). To ensure we
+    -- don't mix those up, add check constraints that reject unspecified IPs.
+    --
+    -- The Rust logic for valid peer addresses is considerably more involved; it
+    -- rejects other classes of addresses like multicast addresses, loopback
+    -- addresses, etc. We don't attempt to enforce that here and rely on
+    -- application-level checks for those requirements.
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     hold_time INT8,
     idle_hold_time INT8,
     delay_open INT8,
@@ -3690,7 +3736,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
     id UUID NOT NULL,
-    router_lifetime INT4 NOT NULL DEFAULT 0,
+    -- Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
+    router_lifetime INT4 NOT NULL CHECK (router_lifetime >= 0 AND router_lifetime <= 9000),
+
+    -- router_lifetime is only meaningful to set for unnumbered peers; ensure
+    -- it's left at 0 for numbered peers
+    CONSTRAINT router_lifetime_only_for_unnumbered_peers CHECK (
+        router_lifetime = 0 OR addr IS NULL
+    ),
 
     PRIMARY KEY (id)
 );
@@ -3718,29 +3771,95 @@ CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_port_settings_id
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
     interface_name TEXT NOT NULL,
-    addr INET NOT NULL,
+    -- We represent unnumbered peers as `NULL`; formerly we used a sentinel
+    -- value of `0.0.0.0`. To ensure we don't mix those up, add check
+    -- constraints that reject unspecified IPs.
+    --
+    -- The Rust logic for valid peer addresses is considerably more involved; it
+    -- rejects other classes of addresses like multicast addresses, loopback
+    -- addresses, etc. We don't attempt to enforce that here and rely on
+    -- application-level checks for those requirements.
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     community INT8 NOT NULL,
+    id UUID NOT NULL,
 
-    PRIMARY KEY (port_settings_id, interface_name, addr, community)
+    -- We use an explictly-named primary key index to ensure idempotency in the
+    -- schema migration step that changed the primary key of this table.
+    CONSTRAINT switch_port_settings_bgp_peer_config_communities_pkey_id
+        PRIMARY KEY (id)
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_communities_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, addr, community)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (those without an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_communities_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, community)
+    WHERE addr IS NULL;
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_import (
     port_settings_id UUID NOT NULL,
     interface_name TEXT NOT NULL,
-    addr INET NOT NULL,
+    -- We represent unnumbered peers as `NULL`; formerly we used a sentinel
+    -- value of `0.0.0.0`. To ensure we don't mix those up, add check
+    -- constraints that reject unspecified IPs.
+    --
+    -- The Rust logic for valid peer addresses is considerably more involved; it
+    -- rejects other classes of addresses like multicast addresses, loopback
+    -- addresses, etc. We don't attempt to enforce that here and rely on
+    -- application-level checks for those requirements.
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     prefix INET NOT NULL,
+    id UUID NOT NULL,
 
-    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+    -- We use an explictly-named primary key index to ensure idempotency in the
+    -- schema migration step that changed the primary key of this table.
+    CONSTRAINT switch_port_settings_bgp_peer_config_allow_import_pkey_id
+        PRIMARY KEY (id)
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_allow_import_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_allow_import (port_settings_id, interface_name, addr, prefix)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (those without an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_allow_import_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_allow_import (port_settings_id, interface_name, prefix)
+    WHERE addr IS NULL;
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_export (
     port_settings_id UUID NOT NULL,
     interface_name TEXT NOT NULL,
-    addr INET NOT NULL,
+    -- We represent unnumbered peers as `NULL`; formerly we used a sentinel
+    -- value of `0.0.0.0`. To ensure we don't mix those up, add check
+    -- constraints that reject unspecified IPs.
+    --
+    -- The Rust logic for valid peer addresses is considerably more involved; it
+    -- rejects other classes of addresses like multicast addresses, loopback
+    -- addresses, etc. We don't attempt to enforce that here and rely on
+    -- application-level checks for those requirements.
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     prefix INET NOT NULL,
+    id UUID NOT NULL,
 
-    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+    -- We use an explictly-named primary key index to ensure idempotency in the
+    -- schema migration step that changed the primary key of this table.
+    CONSTRAINT switch_port_settings_bgp_peer_config_allow_export_pkey_id
+        PRIMARY KEY (id)
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_allow_export_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, addr, prefix)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (those without an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_allow_export_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, prefix)
+    WHERE addr IS NULL;
 
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     id UUID PRIMARY KEY,
@@ -5047,6 +5166,49 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
     PRIMARY KEY (inv_collection_id, zone_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
+    'offline',
+    'degraded',
+    'maintenance'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    -- This represents an error when calling the `svcs` command.
+    -- This column will always be NULL unless something went very wrong and we
+    -- were unable to retrieve any information from the state of the services
+    -- due to a command error.
+    svcs_cmd_error TEXT,
+    time_of_status TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS inv_svc_enabled_not_online_collection_by_sled
+    ON omicron.public.inv_svc_enabled_not_online (inv_collection_id, sled_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_service (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    fmri TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    state omicron.public.inv_svc_enabled_not_online_state NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error (
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+    error_message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -5179,7 +5341,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     nexus_generation INT8 NOT NULL,
 
     -- The source of this blueprint
-    source omicron.public.bp_source NOT NULL
+    source omicron.public.bp_source NOT NULL,
+
+    -- The generation of the collective set of all external networking config
+    -- described by the blueprint
+    external_networking_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -7337,17 +7503,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- from sitreps, so the inventory collection records may not exist.
     inv_collection_id UUID NOT NULL,
 
-    -- These fields are not semantically meaningful and are intended
-    -- debugging purposes.
-
     -- The time at which this sitrep was created.
+    --
+    -- This field is not semantically meaningful and is intended for
+    -- debugging purposes.
     time_created TIMESTAMPTZ NOT NULL,
     -- The Omicron zone UUID of the Nexus instance that created this
     -- sitrep.
+    --
+    -- This field is not semantically meaningful and is intended for
+    -- debugging purposes.
     creator_id UUID NOT NULL,
     -- A human-readable description of the changes represented by this
     -- sitrep.
-    comment TEXT NOT NULL
+    --
+    -- This field is not semantically meaningful and is intended for
+    -- debugging purposes.
+    comment TEXT NOT NULL,
+
+    -- The earliest time at which an inventory collection may have started if
+    -- it is to be considered newer than the inventory collection that was used
+    -- to produce this sitrep.
+    next_inv_min_time_started TIMESTAMPTZ NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -7474,6 +7651,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     alert_class omicron.public.alert_class NOT NULL,
     -- Actual alert data. The structure of this depends on the alert class.
     payload JSONB NOT NULL,
+    -- A human-readable comment from the diagnosis engine explaining why it
+    -- requested this alert.
+    comment TEXT NOT NULL,
 
     PRIMARY KEY (sitrep_id, id)
 );
@@ -7481,6 +7661,71 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
 CREATE INDEX IF NOT EXISTS
     lookup_fm_alert_requests_for_case
 ON omicron.public.fm_alert_request (sitrep_id, case_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
+    -- Requested support bundle UUID.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the bundle was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the bundle was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this request belongs.
+    case_id UUID NOT NULL,
+    -- A human-readable comment from the diagnosis engine explaining why it
+    -- requested this support bundle.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_requests_for_case
+ON omicron.public.fm_support_bundle_request (sitrep_id, case_id);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_request_by_id
+ON omicron.public.fm_support_bundle_request (id)
+STORING (requested_sitrep_id);
+
+-- Child data selection tables owned by `fm_support_bundle_request`. The flags
+-- table stores boolean columns for payload-less categories; the host_info and
+-- ereports tables use row existence for categories that carry additional data.
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_flags (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    include_reconfigurator BOOL NOT NULL,
+    include_sled_cubby_info BOOL NOT NULL,
+    include_sp_dumps BOOL NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_host_info (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
+        NOT (all_sleds AND cardinality(sled_ids) > 0)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
 
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
@@ -8312,7 +8557,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '248.0.0', NULL)
+    (TRUE, NOW(), NOW(), '256.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

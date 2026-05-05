@@ -9,14 +9,15 @@
 //!
 //! [rfd520]: https://rfd.shared.oxide.computer/rfd/520#_determinations
 
+use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
 use ereport_types::Ena;
 use ereport_types::EreportId;
 use futures::future::BoxFuture;
-use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_networking::GatewayClient;
 use nexus_types::fm::ereport::EreportData;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
@@ -24,12 +25,13 @@ use nexus_types::internal_api::background::SpEreporterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::net::SocketAddrV6;
 use std::sync::Arc;
 
 pub struct SpEreportIngester {
     resolver: internal_dns_resolver::Resolver,
+    fm_analysis: Activator,
     disabled: bool,
     inner: Ingester,
 }
@@ -58,15 +60,24 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
+        fm_analysis: Activator,
         disabled: bool,
     ) -> Self {
-        Self { resolver, inner: Ingester { datastore, nexus_id }, disabled }
+        Self {
+            resolver,
+            inner: Ingester { datastore, nexus_id },
+            fm_analysis,
+            disabled,
+        }
     }
 
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
+        use gateway_client::types::{SpIdentifier, SpIgnitionInfo};
+        use gateway_types::ignition::SpIgnition;
+
         let mut status = SpEreportIngesterStatus::default();
         if self.disabled {
             status.disabled = true;
@@ -78,42 +89,25 @@ impl SpEreportIngester {
         }
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
-        let mgs_clients = {
-            let lookup = self
-                .resolver
-                .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
-                .await;
-            let addrs = match lookup {
-                Err(error) => {
-                    const MSG: &str = "failed to resolve MGS addresses";
-                    error!(opctx.log, "{MSG}"; "error" => ?error);
-                    status.errors.push(format!("{MSG}: {error}"));
-                    return status;
-                }
-                Ok(addrs) => addrs,
-            };
-
-            addrs
-                .into_iter()
-                .map(|addr| {
-                    let url = format!("http://{addr}");
-                    let log = opctx.log.new(o!("gateway_url" => url.clone()));
-                    let client = gateway_client::Client::new(&url, log);
-                    GatewayClient { addr, client }
-                })
-                .collect::<Arc<[_]>>()
+        let mgs_clients = match GatewayClient::resolve_all_gateways(
+            &opctx.log,
+            &self.resolver,
+        )
+        .await
+        {
+            Err(error) => {
+                const MSG: &str = "no MGS successfully returned SP ID list";
+                let error = InlineErrorChain::new(&*error);
+                error!(opctx.log, "{MSG}"; "error" => &error);
+                status.errors.push(format!("{MSG}: {error}"));
+                return status;
+            }
+            Ok(clients) => clients.collect::<Arc<[_]>>(),
         };
 
-        if mgs_clients.is_empty() {
-            const MSG: &str = "no MGS addresses resolved";
-            error!(opctx.log, "{MSG}");
-            status.errors.push(MSG.to_string());
-            return status;
-        };
-
-        // Ask MGS for the list of all SP identifiers. If a request to the first
-        // gateway fails, we'll try again for every resolved MGS before giving
-        // up.
+        // Ask MGS for the list of all present SP identifiers. If a request to
+        // the first gateway fails, we'll try again for every resolved MGS
+        // before giving up.
         let sps = {
             let mut gateways = mgs_clients.iter();
             loop {
@@ -124,7 +118,7 @@ impl SpEreportIngester {
                     status.errors.push(MSG.to_string());
                     return status;
                 };
-                match client.sp_all_ids().await {
+                match client.ignition_list().await {
                     Ok(ids) => break ids.into_inner(),
                     Err(err) => {
                         const MSG: &str = "failed to list SP IDs from MGS";
@@ -143,13 +137,28 @@ impl SpEreportIngester {
         // TODO(eliza): what seems like an appropriate parallelism? should we
         // just do 16?
         let mut tasks = ParallelTaskSet::new();
+        let mut total_ereports = 0;
+        let mut total_new_ereports = 0;
 
-        for gateway_client::types::SpIdentifier { type_, slot } in sps {
+        for SpIgnitionInfo { details, id } in sps {
+            let ignition_type = match details {
+                SpIgnition::Present { id, .. } if details.is_sp_running() => id,
+                _ => {
+                    // This SP is not present or is powered off; skip it.
+                    status.sps_not_present += 1;
+                    continue;
+                }
+            };
+            let SpIdentifier { type_, slot } = id;
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
                         // XXX(eliza): that's so many little strings... :(
                         ("sp_type".to_string(), type_.to_string()),
+                        (
+                            "ignition_type".to_string(),
+                            format!("{ignition_type:?}"),
+                        ),
                         ("slot".to_string(), slot.to_string()),
                     ]));
                     let clients = mgs_clients.clone();
@@ -158,11 +167,18 @@ impl SpEreportIngester {
                         let status = ingester
                             .ingest_sp_ereports(opctx, &clients, type_, slot)
                             .await?;
-                        Some(SpEreporterStatus { sp_type: type_, slot, status })
+                        Some(SpEreporterStatus {
+                            sp_type: type_,
+                            slot,
+                            ignition_type,
+                            status,
+                        })
                     }
                 })
                 .await;
             if let Some(Some(sp_status)) = sp_result {
+                total_ereports += sp_status.status.ereports_received;
+                total_new_ereports += sp_status.status.new_ereports;
                 status.sps.push(sp_status);
             }
         }
@@ -170,8 +186,35 @@ impl SpEreportIngester {
         // Wait for remaining ingestion tasks to come back.
         while let Some(sp_result) = tasks.join_next().await {
             if let Some(sp_status) = sp_result {
+                total_ereports += sp_status.status.ereports_received;
+                total_new_ereports += sp_status.status.new_ereports;
                 status.sps.push(sp_status);
             }
+        }
+
+        // If any ereports were ingested that were not already in the database,
+        // trigger a new FM analysis run.
+        if total_new_ereports > 0 {
+            slog::info!(
+                opctx.log,
+                "ingested {total_ereports} ({total_new_ereports} new) \
+                 ereports from {} service processors",
+                status.sps.len();
+                "total_ereports" => total_ereports,
+                "new_ereports" => total_new_ereports,
+                "absent_sps" => status.sps_not_present,
+            );
+            self.fm_analysis.activate();
+        } else {
+            slog::debug!(
+                opctx.log,
+                "ingested {total_ereports} (0 new) \
+                 ereports from {} service processors",
+                status.sps.len();
+                "total_ereports" => total_ereports,
+                "new_ereports" => total_new_ereports,
+                "absent_sps" => status.sps_not_present,
+            );
         }
 
         // Sort statuses for consistent output in OMDB commands.
@@ -179,11 +222,6 @@ impl SpEreportIngester {
 
         status
     }
-}
-
-struct GatewayClient {
-    addr: SocketAddrV6,
-    client: gateway_client::Client,
 }
 
 const LIMIT: std::num::NonZeroU32 = match std::num::NonZeroU32::new(255) {
@@ -336,18 +374,6 @@ impl Ingester {
                 Ok(ereports) => {
                     return Some(ereports.into_inner());
                 }
-                Err(gateway_client::Error::ErrorResponse(rsp))
-                    if rsp.error_code.as_deref() == Some("InvalidSp") =>
-                {
-                    slog::debug!(
-                        &opctx.log,
-                        "ereport collection: MGS claims there is no SP in this slot";
-                        "committed_ena" => ?committed_ena,
-                        "start_ena" => ?start_ena,
-                        "restart_id" => ?restart_id,
-                        "gateway_addr" => %addr,
-                    );
-                }
                 Err(e) => {
                     slog::warn!(
                         &opctx.log,
@@ -411,13 +437,22 @@ mod tests {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
+
+        let fm_analysis_activator = Activator::new();
+        // in order to test that we actually activate the analysis task, we must
+        // wire this up now so that using it does not panic.
+        fm_analysis_activator.mark_wired_up().unwrap();
+
         let mut ingester = SpEreportIngester::new(
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
+            fm_analysis_activator.clone(),
             false,
         );
 
+        let mut analysis_activated =
+            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation1 = ingester.actually_activate(&opctx).await;
         assert!(
             activation1.errors.is_empty(),
@@ -431,8 +466,14 @@ mod tests {
             "ereports from 4 SPs should be observed: {:?}",
             activation1.sps,
         );
+        tokio_test::assert_ready!(
+            analysis_activated.poll(),
+            "fm analysis task should be activated"
+        );
 
-        for SpEreporterStatus { sp_type, slot, status } in &activation1.sps {
+        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
+            &activation1.sps
+        {
             assert_eq!(
                 &status.errors,
                 &Vec::<String>::new(),
@@ -616,6 +657,8 @@ mod tests {
 
         // Activate the task again and assert that no new ereports were
         // ingested.
+        let mut analysis_activated =
+            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation2 = ingester.actually_activate(&opctx).await;
         assert!(
             activation2.errors.is_empty(),
@@ -623,6 +666,11 @@ mod tests {
             activation2.errors
         );
         dbg!(&activation2);
+        tokio_test::assert_pending!(
+            analysis_activated.poll(),
+            "fm analysis task should not be activated when no new ereports \
+             have been ingested"
+        );
 
         assert_eq!(activation2.sps, &[], "no new ereports should be observed");
 

@@ -37,6 +37,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 
 #[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InvalidIpAddrError {
@@ -105,6 +106,36 @@ pub enum RouterPeerType {
     },
 }
 
+// These impls live here instead of in `crate::impls` because they're only used
+// for conversions in this particular version. All these are private to ensure
+// they don't leak out beyond this module.
+impl RouterPeerType {
+    /// In contexts where we cannot use this strong type to describe
+    /// "unnumbered" addresses, we have two or three possible representations:
+    ///
+    /// * In a context where we need a non-optional `IpAddr`, we could use
+    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
+    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
+    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
+    ///
+    /// In the optional case, we always prefer `None`. In the non-optional case,
+    /// we choose this sentinel value.
+    const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+    /// Squash this address down to an [`IpAddr`] by converting
+    /// [`RouterPeerType::Unnumbered`] to
+    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
+        match *self {
+            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
+            Self::Numbered { ip } => ip.into(),
+        }
+    }
+}
+
 #[derive(
     Clone,
     Copy,
@@ -121,7 +152,7 @@ pub enum RouterPeerType {
 // detailed error messages we produce. We manually implement Deserialize per
 // https://github.com/serde-rs/serde/issues/2211#issuecomment-1627628399.
 #[serde(into = "IpNet")]
-#[schemars(with = "IpNet")]
+#[schemars(transparent)]
 pub struct UplinkIpNet(pub(crate) IpNet);
 
 impl<'de> Deserialize<'de> for UplinkIpNet {
@@ -186,7 +217,7 @@ impl TryFrom<IpNet> for UplinkIpNet {
 // detailed error messages we produce. We manually implement Deserialize per
 // https://github.com/serde-rs/serde/issues/2211#issuecomment-1627628399.
 #[serde(into = "IpAddr")]
-#[schemars(with = "IpAddr")]
+#[schemars(transparent)]
 pub struct RouterPeerIpAddr(pub(crate) IpAddr);
 
 impl<'de> Deserialize<'de> for RouterPeerIpAddr {
@@ -535,7 +566,7 @@ impl From<BgpPeerConfig> for v20::BgpPeerConfig {
 }
 
 /// Initial network configuration
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RackNetworkConfig {
     pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks

@@ -367,8 +367,11 @@ async fn test_omdb_success_cases() {
         .field("new ereports ingested:", r"\d+")
         .field("total HTTP requests sent:", r"\d+")
         .field("total collection errors:", r"\d+")
-        .field("reporters with ereports:", r"\d+")
-        .field("reporters with collection errors:", r"\d+")
+        .field("total reporters:", r"\d+")
+        .field("contacted successfully:", r"\d+")
+        .field("with ereports:", r"\d+")
+        .field("without ereports:", r"\d+")
+        .field("with collection errors:", r"\d+")
         .totally_annihilate_section(&[
             "task: \"sp_ereport_ingester\"",
             "errors listing reporters:",
