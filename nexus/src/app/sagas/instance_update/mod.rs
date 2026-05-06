@@ -1575,6 +1575,7 @@ mod test {
     use sled_agent_types::instance::{
         MigrationRuntimeState, MigrationState, Migrations,
     };
+    use std::collections::BTreeSet;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2366,33 +2367,13 @@ mod test {
             .await;
     }
 
-    /// Tests that instance update sagas can complete successfully if one switch
-    /// zone is not available.
-    /// This reproduces <https://github.com/oxidecomputer/omicron/issues/10343>
-    #[tokio::test]
-    async fn instance_updates_can_complete_with_dead_switch() {
-        // The setup here is all more or less copied from the
-        // `should_start_with_dead_switch` test in the `instance_start` saga. We
-        // will manually construct the switches so that we can make one of them
-        // go away.
-        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
-            "should_start_with_dead_switch",
-        )
-        .with_extra_sled_agents(3)
-        .start::<crate::Server>()
-        .await;
+    // === dead-switch test helpers ===
 
-        let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_helpers::test_opctx(&cptestctx);
-        let log = &cptestctx.logctx.log;
-
+    async fn setup_dendrite(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(cptestctx);
         let datastore =
             cptestctx.server.server_context().nexus.datastore().clone();
 
-        // Create uplinks
-        // We only eagerly populate NAT entries on switches that have
-        // uplinks configured, so we need to do some switch configuration
-        // before starting the instance in order to test that section of logic
         let mut uplink0_params =
             networking_types::SwitchPortSettingsCreate::new(
                 IdentityMetadataCreateParams {
@@ -2487,6 +2468,156 @@ mod test {
             )
             .await
             .expect("unable to update switch1 settings");
+    }
+
+    fn mk_dpd_client(
+        cptestctx: &ControlPlaneTestContext,
+        switch_slot: SwitchSlot,
+    ) -> dpd_client::Client {
+        let dendrite_guard = cptestctx.dendrite.read().unwrap();
+        let port = dendrite_guard
+            .get(&switch_slot)
+            .expect("dendrite should be present for this switch slot")
+            .port;
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: cptestctx.logctx.log.new(o!(
+                "component" => "DpdClient",
+                "switch" => format!("{switch_slot:?}"),
+            )),
+        };
+        let addr = std::net::Ipv6Addr::LOCALHOST;
+        dpd_client::Client::new(
+            &format!("http://[{addr}]:{port}"),
+            client_state.clone(),
+        )
+    }
+
+    /// The NAT subnet used for polling NAT entries in tests.
+    const NAT_SUBNET: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 0);
+
+    /// Poll a switch zone until its NAT entries no longer equal `prior`.
+    async fn wait_for_nat_entries_to_change(
+        log: &slog::Logger,
+        client: &dpd_client::Client,
+        switch: SwitchSlot,
+        prior: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        let max_wait = Duration::from_secs(60);
+
+        poll::wait_for_condition(
+            async || {
+                let result =
+                    client.nat_ipv4_list(&NAT_SUBNET, None, None).await;
+
+                slog::info!(log,
+                    "nat_ipv4_list";
+                    "switch" => ?switch,
+                    "result" => ?result,
+                );
+
+                let data =
+                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let current = data.items.iter().map(|entry| {
+                    // I don't love that we are representing the NAT entries as
+                    // strings here, but...we need something which is either
+                    // `Hash + Eq` or `Ord` so that we can put them in sets, and
+                    // the `dpd-client` types don't implement either, so...this
+                    // is fine I Guess.
+                    format!("{entry:?}")
+                }).collect::<BTreeSet<_>>();
+
+                if &current == prior {
+                    slog::info!(
+                        log,
+                        "NAT entries have not changed yet";
+                        "switch" => ?switch,
+                        "current" => ?current,
+                        "prior" => ?prior,
+                    );
+                    return Err(poll::CondCheckError::<()>::NotYet);
+                }
+
+                Ok(current)
+            },
+            &Duration::from_millis(100),
+            &max_wait,
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "NAT entries on {switch:?} did not change from {prior:?} after {max_wait:?}"
+            )
+        })
+    }
+
+    /// Shut down switch 0's dendrite, returning the port it was listening on.
+    async fn shutdown_switch0(cptestctx: &ControlPlaneTestContext) -> u16 {
+        let mut switch0_dpd = cptestctx
+            .dendrite
+            .write()
+            .unwrap()
+            .remove(&SwitchSlot::Switch0)
+            .expect("switch 0 dendrite should be running");
+
+        let port = switch0_dpd.port;
+
+        switch0_dpd
+            .cleanup()
+            .await
+            .expect("switch0 process should get cleaned up");
+
+        port
+    }
+
+    /// Restart switch 0's dendrite on the given port.
+    async fn restart_switch0(
+        cptestctx: &ControlPlaneTestContext,
+        switch0_port: u16,
+    ) {
+        use std::net::Ipv6Addr;
+        use std::net::SocketAddrV6;
+
+        let nexus_address = cptestctx.internal_client.bind_address;
+        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
+        let mgs_address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+
+        let new_switch0 =
+            omicron_test_utils::dev::dendrite::DendriteInstance::start(
+                switch0_port,
+                Some(nexus_address),
+                Some(mgs_address),
+            )
+            .await
+            .unwrap();
+
+        cptestctx
+            .dendrite
+            .write()
+            .unwrap()
+            .insert(SwitchSlot::Switch0, new_switch0);
+    }
+
+    // === dead-switch tests ===
+
+    /// Tests that instance update sagas can complete successfully if one switch
+    /// zone is not available.
+    /// This reproduces <https://github.com/oxidecomputer/omicron/issues/10343>
+    #[tokio::test]
+    async fn destroyed_update_can_complete_with_dead_switch() {
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+            "destroyed_update_can_complete_with_dead_switch",
+        )
+        .with_extra_sled_agents(3)
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let log = &cptestctx.logctx.log;
+
+        setup_dendrite(&cptestctx).await;
 
         // Before we make one of the switch zones go away, start a test
         // instance, and simulate it into the `Running` state so that its
@@ -2495,95 +2626,26 @@ mod test {
         let (state, params) = setup_active_vmm_destroyed_test(&cptestctx).await;
         let instance_id = state.instance.id();
 
-        fn mk_dpd_client(
-            cptestctx: &ControlPlaneTestContext,
-            switch_slot: SwitchSlot,
-        ) -> dpd_client::Client {
-            let dendrite_guard = cptestctx.dendrite.read().unwrap();
-            let port = dendrite_guard
-                .get(&switch_slot)
-                .expect("two dendrites should be present in test context")
-                .port;
-            let client_state = dpd_client::ClientState {
-                tag: String::from("nexus"),
-                log: cptestctx.logctx.log.new(o!(
-                    "component" => "DpdClient",
-                    "switch" => format!("{switch_slot:?}"),
-                )),
-            };
-
-            let addr = std::net::Ipv6Addr::LOCALHOST;
-
-            dpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
-                client_state.clone(),
-            )
-        }
-
         let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
         let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
 
-        // Check to ensure that the nat entry for the address has made it onto
-        // both dendrites. Note: ipv4_nat_trigger_update() triggers dendrite's
-        // RPW asynchronously and returns immediately, but dendrite still needs
-        // time to process the update and create the NAT entries. Tests need to
-        // poll/wait for entries rather than checking immediately, or they'll be
-        // flaky.
-        let nat_subnet = std::net::Ipv4Addr::new(10, 0, 0, 0);
-        let poll_interval = Duration::from_millis(100);
-        let poll_max = Duration::from_secs(60); // Allow time for RPW to process
-
-        poll::wait_for_condition(
-            async || {
-                let dpd0_result = switch0_dpd_client
-                    .nat_ipv4_list(&nat_subnet, None, None)
-                    .await;
-
-                let dpd1_result = switch1_dpd_client
-                    .nat_ipv4_list(&nat_subnet, None, None)
-                    .await;
-
-                slog::info!(&log,
-                    "nat_ipv4_list";
-                    "dpd0_result" => ?dpd0_result,
-                    "dpd1_result" => ?dpd1_result,
-                );
-
-                let dpd0_data = dpd0_result
-                    .map_err(|_| poll::CondCheckError::<()>::NotYet)?;
-                let dpd1_data = dpd1_result
-                    .map_err(|_| poll::CondCheckError::<()>::NotYet)?;
-
-                if dpd0_data.items.is_empty() || dpd1_data.items.is_empty() {
-                    slog::error!(
-                        &log,
-                        "we are expecting NAT entries but none were found"
-                    );
-                    Err(poll::CondCheckError::<()>::NotYet)
-                } else {
-                    Ok(())
-                }
-            },
-            &poll_interval,
-            &poll_max,
+        wait_for_nat_entries_to_change(
+            &log,
+            &switch0_dpd_client,
+            SwitchSlot::Switch0,
+            &BTreeSet::new(),
         )
-        .await
-        .expect("NAT entry should appear on both switches");
+        .await;
+        let switch1_old_nat_entries = wait_for_nat_entries_to_change(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            &BTreeSet::new(),
+        )
+        .await;
 
-        // Shutdown one of the switch daemons
-        let mut switch0_dpd = cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .remove(&SwitchSlot::Switch0)
-            .expect("switch 0 dendrite running is running");
-
-        switch0_dpd
-            .cleanup()
-            .await
-            .expect("switch0 process should get cleaned up");
-
-        // Valls to switch0's dpd should fail
+        // Shutdown switch 0.
+        shutdown_switch0(&cptestctx).await;
         assert!(switch0_dpd_client.dpd_uptime().await.is_err());
 
         // Okay, now that we've taken down one of the simulated switches, we
@@ -2605,49 +2667,138 @@ mod test {
         // Check that the VMM's resources were torn down properly.
         verify_active_vmm_destroyed(&cptestctx, instance_id).await;
 
-        // The still-alive switch should have had the NAT entries for the
-        // destroyed instance removed.
-        poll::wait_for_condition(
-            async || {
-                let dpd1_result = switch1_dpd_client
-                    .nat_ipv4_list(&nat_subnet, None, None)
-                    .await;
-
-                slog::info!(&log,
-                    "nat_ipv4_list";
-                    "dpd1_result" => ?dpd1_result,
-                );
-
-                let dpd1_data = dpd1_result
-                    .map_err(|_| poll::CondCheckError::<()>::NotYet)?;
-                
-                if !dpd1_data.items.is_empty() {
-                    slog::error!(
-                        &log,
-                        "we are expecting no NAT entries on switch1, but we \
-                         found: {:?}",
-                        dpd1_data.items,
-                    );
-                    Err(poll::CondCheckError::<()>::NotYet)
-                } else {
-                    Ok(())
-                }
-            },
-            &poll_interval,
-            &poll_max,
+        // The still-alive switch should have had the NAT entries removed.
+        let new_entries = wait_for_nat_entries_to_change(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            &switch1_old_nat_entries,
         )
-        .await
-        .expect("NAT entry should appear on both switches");
+        .await;
+        assert!(
+            new_entries.is_empty(),
+            "switch1 NAT entries should be empty, but were: {new_entries:?}",
+        );
 
-        // Ideally we would test that when switch 0 comes back, the desired
-        // state is propagated to it as well, but...since the state we expect is
-        // "no NAT entries", there isn't really a difference between the state
-        // where it has been propagated and the state where it hasn't, because,
-        // well...it's empty either way. So, no use checking that here.
-        //
-        // TODO(eliza): add a test for a migration rather than VMM-destroyed
-        // update, so that we can check that the *new* NAT entries for the
-        // destination vmm are propagated to switch 0 when it comes back.
+        // Since the expected state after destroying a VMM is "no NAT entries",
+        // we can't meaningfully distinguish "propagated" from "never set" on
+        // the dead switch. The migration variant of this test (below) is also
+        // able to assert that the proper state is synced to the dead switch
+        // when it comes back to life.
+
+        cptestctx.teardown().await;
+    }
+
+    /// Tests that instance update sagas for a completed migration can complete
+    /// successfully if one switch zone is not available, and that the NAT
+    /// entries are correctly updated on *both* switches (including the one that
+    /// was restarted) to point at the new sled.
+    #[tokio::test]
+    async fn migration_update_can_complete_with_dead_switch() {
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+            "migration_update_can_complete_with_dead_switch",
+        )
+        .with_extra_sled_agents(3)
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let log = &cptestctx.logctx.log;
+
+        setup_dendrite(&cptestctx).await;
+
+        // Create a running instance and start migrating it.
+        setup_test_project(&cptestctx.external_client).await;
+        let migration_test =
+            MigrationTest::setup(MigrationOutcome::default(), &cptestctx).await;
+
+        let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
+        let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
+
+        // Record the initial NAT entries (pointing at the source sled).
+        let switch0_nat_entries = wait_for_nat_entries_to_change(
+            &log,
+            &switch0_dpd_client,
+            SwitchSlot::Switch0,
+            &BTreeSet::new(),
+        )
+        .await;
+        let switch1_nat_entries = wait_for_nat_entries_to_change(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            &BTreeSet::new(),
+        )
+        .await;
+        assert_eq!(switch0_nat_entries, switch1_nat_entries);
+        let initial_nat_entries = switch0_nat_entries;
+
+        // Simulate the migration completing.
+        migration_test
+            .update_src_state(
+                &cptestctx,
+                VmmState::Destroyed,
+                MigrationState::Completed,
+            )
+            .await;
+        migration_test
+            .update_target_state(
+                &cptestctx,
+                VmmState::Running,
+                MigrationState::Completed,
+            )
+            .await;
+
+        // Shut down switch 0.
+        let switch0_port = shutdown_switch0(&cptestctx).await;
+        assert!(switch0_dpd_client.dpd_uptime().await.is_err());
+
+        // Run the instance-update saga to complete the migration.
+        let real_params = make_real_params(
+            &cptestctx,
+            &opctx,
+            migration_test.start_saga_params(),
+        )
+        .await;
+        let dag =
+            create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
+
+        let saga_done =
+            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+                &nexus, dag,
+            );
+        tokio::time::timeout(Duration::from_secs(60), saga_done)
+            .await
+            .expect("instance update saga did not complete within 60 seconds");
+
+        // Verify switch 1 has the *updated* NAT entries.
+        let switch1_new_nat_entries = wait_for_nat_entries_to_change(
+            log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            &initial_nat_entries,
+        )
+        .await;
+        assert!(
+            !switch1_new_nat_entries.is_empty(),
+            "switch 1 should have updated NAT entries, but they were empty"
+        );
+
+        // Restart switch 0 and verify it also gets the new entries.
+        restart_switch0(&cptestctx, switch0_port).await;
+
+        let switch0_new_nat_entries = wait_for_nat_entries_to_change(
+            log,
+            &switch0_dpd_client,
+            SwitchSlot::Switch0,
+            &initial_nat_entries,
+        )
+        .await;
+        assert_eq!(
+            switch1_new_nat_entries, switch0_new_nat_entries,
+            "new NAT entries should be synced to switch 0"
+        );
 
         cptestctx.teardown().await;
     }
