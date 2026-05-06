@@ -49,11 +49,13 @@ pub struct UpdateStatus {
     /// manually applied update, then set that as the target release.
     pub suspended: bool,
 
-    /// Whether the user should contact support
+    /// If true, the system has detected one or more known conditions that
+    /// require Oxide support to resolve
     ///
-    /// This is a rough high-level indicator of overall system health based on
-    /// a subset of components. When true, one or more components may be
-    /// experiencing issues and you should contact support.
+    /// You should contact support to resolve these issues before proceeding
+    /// with an update, or after one has completed.
+    /// The checks underlying this field are not exhaustive, so this being
+    /// `false` does not mean the entire system is completely healthy.
     pub contact_support: bool,
 }
 

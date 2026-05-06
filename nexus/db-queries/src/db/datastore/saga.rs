@@ -179,20 +179,17 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let time_limit = Utc::now() - time_threshold;
 
-        dsl::saga.filter(
-            dsl::saga_state.eq_any(vec![
-                SagaState::Running,
-                SagaState::Unwinding,
-            ]),
-        )
-        .filter(dsl::time_created.lt(time_limit))
-        .limit(500)
-        .select(db::saga_types::Saga::as_select())
-        .load_async(&*conn)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server)
-        })
+        dsl::saga
+            .filter(
+                dsl::saga_state
+                    .eq_any(vec![SagaState::Running, SagaState::Unwinding]),
+            )
+            .filter(dsl::time_created.lt(time_limit))
+            .limit(500)
+            .select(db::saga_types::Saga::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Returns a list of all saga log entries for the given saga, making as
@@ -841,7 +838,7 @@ mod test {
         // Querying with a negative threshold pushes the time limit into the
         // future to avoid flakyness. All sagas in the Running or Unwinding
         // states should be returned.
-        let mut observed_sagas = datastore
+        let observed_sagas = datastore
             .saga_list_running_or_unwinding_older_than(
                 &opctx,
                 TimeDelta::seconds(-10),
@@ -852,17 +849,6 @@ mod test {
         let mut expected_sagas =
             vec![running.clone(), running2.clone(), unwinding.clone()];
         expected_sagas.sort_by_key(|s| s.id);
-
-        // Timestamps can change slightly when we insert them.
-        // Sanitize them to make input/output equality checks easier.
-        let sanitize_timestamps = |sagas: &mut Vec<db::saga_types::Saga>| {
-            for saga in sagas {
-                saga.time_created = chrono::DateTime::UNIX_EPOCH;
-                saga.adopt_time = chrono::DateTime::UNIX_EPOCH;
-            }
-        };
-        sanitize_timestamps(&mut observed_sagas);
-        sanitize_timestamps(&mut expected_sagas);
 
         assert_eq!(
             observed_sagas, expected_sagas,

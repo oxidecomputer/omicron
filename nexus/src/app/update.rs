@@ -31,6 +31,7 @@ use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_hardware_types::BaseboardId;
 use slog::info;
+use slog::warn;
 use std::collections::BTreeMap;
 use std::iter;
 use tokio::sync::watch;
@@ -39,14 +40,21 @@ use update_common::artifacts::{
 };
 use uuid::Uuid;
 
-/// Threshold at which we consider an active saga stale
-const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(60);
+/// Threshold at which we consider an active saga stuck.
+const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(60);
 
-/// Threshold at which we consider an inventory collection stale
-const STALE_INVETORY_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
+/// Threshold at which we consider an inventory collection too old for the
+/// purpose of reporting system health via the update status endpoint
+///
+/// During an update, inventories are collected pretty frequently (around
+/// once a minute or more).
+const STALE_INVENTORY_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 
-/// Threshold at which we consider the inventory collection's last step planned
-/// to be within the boundaries of an update in progress
+/// Threshold at which we consider the update status's last step planned to be
+/// within the boundaries of an update in progress.
+///
+/// This is chosen to be large enough to cover any update-related step (e.g.,
+/// sled reboot) under normal conditions.
 const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Used to pull data out of the channels
@@ -268,14 +276,17 @@ impl super::Nexus {
         })
     }
 
-    /// Let the customer know whether they should call support based on whether
-    /// the system is in a roughly healthy state based a few health checks.
+    /// Identify known reasons why we would want a customer to call support
+    /// before starting an upgrade or if an upgrade just finished. This is not
+    /// an exhaustive health check. Long term, this will be replaced by an
+    /// "active problems" facility driven by the Fault Management system. For
+    /// now, we look for this list of known, serious problems:
     ///
-    /// The system is considered relatively healthy when:
     /// - No sagas have been running for longer than an hour.
     /// - An inventory collection exists
-    /// - An update is in progress and the last step planned is not older than
-    ///   15 minutes.
+    /// - No update is in progress, or an update is in progress and the last
+    ///   step planned is not older than the value of STUCK_UPDATE_THRESHOLD in
+    ///   minutes.
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
     async fn contact_support(
@@ -284,27 +295,31 @@ impl super::Nexus {
         time_last_step_planned: DateTime<Utc>,
         components_by_release_version: &BTreeMap<String, usize>,
     ) -> Result<bool, Error> {
-        // We only run health checks for stale active sagas and an exisiting
+        // We only run health checks for stuck active sagas and an existing
         // inventory collection before checking to see if there is an update in
         // progress. If these two checks return with unhealthy states, we
         // definitely want to log them even if there is an update in progress.
         // It is expected that the remaining checks could fail during an update,
         // so we don't log them and return early if we identify an update in
         // progress
-        let stale_active_sagas = self
+        let stuck_active_sagas = self
             .datastore()
             .saga_list_running_or_unwinding_older_than(
                 opctx,
-                STALE_SAGA_THRESHOLD,
+                STUCK_SAGA_THRESHOLD,
             )
             .await?;
-        let has_stale_sagas = !stale_active_sagas.is_empty();
-        if has_stale_sagas {
-            info!(
+        let has_stuck_sagas = !stuck_active_sagas.is_empty();
+        if has_stuck_sagas {
+            let sagas: Vec<_> = stuck_active_sagas
+                .iter()
+                .map(|s| format!("{}: {}", s.id, s.name))
+                .collect();
+            warn!(
                 opctx.log,
-                "found stale sagas active for longer than {}",
-                omicron_common::format_time_delta(STALE_SAGA_THRESHOLD);
-                "sagas" => ?stale_active_sagas,
+                "found stuck sagas active for longer than {}",
+                omicron_common::format_time_delta(STUCK_SAGA_THRESHOLD);
+                "sagas" => ?sagas,
             );
         }
 
@@ -357,27 +372,25 @@ impl super::Nexus {
             }
         };
 
-        // Check that the inventory collection is not too old (30 minutes). If it is
-        // then call support is true and log it. Log that the information
-        // regarding zpools and services is out of date. Sagas are collected from another
-        // source so the information will be accurate.
-        let is_inventory_stale =
-            if inventory.time_done < Utc::now() - STALE_INVETORY_THRESHOLD {
-                info!(
-                    opctx.log,
-                    "inventory collection is stale: older that {}",
-                    omicron_common::format_time_delta(STALE_INVETORY_THRESHOLD);
-                    "collection_time_done" => ?inventory.time_done,
-                );
-                true
-            } else {
-                false
-            };
+        // Check that the inventory collection is not too old.
+        let is_inventory_stuck = if inventory.time_done
+            < Utc::now() - STALE_INVENTORY_THRESHOLD
+        {
+            info!(
+                opctx.log,
+                "inventory collection is stuck: older that {}",
+                omicron_common::format_time_delta(STALE_INVENTORY_THRESHOLD);
+                "collection_time_done" => ?inventory.time_done,
+            );
+            true
+        } else {
+            false
+        };
 
         let unhealthy_zpools = inventory.unhealthy_zpools();
         let has_unhealthy_zpools = !unhealthy_zpools.is_empty();
         if has_unhealthy_zpools {
-            info!(
+            warn!(
                 opctx.log,
                 "found unhealthy zpools";
                 "zpools_by_sled" => ?unhealthy_zpools,
@@ -389,18 +402,18 @@ impl super::Nexus {
         let has_enabled_services_not_online =
             !enabled_smf_services_not_online.is_empty();
         if has_enabled_services_not_online {
-            info!(
+            warn!(
                 opctx.log,
                 "found enabled SMF services not online";
                 "svcs_by_sled" => ?enabled_smf_services_not_online,
             );
         }
 
-        let contact_support = is_inventory_stale
+        let contact_support = is_inventory_stuck
             || is_update_stuck
             || has_unhealthy_zpools
             || has_enabled_services_not_online
-            || has_stale_sagas;
+            || has_stuck_sagas;
 
         Ok(contact_support)
     }
@@ -707,19 +720,19 @@ mod test {
     }
 
     // Insert a running saga whose `time_created` is older than
-    // `STALE_SAGA_THRESHOLD`.
-    async fn insert_stale_running_saga(cptestctx: &ControlPlaneTestContext) {
+    // `STUCK_SAGA_THRESHOLD`.
+    async fn insert_stuck_running_saga(cptestctx: &ControlPlaneTestContext) {
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let params = steno::SagaCreateParams {
             id: steno::SagaId(Uuid::new_v4()),
-            name: steno::SagaName::new("test stale saga"),
+            name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
         };
         let mut saga = Saga::new(SecId(Uuid::new_v4()), params);
         saga.time_created =
-            Utc::now() - STALE_SAGA_THRESHOLD - TimeDelta::seconds(10);
-        datastore.saga_create(&saga).await.expect("inserted stale saga");
+            Utc::now() - STUCK_SAGA_THRESHOLD - TimeDelta::seconds(10);
+        datastore.saga_create(&saga).await.expect("inserted stuck saga");
     }
 
     #[nexus_test(server = crate::Server)]
@@ -831,7 +844,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_contact_support_healthy_system_with_stale_saga(
+    async fn test_contact_support_healthy_system_with_stuck_saga(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
@@ -843,8 +856,8 @@ mod test {
             healthy_services(),
         )
         .await;
-        insert_stale_running_saga(cptestctx).await;
-        // There is a stale active saga no update has ever been run, contact
+        insert_stuck_running_saga(cptestctx).await;
+        // There is a stuck active saga no update has ever been run, contact
         // support should be true
         assert!(
             nexus
