@@ -4,7 +4,7 @@
 
 //! Tools for managing Dendrite during development
 
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -94,6 +94,10 @@ impl DendriteInstance {
         }
 
         Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0)
     }
 
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {

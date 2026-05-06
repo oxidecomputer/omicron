@@ -38,7 +38,7 @@ pub const DEFAULT_SP_SIM_CONFIG: &str =
 pub struct GatewayTestContext {
     pub client: gateway_client::Client,
     pub server: omicron_gateway::Server,
-    pub port: u16,
+    port: u16,
     pub simrack: SimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
@@ -47,6 +47,10 @@ pub struct GatewayTestContext {
 }
 
 impl GatewayTestContext {
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0)
+    }
+
     pub fn mgs_backends(&self) -> watch::Receiver<AllBackends> {
         self.resolver_backends.clone()
     }

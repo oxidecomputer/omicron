@@ -11,26 +11,35 @@ use crate::switch_zone_slot::ThisSledSwitchSlot;
 use dpd_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
+use slog::info;
 use std::time::Duration;
+
+mod nat;
+
+pub use nat::DpdNatReconcilerStatus;
+pub use nat::DpdNatReconcilerStatusNatEntry;
+pub use nat::DpdNatReconcilerStatusNatEntryFailure;
 
 #[derive(Debug, Clone)]
 pub struct DpdReconcilerStatus {
-    pub todo_status: (),
+    /// Result of reconciling service zone NAT entries
+    pub nat_status: DpdNatReconcilerStatus,
 }
 
 impl slog::KV for DpdReconcilerStatus {
     fn serialize(
         &self,
-        _record: &slog::Record<'_>,
+        record: &slog::Record<'_>,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        serializer.emit_str("dpd-reconciler".into(), "not yet implemented")
+        let Self { nat_status } = self;
+        nat_status.serialize(record, serializer)
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct DpdReconciler {
-    _client: Client,
+    client: Client,
     _switch_slot: ThisSledSwitchSlot,
 }
 
@@ -45,14 +54,29 @@ impl Reconciler for DpdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        Self { _client: mode.dpd_client(parent_log), _switch_slot: switch_slot }
+        Self { client: mode.dpd_client(parent_log), _switch_slot: switch_slot }
     }
 
     async fn do_reconciliation(
         &mut self,
-        _system_networking_config: &SystemNetworkingConfig,
-        _log: &Logger,
+        system_networking_config: &SystemNetworkingConfig,
+        log: &Logger,
     ) -> Self::Status {
-        DpdReconcilerStatus { todo_status: () }
+        let nat_status = if let Some(nat_entries) = system_networking_config
+            .blueprint_external_networking_config
+            .as_ref()
+            .map(|config| &config.service_zone_nat_entries)
+        {
+            nat::reconcile(&self.client, nat_entries, log).await
+        } else {
+            DpdNatReconcilerStatus::NoNatEntriesConfig
+        };
+
+        info!(
+            log, "dpd reconciliation completed";
+            &nat_status,
+        );
+
+        DpdReconcilerStatus { nat_status }
     }
 }

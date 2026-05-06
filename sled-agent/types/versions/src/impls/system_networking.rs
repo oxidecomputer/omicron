@@ -102,6 +102,22 @@ impl proptest::arbitrary::Arbitrary for ServiceZoneNatEntries {
                     for e in extra {
                         entries.insert_overwrite(e);
                     }
+                    // Filter out sets that contain overlapping IPs.
+                    let mut unique_ips = std::collections::BTreeSet::new();
+                    for e in &entries {
+                        let ip = match e.kind.external_ip() {
+                            ip @ IpAddr::V4(_) => ip,
+                            ip @ IpAddr::V6(ip6) => {
+                                match ip6.to_ipv4_mapped() {
+                                    Some(ip4) => IpAddr::V4(ip4),
+                                    None => ip,
+                                }
+                            }
+                        };
+                        if !unique_ips.insert(ip) {
+                            return None;
+                        }
+                    }
                     ServiceZoneNatEntries::try_from(entries).ok()
                 },
             )

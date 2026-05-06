@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::Ipv6Addr;
-use std::time::Duration;
-
 use super::*;
 use assert_matches::assert_matches;
 use dropshot::ConfigLogging;
@@ -16,6 +13,7 @@ use httpmock::Mock;
 use httpmock::MockServer;
 use omicron_test_utils::dev;
 use sled_agent_types::early_networking::RackNetworkConfig;
+use std::time::Duration;
 
 // For "happy path" tests, we spin up a real MGS instances (pointed at a
 // simulated SP).
@@ -28,7 +26,7 @@ trait MgsFlavor {
 
 impl MgsFlavor for GatewayTestContext {
     fn address(&self) -> SocketAddr {
-        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0))
+        SocketAddr::V6(GatewayTestContext::address(self))
     }
 
     async fn teardown(self) {
