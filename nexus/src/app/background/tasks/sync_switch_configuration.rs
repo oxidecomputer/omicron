@@ -2403,96 +2403,119 @@ async fn add_static_routes(
     }
 }
 
+// Helper to decide whether we should update the replicated bootstore.
+//
+// `current_contents` are the most-recently-written bootstore contents; it
+// contains both a rack network config and a blueprint external networking
+// config.
+//
+// `desired_rack_network_config` and `desired_blueprint_networking_config` are
+// what this activation of this background task believes the current
+// configuration should be.
+//
+// At a high level, there are three general possibilities:
+//
+// 1. Our desired configs match `current_contents`. (Easy and common case: we
+//    return `false`.)
+// 2. Our desired configs are different from `current_contents`, but we're
+//    operating on stale data (i.e., data older than what was used to produce
+//    `current_contents`). This can occur if another Nexus executed this same
+//    task with a different and slightly-newer view of the world; e.g., if the
+//    target blueprint recently changed, that Nexus had loaded the change, and
+//    we haven't yet. We must return `false` in this case to avoid overwriting
+//    new data with our stale data.
+// 3. Our desired config is different from `current_contents` and we are not
+//    operating on stale data. We return `true`.
+//
+// Today, we only partially handle case 2. We store generation numbers that
+// allow us to detect a stale `desired_blueprint_networking_config`, but we have
+// no way of detecting a stale `desired_rack_network_config`. If
+// `desired_blueprint_networking_config` is not stale and either desired config
+// is different from `current_contents`, we'll return true.
 fn does_bootstore_need_update(
     current_contents: &SystemNetworkingConfig,
     desired_rack_network_config: &RackNetworkConfig,
     desired_blueprint_networking_config: &BlueprintExternalNetworkingConfig,
     log: &slog::Logger,
 ) -> bool {
-    // If `current_contents` don't have a blueprint networking config at all, we
-    // definitely need to send an update.
-    let Some(current_blueprint_networking_config) =
-        current_contents.blueprint_external_networking_config.as_ref()
-    else {
-        info!(
-            log,
-            "will update bootstore: current contents has no blueprint config",
-        );
-        // TODO-correctness See the note below about not returning early here if
-        // the rack network config is stale, once we have a way to tell.
-        return true;
-    };
-
-    // Check whether we need to definitely or definitely not perform an update
-    // based on the blueprint configs:
-    //
-    // * "Definitely not" if our generation is older than the generation
-    //   currently in the bootstore; this indicates we've produced
-    //   `desired_blueprint_networking_config` based on a stale blueprint.
-    // * "Definitely yes" if our generation is not older than the current
-    //   bootstore generation and there have been changes to the config.
-    // * "No information" if our NAT entries haven't changed, we fall through to
-    //   checking the rack network config below.
-    //
-    // If our generation exactly matches the bootstore generation, we expect
-    // that the NAT entries will also match. We don't explicitly check for this
-    // here. There's one case where we might encounter "same generation,
-    // different NAT entries" in practice: if the generation is exactly 1, we've
-    // just transitioned to a world where we're tracking this generation at all.
-    // It's possible the most-recently-written config in the bootstore was based
-    // on a stale blueprint, so we'd see a current blueprint with generation 1
-    // and different NAT entries. In this case we'll overwrite the bootstore
-    // with the correct generation 1 value; any subsequent config changes will
-    // bump us beyond generation 1.
-    {
-        let BlueprintExternalNetworkingConfig {
-            blueprint_external_networking_generation: current_gen,
-            service_zone_nat_entries: current_nat,
-        } = current_blueprint_networking_config;
-
-        let BlueprintExternalNetworkingConfig {
-            blueprint_external_networking_generation: desired_gen,
-            service_zone_nat_entries: desired_nat,
-        } = desired_blueprint_networking_config;
-
-        // This check must be "strictly less than", not "<=". It's very possible
-        // the blueprint config has not changed (i.e., we'd expect equal
-        // generation numbers) but the rack network config (checked below) has.
-        // We only bail out here if we know we must not send this update.
-        if desired_gen < current_gen {
-            warn!(
-                log,
-                "skipping bootstore update due to stale blueprint";
-                "our-blueprint-gen" => desired_gen,
-                "bootstore-blueprint-gen" => current_gen,
-            );
-            return false;
-        }
-
-        // Our blueprint isn't stale - do we need an update for the NAT entries?
-        if current_nat != desired_nat {
-            info!(
-                log,
-                "will update bootstore: service NAT entries have changed";
-            );
-            // TODO-correctness See the note below about not returning early
-            // here if the rack network config is stale, once we have a way to
-            // tell.
-            return true;
-        }
+    // We should make our decision based on four boolean values: "is the config
+    // different" and "is our desired config based on out of date information"
+    // for each of our two desired configs. Define a couple of enums here to use
+    // instead of `bool` for clarity distinguishing between "are we looking at
+    // staleness" or "are we looking at whether there have been changes".
+    macro_rules! named_bool_yes_no {
+        ($newtype:ident) => {
+            #[derive(Clone, Copy)]
+            enum $newtype {
+                Yes,
+                No,
+            }
+            impl $newtype {
+                fn as_bool(self) -> bool {
+                    match self {
+                        Self::Yes => true,
+                        Self::No => false,
+                    }
+                }
+            }
+        };
     }
+    named_bool_yes_no!(DesiredConfigOutOfDate);
+    named_bool_yes_no!(ConfigChanged);
 
-    // Check whether we need to perform an update based on the rack network
-    // configs.
+    // Compute staleness and "are there changes" for
+    // `desired_blueprint_networking_config`.
+    let (is_blueprint_out_of_date, is_blueprint_different) =
+        if let Some(current_blueprint_networking_config) =
+            current_contents.blueprint_external_networking_config.as_ref()
+        {
+            let BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: current_gen,
+                service_zone_nat_entries: current_nat,
+            } = current_blueprint_networking_config;
+
+            let BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: desired_gen,
+                service_zone_nat_entries: desired_nat,
+            } = desired_blueprint_networking_config;
+
+            // This check must be "strictly less than", not "<=". It's very
+            // possible the blueprint config has not changed (i.e., we'd expect
+            // equal generation numbers) but the rack network config (checked
+            // below) has. We're only out of date if we know we're strictly
+            // older than what's in the bootstore.
+            let is_blueprint_out_of_date = if desired_gen < current_gen {
+                warn!(
+                    log, "our loaded blueprint generation is out of date";
+                    "bootstore-gen" => current_gen,
+                    "our-blueprint-gen" => desired_gen,
+                );
+                DesiredConfigOutOfDate::Yes
+            } else {
+                DesiredConfigOutOfDate::No
+            };
+
+            let is_blueprint_different = if current_nat != desired_nat {
+                ConfigChanged::Yes
+            } else {
+                ConfigChanged::No
+            };
+
+            (is_blueprint_out_of_date, is_blueprint_different)
+        } else {
+            // If the bootstore has no blueprint config, we have no way of
+            // detecting stale data; we have to assume it's not stale, because
+            // there's definitely been a change we need to write!
+            (DesiredConfigOutOfDate::No, ConfigChanged::Yes)
+        };
+
+    // Compute staleness and "are there changes" for
+    // `desired_rack_network_config`.
     //
-    // TODO-correctness This needs a similar generation guard as the blueprint
-    // checks above! As written, if the config is different, we always perform
-    // an update, even if the config is different because we have old data and
-    // are comparing against a bootstore written by another Nexus with fresher
-    // data. Once this is fixed, we'll also need to update the early `return
-    // true`s above; needing an update for the blueprint config shouldn't
-    // override our desire to avoid stomping on a newer rack network config.
-    {
+    // TODO-correctness We have no way of computing staleness! We must always
+    // assume `desired_rack_network_config` is not out of date.
+    let is_network_config_out_of_date = DesiredConfigOutOfDate::No;
+    let is_network_config_different = {
         let RackNetworkConfig {
             rack_subnet: current_subnet,
             infra_ip_first: current_infra_ip_first,
@@ -2518,16 +2541,70 @@ fn does_bootstore_need_update(
             || current_infra_ip_first != desired_infra_ip_first
             || current_infra_ip_last != desired_infra_ip_last;
 
-        if rnc_differs {
-            info!(
-                log,
-                "will update bootstore: rack network config has changed";
-                "old" => ?current_contents.rack_network_config,
-                "new" => ?desired_rack_network_config,
+        if rnc_differs { ConfigChanged::Yes } else { ConfigChanged::No }
+    };
+
+    match (
+        is_blueprint_out_of_date,
+        is_network_config_out_of_date,
+        is_blueprint_different,
+        is_network_config_different,
+    ) {
+        // If either config is out of date, we mut not make changes to avoid
+        // overwriting newer data. A future task activation will load a
+        // different (and newer) set of desired config.
+        (DesiredConfigOutOfDate::Yes, _, _, _)
+        | (_, DesiredConfigOutOfDate::Yes, _, _) => {
+            warn!(
+                log, "skipping bootstore update due to stale data";
+                "is_blueprint_out_of_date" =>
+                    is_blueprint_out_of_date.as_bool(),
+                "is_blueprint_different" =>
+                    is_blueprint_different.as_bool(),
+                "is_network_config_out_of_date" =>
+                    is_network_config_out_of_date.as_bool(),
+                "is_network_config_different" =>
+                    is_network_config_different.as_bool(),
             );
+            false
         }
 
-        rnc_differs
+        // If neither config is out of date, has either changed? If so, we do
+        // need to write new bootstore contents.
+        (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            ConfigChanged::Yes,
+            _,
+        )
+        | (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            _,
+            ConfigChanged::Yes,
+        ) => {
+            info!(
+                log, "will update bootstore with new contents";
+                "is_network_config_out_of_date" =>
+                    is_network_config_out_of_date.as_bool(),
+                "is_network_config_different" =>
+                    is_network_config_different.as_bool(),
+            );
+            true
+        }
+
+        // The most common case in practice: our desired config is not out of
+        // date, but also hasn't changed since the last task activation. We
+        // don't need to write anything to the bootstore; it's up to date.
+        (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            ConfigChanged::No,
+            ConfigChanged::No,
+        ) => {
+            info!(log, "will not update bootstore: it is up to date");
+            false
+        }
     }
 }
 
