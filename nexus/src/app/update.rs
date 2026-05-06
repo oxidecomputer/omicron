@@ -24,6 +24,7 @@ use nexus_types::external_api::update;
 use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
+use nexus_types::inventory::Collection;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
@@ -34,6 +35,7 @@ use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::iter;
+use std::sync::Arc;
 use tokio::sync::watch;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
@@ -229,11 +231,18 @@ impl super::Nexus {
                 version: repo.repo.system_version.0.clone(),
             });
 
+        let Some(inventory) =
+            self.inventory_load_rx().borrow_and_update().clone()
+        else {
+            return Err(Error::internal_error("No inventory collection found"));
+        };
+
         let components_by_release_version = self
             .component_version_counts(
                 opctx,
                 &db_target_release,
                 current_tuf_repo,
+                &inventory,
             )
             .await?;
 
@@ -264,6 +273,7 @@ impl super::Nexus {
                 opctx,
                 time_last_step_planned,
                 &components_by_release_version,
+                &inventory,
             )
             .await?;
 
@@ -285,8 +295,7 @@ impl super::Nexus {
     /// - No sagas have been running for longer than an hour.
     /// - An inventory collection exists
     /// - No update is in progress, or an update is in progress and the last
-    ///   step planned is not older than the value of STUCK_UPDATE_THRESHOLD in
-    ///   minutes.
+    ///   step planned is not older than the value of STUCK_UPDATE_THRESHOLD.
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
     async fn contact_support(
@@ -294,11 +303,13 @@ impl super::Nexus {
         opctx: &OpContext,
         time_last_step_planned: DateTime<Utc>,
         components_by_release_version: &BTreeMap<String, usize>,
+        inventory: &Arc<Collection>,
     ) -> Result<bool, Error> {
         // We only run health checks for stuck active sagas and an existing
         // inventory collection before checking to see if there is an update in
         // progress. If these two checks return with unhealthy states, we
         // definitely want to log them even if there is an update in progress.
+        //
         // It is expected that the remaining checks could fail during an update,
         // so we don't log them and return early if we identify an update in
         // progress
@@ -322,21 +333,6 @@ impl super::Nexus {
                 "sagas" => ?sagas,
             );
         }
-
-        let Some(inventory) =
-            self.datastore().inventory_get_latest_collection(opctx).await?
-        else {
-            // There should always be an inventory collection before, after or
-            // during an update. If there isn't, call support. We don't bother
-            // with the remaining health checks because they need the latest
-            // inventory collection.
-            error!(
-                opctx.log,
-                "no inventory collection found; unable to perform update \
-                health checks";
-            );
-            return Ok(true);
-        };
 
         // We assume an update is in progress if not all components are at the
         // same version or there are only two versions and they are not
@@ -425,13 +421,8 @@ impl super::Nexus {
         opctx: &OpContext,
         target_release: &nexus_db_model::TargetRelease,
         current_tuf_repo: Option<nexus_db_model::TufRepoDescription>,
+        inventory: &Arc<Collection>,
     ) -> Result<BTreeMap<String, usize>, Error> {
-        let Some(inventory) =
-            self.datastore().inventory_get_latest_collection(opctx).await?
-        else {
-            return Err(Error::internal_error("No inventory collection found"));
-        };
-
         // Build current TargetReleaseDescription, defaulting to Initial if
         // there is no tuf repo ID which, based on DB constraints, happens if
         // and only if target_release_source is 'unspecified', which should only
@@ -748,6 +739,17 @@ mod test {
             healthy_services(),
         )
         .await;
+        // We get the latest collection directly from the datastore instead of
+        // using the background task to make sure we get the most recent
+        // collection that we just inserted
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
         // No health checks failed and no update is running, contact support
         // should be false
         assert!(
@@ -755,7 +757,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_finished()
+                    &system_version_update_finished(),
+                    &inventory,
                 )
                 .await
                 .unwrap()
@@ -775,6 +778,14 @@ mod test {
             healthy_services(),
         )
         .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
         // There are unhealthy zpools and no update is running, contact support
         // should be true
         assert!(
@@ -782,7 +793,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_finished()
+                    &system_version_update_finished(),
+                    &inventory,
                 )
                 .await
                 .unwrap()
@@ -802,6 +814,14 @@ mod test {
             unhealthy_services(),
         )
         .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
         // There are unhealthy SMF services and no update is running, contact
         // support should be true
         assert!(
@@ -809,7 +829,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_finished()
+                    &system_version_update_finished(),
+                    &inventory,
                 )
                 .await
                 .unwrap()
@@ -831,12 +852,21 @@ mod test {
         .await;
         // There are unhealthy zpools and SMF services and no update has ever
         // been run, contact support should be true
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
         assert!(
             nexus
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_versions_initial_state()
+                    &system_versions_initial_state(),
+                    &inventory,
                 )
                 .await
                 .unwrap()
@@ -857,6 +887,14 @@ mod test {
         )
         .await;
         insert_stuck_running_saga(cptestctx).await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
         // There is a stuck active saga no update has ever been run, contact
         // support should be true
         assert!(
@@ -864,7 +902,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_versions_initial_state()
+                    &system_versions_initial_state(),
+                    &inventory
                 )
                 .await
                 .unwrap()
@@ -884,6 +923,14 @@ mod test {
             healthy_services(),
         )
         .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
         // Components are split across multiple non-initial versions and the
         // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
         // update is considered stuck and contact support is true.
@@ -894,7 +941,8 @@ mod test {
                     Utc::now()
                         - STUCK_UPDATE_THRESHOLD
                         - TimeDelta::seconds(10),
-                    &system_version_update_in_progress()
+                    &system_version_update_in_progress(),
+                    &inventory,
                 )
                 .await
                 .unwrap()
@@ -917,43 +965,21 @@ mod test {
             unhealthy_services(),
         )
         .await;
-        assert!(
-            !nexus
-                .contact_support(
-                    &opctx,
-                    Utc::now(),
-                    &system_version_update_in_progress()
-                )
-                .await
-                .unwrap()
-        );
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_contact_support_missing_inventory_collection(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = fake_opctx(cptestctx);
-        // No inventory collection has been inserted; the health checks can't
-        // run, so contact support is true whether there is an update in
-        // progress or not.
-        assert!(
+        let inventory = Arc::new(
             nexus
-                .contact_support(
-                    &opctx,
-                    Utc::now(),
-                    &system_version_update_finished()
-                )
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
                 .await
                 .unwrap()
+                .unwrap(),
         );
         assert!(
             !nexus
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_in_progress()
+                    &system_version_update_in_progress(),
+                    &inventory,
                 )
                 .await
                 .unwrap()
