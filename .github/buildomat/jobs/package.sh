@@ -2,7 +2,7 @@
 #:
 #: name = "helios / package"
 #: variety = "basic"
-#: target = "helios-2.0-16c64gb"
+#: target = "helios-3.0-16c64gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/package.tar.gz",
