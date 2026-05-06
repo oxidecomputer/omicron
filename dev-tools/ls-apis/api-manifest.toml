@@ -379,7 +379,7 @@ versioned_how_reason = "Circular dependencies between Nexus and other services"
 # `packages` arrays in the deployment_units table above) are allowed to use this
 # API. ls-apis check will error out if the list of consumers is incorrect.
 restricted_to_consumers = [
-     { name = "omicron-sled-agent", reason = "Only RSS uses this API and it is not part of upgrade" },
+     { name = "omicron-sled-agent", reason = "Only RSS and sled-agent-sim use this API, neither of which is part of upgrade" },
 ]
 
 [[apis]]
@@ -485,30 +485,6 @@ instance.  It's also used by `crutest` for testing.
 #
 
 #
-# RSS-only dependencies.  These are real dependencies that only exist during
-# RSS, not during normal operation or upgrade.
-#
-# At RSS time, the system is known to be at a single, consistent version.
-#
-[[dependency_filter_rules]]
-ancestor = "omicron-sled-agent"
-client = "cockroach-admin-client"
-evaluation = "rss-only"
-note = """
-Sled Agent only uses the Cockroach Admin client during RSS, which we don't care
-about for the purpose of upgrade.
-"""
-
-[[dependency_filter_rules]]
-ancestor = "omicron-sled-agent"
-client = "dns-service-client"
-evaluation = "rss-only"
-note = """
-Sled Agent only uses the DNS service client during RSS, which we don't care
-about for the purpose of upgrade.
-"""
-
-#
 # Non-DAG dependencies.  See above for details.
 #
 
@@ -555,9 +531,35 @@ ancestor = "omicron-sled-agent"
 client = "sled-agent-client"
 evaluation = "not-deployed"
 note = """
-Sled Agent uses a Sled Agent client in two ways: RSS, which we don't care about
-for the purpose of upgrade, and in the `zone-bundle` binary, which is not
+Sled Agent uses a Sled Agent client for the `zone-bundle` binary, which is not
 deployed.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-rack-setup"
+client = "cockroach-admin-client"
+evaluation = "not-deployed"
+note = """
+The Cockroach Admin client is only used during RSS, which we don't care about
+for the purpose of upgrade.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-rack-setup"
+client = "dns-service-client"
+evaluation = "not-deployed"
+note = """
+The DNS service client is only used during RSS, which we don't care about for
+the purpose of upgrade.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "transient-dns-server"
+client = "dns-service-client"
+evaluation = "not-deployed"
+note = """
+transient-dns-server is only used by the simulated sled-agent and tests, neither
+of which are deployed.
 """
 
 #

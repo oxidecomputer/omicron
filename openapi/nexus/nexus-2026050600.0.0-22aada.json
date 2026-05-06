@@ -26000,7 +26000,7 @@
         ]
       },
       "Probe": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A networking probe",
         "type": "object",
         "properties": {
           "description": {
@@ -27004,7 +27004,7 @@
         ]
       },
       "SamlIdentityProvider": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A SAML identity provider",
         "type": "object",
         "properties": {
           "acs_url": {

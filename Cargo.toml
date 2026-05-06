@@ -149,6 +149,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -334,6 +335,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -495,7 +497,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "44a949c9bedf4fcd4d280337fa1965b4293c88d1" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3" }
 dropshot = { version = "0.17.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.1"
 dropshot-api-manager-types = "0.7.1"
@@ -789,6 +791,7 @@ sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
+sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }

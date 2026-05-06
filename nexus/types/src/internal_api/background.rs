@@ -932,6 +932,9 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
+        /// The task is disabled by config.
+        Disabled,
+
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,

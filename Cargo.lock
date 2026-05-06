@@ -1559,6 +1559,7 @@ dependencies = [
  "daft",
  "derive_more 0.99.20",
  "expectorate",
+ "iddqd",
  "itertools 0.14.0",
  "omicron-common",
  "omicron-workspace-hack",
@@ -1740,10 +1741,11 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1#44a949c9bedf4fcd4d280337fa1965b4293c88d1"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194#cc8e02a0800034c431c8cf96b889ea638da3d194"
 dependencies = [
  "anyhow",
  "chrono",
+ "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
  "rand 0.9.2",
  "schemars 0.8.22",
@@ -1761,11 +1763,10 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194#cc8e02a0800034c431c8cf96b889ea638da3d194"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3#d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3"
 dependencies = [
  "anyhow",
  "chrono",
- "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
  "rand 0.9.2",
  "schemars 0.8.22",
@@ -3107,30 +3108,6 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1#44a949c9bedf4fcd4d280337fa1965b4293c88d1"
-dependencies = [
- "async-trait",
- "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
- "crc8",
- "futures",
- "http",
- "oxnet",
- "progenitor 0.13.0",
- "regress 0.10.5",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "tokio",
- "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
- "uuid",
-]
-
-[[package]]
-name = "dpd-client"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194#cc8e02a0800034c431c8cf96b889ea638da3d194"
 dependencies = [
  "async-trait",
@@ -3143,6 +3120,30 @@ dependencies = [
  "progenitor 0.11.2",
  "regress 0.10.5",
  "reqwest 0.12.28",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+ "tokio",
+ "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
+ "uuid",
+]
+
+[[package]]
+name = "dpd-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3#d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3)",
+ "crc8",
+ "futures",
+ "http",
+ "oxnet",
+ "progenitor 0.13.0",
+ "regress 0.10.5",
+ "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -7661,7 +7662,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3)",
  "dropshot 0.17.0",
  "futures",
  "gateway-messages",
@@ -8232,6 +8233,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oxide-tokio-rt",
+ "oximeter 0.1.0",
  "oximeter-db",
  "oximeter-test-utils",
  "schemars 0.8.22",
@@ -8629,7 +8631,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3)",
  "dropshot 0.17.0",
  "ereport-types",
  "expectorate",
@@ -8838,6 +8840,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "clickhouse-admin-single-client",
  "crossterm 0.29.0",
  "crucible-agent-client",
  "crucible-pantry-client",
@@ -9119,19 +9122,16 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-types",
- "cockroach-admin-client",
  "crucible-agent-client",
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "display-error-chain",
- "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
  "dropshot 0.17.0",
  "expectorate",
  "flate2",
  "flume",
  "futures",
- "gateway-client",
  "glob",
  "guppy",
  "hex",
@@ -9151,11 +9151,9 @@ dependencies = [
  "key-manager",
  "libc",
  "macaddr",
- "mg-admin-client",
  "nexus-client",
  "nexus-config",
  "nexus-lockstep-client",
- "nexus-reconfigurator-blippy",
  "nexus-types",
  "nix 0.31.2",
  "ntp-admin-client",
@@ -9178,8 +9176,6 @@ dependencies = [
  "propolis_api_types",
  "rand 0.9.2",
  "range-requests",
- "rcgen",
- "rdb-types",
  "regress 0.10.5",
  "repo-depot-api",
  "repo-depot-client",
@@ -9197,6 +9193,7 @@ dependencies = [
  "sled-agent-config-reconciler",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
+ "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
  "sled-agent-types",
  "sled-agent-types-versions",
@@ -9550,9 +9547,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.75"
+version = "0.10.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328"
+checksum = "f38c4372413cdaaf3cc79dd92d29d7d9f5ab09b51b10dded508fb90bb70b9222"
 dependencies = [
  "bitflags 2.11.0",
  "cfg-if",
@@ -9588,9 +9585,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.111"
+version = "0.9.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82cab2d520aa75e3c58898289429321eb788c3106963d0dc886ec7a5f4adc321"
+checksum = "13ce1245cd07fcc4cfdb438f7507b0c7e4f3849a69fd84d52374c66d83741bb6"
 dependencies = [
  "cc",
  "libc",
@@ -9870,6 +9867,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "clickhouse-admin-types",
  "clickward",
  "const_format",
  "criterion",
@@ -9882,6 +9880,7 @@ dependencies = [
  "gethostname",
  "highway",
  "iana-time-zone",
+ "iddqd",
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "libc",
@@ -13602,6 +13601,63 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-rack-setup"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bootstore",
+ "bootstrap-agent-lockstep-types",
+ "camino",
+ "camino-tempfile",
+ "cancel-safe-futures",
+ "chrono",
+ "cockroach-admin-client",
+ "dns-service-client",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
+ "futures",
+ "gateway-client",
+ "http",
+ "iddqd",
+ "illumos-utils",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "itertools 0.14.0",
+ "mg-admin-client",
+ "nexus-lockstep-client",
+ "nexus-reconfigurator-blippy",
+ "nexus-types",
+ "ntp-admin-client",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-ledger",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "rand 0.9.2",
+ "rcgen",
+ "rdb-types",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
+ "serde",
+ "sled-agent-client",
+ "sled-agent-config-reconciler",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "trust-quorum",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
+ "uuid",
+]
+
+[[package]]
 name = "sled-agent-resolvable-files"
 version = "0.1.0"
 dependencies = [
@@ -13691,6 +13747,7 @@ dependencies = [
  "daft",
  "iddqd",
  "indent_write",
+ "ipnetwork",
  "itertools 0.14.0",
  "omicron-common",
  "omicron-ledger",
@@ -14049,7 +14106,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -16842,7 +16899,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3)",
  "dropshot 0.17.0",
  "gateway-client",
  "gateway-types",
@@ -16907,7 +16964,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=44a949c9bedf4fcd4d280337fa1965b4293c88d1)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3)",
  "dropshot 0.17.0",
  "either",
  "expectorate",

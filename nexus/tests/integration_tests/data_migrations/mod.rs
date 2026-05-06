@@ -26,6 +26,7 @@ use std::collections::HashMap;
 
 mod audit_log_credential_id;
 mod bgp_config_max_paths_not_null;
+mod bgp_unnumbered_peer_cleanup;
 mod bgp_unnumbered_peers;
 mod blueprint_sled_config_subnet;
 mod blueprint_sled_last_used_ip;
@@ -88,6 +89,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(rename_default_igw_ip_pool);
     register!(delete_nexus_default_allow_firewall_rule);
     register!(drop_uninitialized_svc_enabled_not_online_state);
+    register!(bgp_unnumbered_peer_cleanup);
 
     map
 }

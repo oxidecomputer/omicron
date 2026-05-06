@@ -117,7 +117,10 @@ pub enum BgpPeerConversionError {
 /// or multicast address) or if given an IP that maps to
 /// [`RouterPeerType::Unnumbered`] and `router_lifetime` is an invalid
 /// [`RouterLifetimeConfig`].
-pub fn router_peer_type_try_from_old_representation(
+///
+/// This method is private and is only used by a `TryFrom` implementation and
+/// the conversion unit tests in this module.
+fn router_peer_type_try_from_old_representation(
     ip: Option<IpAddr>,
     router_lifetime: u16,
 ) -> Result<RouterPeerType, BgpPeerConversionError> {
