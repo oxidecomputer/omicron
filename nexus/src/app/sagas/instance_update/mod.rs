@@ -1551,6 +1551,7 @@ mod test {
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
+    use anyhow::Context;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
@@ -2496,13 +2497,15 @@ mod test {
     /// The NAT subnet used for polling NAT entries in tests.
     const NAT_SUBNET: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 0);
 
-    /// Poll a switch zone until its NAT entries no longer equal `prior`.
+    /// Poll a switch zone until it has `n` NAT entries, or 60 seconds elapse.
+    /// This returns a `Result` so that it can be `unwrap()`ed and panic with a
+    /// useful source location.
     async fn wait_for_nat_entries_to_change(
         log: &slog::Logger,
         client: &dpd_client::Client,
         switch: SwitchSlot,
-        prior: &BTreeSet<String>,
-    ) -> BTreeSet<String> {
+        n: usize,
+    ) -> anyhow::Result<()> {
         let max_wait = Duration::from_secs(60);
 
         poll::wait_for_condition(
@@ -2516,37 +2519,34 @@ mod test {
                     "result" => ?result,
                 );
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
-                let current = data.items.iter().map(|entry| {
-                    // I don't love that we are representing the NAT entries as
-                    // strings here, but...we need something which is either
-                    // `Hash + Eq` or `Ord` so that we can put them in sets, and
-                    // the `dpd-client` types don't implement either, so...this
-                    // is fine I Guess.
-                    format!("{entry:?}")
-                }).collect::<BTreeSet<_>>();
-
-                if &current == prior {
+                let data = result.map_err(|_| {
+                    // Use `&'static str` as the permanent error type so that it
+                    // implements `Display`, which is necessary for the
+                    // `poll::Error` to be `Display`...even though we never
+                    // return a `Permanent` error here. I love types.
+                    poll::CondCheckError::<&'static str>::NotYet
+                })?;
+                let len = data.items.len();
+                if len != n {
                     slog::info!(
                         log,
-                        "NAT entries have not changed yet";
+                        "{switch:?} still has {len} NAT entries";
                         "switch" => ?switch,
-                        "current" => ?current,
-                        "prior" => ?prior,
+                        "entries" => ?data.items,
+                        "expected_len" => n,
                     );
-                    return Err(poll::CondCheckError::<()>::NotYet);
+                    return Err(poll::CondCheckError::<&'static str>::NotYet);
                 }
 
-                Ok(current)
+                Ok(())
             },
             &Duration::from_millis(100),
             &max_wait,
         )
         .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "NAT entries on {switch:?} did not change from {prior:?} after {max_wait:?}"
+        .with_context(|| {
+            format!(
+                "{switch:?} did not have {n} NAT entries after {max_wait:?}"
             )
         })
     }
@@ -2629,20 +2629,20 @@ mod test {
         let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
         let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
 
-        wait_for_nat_entries_to_change(
+        wait_for_n_nat_entries(
             &log,
             &switch0_dpd_client,
             SwitchSlot::Switch0,
-            &BTreeSet::new(),
+            1,
         )
-        .await;
-        let switch1_old_nat_entries = wait_for_nat_entries_to_change(
+        .unwrap();
+        wait_for_n_nat_entries(
             &log,
             &switch1_dpd_client,
             SwitchSlot::Switch1,
-            &BTreeSet::new(),
+            1,
         )
-        .await;
+        .unwrap();
 
         // Shutdown switch 0.
         shutdown_switch0(&cptestctx).await;
@@ -2668,17 +2668,14 @@ mod test {
         verify_active_vmm_destroyed(&cptestctx, instance_id).await;
 
         // The still-alive switch should have had the NAT entries removed.
-        let new_entries = wait_for_nat_entries_to_change(
+        wait_for_nat_entries_to_change(
             &log,
             &switch1_dpd_client,
             SwitchSlot::Switch1,
-            &switch1_old_nat_entries,
+            1,
         )
-        .await;
-        assert!(
-            new_entries.is_empty(),
-            "switch1 NAT entries should be empty, but were: {new_entries:?}",
-        );
+        .await
+        .unwrap();
 
         // Since the expected state after destroying a VMM is "no NAT entries",
         // we can't meaningfully distinguish "propagated" from "never set" on
@@ -2691,8 +2688,8 @@ mod test {
 
     /// Tests that instance update sagas for a completed migration can complete
     /// successfully if one switch zone is not available, and that the NAT
-    /// entries are correctly updated on *both* switches (including the one that
-    /// was restarted) to point at the new sled.
+    /// entries for the instance are propagated to both switches once the
+    /// missing one has come back.
     #[tokio::test]
     async fn migration_update_can_complete_with_dead_switch() {
         let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
@@ -2716,23 +2713,22 @@ mod test {
         let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
         let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
 
-        // Record the initial NAT entries (pointing at the source sled).
-        let switch0_nat_entries = wait_for_nat_entries_to_change(
+        wait_for_n_nat_entries(
             &log,
             &switch0_dpd_client,
             SwitchSlot::Switch0,
-            &BTreeSet::new(),
+            1,
         )
-        .await;
-        let switch1_nat_entries = wait_for_nat_entries_to_change(
+        .await
+        .unwrap();
+        wait_for_n_nat_entries(
             &log,
             &switch1_dpd_client,
             SwitchSlot::Switch1,
-            &BTreeSet::new(),
+            1,
         )
-        .await;
-        assert_eq!(switch0_nat_entries, switch1_nat_entries);
-        let initial_nat_entries = switch0_nat_entries;
+        .await
+        .unwrap();
 
         // Simulate the migration completing.
         migration_test
@@ -2772,33 +2768,34 @@ mod test {
             .await
             .expect("instance update saga did not complete within 60 seconds");
 
-        // Verify switch 1 has the *updated* NAT entries.
-        let switch1_new_nat_entries = wait_for_nat_entries_to_change(
-            log,
+        // In real life, the NAT entries on the alive switch should *change* to
+        // point at the new sled. However, in this test, the NAT entry for both
+        // the source and destination sleds will both point at localhost, since
+        // both "sleds" are actually just processes running on that computer.
+        // So, we're just asserting that there is one NAT entry before and after
+        // the migration...which would catch a bug where we delete the old NAT
+        // entry for the source sled but don't create the new one for the target
+        // sled, I guess, but doesn't actually validate that they have
+        // *changed*...since they *haven't*. Oh well.
+        wait_for_n_nat_entries(
+            &log,
             &switch1_dpd_client,
             SwitchSlot::Switch1,
-            &initial_nat_entries,
+            1,
         )
-        .await;
-        assert!(
-            !switch1_new_nat_entries.is_empty(),
-            "switch 1 should have updated NAT entries, but they were empty"
-        );
+        .await
+        .unwrap();
 
         // Restart switch 0 and verify it also gets the new entries.
         restart_switch0(&cptestctx, switch0_port).await;
-
-        let switch0_new_nat_entries = wait_for_nat_entries_to_change(
+        wait_for_n_nat_entries(
             log,
             &switch0_dpd_client,
             SwitchSlot::Switch0,
-            &initial_nat_entries,
+            1,
         )
-        .await;
-        assert_eq!(
-            switch1_new_nat_entries, switch0_new_nat_entries,
-            "new NAT entries should be synced to switch 0"
-        );
+        .await
+        .unwrap();
 
         cptestctx.teardown().await;
     }
