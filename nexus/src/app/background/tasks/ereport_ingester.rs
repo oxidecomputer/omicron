@@ -149,6 +149,9 @@ impl SpEreportIngester {
                     continue;
                 }
             };
+
+            status.sps_found += 1;
+
             let SpIdentifier { type_, slot } = id;
             let sp_result = tasks
                 .spawn({
@@ -259,8 +262,8 @@ impl Ingester {
             .mgs_requests(&opctx, clients, &params, sp_type, slot, &mut status)
             .await
         {
+            status.requests += 1;
             if reports.items.is_empty() {
-                status.requests += 1;
                 slog::trace!(
                     &opctx.log,
                     "no ereports returned by SP";
@@ -271,9 +274,8 @@ impl Ingester {
                     "total_new_ereports" => status.new_ereports,
                 );
                 break;
-            } else {
-                status.requests += 1;
             }
+
             let time_collected = Utc::now();
             let received = reports.items.len();
             status.ereports_received += received;
