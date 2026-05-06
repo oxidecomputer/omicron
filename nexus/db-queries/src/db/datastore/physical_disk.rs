@@ -744,8 +744,7 @@ impl DataStore {
         if rows_modified != 1 {
             return Err(Error::non_resourcetype_not_found(format!(
                 "No active adoption request found for id: {id}"
-            ))
-            .into());
+            )));
         }
 
         Ok(())
