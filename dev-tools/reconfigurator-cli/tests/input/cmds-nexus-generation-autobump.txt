@@ -148,28 +148,14 @@ blueprint-diff latest
 set active-nexus-gen 2
 
 # Now expungement can complete
-# (Three Nexuses, expunged one at a time). Apply each blueprint to inventory
-# between plans so the noop check doesn't fire the inventory-stale path on
-# subsequent iterations.
+# (Three Nexuses, expunged one at a time)
 blueprint-plan latest latest
 blueprint-diff latest
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
-inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
-inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
 # Should be a no-op
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
-inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

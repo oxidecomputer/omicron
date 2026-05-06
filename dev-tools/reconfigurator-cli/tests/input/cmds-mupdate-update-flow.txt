@@ -37,14 +37,6 @@ blueprint-edit latest set-host-phase2 serial1 B artifact 1.0.0 044d45ad681b44e89
 # Simulate a mupdate on sled 2 as well.
 sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
 
-# The blueprint-edits above bumped serial0 and serial1's sled-agent generations.
-# Apply the latest blueprint to all sleds' inventories so the noop check on
-# the upcoming plan starts from fresh sled-agent generations rather than
-# firing the inventory-stale path.
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
-
 # Generate a new inventory and plan against that.
 inventory-generate
 inventory-show latest
@@ -70,12 +62,6 @@ blueprint-diff latest
 #    below.
 sled-set serial0 inventory-hidden
 
-# The previous plan set remove_mupdate_override on serial2, bumping its
-# sled-agent generation. Apply the latest blueprint to serial2's inventory so
-# the noop check on the upcoming plan exercises the mupdate-override-set path
-# rather than firing the inventory-stale path.
-sled-set serial2 omicron-config latest
-
 # Set the target release to a new repo, causing a generation number bump
 # to 3.
 set target-release repo-1.0.0.zip
@@ -87,10 +73,10 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now simulate the new config being applied to sled 0, which would cause the
-# mupdate override to be removed. Apply the latest blueprint to inventory too,
-# so that inventory's reported sled-agent generation advances to match the
-# blueprint's; otherwise the noop check on the next plan would correctly
-# refuse to clear remove_mupdate_override on the basis of stale inventory.
+# mupdate override to be removed. Apply the latest blueprint to inventory
+# too, so that the sled's reported sled-agent generation advances to match
+# the blueprint's; the sled clearing the override and bumping its generation
+# happen together when the sled processes the new blueprint config.
 sled-set serial0 mupdate-override unset
 sled-set serial0 inventory-visible
 sled-set serial0 omicron-config latest
@@ -116,9 +102,11 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Clear the mupdate override on sled 2, signifying that the config has been
-# applied. Also advance serial0 and serial2's inventories to the latest
-# blueprint -- the previous plan did noop conversions on serial0 (bumping its
-# sled-agent generation) and set remove_mupdate_override on serial2.
+# applied. Also advance the sled's reported sled-agent generation to match,
+# since the sled clearing the override and bumping its generation happen
+# together when it processes the new blueprint config. Likewise advance
+# serial0's reported sled-agent generation: the previous plan did noop
+# conversions on serial0 that the sled would have applied by now in production.
 sled-set serial2 mupdate-override unset
 sled-set serial0 omicron-config latest
 sled-set serial2 omicron-config latest
@@ -131,8 +119,9 @@ blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
 
-# Apply the latest blueprint again so subsequent plans aren't shadowed by an
-# inventory-stale check on the just-bumped sled-agent generations.
+# Model sled-agents applying the latest blueprint between plans (this happens
+# automatically in production), advancing reported sled-agent generations to
+# match.
 sled-set serial0 omicron-config latest
 sled-set serial2 omicron-config latest
 inventory-generate
@@ -146,13 +135,8 @@ blueprint-diff latest
 
 # Now clear the mupdate override error. At this point, we're *still* blocked
 # on serial1's install dataset not being known (so cannot be noop converted).
-# Advance serial1's reported sled-agent generation alongside, simulating the
-# sled having applied the latest blueprint. Also advance serial0/2 since the
-# previous plan bumped their generations too.
 sled-set serial1 mupdate-override unset
-sled-set serial0 omicron-config latest
 sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -162,8 +146,6 @@ blueprint-diff latest
 # steps within the same blueprint. In other words, the code that considers
 # whether add/update are blocked takes into account noop conversions.)
 sled-update-install-dataset serial1 --to-target-release
-sled-set serial0 omicron-config latest
-sled-set serial2 omicron-config latest
 inventory-generate
 
 # Measurements will block further planning progress, run a planning step
@@ -211,13 +193,7 @@ sled-update-sp serial2 --active 2.0.0
 sled-update-host-phase2 serial2 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
 sled-update-host-phase1 serial2 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
-# All MGS-based updates complete. Apply the latest blueprint to all sleds'
-# inventories so the noop check on the next plan starts from fresh sled-agent
-# generations rather than firing the inventory-stale path on the bumped
-# generations from earlier plans in this file.
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
+# All MGS-based updates complete.
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -232,11 +208,6 @@ blueprint-diff latest
 # new zones will be added.
 sled-set serial0 mupdate-override c8fba912-63ae-473a-9115-0495d10fb3bc
 sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-# The plan above bumped sled-agent generations as it scheduled work; apply the
-# latest blueprint to inventory so subsequent noop checks aren't inventory-stale.
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
 inventory-generate
 
 # This will *not* generate the datasets and internal NTP zone on the new
@@ -246,10 +217,6 @@ blueprint-diff latest
 
 # This *will* generate the datasets and internal NTP zone on the new sled.
 set planner-config --add-zones-with-mupdate-override true
-sled-set serial0 omicron-config latest
-sled-set serial1 omicron-config latest
-sled-set serial2 omicron-config latest
-inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
