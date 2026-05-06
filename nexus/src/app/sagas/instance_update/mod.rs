@@ -2791,7 +2791,7 @@ mod test {
             log,
             &switch0_dpd_client,
             SwitchSlot::Switch0,
-            1,
+            1,,
         )
         .await
         .unwrap();
