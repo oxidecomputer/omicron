@@ -4,7 +4,7 @@
 
 //! [`DataStore`] methods related to updates and artifacts.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::DataStore;
 use crate::authz;
@@ -17,45 +17,88 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use iddqd::IdHashMap;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TargetRelease, TufArtifact, TufRepo, TufRepoDescription,
+    ArtifactHash, TargetRelease, TufArtifact, TufArtifactDescription,
+    TufArtifactFile, TufArtifactTag, TufRepo, TufRepoDescription,
     TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
 use nexus_types::external_api::update::TufRepoUploadStatus;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Generation,
-    ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
+    self, ByteCountRangeError, CreateResult, DataPageParams, DeleteResult,
+    Generation, ListResultVec, LookupResult, LookupType, ResourceType,
+    UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_common::update;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
 use swrite::{SWrite, swrite};
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::{Artifact, ArtifactSet};
 use uuid::Uuid;
 
 async fn artifacts_for_repo(
     repo_id: TufRepoUuid,
     conn: &async_bb8_diesel::Connection<DbConnection>,
-) -> Result<Vec<TufArtifact>, DieselError> {
+) -> Result<Vec<TufArtifactDescription>, DieselError> {
     use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+    use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
+    use nexus_db_schema::schema::tuf_artifact_tag::dsl as tuf_artifact_tag_dsl;
     use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
-    let join_on_dsl =
+    // We don't bother paginating in this method because each repo has a
+    // limited number of artifacts (currently <100 as of February 2026) and tags
+    // (currently <250).
+
+    // First collect all the artifacts belonging to this repo ID.
+    let join_on_dsl_1 =
         tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
-    // Don't bother paginating because each repo should only have a few (under
-    // 20) artifacts.
-    tuf_repo_artifact_dsl::tuf_repo_artifact
+    let join_on_dsl_2 =
+        tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256);
+    let artifacts: Vec<(TufArtifact, TufArtifactFile)> =
+        tuf_repo_artifact_dsl::tuf_repo_artifact
+            .filter(
+                tuf_repo_artifact_dsl::tuf_repo_id
+                    .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+            )
+            .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl_1))
+            .inner_join(
+                tuf_artifact_file_dsl::tuf_artifact_file.on(join_on_dsl_2),
+            )
+            .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
+            .load_async(conn)
+            .await?;
+    let mut artifacts = artifacts
+        .into_iter()
+        .map(|(artifact, file)| TufArtifactDescription {
+            artifact,
+            file,
+            tags: Vec::new(),
+        })
+        .collect::<IdHashMap<_>>();
+
+    // Now collect all the tags.
+    let join_on_dsl = tuf_artifact_tag_dsl::tuf_artifact_id
+        .eq(tuf_repo_artifact_dsl::tuf_artifact_id);
+    for tag in tuf_repo_artifact_dsl::tuf_repo_artifact
         .filter(
             tuf_repo_artifact_dsl::tuf_repo_id
                 .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
         )
-        .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
-        .select(TufArtifact::as_select())
+        .inner_join(tuf_artifact_tag_dsl::tuf_artifact_tag.on(join_on_dsl))
+        .select(TufArtifactTag::as_select())
         .load_async(conn)
-        .await
+        .await?
+    {
+        if let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id) {
+            artifact.tags.push(tag);
+        }
+    }
+
+    Ok(artifacts.into_iter().collect())
 }
 
 impl DataStore {
@@ -68,15 +111,13 @@ impl DataStore {
     pub async fn tuf_repo_insert(
         &self,
         opctx: &OpContext,
-        description: &external::TufRepoDescription,
+        description: &update::TufRepoDescription,
     ) -> CreateResult<TufRepoUpload> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let log = opctx.log.new(
-            slog::o!(
-                "method" => "update_tuf_repo_insert",
-                "uploaded_system_version" => description.repo.system_version.to_string(),
-            ),
-        );
+        let log = opctx.log.new(slog::o!(
+            "method" => "update_tuf_repo_insert",
+            "uploaded_system_version" => description.system_version.to_string(),
+        ));
 
         let err = OptionalError::new();
         let err2 = err.clone();
@@ -403,10 +444,42 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         repo_id: TufRepoUuid,
-    ) -> ListResultVec<TufArtifact> {
+    ) -> ListResultVec<TufArtifactDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         artifacts_for_repo(repo_id, &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List the artifacts present in a TUF repo without their tags.
+    ///
+    /// You almost certainly want `tuf_list_repo_artifacts` instead; this is
+    /// only useful if you don't need to choose a particular type of artifact.
+    pub async fn tuf_list_repo_artifacts_without_tags(
+        &self,
+        opctx: &OpContext,
+        repo_id: TufRepoUuid,
+    ) -> ListResultVec<TufArtifact> {
+        use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+        use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // We don't bother paginating in this method because each repo has a
+        // limited number of artifacts (currently <100 as of February 2026).
+
+        let join_on_dsl =
+            tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
+        tuf_repo_artifact_dsl::tuf_repo_artifact
+            .filter(
+                tuf_repo_artifact_dsl::tuf_repo_id
+                    .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+            )
+            .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
+            .select(TufArtifact::as_select())
+            .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -522,7 +595,7 @@ impl DataStore {
 async fn insert_impl(
     log: slog::Logger,
     conn: async_bb8_diesel::Connection<DbConnection>,
-    desc: &external::TufRepoDescription,
+    desc: &update::TufRepoDescription,
     err: OptionalError<InsertError>,
 ) -> Result<TufRepoUpload, DieselError> {
     // Load the current generation from the database and increment it, then
@@ -531,7 +604,8 @@ async fn insert_impl(
     // later.
     let old_generation = get_generation(&conn).await?;
     let new_generation = old_generation.next();
-    let desc = TufRepoDescription::from_external(desc.clone(), new_generation);
+    let desc = TufRepoDescription::from_common(desc.clone(), new_generation)
+        .map_err(|error| err.bail(InsertError::ByteCountRangeError(error)))?;
 
     let repo = {
         use nexus_db_schema::schema::tuf_repo::dsl;
@@ -545,35 +619,70 @@ async fn insert_impl(
             .optional()?;
 
         if let Some(mut existing_repo) = existing_repo {
-            // It doesn't matter whether the UUID of the repo matches or not,
-            // since it's uniquely generated. But do check the hash.
-            if existing_repo.sha256 != desc.repo.sha256 {
-                return Err(err.bail(InsertError::RepoHashMismatch {
-                    system_version: desc.repo.system_version,
-                    uploaded: desc.repo.sha256,
-                    existing: existing_repo.sha256,
-                }));
+            // A repository for this system version already exists. Fetch all
+            // additional information about the repository from the database
+            // and ensure the uploaded repository and the existing repository
+            // are equivalent. If so, update `time_created` and `time_pruned` to
+            // reset its position in the pruning queue, and return the existing
+            // repository.
+            let existing_artifacts =
+                artifacts_for_repo(existing_repo.id.into(), &conn).await?;
+
+            {
+                // `ArtifactSet` maintains consistent ordering.
+                let uploaded_artifacts = desc
+                    .artifacts
+                    .iter()
+                    .cloned()
+                    .map(Artifact::from)
+                    .collect::<ArtifactSet>();
+                let existing_artifacts = existing_artifacts
+                    .iter()
+                    .cloned()
+                    .map(Artifact::from)
+                    .collect::<ArtifactSet>();
+                if uploaded_artifacts != existing_artifacts {
+                    return Err(err.bail(InsertError::RepoMismatch {
+                        system_version: desc.repo.system_version,
+                    }));
+                }
             }
 
-            // This repo matches a previous record, so reset `time_created` to
-            // now and ensure `time_pruned` is set to NULL.
+            // If the existing repo has a recorded SHA-256 checksum, and we calculated
+            // the SHA-256 checksum for the uploaded repo, verify they are the same.
+            if let Some(uploaded) = desc.repo.sha256 {
+                if let Some(existing) = existing_repo.sha256 {
+                    if uploaded != existing {
+                        return Err(err.bail(InsertError::RepoHashMismatch {
+                            system_version: desc.repo.system_version,
+                            uploaded,
+                            existing,
+                        }));
+                    }
+                } else {
+                    // Record the newly calculated SHA-256 checksum.
+                    existing_repo.sha256 = Some(uploaded);
+                }
+            }
+
+            // Now, reset `time_created` to now and ensure `time_pruned` is set
+            // to NULL. Also update `sha256` in case we updated it above.
             existing_repo.time_created = chrono::Utc::now();
             existing_repo.time_pruned = None;
             diesel::update(dsl::tuf_repo)
                 .filter(dsl::id.eq(existing_repo.id))
                 .set((
+                    dsl::sha256.eq(existing_repo.sha256),
                     dsl::time_created.eq(existing_repo.time_created),
                     dsl::time_pruned.eq(existing_repo.time_pruned),
                 ))
                 .execute_async(&conn)
                 .await?;
 
-            // Just return the existing repo along with all of its artifacts.
-            let artifacts =
-                artifacts_for_repo(existing_repo.id.into(), &conn).await?;
-
-            let recorded =
-                TufRepoDescription { repo: existing_repo, artifacts };
+            let recorded = TufRepoDescription {
+                repo: existing_repo,
+                artifacts: existing_artifacts,
+            };
             return Ok(TufRepoUpload {
                 recorded,
                 status: TufRepoUploadStatus::AlreadyExists,
@@ -593,64 +702,108 @@ async fn insert_impl(
     // Since we've inserted a new repo, we also need to insert the
     // corresponding artifacts.
     let all_artifacts = {
-        use nexus_db_schema::schema::tuf_artifact::dsl;
+        use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+        use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
+        use nexus_db_schema::schema::tuf_artifact_tag::dsl as tuf_artifact_tag_dsl;
 
-        // Multiple repos can have the same artifacts, so we shouldn't error
-        // out if we find an existing artifact. However, we should check that
-        // the SHA256 hash and length matches if an existing artifact matches.
+        // Multiple repos can have the same artifacts, so we shouldn't error out
+        // if we find an existing artifact. However, we should avoid adding new
+        // rows to the artifact table if we've already recorded them.
+        //
+        // We don't enforce that two artifacts with the same SHA-256 checksum
+        // have the same tags; they are entered as separate artifacts. The
+        // only rule we enforce is that if two artifacts have the same SHA-256
+        // checksum, they must also have the same length and the same version
+        // (because artifacts should contain their own version string, or
+        // otherwise be unique due to the version).
 
-        let mut filter_dsl = dsl::tuf_artifact.into_boxed();
-        for artifact in desc.artifacts.clone() {
-            filter_dsl = filter_dsl
-                .or_filter(
-                    // Look up artifacts by name/version/kind.
-                    dsl::name
-                        .eq(artifact.name)
-                        .and(dsl::version.eq(artifact.version))
-                        .and(dsl::kind.eq(artifact.kind.clone())),
-                )
-                .or_filter(
-                    // Also look up artifacts by kind/hash.
-                    dsl::kind
-                        .eq(artifact.kind)
-                        .and(dsl::sha256.eq(artifact.sha256)),
+        // First, build a list of artifacts matching any artifact hash present
+        // in the uploaded repository.
+        let mut filter_dsl = tuf_artifact_dsl::tuf_artifact.into_boxed();
+        for artifact in &desc.artifacts {
+            filter_dsl = filter_dsl.or_filter(
+                tuf_artifact_dsl::sha256.eq(artifact.artifact.sha256),
+            );
+        }
+        let join_on_dsl =
+            tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256);
+        let mut results = filter_dsl
+            .inner_join(
+                tuf_artifact_file_dsl::tuf_artifact_file.on(join_on_dsl),
+            )
+            .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
+            .load_async(&conn)
+            .await?
+            .into_iter()
+            .map(|(artifact, file)| TufArtifactDescription {
+                artifact,
+                file,
+                tags: Vec::new(),
+            })
+            .collect::<IdHashMap<_>>();
+        // Now fetch their tags and add them.
+        if !results.is_empty() {
+            let mut filter_dsl =
+                tuf_artifact_tag_dsl::tuf_artifact_tag.into_boxed();
+            for artifact in &results {
+                filter_dsl = filter_dsl.or_filter(
+                    tuf_artifact_tag_dsl::tuf_artifact_id
+                        .eq(artifact.artifact.id),
                 );
+            }
+            for tag in filter_dsl
+                .select(TufArtifactTag::as_select())
+                .load_async(&conn)
+                .await?
+            {
+                if let Some(mut artifact) =
+                    results.get_mut(&tag.tuf_artifact_id)
+                {
+                    artifact.tags.push(tag);
+                }
+            }
         }
 
-        let results = filter_dsl
-            .select(TufArtifact::as_select())
-            .load_async(&conn)
-            .await?;
-        debug!(
-            log,
-            "found {} existing artifacts with nvk lookup", results.len();
-            "results" => ?results,
-        );
+        // Time to make this list useful. For each artifact in our uploaded
+        // repository, we need to find any artifacts with the same SHA-256
+        // checksum and ensure its length and version are equal to ours. Then
+        // we need to look for an artifact with the same set of tags as ours.
+        // If one is present, we use the already-present artifact instead of the
+        // newly-generated one.
+        //
+        // We use a nested hash table. The outer hash table uses the SHA-256
+        // checksum as the key. The inner hash table uses a BTreeMap of the tag
+        // keys and values as the key.
+        let mut lookup = HashMap::<_, HashMap<_, _>>::new();
+        for artifact in &results {
+            let tags = artifact
+                .tags
+                .iter()
+                .map(|tag| (&tag.key, &tag.value))
+                .collect::<BTreeMap<_, _>>();
+            lookup
+                .entry(artifact.artifact.sha256)
+                .or_default()
+                .insert(tags, artifact);
+        }
 
-        let results_by_id = results
-            .iter()
-            .map(|artifact| (artifact.nvk(), artifact))
-            .collect::<HashMap<_, _>>();
-        let results_by_hash_id = results
-            .iter()
-            .map(|artifact| ((&artifact.kind, artifact.sha256), artifact))
-            .collect::<HashMap<_, _>>();
-
-        // uploaded_and_existing contains non-matching artifacts in pairs of
-        // (uploaded, currently in db).
-        let mut nvk_mismatch = Vec::new();
-        let mut hash_id_mismatch = Vec::new();
+        // Iterate through our uploaded artifacts, check that their length and
+        // version are equal to what's in the database, and then look for an
+        // existing entry we can use instead or insert our new entry.
+        let mut mismatch = Vec::new();
+        let mut new_files: HashMap<ArtifactHash, TufArtifactFile> =
+            HashMap::new();
         let mut new_artifacts = Vec::new();
         let mut all_artifacts = Vec::new();
 
         enum ArtifactStatus<'a> {
             New,
-            Existing(&'a TufArtifact),
+            Existing(&'a TufArtifactDescription),
             Mismatch,
         }
 
         impl<'a> ArtifactStatus<'a> {
-            fn mark_existing(&mut self, artifact: &'a TufArtifact) {
+            fn mark_existing(&mut self, artifact: &'a TufArtifactDescription) {
                 match self {
                     ArtifactStatus::New => {
                         *self = ArtifactStatus::Existing(artifact)
@@ -671,44 +824,50 @@ async fn insert_impl(
             }
         }
 
-        for uploaded_artifact in desc.artifacts.clone() {
+        for uploaded_artifact in &desc.artifacts {
             let mut status = ArtifactStatus::New;
-            if let Some(&existing_nvk) =
-                results_by_id.get(&uploaded_artifact.nvk())
-            {
-                status.mark_existing(existing_nvk);
-                if existing_nvk.sha256 != uploaded_artifact.sha256
-                    || existing_nvk.artifact_size()
-                        != uploaded_artifact.artifact_size()
-                {
-                    nvk_mismatch.push((
-                        uploaded_artifact.clone(),
-                        existing_nvk.clone(),
-                    ));
+            // Check that this isn't a mismatch within the repository.
+            if let Some(file) = new_files.get(&uploaded_artifact.file.sha256) {
+                if uploaded_artifact.file != *file {
+                    mismatch
+                        .push((uploaded_artifact.file.clone(), file.clone()));
                     status.mark_mismatch();
                 }
-            };
-
-            if let Some(&existing_hash) = results_by_hash_id
-                .get(&(&uploaded_artifact.kind, uploaded_artifact.sha256))
+            }
+            if let Some(inner) = lookup.get(&uploaded_artifact.artifact.sha256)
             {
-                status.mark_existing(existing_hash);
-                if existing_hash.name != uploaded_artifact.name
-                    || existing_hash.version != uploaded_artifact.version
-                {
-                    hash_id_mismatch.push((
-                        uploaded_artifact.clone(),
-                        existing_hash.clone(),
-                    ));
-                    status.mark_mismatch();
+                // Check that this isn't a mismatch within previously-uploaded
+                // artifacts.
+                for artifact in inner.values() {
+                    if uploaded_artifact.file != artifact.file {
+                        mismatch.push((
+                            uploaded_artifact.file.clone(),
+                            artifact.file.clone(),
+                        ));
+                        status.mark_mismatch();
+                        break;
+                    }
                 }
-            };
+                // Check to see if this artifact already exists with the same
+                // tags.
+                let tags = uploaded_artifact
+                    .tags
+                    .iter()
+                    .map(|tag| (&tag.key, &tag.value))
+                    .collect::<BTreeMap<_, _>>();
+                if let Some(artifact) = inner.get(&tags) {
+                    status.mark_existing(artifact);
+                }
+            }
 
-            // This is a new artifact.
             match status {
                 ArtifactStatus::New => {
                     new_artifacts.push(uploaded_artifact.clone());
-                    all_artifacts.push(uploaded_artifact);
+                    new_files.insert(
+                        uploaded_artifact.file.sha256,
+                        uploaded_artifact.file.clone(),
+                    );
+                    all_artifacts.push(uploaded_artifact.clone());
                 }
                 ArtifactStatus::Existing(existing_artifact) => {
                     all_artifacts.push(existing_artifact.clone());
@@ -720,15 +879,11 @@ async fn insert_impl(
             }
         }
 
-        if !nvk_mismatch.is_empty() || !hash_id_mismatch.is_empty() {
+        if !mismatch.is_empty() {
             debug!(log, "uploaded artifacts don't match existing artifacts";
-                "nvk_mismatch" => ?nvk_mismatch,
-                "hash_id_mismatch" => ?hash_id_mismatch,
+                "mismatch" => ?mismatch,
             );
-            return Err(err.bail(InsertError::ArtifactMismatch {
-                nvk_mismatch,
-                hash_id_mismatch,
-            }));
+            return Err(err.bail(InsertError::ArtifactMismatch { mismatch }));
         }
 
         debug!(
@@ -746,9 +901,34 @@ async fn insert_impl(
             put_generation(&conn, old_generation.into(), new_generation.into())
                 .await?;
 
+            let (new_artifacts, mut new_files, new_tags) = new_artifacts
+                .into_iter()
+                .map(|artifact| {
+                    (artifact.artifact, artifact.file, artifact.tags)
+                })
+                .collect::<(Vec<_>, Vec<_>, Vec<_>)>();
+            let new_tags: Vec<_> = new_tags.into_iter().flatten().collect();
+            // Only insert values in `tuf_artifact_file` that we have not seen
+            // before.
+            new_files.retain(|file| !lookup.contains_key(&file.sha256));
+            // Remove duplicate hashes; we've already verified that they are
+            // consistent above.
+            new_files.sort_unstable_by_key(|file| file.sha256);
+            new_files.dedup_by_key(|file| file.sha256);
+
             // Insert new artifacts into the database.
-            diesel::insert_into(dsl::tuf_artifact)
+            diesel::insert_into(tuf_artifact_dsl::tuf_artifact)
                 .values(new_artifacts)
+                .execute_async(&conn)
+                .await?;
+            // Insert newly-seen checksums/versions/lengths into the database.
+            diesel::insert_into(tuf_artifact_file_dsl::tuf_artifact_file)
+                .values(new_files)
+                .execute_async(&conn)
+                .await?;
+            // Insert new tags into the database.
+            diesel::insert_into(tuf_artifact_tag_dsl::tuf_artifact_tag)
+                .values(new_tags)
                 .execute_async(&conn)
                 .await?;
         }
@@ -765,11 +945,11 @@ async fn insert_impl(
             slog::debug!(
                 log,
                 "inserting artifact into tuf_repo_artifact table";
-                "artifact" => %artifact.id,
+                "artifact" => %artifact.artifact.id,
             );
             values.push((
                 dsl::tuf_repo_id.eq(desc.repo.id),
-                dsl::tuf_artifact_id.eq(artifact.id),
+                dsl::tuf_artifact_id.eq(artifact.artifact.id),
             ));
         }
 
@@ -823,17 +1003,14 @@ enum InsertError {
         uploaded: ArtifactHash,
         existing: ArtifactHash,
     },
+    /// Either the SHA256 of the existing repository or the uploaded repository
+    /// was not calculated, and the set of artifacts differs.
+    RepoMismatch { system_version: SemverVersion },
     /// Some uploaded artifacts doesn't match the corresponding entries in the
     /// database.
-    ArtifactMismatch {
-        // Artifacts for which the name/version/kind were the same, but the hash
-        // or length were different.
-        nvk_mismatch: Vec<(TufArtifact, TufArtifact)>,
-
-        // Artifacts for which the kind/hash were the same, but the name or
-        // version were different.
-        hash_id_mismatch: Vec<(TufArtifact, TufArtifact)>,
-    },
+    ArtifactMismatch { mismatch: Vec<(TufArtifactFile, TufArtifactFile)> },
+    /// The length of the repository exceeds `i64::MAX`.
+    ByteCountRangeError(ByteCountRangeError),
 }
 
 impl From<InsertError> for external::Error {
@@ -845,60 +1022,45 @@ impl From<InsertError> for external::Error {
                 existing,
             } => external::Error::conflict(format!(
                 "Uploaded repository with system version {} has SHA256 hash \
-                     {}, but existing repository has SHA256 hash {}.",
+                 {}, but existing repository has SHA256 hash {}.",
                 system_version, uploaded, existing,
             )),
-            InsertError::ArtifactMismatch {
-                nvk_mismatch,
-                hash_id_mismatch,
-            } => {
+            InsertError::RepoMismatch { system_version } => {
+                external::Error::conflict(format!(
+                    "Uploaded repository with system version {} does not have \
+                    the same artifacts as existing repository with same \
+                    system version",
+                    system_version
+                ))
+            }
+            InsertError::ArtifactMismatch { mismatch } => {
                 // Build a message out of uploaded and existing artifacts.
                 let mut message = "Uploaded artifacts don't match existing \
-                                   artifacts with same IDs:\n"
+                                   artifacts:\n"
                     .to_string();
-                for (uploaded, existing) in nvk_mismatch {
-                    // Uploaded and existing artifacts are matched by their
-                    // name/version/kinds.
+                for (uploaded, existing) in mismatch {
                     swrite!(
                         message,
-                        "- For artifact {}, uploaded SHA256 hash {} and length \
-                         {}, but existing artifact has SHA256 hash {} and \
-                         length {}.\n",
-                        display_nvk(uploaded.nvk()),
+                        "- Uploaded artifact with SHA-256 checksum {} has \
+                        length {} and version {}, but existing artifact with \
+                        SHA-256 checksum {} has length {} and version {}.\n",
                         uploaded.sha256,
-                        uploaded.artifact_size(),
-                        existing.sha256,
-                        existing.artifact_size(),
-                    );
-                }
-
-                for (uploaded, existing) in hash_id_mismatch {
-                    swrite!(
-                        message,
-                        "- For artifact {}, uploaded name {} and version {}, \
-                           but existing artifact has name {} and version {}.\n",
-                        display_kind_hash(&uploaded.kind, uploaded.sha256),
-                        uploaded.name,
+                        uploaded.artifact_size.0.to_bytes(),
                         uploaded.version,
-                        existing.name,
+                        existing.sha256,
+                        existing.artifact_size.0.to_bytes(),
                         existing.version,
                     );
                 }
-
                 external::Error::conflict(message)
+            }
+            InsertError::ByteCountRangeError(error) => {
+                external::Error::internal_error(&format!(
+                    "could not convert repo length: {error}"
+                ))
             }
         }
     }
-}
-
-fn display_nvk(
-    (name, version, kind): (&str, &ArtifactVersion, &str),
-) -> String {
-    format!("(name: {name}, version: {version}, kind: {kind})")
-}
-
-fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
-    format!("(kind: {kind}, hash: {hash})")
 }
 
 #[cfg(test)]

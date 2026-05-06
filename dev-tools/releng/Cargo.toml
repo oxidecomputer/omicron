@@ -30,8 +30,9 @@ slog-term.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
-tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
+tufaceous-lib-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-lib" }
 update-common.workspace = true
 
 [lints]

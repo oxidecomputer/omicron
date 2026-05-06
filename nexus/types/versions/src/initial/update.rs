@@ -37,13 +37,11 @@ impl<'de> Deserialize<'de> for TufSignedRootRole {
     where
         D: Deserializer<'de>,
     {
-        use tough::schema::{Root, Signed};
-
         let value = serde_json::Value::deserialize(deserializer)?;
         // Verify that this appears to be a valid, self-signed TUF root role.
-        let root =
-            <Signed<Root>>::deserialize(&value).map_err(D::Error::custom)?;
-        match root.signed.verify_role(&root) {
+        let root = tufaceous::edit::Root::deserialize(&value)
+            .map_err(D::Error::custom)?;
+        match root.verify_self_signed() {
             Ok(()) => Ok(Self(value)),
             Err(err) => Err(D::Error::custom(format!(
                 "Unable to verify root role: {}",

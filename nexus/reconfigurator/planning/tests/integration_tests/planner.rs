@@ -54,9 +54,6 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
-use omicron_common::api::external::TufArtifactMeta;
-use omicron_common::api::external::TufRepoDescription;
-use omicron_common::api::external::TufRepoMeta;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::disk::DatasetKind;
@@ -67,7 +64,7 @@ use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_common::update::ArtifactId;
+use omicron_common::update::TufRepoDescription;
 use omicron_deployment_graph::DEPLOYMENT_UNIT_DAG_PATH;
 use omicron_deployment_graph::DagEdge;
 use omicron_deployment_graph::DagEdgesFile;
@@ -99,10 +96,21 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
+use tufaceous_artifact::RotSlot;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::SpTags;
+use tufaceous_artifact::ZoneTags;
 use typed_rng::TypedUuidRng;
 use uuid::Uuid;
 
@@ -3161,16 +3169,16 @@ fn sim_complete_pending_host_os_updates(
 
 macro_rules! fake_zone_artifact {
     ($kind: ident, $version: expr, $hash: expr) => {
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: ZoneKind::$kind.artifact_id_name().to_string(),
-                version: $version,
-                kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
-            },
+        Artifact {
+            target_name: String::new(),
+            version: $version,
+            tags: KnownArtifactTags::Zone(ZoneTags {
+                zone_name: ZoneKind::$kind.artifact_id_name().to_string(),
+            })
+            .to_tags()
+            .unwrap(),
             hash: $hash,
-            size: 0,
-            board: None,
-            sign: None,
+            length: 0,
         }
     };
 }
@@ -3183,32 +3191,24 @@ const MEASUREMENT_HASH_ALWAYS: ArtifactHash = ArtifactHash([0xcc; 32]);
 fn create_measurement_artifacts_at_version(
     version: &ArtifactVersion,
     measurement_hash: ArtifactHash,
-) -> Vec<TufArtifactMeta> {
+) -> ArtifactSet {
     let zones =
         create_artifacts_for_version(WhichVersion::InitialSystemVersion);
 
-    let corpus = vec![
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "measurement_corpus2".to_string(),
-                version: version.clone(),
-                kind: ArtifactKind::MEASUREMENT_CORPUS,
-            },
+    let corpus = [
+        Artifact {
+            target_name: String::new(),
+            version: version.clone(),
+            tags: KnownArtifactTags::MeasurementCorpus.to_tags().unwrap(),
             hash: MEASUREMENT_HASH_ALWAYS,
-            size: 0,
-            board: None,
-            sign: None,
+            length: 0,
         },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "measurement_corpus".to_string(),
-                version: version.clone(),
-                kind: ArtifactKind::MEASUREMENT_CORPUS,
-            },
+        Artifact {
+            target_name: String::new(),
+            version: version.clone(),
+            tags: KnownArtifactTags::MeasurementCorpus.to_tags().unwrap(),
             hash: measurement_hash,
-            size: 0,
-            board: None,
-            sign: None,
+            length: 0,
         },
     ];
 
@@ -3285,12 +3285,12 @@ impl WhichVersion {
     }
 }
 
-fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
+fn create_artifacts_for_version(which: WhichVersion) -> ArtifactSet {
     let version = which.version();
     let (host_phase_1_hash, host_phase_2_hash) = which.host_phase_hashes();
     let zone_hash = which.zone_artifact_hash();
 
-    vec![
+    ArtifactSet::from_iter([
         // Omit `BoundaryNtp` because it has the same artifact name as
         // `InternalNtp`.
         fake_zone_artifact!(Clickhouse, version.clone(), zone_hash),
@@ -3304,91 +3304,79 @@ fn create_artifacts_for_version(which: WhichVersion) -> Vec<TufArtifactMeta> {
         fake_zone_artifact!(InternalNtp, version.clone(), zone_hash),
         fake_zone_artifact!(Nexus, version.clone(), zone_hash),
         fake_zone_artifact!(Oximeter, version.clone(), zone_hash),
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "host-os-phase-1".to_string(),
-                version: version.clone(),
-                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
-            },
+        Artifact {
+            target_name: String::new(),
+            version: version.clone(),
+            tags: KnownArtifactTags::OsPhase1(OsPhase1Tags {
+                os_board: OsBoard::GIMLET,
+                os_variant: OsVariant::Host,
+            })
+            .to_tags()
+            .unwrap(),
             hash: host_phase_1_hash,
-            size: 0,
-            board: None,
-            sign: None,
+            length: 0,
         },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "host-os-phase-2".to_string(),
-                version: version.clone(),
-                kind: ArtifactKind::HOST_PHASE_2,
-            },
+        Artifact {
+            target_name: String::new(),
+            version: version.clone(),
+            tags: KnownArtifactTags::OsPhase2(OsPhase2Tags {
+                os_variant: OsVariant::Host,
+            })
+            .to_tags()
+            .unwrap(),
             hash: host_phase_2_hash,
-            size: 0,
-            board: None,
-            sign: None,
+            length: 0,
         },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: sp_sim::SIM_GIMLET_BOARD.to_string(),
-                version: ArtifactVersion::new("0.0.1").unwrap(),
-                kind: KnownArtifactKind::GimletSp.into(),
-            },
-            // The WhichVersion enum does not currently have a variant for
-            // a different SP version, so we hardcode the hash here. If
-            // WhichVersion gains such a variant, this would be the place to
-            // change.
+        Artifact {
+            target_name: String::new(),
+            version: ArtifactVersion::new("0.0.1").unwrap(),
+            tags: KnownArtifactTags::Sp(SpTags {
+                sp_board: sp_sim::SIM_GIMLET_BOARD.to_string(),
+            })
+            .to_tags()
+            .unwrap(),
             hash: ArtifactHash([0; 32]),
-            size: 0,
-            board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
-            sign: None,
+            length: 0,
         },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: sp_sim::SIM_ROT_BOARD.to_string(),
-                version: ArtifactVersion::new("0.0.1").unwrap(),
-                kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
-            },
-            // The WhichVersion enum does not currently have a variant for
-            // a different RoT version, so we hardcode the hash here. If
-            // WhichVersion gains such a variant, this would be the place to
-            // change.
+        Artifact {
+            target_name: String::new(),
+            version: ArtifactVersion::new("0.0.1").unwrap(),
+            tags: KnownArtifactTags::Rot(RotTags {
+                rot_board: sp_sim::SIM_ROT_BOARD.to_string(),
+                rot_rkth: RotKeyTableHash(Some("sign-gimlet".into())),
+                rot_slot: RotSlot::B,
+            })
+            .to_tags()
+            .unwrap(),
             hash: ArtifactHash([0; 32]),
-            size: 0,
-            board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
-            sign: Some("sign-gimlet".into()),
+            length: 0,
         },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: sp_sim::SIM_ROT_BOARD.to_string(),
-                version: ArtifactVersion::new("0.0.1").unwrap(),
-                kind: ArtifactKind::GIMLET_ROT_STAGE0,
-            },
-            // The WhichVersion enum does not currently have a variant for a
-            // different RoT stage 0 version, so we hardcode the hash here. If
-            // WhichVersion gains such a variant, this would be the place to
-            // change.
+        Artifact {
+            target_name: String::new(),
+            version: ArtifactVersion::new("0.0.1").unwrap(),
+            tags: KnownArtifactTags::RotBootloader(RotBootloaderTags {
+                rot_board: sp_sim::SIM_ROT_BOARD.to_string(),
+                rot_rkth: RotKeyTableHash(Some("sign-gimlet".into())),
+            })
+            .to_tags()
+            .unwrap(),
             hash: ArtifactHash([0; 32]),
-            size: 0,
-            board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
-            sign: Some("sign-gimlet".into()),
+            length: 0,
         },
         // We need at least one measurement in a repo to proceed with planning
         // This value matches what we load from the example repo so that
         // we can go ahead and proceed with zone planning without extra
         // measurement steps
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "measurement-base".to_string(),
-                version: ArtifactVersion::new("1.0.0").unwrap(),
-                kind: ArtifactKind::MEASUREMENT_CORPUS,
-            },
+        Artifact {
+            target_name: String::new(),
+            version: ArtifactVersion::new("1.0.0").unwrap(),
+            tags: KnownArtifactTags::MeasurementCorpus.to_tags().unwrap(),
             hash: ArtifactHash(hex_literal::hex!(
                 "8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f"
             )),
-            size: 0,
-            board: None,
-            sign: None,
+            length: 0,
         },
-    ]
+    ])
 }
 
 /// Ensure that dependent zones (here just Crucible Pantry) are updated
@@ -3432,14 +3420,10 @@ fn test_update_crucible_pantry_before_nexus() {
     };
     let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts,
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
     sim.change_description("set new target release", |desc| {
         desc.set_target_release(description);
@@ -3830,14 +3814,10 @@ fn test_update_cockroach() {
     };
     let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts,
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
     sim.change_description("set new target release", |desc| {
         desc.set_target_release(description);
@@ -4200,14 +4180,10 @@ fn test_update_boundary_ntp() {
     };
     let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts,
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
     sim.change_description("set new target release", |desc| {
         desc.set_target_release(description);
@@ -4611,14 +4587,10 @@ fn test_update_internal_dns() {
     };
     let artifacts = create_artifacts_for_version(which);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts,
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
     sim.change_description("set new target release", |desc| {
         desc.set_target_release(description);
@@ -4859,14 +4831,10 @@ fn test_update_all_zones() {
     // We use generation 2 to represent the first generation with a TUF repo
     // attached.
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts: create_artifacts_for_version(which),
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
 
     sim.change_description("set new target release", |desc| {
@@ -4951,17 +4919,13 @@ fn test_simple_measurements() {
     // We use generation 2 to represent the first generation with a TUF repo
     // attached.
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts: create_measurement_artifacts_at_version(
             &version,
             MEASUREMENT_HASH1,
         ),
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
 
     sim.change_description("set new target release", |desc| {
@@ -5033,17 +4997,13 @@ fn test_multiple_measurements() {
     // We use generation 2 to represent the first generation with a TUF repo
     // attached.
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts: create_measurement_artifacts_at_version(
             &version,
             MEASUREMENT_HASH1,
         ),
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
 
     let mut artifacts = BTreeSet::new();
@@ -5136,17 +5096,13 @@ fn test_multiple_measurements() {
     // We use generation 2 to represent the first generation with a TUF repo
     // attached.
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: fake_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts: create_measurement_artifacts_at_version(
             &version,
             MEASUREMENT_HASH2,
         ),
+        system_version: Version::new(1, 0, 0),
+        hash: Some(fake_hash),
+        file_name: None,
     });
 
     sim.change_description("set new target release again", |desc| {
@@ -5525,14 +5481,10 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     // The TUF repo's overall hash doesn't matter for this test.
     let repo_hash = ArtifactHash([0; 32]);
     let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
-        repo: TufRepoMeta {
-            hash: repo_hash,
-            targets_role_version: 0,
-            valid_until: Utc::now(),
-            system_version: Version::new(1, 0, 0),
-            file_name: String::from(""),
-        },
         artifacts: create_artifacts_for_version(which),
+        system_version: Version::new(1, 0, 0),
+        hash: Some(repo_hash),
+        file_name: None,
     });
 
     sim.change_description("set new target release", |desc| {

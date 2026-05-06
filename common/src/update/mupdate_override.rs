@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::ArtifactHashId;
+use tufaceous_artifact::ArtifactHash;
 
 /// MUPdate override information, typically serialized as JSON (RFD 556).
 ///
@@ -19,14 +19,27 @@ pub struct MupdateOverrideInfo {
     /// A UUID that identifies a MUPdate that occurred.
     pub mupdate_uuid: MupdateOverrideUuid,
 
-    /// Artifact hashes written out to the install dataset.
-    ///
-    /// Currently includes the host phase 2 and composite control plane
-    /// artifacts.
-    pub hash_ids: BTreeSet<ArtifactHashId>,
+    /// Artifact hashes written out to the install dataset. This is used only
+    /// for debugging.
+    #[serde(default)]
+    pub hash_ids: BTreeSet<MupdateOverrideHashId>,
 }
 
 impl MupdateOverrideInfo {
     /// The name of the file on the install dataset.
     pub const FILE_NAME: &'static str = "mupdate-override.json";
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Deserialize, Serialize,
+)]
+/// An artifact hash written out to the install dataset. This is used only for
+/// debugging.
+pub struct MupdateOverrideHashId {
+    /// The kind of artifact this is. This is not intended to be mapped to an
+    /// artifact in a repository.
+    pub kind: String,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
 }

@@ -15,12 +15,12 @@ use semver::Version;
 use serde::Deserialize;
 use slog::Logger;
 use slog::warn;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::assemble::DeserializedArtifactData;
-use tufaceous_lib::assemble::DeserializedArtifactSource;
-use tufaceous_lib::assemble::DeserializedFileArtifactSource;
-use tufaceous_lib::assemble::DeserializedManifest;
+use tufaceous_artifact_v1::ArtifactVersion;
+use tufaceous_artifact_v1::KnownArtifactKind;
+use tufaceous_lib_v1::assemble::DeserializedArtifactData;
+use tufaceous_lib_v1::assemble::DeserializedArtifactSource;
+use tufaceous_lib_v1::assemble::DeserializedFileArtifactSource;
+use tufaceous_lib_v1::assemble::DeserializedManifest;
 
 use crate::RETRY_ATTEMPTS;
 

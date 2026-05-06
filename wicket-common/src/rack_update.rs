@@ -9,11 +9,10 @@ use std::{collections::BTreeSet, time::Duration};
 use semver::Version;
 
 use dropshot::HttpError;
-use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::inventory::SpIdentifier;
+use crate::{artifact::ArtifactId, inventory::SpIdentifier};
 
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
 pub struct StartUpdateOptions {
