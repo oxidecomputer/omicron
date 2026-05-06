@@ -2583,7 +2583,7 @@ mod test {
             .await
             .expect("switch0 process should get cleaned up");
 
-        // calls to switch0's dpd should fail
+        // Valls to switch0's dpd should fail
         assert!(switch0_dpd_client.dpd_uptime().await.is_err());
 
         // Okay, now that we've taken down one of the simulated switches, we
@@ -2602,7 +2602,52 @@ mod test {
             .await
             .expect("instance update saga did not complete within 60 seconds");
 
+        // Check that the VMM's resources were torn down properly.
         verify_active_vmm_destroyed(&cptestctx, instance_id).await;
+
+        // The still-alive switch should have had the NAT entries for the
+        // destroyed instance removed.
+        poll::wait_for_condition(
+            async || {
+                let dpd1_result = switch1_dpd_client
+                    .nat_ipv4_list(&nat_subnet, None, None)
+                    .await;
+
+                slog::info!(&log,
+                    "nat_ipv4_list";
+                    "dpd1_result" => ?dpd1_result,
+                );
+
+                let dpd1_data = dpd1_result
+                    .map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                
+                if !dpd1_data.items.is_empty() {
+                    slog::error!(
+                        &log,
+                        "we are expecting no NAT entries on switch1, but we \
+                         found: {:?}",
+                        dpd1_data.items,
+                    );
+                    Err(poll::CondCheckError::<()>::NotYet)
+                } else {
+                    Ok(())
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .expect("NAT entry should appear on both switches");
+
+        // Ideally we would test that when switch 0 comes back, the desired
+        // state is propagated to it as well, but...since the state we expect is
+        // "no NAT entries", there isn't really a difference between the state
+        // where it has been propagated and the state where it hasn't, because,
+        // well...it's empty either way. So, no use checking that here.
+        //
+        // TODO(eliza): add a test for a migration rather than VMM-destroyed
+        // update, so that we can check that the *new* NAT entries for the
+        // destination vmm are propagated to switch 0 when it comes back.
 
         cptestctx.teardown().await;
     }
