@@ -1546,6 +1546,7 @@ async fn unwind_instance_lock(
 mod test {
     use super::*;
     use crate::app::OpContext;
+    use crate::app::db;
     use crate::app::db::model::Instance;
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
@@ -1554,19 +1555,29 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+    use nexus_test_utils;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::{
+        instance as instance_types, networking as networking_types,
+    };
     use nexus_types::internal_api::params::InstanceMigrateRequest;
+    use omicron_common::api::external::{
+        ByteCount, DataPageParams, IdentityMetadataCreateParams,
+        InstanceCpuCount, Name,
+    };
+    use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
+    use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::instance::{
         MigrationRuntimeState, MigrationState, Migrations,
     };
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::time::Duration;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1604,9 +1615,6 @@ mod test {
     async fn create_instance(
         client: &ClientTestContext,
     ) -> omicron_common::api::external::Instance {
-        use omicron_common::api::external::{
-            ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-        };
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
@@ -1621,8 +1629,10 @@ mod test {
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
+                // The instance should have one IPv4 NIC in order for the tests
+                // for networking state to work.
                 network_interfaces:
-                    instance_types::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -2354,6 +2364,247 @@ mod test {
             .source(MigrationState::Completed, VmmState::Stopping)
             .run_unwinding_test(cptestctx)
             .await;
+    }
+
+    /// Tests that instance update sagas can complete successfully if one switch
+    /// zone is not available.
+    /// This reproduces <https://github.com/oxidecomputer/omicron/issues/10343>
+    #[tokio::test]
+    async fn instance_updates_can_complete_with_dead_switch() {
+        // The setup here is all more or less copied from the
+        // `should_start_with_dead_switch` test in the `instance_start` saga. We
+        // will manually construct the switches so that we can make one of them
+        // go away.
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+            "should_start_with_dead_switch",
+        )
+        .with_extra_sled_agents(3)
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let log = &cptestctx.logctx.log;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+
+        // Create uplinks
+        // We only eagerly populate NAT entries on switches that have
+        // uplinks configured, so we need to do some switch configuration
+        // before starting the instance in order to test that section of logic
+        let mut uplink0_params =
+            networking_types::SwitchPortSettingsCreate::new(
+                IdentityMetadataCreateParams {
+                    name: "test-uplink0".parse().unwrap(),
+                    description: "test uplink".into(),
+                },
+            );
+
+        uplink0_params.routes = vec![networking_types::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![networking_types::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "1.1.1.1".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let mut uplink1_params =
+            networking_types::SwitchPortSettingsCreate::new(
+                IdentityMetadataCreateParams {
+                    name: "test-uplink1".parse().unwrap(),
+                    description: "test uplink".into(),
+                },
+            );
+
+        uplink1_params.routes = vec![networking_types::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![networking_types::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "2.2.2.2".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let uplink0_settings = datastore
+            .switch_port_settings_create(&opctx, &uplink0_params, None)
+            .await
+            .expect("should be able to create configuration for uplink0");
+
+        let uplink1_settings = datastore
+            .switch_port_settings_create(&opctx, &uplink1_params, None)
+            .await
+            .expect("should be able to create configuration for uplink1");
+
+        let rack_id = datastore
+            .rack_list(&opctx, &DataPageParams::max_page())
+            .await
+            .unwrap()
+            .pop()
+            .unwrap()
+            .identity
+            .id;
+
+        let uplink0 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch0,
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch0");
+
+        let uplink1 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch1,
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch1");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink0,
+                Some(uplink0_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch0 settings");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink1,
+                Some(uplink1_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch1 settings");
+
+        // Before we make one of the switch zones go away, start a test
+        // instance, and simulate it into the `Running` state so that its
+        // network config is propagated.
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let (state, params) = setup_active_vmm_destroyed_test(&cptestctx).await;
+        let instance_id = state.instance.id();
+
+        fn mk_dpd_client(
+            cptestctx: &ControlPlaneTestContext,
+            switch_slot: SwitchSlot,
+        ) -> dpd_client::Client {
+            let dendrite_guard = cptestctx.dendrite.read().unwrap();
+            let port = dendrite_guard
+                .get(&switch_slot)
+                .expect("two dendrites should be present in test context")
+                .port;
+            let client_state = dpd_client::ClientState {
+                tag: String::from("nexus"),
+                log: cptestctx.logctx.log.new(o!(
+                    "component" => "DpdClient",
+                    "switch" => format!("{switch_slot:?}"),
+                )),
+            };
+
+            let addr = std::net::Ipv6Addr::LOCALHOST;
+
+            dpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                client_state.clone(),
+            )
+        }
+
+        let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
+        let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
+
+        // Check to ensure that the nat entry for the address has made it onto
+        // both dendrites. Note: ipv4_nat_trigger_update() triggers dendrite's
+        // RPW asynchronously and returns immediately, but dendrite still needs
+        // time to process the update and create the NAT entries. Tests need to
+        // poll/wait for entries rather than checking immediately, or they'll be
+        // flaky.
+        let nat_subnet = std::net::Ipv4Addr::new(10, 0, 0, 0);
+        let poll_interval = Duration::from_millis(100);
+        let poll_max = Duration::from_secs(60); // Allow time for RPW to process
+
+        poll::wait_for_condition(
+            async || {
+                let dpd0_result = switch0_dpd_client
+                    .nat_ipv4_list(&nat_subnet, None, None)
+                    .await;
+
+                let dpd1_result = switch1_dpd_client
+                    .nat_ipv4_list(&nat_subnet, None, None)
+                    .await;
+
+                slog::info!(&log,
+                    "nat_ipv4_list";
+                    "dpd0_result" => ?dpd0_result,
+                    "dpd1_result" => ?dpd1_result,
+                );
+
+                let dpd0_data = dpd0_result
+                    .map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let dpd1_data = dpd1_result
+                    .map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+
+                if dpd0_data.items.is_empty() || dpd1_data.items.is_empty() {
+                    slog::error!(
+                        &log,
+                        "we are expecting NAT entries but none were found"
+                    );
+                    Err(poll::CondCheckError::<()>::NotYet)
+                } else {
+                    Ok(())
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .expect("NAT entry should appear on both switches");
+
+        // Shutdown one of the switch daemons
+        let mut switch0_dpd = cptestctx
+            .dendrite
+            .write()
+            .unwrap()
+            .remove(&SwitchSlot::Switch0)
+            .expect("switch 0 dendrite running is running");
+
+        switch0_dpd
+            .cleanup()
+            .await
+            .expect("switch0 process should get cleaned up");
+
+        // calls to switch0's dpd should fail
+        assert!(switch0_dpd_client.dpd_uptime().await.is_err());
+
+        // Okay, now that we've taken down one of the simulated switches, we
+        // should be able to run an instance-update saga to destroy the VMM.
+        //
+        // Build the saga DAG with the provided test parameters
+        let real_params = make_real_params(&cptestctx, &opctx, params).await;
+        let dag =
+            create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
+
+        let saga_done =
+            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+                &nexus, dag,
+            );
+        tokio::time::timeout(Duration::from_secs(60), saga_done)
+            .await
+            .expect("instance update saga did not complete within 60 seconds");
+
+        verify_active_vmm_destroyed(&cptestctx, instance_id).await;
+
+        cptestctx.teardown().await;
     }
 
     #[derive(Clone, Copy, Default)]
