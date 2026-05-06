@@ -1,13 +1,15 @@
 using provided RNG seed: reconfigurator-cli-test
-> # This test exercises the bug where, in the mupdate-override flow, the planner
+> # This test exercises the bug where, in the mupdate override flow, the planner
 > # would clear `remove_mupdate_override` from a sled's blueprint based on stale
-> # inventory -- specifically, an inventory collection that was captured BEFORE
-> # the sled was mupdated, so the override marker isn't visible in it. Acting on
-> # stale inventory in this way could cause the planner to acknowledge a sled
-> # recovery that hasn't happened, breaking the edge-triggered mupdate-override
-> # semantics. The fix is to mark a sled as ineligible for noop-conversion (and
-> # downstream mupdate-override clearing) whenever the inventory's reported
-> # sled-agent generation is older than the generation in the parent blueprint.
+> # inventory -- specifically, an inventory collection that was captured before
+> # the sled was mupdated, so the override marker isn't visible in it.
+> #
+> # Acting on stale inventory in this way could cause the planner to acknowledge
+> # a sled recovery that hasn't happened, breaking the edge-triggere
+> # mupdate override semantics. The fix is to mark a sled as ineligible for
+> # both noop conversion and mupdate override clearing whenever the inventory's
+> # reported sled-agent generation is older than the generation in the parent
+> # blueprint.
 > #
 > # The test simulates two plans against the same parent blueprint: one against
 > # the latest (post-mupdate) inventory, and one against a stale (pre-mupdate)
@@ -281,8 +283,8 @@ external DNS:
 
 
 
-> # Now plan against the FIRST (pre-mupdate) inventory collection. That
-> # inventory shows no mupdate override on serial0 -- but only because the
+> # Now plan against the first (pre-mupdate) inventory collection. That
+> # inventory shows no mupdate override on serial0, but only because the
 > # inventory was captured before the mupdate ever happened. The parent
 > # blueprint's sled-agent generation for serial0 is now ahead of what this
 > # stale inventory reports.
