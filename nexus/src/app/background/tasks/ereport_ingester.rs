@@ -456,6 +456,7 @@ mod tests {
             "ereports from 4 SPs should be observed: {:?}",
             activation1.sps,
         );
+        assert_eq!(activation1.sps_found, 4);
         tokio_test::assert_ready!(
             analysis_activated.poll(),
             "fm analysis task should be activated"
@@ -661,8 +662,41 @@ mod tests {
             "fm analysis task should not be activated when no new ereports \
              have been ingested"
         );
-
-        assert_eq!(activation2.sps, &[], "no new ereports should be observed");
+        assert_eq!(
+            activation2.sps_found, 4,
+            "4 present SPs should have been found via ignition",
+        );
+        assert_eq!(
+            activation2.sps.len(),
+            4,
+            "all 4 SPs should be reported in the status, even when no new \
+             ereports were observed: {:?}",
+            activation2.sps,
+        );
+        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
+            &activation2.sps
+        {
+            assert_eq!(
+                status.ereports_received, 0,
+                "no ereports should have been received from SP \
+                 {sp_type:?} {slot}",
+            );
+            assert_eq!(
+                status.new_ereports, 0,
+                "no new ereports should have been ingested from SP \
+                 {sp_type:?} {slot}",
+            );
+            assert_eq!(
+                status.requests, 1,
+                "one HTTP request should have been sent for SP \
+                 {sp_type:?} {slot} (empty response)",
+            );
+            assert_eq!(
+                &status.errors,
+                &Vec::<String>::new(),
+                "there should be no errors from SP {sp_type:?} {slot}",
+            );
+        }
 
         check_sp_ereports_exist(
             datastore,
