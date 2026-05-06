@@ -595,7 +595,7 @@ libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d32
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "61479b6922f9112fbe1e722414d2b8055212cb12", package = "lldpd-client" }
-lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "61479b6922f9112fbe1e722414d2b8055212cb12", package = "protocol" }
 omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
