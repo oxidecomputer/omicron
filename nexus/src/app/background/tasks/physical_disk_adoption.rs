@@ -20,6 +20,7 @@ use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
@@ -58,9 +59,8 @@ impl PhysicalDiskAdoption {
         &self,
         opctx: &OpContext,
         collection_id: CollectionUuid,
+        status: &mut PhysicalDiskAdoptionStatus,
     ) -> serde_json::Value {
-        let mut disks_added = 0;
-
         let result = self
             .datastore
             .physical_disk_adoptable_list(opctx, collection_id)
@@ -77,7 +77,8 @@ impl PhysicalDiskAdoption {
                     &err,
                 );
                 let err = format!("failed to query database: {err}");
-                return json!({ "error": err });
+                status.errors.push(err);
+                return json!(status);
             }
         };
 
@@ -117,22 +118,20 @@ impl PhysicalDiskAdoption {
                 let msg = format!(
                     "failed to insert disk/zpool: {err}; disk = {disk:#?}",
                 );
-                return json!({ "error": msg });
+                status.errors.push(msg);
+            } else {
+                status.disks_added += 1;
+
+                info!(
+                    &opctx.log,
+                    "Physical Disk Adoption: \
+                     Successfully added a new disk and zpool";
+                    "disk" => #?disk
+                );
             }
-
-            disks_added += 1;
-
-            info!(
-                &opctx.log,
-                "Physical Disk Adoption: \
-                 Successfully added a new disk and zpool";
-                "disk" => #?disk
-            );
         }
 
-        json!({
-            "physical_disks_added": disks_added,
-        })
+        json!(status)
     }
 }
 
@@ -142,8 +141,10 @@ impl BackgroundTask for PhysicalDiskAdoption {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
+            let mut status = PhysicalDiskAdoptionStatus::default();
             if self.disable {
-                return json!({ "error": "task disabled" });
+                status.errors.push("task disabled".to_owned());
+                return json!(status);
             }
 
             // Only adopt physical disks after rack handoff has completed.
@@ -171,7 +172,8 @@ impl BackgroundTask for PhysicalDiskAdoption {
                             "rack not yet initialized: {}",
                             self.rack_id
                         );
-                        return json!({"error": msg});
+                        status.errors.push(msg);
+                        return json!(status);
                     }
                 }
                 Err(err) => {
@@ -183,7 +185,8 @@ impl BackgroundTask for PhysicalDiskAdoption {
                         &err,
                     );
                     let err = format!("failed to query database: {err}");
-                    return json!({ "error": err });
+                    status.errors.push(err);
+                    return json!(status);
                 }
             }
 
@@ -200,7 +203,8 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     "Physical Disk Adoption: skipped";
                     "reason" => "no inventory"
                 );
-                return json!({ "error": "no inventory" });
+                status.errors.push("no inventory".to_owned());
+                return json!(status);
             };
 
             // We only force manual re-adoption of expunged disks currently.
@@ -234,7 +238,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 // adoption below so we fall through.
             }
 
-            self.physical_disk_adopt(opctx, collection_id).await
+            self.physical_disk_adopt(opctx, collection_id, &mut status).await
         }
         .boxed()
     }
