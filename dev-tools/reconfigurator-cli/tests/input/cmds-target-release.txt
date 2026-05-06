@@ -102,6 +102,13 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
+# The plan above scheduled a host phase 2 update, which bumped serial0's
+# sled-agent generation in the blueprint. Apply the latest blueprint to
+# inventory so subsequent plans aren't blocked by the inventory-stale check
+# in the noop image source path.
+sled-set serial0 omicron-config latest
+inventory-generate
+
 # If we generate another plan, there should be no change.
 blueprint-plan latest latest
 blueprint-diff latest
@@ -133,6 +140,12 @@ inventory-generate
 # update.
 blueprint-plan latest latest
 blueprint-diff latest
+
+# Apply the latest blueprint to serial0's inventory so the next plans (which
+# work on serial1's MGS chain) aren't shadowed by an inventory-stale check on
+# serial0.
+sled-set serial0 omicron-config latest
+inventory-generate
 
 # This time, make it more interesting.  Change the inactive slot contents of
 # the simulated RoT bootloader.  This should make the configured update
@@ -182,6 +195,12 @@ inventory-generate
 # Planning should remove this update and add an OS update for this sled.
 blueprint-plan latest latest
 blueprint-diff latest
+
+# The plan above scheduled a host phase 2 update on serial1, bumping its
+# sled-agent generation. Apply the latest blueprint to inventory so subsequent
+# plans aren't blocked by the inventory-stale check on serial1.
+sled-set serial1 omicron-config latest
+inventory-generate
 
 # Try a host OS impossible update replacement: write an unknown artifact to the
 # sled's phase 1. The planner should realize the update is impossible and
@@ -252,6 +271,12 @@ sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
+
+# The plan above scheduled a host phase 2 update on serial2, bumping its
+# sled-agent generation. Apply the latest blueprint to inventory so subsequent
+# plans aren't blocked by the inventory-stale check on serial2.
+sled-set serial2 omicron-config latest
+inventory-generate
 
 # Finish updating the last sled's host OS.
 sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
@@ -471,8 +496,12 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # If we expunge one of the OLD nexuses, we should observe
-# that it is re-created.
+# that it is re-created. Apply the latest blueprint to the affected sled's
+# inventory so the noop check on the next plan isn't blocked by the
+# inventory-stale path on the bumped generation.
 blueprint-edit latest expunge-zones 0c71b3b2-6ceb-4e8f-b020-b08675e83038
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
@@ -481,14 +510,24 @@ inventory-generate
 # Bump the set of active Nexus zones; this simulates Nexus handoff.
 set active-nexus-gen 2
 
-# Planning should now expunge one of the old Nexus zones.
+# Planning should now expunge one of the old Nexus zones. After each plan,
+# apply the latest blueprint to all sleds' inventories so subsequent plans see
+# fresh sled-agent generations rather than firing the inventory-stale path.
 blueprint-plan latest latest
 blueprint-diff latest
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
 
 # Two more planning iterations should expunge the remaining two old 0.0.1
 # version Nexus zones.
 blueprint-plan latest latest
 blueprint-diff latest
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 

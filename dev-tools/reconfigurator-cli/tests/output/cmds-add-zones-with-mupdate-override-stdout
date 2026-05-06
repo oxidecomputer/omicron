@@ -225,6 +225,18 @@ external DNS:
 
 
 
+> # Apply the blueprint to serial0 so that inventory's reported sled-agent
+> # generation matches the blueprint. (The mupdate override remains visible in
+> # inventory because we don't call `sled-set ... mupdate-override unset`.) This
+> # keeps the next plan's noop check from firing the inventory-stale path,
+> # letting it exercise the mupdate-override-set-in-blueprint path instead.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1)
+
+> inventory-generate
+generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
+
+
 > # Set Nexus redundancy to 4.
 > set num-nexus 4
 target number of Nexus zones: None -> 4

@@ -110,6 +110,20 @@ warn: no validation is done on the requested source
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 mupdate override: unset -> 203fa72c-85c1-466a-8ed3-338ee029530d
 
 
+> # The blueprint-edits above bumped serial0 and serial1's sled-agent generations.
+> # Apply the latest blueprint to all sleds' inventories so the noop check on
+> # the upcoming plan starts from fresh sled-agent generations rather than
+> # firing the inventory-stale path.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (d60afc57-f15d-476c-bd0f-b1071e2bb976)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (d60afc57-f15d-476c-bd0f-b1071e2bb976)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (d60afc57-f15d-476c-bd0f-b1071e2bb976)
+
+
 > # Generate a new inventory and plan against that.
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
@@ -257,10 +271,10 @@ sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (role = Gimlet, serial serial1)
         reservation: None, quota: None
 
 LEDGERED SLED CONFIG
-    generation: 2
+    generation: 4
     remove_mupdate_override: None
-    desired host phase 2 slot a: keep current contents
-    desired host phase 2 slot b: keep current contents
+    desired host phase 2 slot a: artifact 3a9607047b03ccaab6d222249d890e93ca51b94ad631c7ca38be74cba60802ff
+    desired host phase 2 slot b: artifact 044d45ad681b44e89c10e056cabdedf19fd8b1e54bc95e6622bcdd23f16bc8f2
     DISKS: 1
         ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
         f26df0e3-46bb-4c85-8146-efcab46179da     72c59873-31ff-4e36-8d76-ff834009349a     fake-vendor     fake-model     serial-72c59873-31ff-4e36-8d76-ff834009349a 
@@ -383,10 +397,10 @@ sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (role = Gimlet, serial serial0)
         reservation: None, quota: None
 
 LEDGERED SLED CONFIG
-    generation: 2
+    generation: 5
     remove_mupdate_override: None
-    desired host phase 2 slot a: keep current contents
-    desired host phase 2 slot b: keep current contents
+    desired host phase 2 slot a: artifact 3a9607047b03ccaab6d222249d890e93ca51b94ad631c7ca38be74cba60802ff
+    desired host phase 2 slot b: artifact 044d45ad681b44e89c10e056cabdedf19fd8b1e54bc95e6622bcdd23f16bc8f2
     DISKS: 1
         ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
         3f399219-7701-414c-9f07-8e97f688765c     c6d33b64-fb96-4129-bab1-7878a06a5f9b     fake-vendor     fake-model     serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b 
@@ -406,13 +420,13 @@ LEDGERED SLED CONFIG
         ad41be71-6c15-4428-b510-20ceacde4fa6     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/external_dns                                                      off             none        none        
         cdf3684f-a6cf-4449-b9ec-e696b2c663e2     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/local_storage                                                     off             none        none        
     ZONES: 6
-        ID                                       KIND                IMAGE_SOURCE    
-        0c71b3b2-6ceb-4e8f-b020-b08675e83038     nexus               install-dataset 
-        427ec88f-f467-42fa-9bbb-66a91a36103c     internal_dns        install-dataset 
-        5199c033-4cf9-4ab6-8ae7-566bd7606363     crucible            install-dataset 
-        6444f8a5-6465-4f0b-a549-1993c113569c     internal_ntp        install-dataset 
-        803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        install-dataset 
-        ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     install-dataset 
+        ID                                       KIND                IMAGE_SOURCE                                                               
+        0c71b3b2-6ceb-4e8f-b020-b08675e83038     nexus               artifact: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 
+        427ec88f-f467-42fa-9bbb-66a91a36103c     internal_dns        install-dataset                                                            
+        5199c033-4cf9-4ab6-8ae7-566bd7606363     crucible            install-dataset                                                            
+        6444f8a5-6465-4f0b-a549-1993c113569c     internal_ntp        install-dataset                                                            
+        803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        install-dataset                                                            
+        ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     install-dataset                                                            
     measurement empty
     zone image resolver status:
         zone manifest:
@@ -904,6 +918,14 @@ external DNS:
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 inventory visibility: visible -> hidden
 
 
+> # The previous plan set remove_mupdate_override on serial2, bumping its
+> # sled-agent generation. Apply the latest blueprint to serial2's inventory so
+> # the noop check on the upcoming plan exercises the mupdate-override-set path
+> # rather than firing the inventory-stale path.
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (a5a8f242-ffa5-473c-8efd-2acf2dc0b736)
+
+
 > # Set the target release to a new repo, causing a generation number bump
 > # to 3.
 > set target-release repo-1.0.0.zip
@@ -1012,13 +1034,19 @@ external DNS:
 
 
 
-> # Now simulate the new config being applied to sled 0, which would
-> # cause the mupdate override to be removed.
+> # Now simulate the new config being applied to sled 0, which would cause the
+> # mupdate override to be removed. Apply the latest blueprint to inventory too,
+> # so that inventory's reported sled-agent generation advances to match the
+> # blueprint's; otherwise the noop check on the next plan would correctly
+> # refuse to clear remove_mupdate_override on the basis of stale inventory.
 > sled-set serial0 mupdate-override unset
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: 6123eac1-ec5b-42ba-b73f-9845105a9971 -> unset
 
 > sled-set serial0 inventory-visible
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 inventory visibility: hidden -> visible
+
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (626487fa-7139-45ec-8416-902271fc730b)
 
 
 > # But simulate a second mupdate on sled 2. This should invalidate the existing
@@ -1284,9 +1312,17 @@ external DNS:
 
 
 > # Clear the mupdate override on sled 2, signifying that the config has been
-> # applied.
+> # applied. Also advance serial0 and serial2's inventories to the latest
+> # blueprint -- the previous plan did noop conversions on serial0 (bumping its
+> # sled-agent generation) and set remove_mupdate_override on serial2.
 > sled-set serial2 mupdate-override unset
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 mupdate override: 1c0ce176-6dc8-4a90-adea-d4a8000751da -> unset
+
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (c1a0d242-9160-40f4-96ae-61f8f40a0b1b)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (c1a0d242-9160-40f4-96ae-61f8f40a0b1b)
 
 
 > # Run the planner again. This will cause sled 2's blueprint
@@ -1650,6 +1686,18 @@ external DNS:
     unchanged names: 5 (records: 9)
 
 
+
+
+> # Apply the latest blueprint again so subsequent plans aren't shadowed by an
+> # inventory-stale check on the just-bumped sled-agent generations.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (afb09faf-a586-4483-9289-04d4f1d8ba23)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (afb09faf-a586-4483-9289-04d4f1d8ba23)
+
+> inventory-generate
+generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
 
 > # Now set the target release -- at this point, we're still waiting on the
@@ -2043,11 +2091,23 @@ external DNS:
 
 > # Now clear the mupdate override error. At this point, we're *still* blocked
 > # on serial1's install dataset not being known (so cannot be noop converted).
+> # Advance serial1's reported sled-agent generation alongside, simulating the
+> # sled having applied the latest blueprint. Also advance serial0/2 since the
+> # previous plan bumped their generations too.
 > sled-set serial1 mupdate-override unset
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: error -> unset
 
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (ce365dff-2cdb-4f35-a186-b15e20e1e700)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (ce365dff-2cdb-4f35-a186-b15e20e1e700)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (ce365dff-2cdb-4f35-a186-b15e20e1e700)
+
 > inventory-generate
-generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
+generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
 
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
@@ -2112,8 +2172,14 @@ external DNS:
 > sled-update-install-dataset serial1 --to-target-release
 sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target release (system version 2.0.0)
 
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (8f2d1f39-7c88-4701-aa43-56bf281b28c1)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (8f2d1f39-7c88-4701-aa43-56bf281b28c1)
+
 > inventory-generate
-generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
+generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
 
 
 > # Measurements will block further planning progress, run a planning step
@@ -2583,7 +2649,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest bluepri
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (12d602a6-5ab4-487a-b94e-eb30cdf30300)
 
 > inventory-generate
-generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
+generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
 
 
 > # This will attempt to update the RoT bootloader on the first sled.
@@ -2933,9 +2999,21 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk ->
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 
-> # All MGS-based updates complete.
+> # All MGS-based updates complete. Apply the latest blueprint to all sleds'
+> # inventories so the noop check on the next plan starts from fresh sled-agent
+> # generations rather than firing the inventory-stale path on the bumped
+> # generations from earlier plans in this file.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (61a93ea3-c872-48e0-aace-e86b0c52b839)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (61a93ea3-c872-48e0-aace-e86b0c52b839)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (61a93ea3-c872-48e0-aace-e86b0c52b839)
+
 > inventory-generate
-generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
+generated inventory collection 08abe624-4b5f-491c-90cb-d74a84e4ba3e from configured sleds
 
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
@@ -3213,8 +3291,19 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> c8fba91
 > sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 added sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b (serial: serial3)
 
+> # The plan above bumped sled-agent generations as it scheduled work; apply the
+> # latest blueprint to inventory so subsequent noop checks aren't inventory-stale.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (27e755bc-dc10-4647-853c-f89bb3a15a2c)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (27e755bc-dc10-4647-853c-f89bb3a15a2c)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (27e755bc-dc10-4647-853c-f89bb3a15a2c)
+
 > inventory-generate
-generated inventory collection 08abe624-4b5f-491c-90cb-d74a84e4ba3e from configured sleds
+generated inventory collection 005f6a30-7f65-4593-9f78-ee68f766f42b from configured sleds
 
 
 > # This will *not* generate the datasets and internal NTP zone on the new
@@ -3318,20 +3407,21 @@ to:   blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 
 
     omicron zones:
-    -------------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source                disposition    underlay IP          
-    -------------------------------------------------------------------------------------------------------------------------
-    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 1.0.0     expunged ⏳     fd00:1122:3344:2::1  
-*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - artifact: version 1.0.0   in service     fd00:1122:3344:101::7
-     └─                                                      + install dataset                                               
-*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - artifact: version 1.0.0   in service     fd00:1122:3344:101::6
-     └─                                                      + install dataset                                               
-*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - artifact: version 1.0.0   in service     fd00:1122:3344:101::5
-     └─                                                      + install dataset                                               
-*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - artifact: version 1.0.0   in service     fd00:1122:3344:101::3
-     └─                                                      + install dataset                                               
-*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - artifact: version 1.0.0   in service     fd00:1122:3344:101::4
-     └─                                                      + install dataset                                               
+    ---------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition      underlay IP          
+    ---------------------------------------------------------------------------------------------------------------------------
+*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - artifact: version 1.0.0   in service       fd00:1122:3344:101::7
+     └─                                                      + install dataset                                                 
+*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - artifact: version 1.0.0   in service       fd00:1122:3344:101::6
+     └─                                                      + install dataset                                                 
+*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - artifact: version 1.0.0   in service       fd00:1122:3344:101::5
+     └─                                                      + install dataset                                                 
+*   internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 1.0.0     - expunged ⏳     fd00:1122:3344:2::1  
+     └─                                                                                  + expunged ✓                          
+*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - artifact: version 1.0.0   in service       fd00:1122:3344:101::3
+     └─                                                      + install dataset                                                 
+*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - artifact: version 1.0.0   in service       fd00:1122:3344:101::4
+     └─                                                      + install dataset                                                 
 
 
  ADDED SLEDS:
@@ -3385,6 +3475,18 @@ planner config updated:
 *   add zones with mupdate override:   false -> true
 
 
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (9f89efdf-a23e-4137-b7cc-79f4a91cbe1f)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (9f89efdf-a23e-4137-b7cc-79f4a91cbe1f)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (9f89efdf-a23e-4137-b7cc-79f4a91cbe1f)
+
+> inventory-generate
+generated inventory collection b5263998-e486-4cea-8842-b32bd326fa3a from configured sleds
+
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
@@ -3415,7 +3517,9 @@ planner config:
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * only placed 0/1 desired nexus zones
-* zone updates waiting on zone add blockers
+* discretionary zones placed:
+  * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 2.0.0
+* zone updates waiting on discretionary zones
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
 Waiting on zone add/update blockers
@@ -3427,6 +3531,65 @@ from: blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 to:   blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
 
  MODIFIED SLEDS:
+
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 10 -> 11):
+    will remove mupdate override:   c8fba912-63ae-473a-9115-0495d10fb3bc (unchanged)
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/external_dns                                                    ad41be71-6c15-4428-b510-20ceacde4fa6   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/internal_dns                                                    a4c3032e-21fa-4d4a-b040-a7e3c572cf3c   expunged      none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                            4617d206-4330-4dfa-b9f3-f63a3db834f9   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363          4847a96e-a267-4ae7-aa3d-805c1e77f81e   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389   43931274-7fe8-4077-825d-dff2bc8efa58   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d      1bca7f71-5e42-4749-91ec-fa40793a3a9a   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      3ac089c9-9dec-465b-863a-188e80d71fb4   expunged      none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               686c19cf-a0d7-45f6-866f-c564612b2664   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/local_storage                                                   cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/local_storage_unencrypted                                             793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
++   oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/internal_dns                                                    b8ba4bea-893b-42e9-a034-c7283d15c2b7   in service    none      none          off        
++   oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_cfc72ddd-fd83-4396-b1ad-d53f69182a09      64c1c086-6866-4a94-b9bf-1d022312d587   in service    none      none          off        
+
+
+    omicron zones:
+    -----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition    underlay IP          
+    -----------------------------------------------------------------------------------------------------------------------
+    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   install dataset           in service     fd00:1122:3344:101::7
+    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   install dataset           in service     fd00:1122:3344:101::6
+    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   install dataset           in service     fd00:1122:3344:101::5
+    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 1.0.0   expunged ✓     fd00:1122:3344:2::1  
+    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   install dataset           in service     fd00:1122:3344:101::3
+    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   install dataset           in service     fd00:1122:3344:101::4
++   internal_dns      cfc72ddd-fd83-4396-b1ad-d53f69182a09   artifact: version 2.0.0   in service     fd00:1122:3344:2::1  
+
 
   sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b (active, config generation 1 -> 2):
 
@@ -3532,6 +3695,12 @@ to:   blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
 
 internal DNS:
 * DNS zone: "control-plane.oxide.internal": 
+*   name: @                                                  (records: 2 -> 3)
+-       NS   ns1.control-plane.oxide.internal
+-       NS   ns2.control-plane.oxide.internal
++       NS   ns1.control-plane.oxide.internal
++       NS   ns2.control-plane.oxide.internal
++       NS   ns3.control-plane.oxide.internal
 *   name: _internal-ntp._tcp                                 (records: 3 -> 4)
 -       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
 -       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
@@ -3540,9 +3709,22 @@ internal DNS:
 +       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
 +       SRV  port   123 cee5d0c6-412c-49e9-a9a8-dab9addaa182.host.control-plane.oxide.internal
 +       SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+*   name: _nameservice._tcp                                  (records: 2 -> 3)
+-       SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+-       SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
++       SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
++       SRV  port  5353 cfc72ddd-fd83-4396-b1ad-d53f69182a09.host.control-plane.oxide.internal
++       SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
 +   name: cee5d0c6-412c-49e9-a9a8-dab9addaa182.host          (records: 1)
 +       AAAA fd00:1122:3344:104::3
-    unchanged names: 38 (records: 51)
++   name: cfc72ddd-fd83-4396-b1ad-d53f69182a09.host          (records: 1)
++       AAAA fd00:1122:3344:2::1
+*   name: ns2                                                (records: 1 -> 1)
+-       AAAA fd00:1122:3344:3::1
++       AAAA fd00:1122:3344:2::1
++   name: ns3                                                (records: 1)
++       AAAA fd00:1122:3344:3::1
+    unchanged names: 35 (records: 46)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -3561,7 +3743,7 @@ blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 created from latest blueprint (9a
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset -> cc724abe-80c1-47e6-9771-19e6540531a9
 
 > inventory-generate
-generated inventory collection 005f6a30-7f65-4593-9f78-ee68f766f42b from configured sleds
+generated inventory collection 68767302-7fed-4eb1-9611-3dfd807ff0cd from configured sleds
 
 > blueprint-plan latest latest
 INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, new_bp_override: cc724abe-80c1-47e6-9771-19e6540531a9, prev_bp_override: None, zones: 
