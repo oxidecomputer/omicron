@@ -2403,6 +2403,7 @@ mod test {
             SwitchSlot::Switch0,
             1,
         )
+        .await
         .unwrap();
         wait_for_n_nat_entries(
             &log,
@@ -2410,6 +2411,7 @@ mod test {
             SwitchSlot::Switch1,
             1,
         )
+        .await
         .unwrap();
 
         // Shutdown switch 0.
@@ -2440,7 +2442,7 @@ mod test {
             &log,
             &switch1_dpd_client,
             SwitchSlot::Switch1,
-            1,
+            0,
         )
         .await
         .unwrap();
