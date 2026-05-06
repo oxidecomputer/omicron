@@ -168,41 +168,31 @@ impl DataStore {
         Ok(sagas)
     }
 
-    pub async fn saga_list_running_or_unwinding_older_than_batched(
+    /// Returns a list of sagas that were created before the given time
+    /// threshold and are in a running or unwinding state (limit of 500).
+    pub async fn saga_list_running_or_unwinding_older_than(
         &self,
         opctx: &OpContext,
         time_threshold: TimeDelta,
     ) -> Result<Vec<db::saga_types::Saga>, Error> {
-        let mut sagas = vec![];
-        let mut paginator = Paginator::new(
-            SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
+        use nexus_db_schema::schema::saga::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
         let time_limit = Utc::now() - time_threshold;
 
-        while let Some(p) = paginator.next() {
-            use nexus_db_schema::schema::saga::dsl;
-            let mut batch =
-                paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                    .filter(
-                        dsl::saga_state.eq_any(vec![
-                            SagaState::Running,
-                            SagaState::Unwinding,
-                        ]),
-                    )
-                    .filter(dsl::time_created.lt(time_limit))
-                    .select(db::saga_types::Saga::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
-
-            paginator = p.found_batch(&batch, &|row| row.id);
-            sagas.append(&mut batch);
-        }
-        Ok(sagas)
+        dsl::saga.filter(
+            dsl::saga_state.eq_any(vec![
+                SagaState::Running,
+                SagaState::Unwinding,
+            ]),
+        )
+        .filter(dsl::time_created.lt(time_limit))
+        .limit(500)
+        .select(db::saga_types::Saga::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+        })
     }
 
     /// Returns a list of all saga log entries for the given saga, making as
@@ -836,7 +826,7 @@ mod test {
         // Querying with a large threshold should return no sagas, since all
         // test sagas were just created and none are older than 10 hours.
         let observed_sagas = datastore
-            .saga_list_running_or_unwinding_older_than_batched(
+            .saga_list_running_or_unwinding_older_than(
                 &opctx,
                 TimeDelta::hours(10),
             )
@@ -852,7 +842,7 @@ mod test {
         // future to avoid flakyness. All sagas in the Running or Unwinding
         // states should be returned.
         let mut observed_sagas = datastore
-            .saga_list_running_or_unwinding_older_than_batched(
+            .saga_list_running_or_unwinding_older_than(
                 &opctx,
                 TimeDelta::seconds(-10),
             )

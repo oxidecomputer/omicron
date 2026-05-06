@@ -293,7 +293,7 @@ impl super::Nexus {
         // progress
         let stale_active_sagas = self
             .datastore()
-            .saga_list_running_or_unwinding_older_than_batched(
+            .saga_list_running_or_unwinding_older_than(
                 opctx,
                 STALE_SAGA_THRESHOLD,
             )
