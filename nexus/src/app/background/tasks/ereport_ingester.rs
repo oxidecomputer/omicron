@@ -166,17 +166,17 @@ impl SpEreportIngester {
                     async move {
                         let status = ingester
                             .ingest_sp_ereports(opctx, &clients, type_, slot)
-                            .await?;
-                        Some(SpEreporterStatus {
+                            .await;
+                        SpEreporterStatus {
                             sp_type: type_,
                             slot,
                             ignition_type,
                             status,
-                        })
+                        }
                     }
                 })
                 .await;
-            if let Some(Some(sp_status)) = sp_result {
+            if let Some(sp_status) = sp_result {
                 total_ereports += sp_status.status.ereports_received;
                 total_new_ereports += sp_status.status.new_ereports;
                 status.sps.push(sp_status);
@@ -184,12 +184,10 @@ impl SpEreportIngester {
         }
 
         // Wait for remaining ingestion tasks to come back.
-        while let Some(sp_result) = tasks.join_next().await {
-            if let Some(sp_status) = sp_result {
-                total_ereports += sp_status.status.ereports_received;
-                total_new_ereports += sp_status.status.new_ereports;
-                status.sps.push(sp_status);
-            }
+        while let Some(sp_status) = tasks.join_next().await {
+            total_ereports += sp_status.status.ereports_received;
+            total_new_ereports += sp_status.status.new_ereports;
+            status.sps.push(sp_status);
         }
 
         // If any ereports were ingested that were not already in the database,
@@ -236,24 +234,24 @@ impl Ingester {
         clients: &[GatewayClient],
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
-    ) -> Option<EreporterStatus> {
+    ) -> EreporterStatus {
         // Fetch the latest ereport from this SP.
         let reporter = nexus_types::fm::ereport::Reporter::Sp { sp_type, slot };
         let latest =
             match self.datastore.latest_ereport_id(&opctx, reporter).await {
                 Ok(latest) => latest,
                 Err(error) => {
-                    return Some(EreporterStatus {
+                    return EreporterStatus {
                         errors: vec![format!(
                             "failed to query for latest ereport: {error:#}"
                         )],
                         ..Default::default()
-                    });
+                    };
                 }
             };
 
         let mut params = EreportQueryParams::from_latest(latest);
-        let mut status = None;
+        let mut status = EreporterStatus::default();
 
         // Continue requesting ereports from this SP in a loop until we have
         // received all its ereports.
@@ -262,29 +260,22 @@ impl Ingester {
             .await
         {
             if reports.items.is_empty() {
-                if let Some(ref mut status) = status {
-                    status.requests += 1;
-                }
+                status.requests += 1;
                 slog::trace!(
                     &opctx.log,
                     "no ereports returned by SP";
                     "committed_ena" => ?params.committed_ena,
                     "start_ena" => ?params.start_ena,
                     "restart_id" => ?params.restart_id,
-                    "total_ereports_received" => status
-                        .as_ref()
-                        .map(|s| s.ereports_received),
-                    "total_new_ereports" => status
-                        .as_ref()
-                        .map(|s| s.new_ereports),
+                    "total_ereports_received" => status.ereports_received,
+                    "total_new_ereports" => status.new_ereports,
                 );
                 break;
             } else {
-                status.get_or_insert_default().requests += 1;
+                status.requests += 1;
             }
             let time_collected = Utc::now();
             let received = reports.items.len();
-            let status = status.get_or_insert_default();
             status.ereports_received += received;
 
             let db_ereports = reports.items.into_iter().map(|ereport| {
@@ -347,7 +338,7 @@ impl Ingester {
         EreportQueryParams { committed_ena,start_ena, restart_id }: &EreportQueryParams,
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
-        status: &mut Option<EreporterStatus>,
+        status: &mut EreporterStatus,
     ) -> Option<ereport_types::Ereports> {
         // If an attempt to collect ereports from one gateway fails, we will try
         // any other discovered gateways.
@@ -384,9 +375,8 @@ impl Ingester {
                         "gateway_addr" => %addr,
                         "error" => ?e,
                     );
-                    let stats = status.get_or_insert_default();
-                    stats.requests += 1;
-                    stats.errors.push(format!("MGS {addr}: {e:#}"));
+                    status.requests += 1;
+                    status.errors.push(format!("MGS {addr}: {e:#}"));
                 }
             }
         }
