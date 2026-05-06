@@ -7785,7 +7785,7 @@ dependencies = [
  "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
- "tough",
+ "tough 0.22.0",
  "trust-quorum-protocol",
  "trust-quorum-types",
  "tufaceous-artifact",
@@ -7825,7 +7825,7 @@ dependencies = [
  "slog-error-chain",
  "strum 0.27.2",
  "thiserror 2.0.18",
- "tough",
+ "tough 0.22.0",
  "tufaceous-artifact",
  "url",
  "uuid",
@@ -8773,7 +8773,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-test",
  "tokio-util",
- "tough",
+ "tough 0.22.0",
  "trust-quorum-types",
  "tufaceous",
  "tufaceous-artifact",
@@ -14106,7 +14106,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -15434,6 +15434,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "tough"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8031cff0872dd1c6312370515a6be8098f6ea5512f1bad725016046fc725f272"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "aws-lc-rs",
+ "bytes",
+ "chrono",
+ "dyn-clone",
+ "futures",
+ "futures-core",
+ "globset",
+ "hex",
+ "log",
+ "olpc-cjson",
+ "pem",
+ "percent-encoding",
+ "reqwest 0.12.28",
+ "rustls 0.23.37",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "typed-path",
+ "untrusted 0.7.1",
+ "url",
+ "walkdir",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15907,7 +15942,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tough",
+ "tough 0.20.0",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "url",
@@ -16249,7 +16284,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
- "tough",
+ "tough 0.22.0",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
@@ -17025,7 +17060,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.23",
- "tough",
+ "tough 0.22.0",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous",
  "tufaceous-artifact",
