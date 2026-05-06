@@ -1576,7 +1576,6 @@ mod test {
     use sled_agent_types::instance::{
         MigrationRuntimeState, MigrationState, Migrations,
     };
-    use std::collections::BTreeSet;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
