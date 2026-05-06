@@ -45,6 +45,7 @@ members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
+    "dev-tools/omicron-deployment-graph",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -227,6 +228,7 @@ default-members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
+    "dev-tools/omicron-deployment-graph",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -520,9 +522,9 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gateway-types-versions = { path = "gateway-types/versions" }
@@ -592,6 +594,7 @@ linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
 lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"

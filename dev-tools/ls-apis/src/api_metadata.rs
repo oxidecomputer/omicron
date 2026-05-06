@@ -5,7 +5,6 @@
 //! Developer-maintained API metadata
 
 use crate::ClientPackageName;
-use crate::DeploymentUnitName;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
 use crate::cargo::DepPath;
@@ -14,6 +13,7 @@ use anyhow::{Result, bail};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_deployment_graph::DeploymentUnitName;
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -27,7 +27,7 @@ use std::collections::BTreeSet;
 #[serde(try_from = "RawApiMetadata")]
 pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
-    deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
+    deployment_units: IdOrdMap<DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
     intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
@@ -42,8 +42,16 @@ impl AllApiMetadata {
     /// Iterate over the deployment units defined in the metadata
     pub fn deployment_units(
         &self,
-    ) -> impl Iterator<Item = (&DeploymentUnitName, &DeploymentUnitInfo)> {
+    ) -> impl Iterator<Item = &DeploymentUnitInfo> {
         self.deployment_units.iter()
+    }
+
+    /// Look up a deployment unit's info by its name
+    pub fn deployment_unit_info(
+        &self,
+        name: &DeploymentUnitName,
+    ) -> Option<&DeploymentUnitInfo> {
+        self.deployment_units.get(name)
     }
 
     /// Iterate over the package names for all the APIs' clients
@@ -55,7 +63,7 @@ impl AllApiMetadata {
     pub fn server_components(
         &self,
     ) -> impl Iterator<Item = &ServerComponentName> {
-        self.deployment_units.values().flat_map(|d| d.packages.iter())
+        self.deployment_units.iter().flat_map(|d| d.packages.iter())
     }
 
     /// Look up details about an API based on its client package name
@@ -166,14 +174,12 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             }
         }
 
-        let mut deployment_units = BTreeMap::new();
+        let mut deployment_units = IdOrdMap::new();
         for info in raw.deployment_units {
-            if let Some(previous) =
-                deployment_units.insert(info.label.clone(), info)
-            {
+            if let Err(e) = deployment_units.insert_unique(info) {
                 bail!(
-                    "duplicate deployment unit in API metadata: {}",
-                    &previous.label,
+                    "duplicate deployment unit name in API metadata: {}",
+                    e.new_item().name,
                 );
             }
         }
@@ -206,7 +212,7 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         // Validate that IDU-only edges reference only known server components
         // and APIs.
         let known_components: BTreeSet<_> =
-            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
+            deployment_units.iter().flat_map(|u| u.packages.iter()).collect();
         for edge in &raw.intra_deployment_unit_only_edges {
             if !known_components.contains(&edge.server) {
                 bail!(
@@ -411,10 +417,19 @@ pub enum ApiConsumerStatus {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentUnitInfo {
-    /// human-readable label, also used as primary key
-    pub label: DeploymentUnitName,
+    /// human-readable name (e.g. "Nexus", "DNS Server"), also used as primary
+    /// key
+    pub name: DeploymentUnitName,
     /// list of Rust packages that are shipped in this unit
     pub packages: Vec<ServerComponentName>,
+}
+
+impl IdOrdItem for DeploymentUnitInfo {
+    type Key<'a> = &'a DeploymentUnitName;
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+    id_upcast!();
 }
 
 #[derive(Deserialize)]
@@ -446,6 +461,11 @@ pub enum Evaluation {
     NotDeployed,
     /// This dependency should not be part of the update DAG
     NonDag,
+    /// This dependency is only used during RSS, not during normal operation or
+    /// upgrade. Like `NonDag`, this means the dependency should not be part of
+    /// the update DAG. Unlike `NonDag`, this does not require that the target
+    /// API uses client-side versioning.
+    RssOnly,
     /// This dependency should be part of the update DAG
     Dag,
 }

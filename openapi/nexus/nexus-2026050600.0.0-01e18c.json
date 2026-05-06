@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026042800.0.0"
+    "version": "2026050600.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -30066,7 +30066,8 @@
               "volts",
               "amps",
               "watts",
-              "degrees_celsius"
+              "degrees_celsius",
+              "joules"
             ]
           },
           {
