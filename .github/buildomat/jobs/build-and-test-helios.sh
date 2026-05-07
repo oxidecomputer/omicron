@@ -2,7 +2,7 @@
 #:
 #: name = "build-and-test (helios)"
 #: variety = "basic"
-#: target = "helios-2.0-32c256gb"
+#: target = "helios-3.0-32c256gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",

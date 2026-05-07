@@ -90,15 +90,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v36::multicast::ClearMcast2Phys;
-    pub use crate::v36::multicast::ClearMcastForwarding;
-    pub use crate::v36::multicast::Mcast2PhysMapping;
-    pub use crate::v36::multicast::McastFilterMode;
-    pub use crate::v36::multicast::McastForwardingEntry;
-    pub use crate::v36::multicast::McastForwardingNextHop;
-    pub use crate::v36::multicast::McastReplication;
-    pub use crate::v36::multicast::McastSourceFilter;
-    pub use crate::v36::multicast::MulticastGroupCfg;
+    pub use crate::v38::multicast::ClearMcast2Phys;
+    pub use crate::v38::multicast::ClearMcastForwarding;
+    pub use crate::v38::multicast::Mcast2PhysMapping;
+    pub use crate::v38::multicast::McastFilterMode;
+    pub use crate::v38::multicast::McastForwardingEntry;
+    pub use crate::v38::multicast::McastForwardingNextHop;
+    pub use crate::v38::multicast::McastReplication;
+    pub use crate::v38::multicast::McastSourceFilter;
+    pub use crate::v38::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -186,14 +186,15 @@ pub mod inventory {
     pub use crate::v24::inventory::InventoryZpool;
     pub use crate::v24::inventory::ZpoolHealth;
 
-    pub use crate::v34::inventory::Inventory;
     pub use crate::v34::inventory::Svc;
-    pub use crate::v34::inventory::SvcEnabledNotOnline;
-    pub use crate::v34::inventory::SvcEnabledNotOnlineState;
     pub use crate::v34::inventory::SvcState;
-    pub use crate::v34::inventory::SvcsEnabledNotOnline;
-    pub use crate::v34::inventory::SvcsEnabledNotOnlineResult;
     pub use crate::v34::inventory::SvcsError;
+
+    pub use crate::v37::inventory::Inventory;
+    pub use crate::v37::inventory::SvcEnabledNotOnline;
+    pub use crate::v37::inventory::SvcEnabledNotOnlineState;
+    pub use crate::v37::inventory::SvcsEnabledNotOnline;
+    pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

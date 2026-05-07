@@ -586,12 +586,10 @@ mod tests {
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();
-            new_case
-                .request_support_bundle(
-                    nexus_types::support_bundle::BundleDataSelection::all(),
-                    "requesting a support bundle",
-                )
-                .unwrap();
+            new_case.request_support_bundle(
+                nexus_types::support_bundle::BundleDataSelection::all(),
+                "requesting a support bundle",
+            );
             *new_case.id()
         };
 

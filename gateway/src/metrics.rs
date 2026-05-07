@@ -818,6 +818,10 @@ impl SpPoller {
                             MeasurementKind::InputCurrent => "input_current",
                             MeasurementKind::InputVoltage => "input_voltage",
                             MeasurementKind::Speed => "fan_speed",
+                            MeasurementKind::Pwm => "pwm",
+                            MeasurementKind::InputPower => "input_power",
+                            MeasurementKind::OutputEnergy => "output_energy",
+                            MeasurementKind::InputEnergy => "input_energy",
                         };
                         let error = match error {
                             MeasurementError::InvalidSensor => "invalid_sensor",
@@ -893,7 +897,6 @@ impl SpPoller {
                                 &metric::Temperature { sensor, datum: 0.0 },
                             )
                         }
-
                         (Ok(datum), MeasurementKind::CpuTctl) => Sample::new(
                             target,
                             &metric::AmdCpuTctl { sensor, datum },
@@ -918,7 +921,6 @@ impl SpPoller {
                             target,
                             &metric::Voltage { sensor, datum },
                         ),
-
                         (Err(_), MeasurementKind::Voltage) => {
                             Sample::new_missing(
                                 target,
@@ -967,6 +969,49 @@ impl SpPoller {
                             Sample::new_missing(
                                 target,
                                 &metric::FanSpeed { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Ok(datum), MeasurementKind::Pwm) => {
+                            Sample::new(target, &metric::Pwm { sensor, datum })
+                        }
+                        (Err(_), MeasurementKind::Pwm) => Sample::new_missing(
+                            target,
+                            &metric::Pwm { sensor, datum: 0.0 },
+                        ),
+                        (Ok(datum), MeasurementKind::InputPower) => {
+                            Sample::new(
+                                target,
+                                &metric::InputPower { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::InputPower) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::InputPower { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Ok(datum), MeasurementKind::OutputEnergy) => {
+                            Sample::new(
+                                target,
+                                &metric::OutputEnergy { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::OutputEnergy) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::OutputEnergy { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Ok(datum), MeasurementKind::InputEnergy) => {
+                            Sample::new(
+                                target,
+                                &metric::InputEnergy { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::InputEnergy) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::InputEnergy { sensor, datum: 0.0 },
                             )
                         }
                     };

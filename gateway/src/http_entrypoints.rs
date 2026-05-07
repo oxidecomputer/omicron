@@ -65,6 +65,7 @@ use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
 use gateway_types::update::UpdateAbortBody;
 use omicron_uuid_kinds::GenericUuid;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::io::Cursor;
 use std::num::NonZeroU8;
@@ -216,8 +217,29 @@ impl GatewayApi for GatewayImpl {
                 details
                     .entries
                     .into_iter()
-                    .map(SpComponentDetails::try_from)
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .filter_map(|sp_details| {
+                        match SpComponentDetails::try_from(sp_details) {
+                            Ok(details) => Some(details),
+                            Err(err) => {
+                                // Once omicron#9708 is addressed, we should
+                                // update the API type to turn the
+                                // `try_from()` into a `from()` and remove
+                                // this branch entirely.
+                                warn!(
+                                    apictx.log,
+                                    "skipping some component details \
+                                     that we can't convert to the MGS \
+                                     API type (yet)";
+                                    "sp_type" => ?sp_id.typ,
+                                    "sp_slot" => sp_id.slot,
+                                    "component" => %component,
+                                    InlineErrorChain::new(&err)
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect(),
             ))
         };
 

@@ -198,6 +198,7 @@ sp_ereport_ingester.disable = true
 # How frequently to check for a new fault management sitrep (made by any Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+fm.analysis_enabled = true
 # How frequently to run analysis from the current sitrep.
 fm.analysis_period_secs = 120
 # Sitrep GC, on the other hand, does not need to be activated very frequently,

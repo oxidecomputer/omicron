@@ -9942,13 +9942,14 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-sim
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   2
+    created by::::::::::::::   reconfigurator-sim
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   2
+    external networking gen:   14
 
  PENDING MGS-MANAGED UPDATES: 0
 

@@ -773,6 +773,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,

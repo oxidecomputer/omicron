@@ -2136,7 +2136,6 @@ impl_enum_type!(
     pub enum InvSvcEnabledNotOnlineState;
 
     // Enum values
-    Uninitialized => b"uninitialized"
     Offline => b"offline"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
@@ -2147,9 +2146,6 @@ impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
         match value {
             SvcEnabledNotOnlineState::Degraded => {
                 InvSvcEnabledNotOnlineState::Degraded
-            }
-            SvcEnabledNotOnlineState::Uninitialized => {
-                InvSvcEnabledNotOnlineState::Uninitialized
             }
             SvcEnabledNotOnlineState::Offline => {
                 InvSvcEnabledNotOnlineState::Offline
@@ -2166,9 +2162,6 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
         match value {
             InvSvcEnabledNotOnlineState::Degraded => {
                 SvcEnabledNotOnlineState::Degraded
-            }
-            InvSvcEnabledNotOnlineState::Uninitialized => {
-                SvcEnabledNotOnlineState::Uninitialized
             }
             InvSvcEnabledNotOnlineState::Offline => {
                 SvcEnabledNotOnlineState::Offline

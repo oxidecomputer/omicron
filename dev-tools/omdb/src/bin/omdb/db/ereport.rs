@@ -86,6 +86,19 @@ struct ListArgs {
     /// Include only ereports collected after this timestamp
     #[clap(long, short)]
     after: Option<DateTime<Utc>>,
+
+    /// Filter ereports based on whether or not their database records have
+    /// been marked as "seen" (included in a committed sitrep).
+    ///
+    /// Note that ereports which have not been marked in the database *may*
+    /// still have been included in a sitrep. Marking of ereport database
+    /// records occurs in the background, and may not be up to date with the
+    /// latest sitrep. If an ereport has been marked as seen, it has
+    /// *definitely* been included in a committed sitrep, but if an ereport
+    /// has not been marked, it *may or may not* have been included in a
+    /// committed sitrep.
+    #[clap(long = "seen", short = 'm', value_enum, default_value_t)]
+    seen: Seen,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -97,6 +110,21 @@ struct ReportersArgs {
     slot: Option<u16>,
 
     serial: Option<String>,
+}
+
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum,
+)]
+enum Seen {
+    /// Include all ereports, regardless of whether or not they have been
+    /// marked.
+    #[default]
+    All,
+    /// Include only ereports whose database records have been marked as seen.
+    Marked,
+    /// Include only ereports whose database records have NOT been marked as
+    /// seen.
+    Unmarked,
 }
 
 pub(super) async fn cmd_db_ereport(
@@ -138,6 +166,22 @@ async fn cmd_db_ereport_list(
         serial: Option<&'report str>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<&'report str>,
+
+        /// The underlying ereport record. This is not displayed when
+        /// formatting, but is retained so that the `EreportRow` can be
+        /// converted into an `EreportRowWithMark` if the markedness is needed.
+        #[tabled(skip)]
+        ereport: &'report db::model::Ereport,
+    }
+
+    /// Adds a `MARK` column to `EreportRow` to indicate whether or not the
+    /// ereport has been marked as seen in the database.
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct EreportRowWithMark<'report> {
+        mark: &'static str,
+        #[tabled(inline)]
+        ereport: EreportRow<'report>,
     }
 
     impl<'report> From<&'report db::model::Ereport> for EreportRow<'report> {
@@ -169,7 +213,24 @@ async fn cmd_db_ereport_list(
                 source,
                 serial: serial_number.as_deref(),
                 part_number: part_number.as_deref(),
+                ereport,
             }
+        }
+    }
+
+    impl<'report> From<EreportRow<'report>> for EreportRowWithMark<'report> {
+        fn from(row: EreportRow<'report>) -> Self {
+            // The column is named "MARK" and its values are either "seen" or
+            // "", because I wanted to make it as obvious as possible that an
+            // unmarked ereport may still have been seen in a sitrep. The more
+            // obvious option of a "SEEN" column with values "yes" and "no" is
+            // potentially misleading, as "no" would suggest the ereport has not
+            // been seen, when actually it has not been *marked*. So, the column
+            // is named "MARK". But, I wanted to include the word "seen", so
+            // marked-as-seen ereports have the value "seen".
+            let mark =
+                if row.ereport.marked_seen_in.is_some() { "seen" } else { "" };
+            Self { mark, ereport: row }
         }
     }
 
@@ -213,6 +274,12 @@ async fn cmd_db_ereport_list(
         query = query.filter(dsl::time_deleted.is_null());
     }
 
+    match args.seen {
+        Seen::Marked => query = query.filter(dsl::marked_seen_in.is_not_null()),
+        Seen::Unmarked => query = query.filter(dsl::marked_seen_in.is_null()),
+        Seen::All => {}
+    }
+
     let ereports = query.load_async(&*conn).await.with_context(ctx)?;
     check_limit(&ereports, fetch_opts.fetch_limit, ctx);
 
@@ -229,7 +296,13 @@ async fn cmd_db_ereport_list(
         )
     });
 
-    let mut table = tabled::Table::new(rows);
+    let mut table = if args.seen == Seen::All {
+        // If both marked and unmarked ereports were included, add the "mark"
+        // column.
+        tabled::Table::new(rows.into_iter().map(EreportRowWithMark::from))
+    } else {
+        tabled::Table::new(rows)
+    };
     table
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0));

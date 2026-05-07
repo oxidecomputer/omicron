@@ -547,24 +547,23 @@ pub trait ClientError: std::fmt::Debug {
 // external client, others may require, for example, retries with an alternate
 // service instance or additional interpretation to sanitize the output error.
 // This should be removed to avoid leaking data.
-impl<T: ClientError> From<progenitor_client010::Error<T>> for Error {
-    fn from(e: progenitor_client010::Error<T>) -> Self {
+impl<T: ClientError> From<progenitor_client013::Error<T>> for Error {
+    fn from(e: progenitor_client013::Error<T>) -> Self {
         match e {
             // For most error variants, we delegate to the display impl for the
             // Progenitor error type, but we pick apart an error response more
             // carefully.
-            progenitor_client010::Error::InvalidRequest(_)
-            | progenitor_client010::Error::CommunicationError(_)
-            | progenitor_client010::Error::InvalidResponsePayload(..)
-            | progenitor_client010::Error::UnexpectedResponse(_)
-            | progenitor_client010::Error::InvalidUpgrade(_)
-            | progenitor_client010::Error::ResponseBodyError(_)
-            | progenitor_client010::Error::PreHookError(_)
-            | progenitor_client010::Error::PostHookError(_) => {
+            progenitor_client013::Error::InvalidRequest(_)
+            | progenitor_client013::Error::CommunicationError(_)
+            | progenitor_client013::Error::InvalidResponsePayload(..)
+            | progenitor_client013::Error::UnexpectedResponse(_)
+            | progenitor_client013::Error::InvalidUpgrade(_)
+            | progenitor_client013::Error::ResponseBodyError(_)
+            | progenitor_client013::Error::Custom(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.
-            progenitor_client010::Error::ErrorResponse(rv) => {
+            progenitor_client013::Error::ErrorResponse(rv) => {
                 let message = rv.message();
 
                 match rv.status() {
@@ -581,8 +580,9 @@ impl<T: ClientError> From<progenitor_client010::Error<T>> for Error {
     }
 }
 
-// Equivalent From impl for progenitor-client 0.13. This coexists with the
-// progenitor_client010 impl above during the cross-repo upgrade window.
+// Equivalent From impl for progenitor-client 0.14 (workspace default). This
+// coexists with the progenitor_client013 impl above during the cross-repo
+// upgrade window.
 impl<T: ClientError> From<progenitor_client::Error<T>> for Error {
     fn from(e: progenitor_client::Error<T>) -> Self {
         match e {

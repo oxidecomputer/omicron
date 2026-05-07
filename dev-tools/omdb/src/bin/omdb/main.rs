@@ -46,6 +46,7 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
 
+mod clickhouse_admin;
 mod crucible_agent;
 mod crucible_pantry;
 mod db;
@@ -84,6 +85,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
         OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
         OmdbCommands::CruciblePantry(crucible) => crucible.run_cmd(&args).await,
+        OmdbCommands::ClickhouseAdmin(ch) => ch.run_cmd(&args, &log).await,
     }
 }
 
@@ -275,6 +277,8 @@ impl Omdb {
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum OmdbCommands {
+    /// Operate on a single-node ClickHouse admin server
+    ClickhouseAdmin(clickhouse_admin::ClickHouseAdminArgs),
     /// Debug a specific crucible-agent
     CrucibleAgent(crucible_agent::CrucibleAgentArgs),
     /// Query a specific crucible-pantry

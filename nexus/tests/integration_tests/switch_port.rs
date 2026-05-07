@@ -24,7 +24,6 @@ use omicron_common::api::external::{
 use oxnet::IpNet;
 use sled_agent_types::early_networking::{ImportExportPolicy, RouterPeerType};
 use sled_agent_types::early_networking::{RouterLifetimeConfig, SwitchSlot};
-use std::net::IpAddr;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -381,11 +380,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let numbered_peer = created
         .bgp_peers
         .iter()
-        .find_map(|p| p.addr.ip_squashing_unnumbered_to_none())
+        .find(|p| p.addr.is_numbered())
         .expect("Should have a numbered peer");
     assert_eq!(
-        numbered_peer,
-        "1.2.3.4".parse::<IpAddr>().unwrap(),
+        numbered_peer.addr,
+        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
         "Numbered peer should have addr 1.2.3.4"
     );
 

@@ -21,6 +21,7 @@ use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use crate::latest::early_networking::UplinkIpNet;
 use crate::latest::early_networking::UplinkIpNetError;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
@@ -28,7 +29,6 @@ use oxnet::Ipv6Net;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
@@ -137,6 +137,12 @@ impl std::fmt::Display for RouterPeerIpAddr {
     }
 }
 
+impl From<RouterPeerIpAddr> for IpNetwork {
+    fn from(value: RouterPeerIpAddr) -> Self {
+        Self::from(IpAddr::from(value))
+    }
+}
+
 impl UplinkIpNet {
     pub const fn addr(&self) -> IpAddr {
         self.0.addr()
@@ -180,18 +186,6 @@ impl FromStr for RouterPeerIpAddr {
 }
 
 impl RouterPeerType {
-    /// In contexts where we cannot use this strong type to describe
-    /// "unnumbered" addresses, we have two or three possible representations:
-    ///
-    /// * In a context where we need a non-optional `IpAddr`, we could use
-    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
-    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
-    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
-    ///
-    /// In the optional case, we always prefer `None`. In the non-optional case,
-    /// we choose this sentinel value.
-    pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-
     /// Returns true if `Self` describes a numbered peer; false otherwise.
     pub fn is_numbered(&self) -> bool {
         match self {
@@ -203,31 +197,6 @@ impl RouterPeerType {
     /// Returns true if `Self` describes an unnumbered peer; false otherwise.
     pub fn is_unnumbered(&self) -> bool {
         !self.is_numbered()
-    }
-
-    /// Squash this address down to an [`IpAddr`] by converting
-    /// [`RouterPeerType::Unnumbered`] to
-    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
-        match *self {
-            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
-            Self::Numbered { ip } => ip.into(),
-        }
-    }
-
-    /// Squash this address down to an [`Option<IpAddr>`] by converting
-    /// [`RouterPeerType::Unnumbered`] to `None`.
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_unnumbered_to_none(&self) -> Option<IpAddr> {
-        match *self {
-            Self::Unnumbered { .. } => None,
-            Self::Numbered { ip } => Some(ip.into()),
-        }
     }
 }
 
@@ -369,6 +338,7 @@ mod tests {
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use serde::{Deserialize, Serialize};
+    use std::net::Ipv4Addr;
     use test_strategy::proptest;
 
     #[test]

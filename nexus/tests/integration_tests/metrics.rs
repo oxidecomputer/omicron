@@ -725,6 +725,10 @@ async fn test_mgs_metrics(
     let mut input_current_sensors = HashMap::new();
     let mut fan_speed_sensors = HashMap::new();
     let mut cpu_tctl_sensors = HashMap::new();
+    let mut pwm_sensors = HashMap::new();
+    let mut input_power_sensors = HashMap::new();
+    let mut input_energy_sensors = HashMap::new();
+    let mut output_energy_sensors = HashMap::new();
     for sp in all_sp_configs {
         let mut temp = 0;
         let mut current = 0;
@@ -734,6 +738,10 @@ async fn test_mgs_metrics(
         let mut power = 0;
         let mut speed = 0;
         let mut cpu_tctl = 0;
+        let mut pwm = 0;
+        let mut input_power = 0;
+        let mut input_energy = 0;
+        let mut output_energy = 0;
         for component in &sp.components {
             for sensor in &component.sensors {
                 use gateway_messages::measurement::MeasurementKind as Kind;
@@ -758,6 +766,10 @@ async fn test_mgs_metrics(
                     Kind::InputCurrent => input_current += 1,
                     Kind::Speed => speed += 1,
                     Kind::Power => power += 1,
+                    Kind::Pwm => pwm += 1,
+                    Kind::InputPower => input_power += 1,
+                    Kind::OutputEnergy => output_energy += 1,
+                    Kind::InputEnergy => input_energy += 1,
                 }
             }
         }
@@ -769,6 +781,10 @@ async fn test_mgs_metrics(
         fan_speed_sensors.insert(sp.serial_number.clone(), speed);
         power_sensors.insert(sp.serial_number.clone(), power);
         cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
+        pwm_sensors.insert(sp.serial_number.clone(), pwm);
+        input_power_sensors.insert(sp.serial_number.clone(), input_power);
+        input_energy_sensors.insert(sp.serial_number.clone(), input_energy);
+        output_energy_sensors.insert(sp.serial_number.clone(), output_energy);
     }
 
     async fn check_all_timeseries_present<N>(
@@ -884,6 +900,21 @@ async fn test_mgs_metrics(
         .await;
     check_all_timeseries_present(&querier, "amd_cpu_tctl", cpu_tctl_sensors)
         .await;
+    check_all_timeseries_present(&querier, "pwm", pwm_sensors).await;
+    check_all_timeseries_present(&querier, "input_power", input_power_sensors)
+        .await;
+    check_all_timeseries_present(
+        &querier,
+        "input_energy",
+        input_energy_sensors,
+    )
+    .await;
+    check_all_timeseries_present(
+        &querier,
+        "output_energy",
+        output_energy_sensors,
+    )
+    .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
     // this test, we are responsible for removing its logs.

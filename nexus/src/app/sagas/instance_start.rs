@@ -18,6 +18,8 @@ use crate::app::instance::{
 };
 use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::sled_out_of_service_gone_check;
+use crate::app::sagas::zpool_out_of_service_gone_check;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
@@ -30,7 +32,11 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::backoff::backon_retry_policy_internal_service;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use paste::paste;
 use progenitor_extras::retry::{
     GoneCheckResult, retry_operation_while_indefinitely,
@@ -658,9 +664,10 @@ async fn sis_ensure_local_storage(
 
     // Ensure that the local storage is created
 
-    let (sled_id, ensure_request) = match allocation {
+    let (sled_id, zpool_id, ensure_request) = match allocation {
         LocalStorageAllocation::Unencrypted(allocation) => {
             let sled_id = allocation.sled_id();
+            let pool_id: ZpoolUuid = allocation.pool_id().upcast();
 
             let ensure_request = LocalStorageDatasetEnsureRequest {
                 zpool_id: allocation.pool_id(),
@@ -670,7 +677,7 @@ async fn sis_ensure_local_storage(
                 encrypted_at_rest: false,
             };
 
-            (sled_id, ensure_request)
+            (sled_id, pool_id, ensure_request)
         }
 
         LocalStorageAllocation::Encrypted(_) => {
@@ -693,14 +700,27 @@ async fn sis_ensure_local_storage(
         sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
     };
 
-    // `check_sled_in_service` returns an error if the sled is no longer in
-    // service; if it succeeds, the sled is not gone.
+    // Bail out of the retry loop if either the disk or sled is no longer
+    // in-service.
     let gone_check = || async {
-        osagactx
-            .datastore()
-            .check_sled_in_service(&opctx, sled_id)
+        match sled_out_of_service_gone_check(
+            osagactx.datastore(),
+            &opctx,
+            sled_id,
+        )
+        .await?
+        {
+            GoneCheckResult::StillAvailable => {
+                // proceed to zpool check
+            }
+
+            GoneCheckResult::Gone => {
+                return Ok(GoneCheckResult::Gone);
+            }
+        }
+
+        zpool_out_of_service_gone_check(osagactx.datastore(), &opctx, zpool_id)
             .await
-            .map(|()| GoneCheckResult::StillAvailable)
     };
 
     let log = osagactx.log().clone();
@@ -1137,11 +1157,16 @@ mod test {
     use core::time::Duration;
     use std::net::SocketAddrV6;
 
+    use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
+    use crate::app::sagas::disk_delete::test::create_disk;
+    use crate::app::sagas::disk_delete::test::new_local_disk_create_params;
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pools, create_project, object_create,
+        attach_disk_to_instance, create_default_ip_pools, create_project,
+        object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{instance as instance_types, networking};
@@ -1697,6 +1722,88 @@ mod test {
             )
             .await
         );
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_cannot_start_local_storage_disk_gone(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(cptestctx);
+
+        let instance = create_instance(client).await;
+
+        // Create a local storage disk, manually create an allocation for that
+        // local storage on a pool, attach the disk to the instance, then
+        // expunge the disk backing the pool.
+
+        let disk_test = DiskTest::new(cptestctx).await;
+        let zpool = disk_test.zpools().next().unwrap();
+        let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
+        let harness =
+            ExpungeTestHarness::setup(&cptestctx, disk.id(), zpool.id).await;
+
+        attach_disk_to_instance(
+            client,
+            PROJECT_NAME,
+            INSTANCE_NAME,
+            disk.name().as_str(),
+        )
+        .await;
+
+        harness.expunge_disk().await;
+
+        // Run the saga and make sure that the instance does not start
+
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
+        let saga_result = runnable_saga
+            .run_to_completion()
+            .await
+            .expect("saga execution should have started")
+            .into_raw_result();
+
+        let saga_error = saga_result
+            .kind
+            .expect_err("saga should fail when ensuring local storage");
+
+        assert_eq!(
+            saga_error.error_node_name.as_ref(),
+            "ensure_local_storage_0",
+        );
+
+        let db_instance =
+            test_helpers::instance_fetch(cptestctx, instance_id).await;
+
+        assert_eq!(
+            db_instance.instance().nexus_state,
+            nexus_db_model::InstanceState::NoVmm
+        );
+        assert!(db_instance.vmm().is_none());
+
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                cptestctx
+            )
+            .await
+        );
+
         assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
     }
 }
