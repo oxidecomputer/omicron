@@ -59,8 +59,9 @@ pub mod audit {
     pub use crate::v2025_11_20_00::audit::AuditLogEntryResult;
     pub use crate::v2025_11_20_00::audit::AuditLogParams;
 
+    pub use crate::v2026_01_15_00::audit::AuthMethod;
+
     pub use crate::v2026_01_15_01::audit::AuditLogEntry;
-    pub use crate::v2026_01_15_01::audit::AuthMethod;
 }
 
 pub mod bfd {
