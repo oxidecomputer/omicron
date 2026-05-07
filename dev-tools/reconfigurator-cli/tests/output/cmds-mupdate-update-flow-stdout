@@ -78,9 +78,7 @@ blueprint df06bb57-ad42-4431-9206-abff322896c7 created from latest blueprint (af
 warn: no validation is done on the requested source
 
 
-> # Model sled 0 reconciling the blueprint edits above, so its reported
-> # sled-agent generation matches the parent blueprint when the next
-> # inventory is generated.
+> # Apply the blueprint edits to sled 0.
 > sled-set serial0 omicron-config latest
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (df06bb57-ad42-4431-9206-abff322896c7)
 
@@ -1034,10 +1032,8 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 inventory visibility: hidden -> vi
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (626487fa-7139-45ec-8416-902271fc730b)
 
 
-> # Model sled 2 having processed the recovery blueprint emitted by the first
-> # plan (which set remove_mupdate_override = 203fa72c on sled 2): advance the
-> # reported sled-agent generation. (The marker is overwritten below, so we
-> # don't need to unset it first.)
+> # Apply this config (which sets remove_mupdate_override to 203fa72c)
+> # on sled 2.
 > sled-set serial2 omicron-config latest
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (626487fa-7139-45ec-8416-902271fc730b)
 
@@ -3251,11 +3247,9 @@ external DNS:
 > # not proceed with adding new zones. But with the option enabled,
 > # new zones will be added.
 
-> # Advance serial0's reported sled-agent generation to match the latest
-> # blueprint, modeling the sled having reconciled prior planning steps
-> # before the new mupdate below. This also lets the planner confirm a
-> # previously soft-expunged internal_dns zone, transitioning it to
-> # hard-expunged and unblocking a replacement.
+> # Apply the blueprint edits to sled 0. This also lets the planner see
+> # that the internal_dns zone is expunged, setting up a replacement
+> # internal_dns zone.
 > sled-set serial0 omicron-config latest
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (27e755bc-dc10-4647-853c-f89bb3a15a2c)
 
@@ -3687,8 +3681,7 @@ external DNS:
 blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 created from latest blueprint (9a9e6c32-5a84-4020-a159-33dceff18d35): set target release minimum generation to 1000
 
 
-> # Advance serial1's reported sled-agent generation to match the latest
-> # blueprint before the new mupdate below.
+> # Apply this config to sled 1 before the new MUPdate below.
 > sled-set serial1 omicron-config latest
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (13cfdd24-52ba-4e94-8c83-02e3a48fc746)
 
