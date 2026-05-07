@@ -228,7 +228,7 @@ By default, this command shows dependencies that might be in the final graph.  T
 
 You can select different subsets using the `--filter` option, which accepts:
 
-* `include-non-dag`: show non-`bogus`, non-`not-deployed` dependencies (i.e., all dependencies that do exist in the deployed system).
+* `include-non-dag`: show non-`bogus`, non-`not-deployed` dependencies (i.e., all dependencies that do exist in the deployed system).  This includes `non-dag` dependencies.
 * `non-bogus`: show everything _except_ bogus dependencies
 * `bogus`: show only the bogus dependencies (useful for seeing all the false positives)
 * `all`: show everything, even bogus dependencies

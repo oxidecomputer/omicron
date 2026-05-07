@@ -74,6 +74,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
@@ -2883,18 +2884,26 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
-    match serde_json::from_value::<serde_json::Value>(details.clone()) {
+    match serde_json::from_value::<ServiceFirewallRuleStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(serde_json::Value::Object(map)) => {
-            if !map.is_empty() {
-                eprintln!("    unexpected return value from task: {:?}", map)
+        Ok(status) => {
+            if let Some(e) = status.lookup_error {
+                eprintln!("    error looking up or resolving rules: {}", e);
             }
-        }
-        Ok(val) => {
-            eprintln!("    unexpected return value from task: {:?}", val)
+            if let Some(failures) = status.sled_push_errors {
+                let maybe_s = if failures.len() == 1 { "" } else { "s" };
+                eprintln!(
+                    "    failed to push rules to {} sled{}:",
+                    failures.len(),
+                    maybe_s,
+                );
+                for (sled_id, error) in failures {
+                    eprintln!("        sled {}: {}", sled_id, error);
+                }
+            }
         }
     };
 }
@@ -3579,6 +3588,13 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
+        Outcome::Disabled => {
+            println!(
+                "    fault management analysis explicitly disabled \
+                 by config!"
+            );
+            return;
+        }
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
