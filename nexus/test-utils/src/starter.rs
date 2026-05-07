@@ -23,6 +23,7 @@ use futures::future::BoxFuture;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::config::HostSwitchZonePorts;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
@@ -492,10 +493,18 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .host_zone_switch(
                 sled_id,
                 Ipv6Addr::LOCALHOST,
-                self.dendrite.read().unwrap().get(&switch_slot).unwrap().port,
-                self.gateway.get(&switch_slot).unwrap().port,
-                self.mgd.get(&switch_slot).unwrap().port,
-                self.ddm.get(&switch_slot).unwrap().port,
+                HostSwitchZonePorts {
+                    dendrite: self
+                        .dendrite
+                        .read()
+                        .unwrap()
+                        .get(&switch_slot)
+                        .unwrap()
+                        .port,
+                    mgs: self.gateway.get(&switch_slot).unwrap().port,
+                    mgd: self.mgd.get(&switch_slot).unwrap().port,
+                    ddm: self.ddm.get(&switch_slot).unwrap().port,
+                },
             )
             .unwrap()
     }
@@ -1307,7 +1316,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             mgd.cleanup().await.unwrap();
         }
         for (_, mut ddm) in self.ddm {
-            ddm.cleanup().await;
+            ddm.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }

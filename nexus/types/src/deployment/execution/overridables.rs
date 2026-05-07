@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use internal_dns_types::config::HostSwitchZonePorts;
 use omicron_common::address::DDMD_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::Ipv6Subnet;
@@ -78,6 +79,22 @@ impl Overridables {
     /// Returns the TCP port on which this sled's DDM is listening
     pub fn ddm_port(&self, sled_id: SledUuid) -> u16 {
         self.ddm_ports.get(&sled_id).copied().unwrap_or(DDMD_PORT)
+    }
+
+    /// Returns the per-switch-zone service ports for this sled.
+    ///
+    /// Bundles the four switch-zone admin ports into a single
+    /// [`HostSwitchZonePorts`] so callers cannot swap fields by accident.
+    pub fn host_switch_zone_ports(
+        &self,
+        sled_id: SledUuid,
+    ) -> HostSwitchZonePorts {
+        HostSwitchZonePorts {
+            dendrite: self.dendrite_port(sled_id),
+            mgs: self.mgs_port(sled_id),
+            mgd: self.mgd_port(sled_id),
+            ddm: self.ddm_port(sled_id),
+        }
     }
 
     /// Specify the IP address of this switch zone

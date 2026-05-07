@@ -2525,10 +2525,10 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3b54e1630e6f75cdc09a2580cec2438bfecade22#3b54e1630e6f75cdc09a2580cec2438bfecade22"
 dependencies = [
  "oxnet",
- "progenitor 0.13.0",
+ "progenitor 0.14.0",
  "reqwest 0.13.2",
  "serde",
  "slog",
@@ -6509,11 +6509,11 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3b54e1630e6f75cdc09a2580cec2438bfecade22#3b54e1630e6f75cdc09a2580cec2438bfecade22"
 dependencies = [
  "chrono",
  "colored 3.1.1",
- "progenitor 0.13.0",
+ "progenitor 0.14.0",
  "rdb-types",
  "reqwest 0.13.2",
  "schemars 0.8.22",
@@ -10180,9 +10180,9 @@ dependencies = [
 
 [[package]]
 name = "oxnet"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dc6fb07ecd6d2a17ff1431bc5b3ce11036c0b6dd93a3c4904db5b910817b162"
+checksum = "057865b45bb202b17ed475d8f22f0416412de2c317c168fefecf9d207faf048d"
 dependencies = [
  "ipnetwork",
  "schemars 0.8.22",
@@ -11845,7 +11845,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3b54e1630e6f75cdc09a2580cec2438bfecade22#3b54e1630e6f75cdc09a2580cec2438bfecade22"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -14106,7 +14106,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",

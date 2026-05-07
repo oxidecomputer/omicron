@@ -13,7 +13,7 @@ use iddqd::errors::DuplicateItem;
 use iddqd::id_upcast;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
-    DnsConfigBuilder, DnsConfigParams, Host, Zone,
+    DnsConfigBuilder, DnsConfigParams, Host, HostSwitchZonePorts, Zone,
 };
 use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
@@ -338,10 +338,12 @@ impl ServicePlan {
                 .host_zone_switch(
                     sled.sled_id,
                     address,
-                    DENDRITE_PORT,
-                    MGS_PORT,
-                    MGD_PORT,
-                    DDMD_PORT,
+                    HostSwitchZonePorts {
+                        dendrite: DENDRITE_PORT,
+                        mgs: MGS_PORT,
+                        mgd: MGD_PORT,
+                        ddm: DDMD_PORT,
+                    },
                 )
                 .unwrap();
         }

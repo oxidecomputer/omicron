@@ -163,6 +163,20 @@ pub struct DnsConfigBuilder {
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
 }
 
+/// Ports for the per-switch services published in internal DNS by
+/// [`DnsConfigBuilder::host_zone_switch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostSwitchZonePorts {
+    /// Dendrite (`dpd`) admin API port.
+    pub dendrite: u16,
+    /// Management Gateway Service (`mgs`) port.
+    pub mgs: u16,
+    /// Maghemite `mgd` admin API port.
+    pub mgd: u16,
+    /// Maghemite `ddmd` admin API port.
+    pub ddm: u16,
+}
+
 /// Describes a host of type "sled" in the control plane DNS zone
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sled(SledUuid);
@@ -396,11 +410,14 @@ impl DnsConfigBuilder {
         &mut self,
         sled_id: SledUuid,
         switch_zone_ip: Ipv6Addr,
-        dendrite_port: u16,
-        mgs_port: u16,
-        mgd_port: u16,
-        ddm_port: u16,
+        ports: HostSwitchZonePorts,
     ) -> anyhow::Result<()> {
+        let HostSwitchZonePorts {
+            dendrite: dendrite_port,
+            mgs: mgs_port,
+            mgd: mgd_port,
+            ddm: ddm_port,
+        } = ports;
         let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
         self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
         self.service_backend_zone(
@@ -733,7 +750,9 @@ impl DnsConfigBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::{DnsConfigBuilder, DnsRecord, Host, ServiceName};
+    use super::{
+        DnsConfigBuilder, DnsRecord, Host, HostSwitchZonePorts, ServiceName,
+    };
     use crate::{config::Zone, names::DNS_ZONE};
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
@@ -818,10 +837,12 @@ mod test {
             .host_zone_switch(
                 sled_uuid,
                 switch_zone_ip,
-                dendrite_port,
-                mgs_port,
-                mgd_port,
-                ddm_port,
+                HostSwitchZonePorts {
+                    dendrite: dendrite_port,
+                    mgs: mgs_port,
+                    mgd: mgd_port,
+                    ddm: ddm_port,
+                },
             )
             .unwrap();
 

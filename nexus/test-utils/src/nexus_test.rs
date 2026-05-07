@@ -322,7 +322,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             mgd.cleanup().await.unwrap();
         }
         for (_, mut ddm) in self.ddm {
-            ddm.cleanup().await;
+            ddm.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }
