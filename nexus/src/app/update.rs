@@ -43,7 +43,12 @@ use update_common::artifacts::{
 use uuid::Uuid;
 
 /// Threshold at which we consider an active saga stuck.
-const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(60);
+///
+/// Sometimes sagas can sometimes spend time being unassigned or recovered
+/// across Nexus restarts. To calculate this threshold we took a sample of
+/// 10,000 sagas and the longest running saga took ~1h30m so we give ample time
+/// before we consider a saga stuck.
+const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(120);
 
 /// Threshold at which we consider an inventory collection too old for the
 /// purpose of reporting system health via the update status endpoint
@@ -56,8 +61,10 @@ const STALE_INVENTORY_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 /// within the boundaries of an update in progress.
 ///
 /// This is chosen to be large enough to cover any update-related step (e.g.,
-/// sled reboot) under normal conditions.
-const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
+/// sled reboot) under normal conditions. Host OS updates can take a very long
+/// time, usually around 10-13 minutes. We give ourselves a bit more time than
+/// that before considering an update stuck.
+const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(30);
 
 /// Used to pull data out of the channels
 #[derive(Clone)]
