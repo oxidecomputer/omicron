@@ -33,6 +33,12 @@ blueprint-edit latest set-measurements serial1 install-dataset
 sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --to-target-release --with-measurement-manifest-error
 
+# Apply the latest blueprint to inventory so the noop check on the next plan
+# sees up-to-date sled-agent generations and can exercise the measurement
+# conversion path. (Earlier plans and edits bumped these generations.)
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+
 # This time we expect that sled1 should have blocked at a missing
 # measurement manifest because we are expecting one
 inventory-generate

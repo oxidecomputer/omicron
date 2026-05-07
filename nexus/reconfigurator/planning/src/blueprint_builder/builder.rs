@@ -884,6 +884,20 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.all_in_service_and_expunged_zones(reason))
     }
 
+    /// For a sled, return the sled agent generation recorded in the parent
+    /// blueprint, or generation 1 if the sled is newly added.
+    pub fn current_sled_incoming_sled_agent_generation(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<Generation, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get incoming generation for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.incoming_sled_agent_generation())
+    }
+
     pub fn current_sled_disks<F>(
         &self,
         sled_id: SledUuid,
