@@ -656,8 +656,10 @@ pub(crate) async fn instance_delete_dpd_config(
     // Just like in `instance_ensure_dpd_config`, we should not bail out if
     // there is an error while notifying dendrite. If there is an error
     // communicating with one dendrite instance but the other is operational and
-    // we bail here, it will prevent users from starting an instance. Dendrite
-    // should still catch back up via a RPW if we fail to notify it here.
+    // we bail here, it will prevent Nexus from tearing down the VMM's network
+    // config, leaving the instance stuck and preventing it from being restarted
+    // or deleted. Dendrite should still catch back up via a RPW if we fail to
+    // notify it here.
     if let Err(error) = notify_dendrite_nat_state(
         datastore,
         log,
