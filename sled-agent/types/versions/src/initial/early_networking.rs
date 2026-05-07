@@ -271,7 +271,7 @@ pub struct PortConfig {
     /// Port speed.
     pub uplink_port_speed: PortSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<PortFec>,
+    pub uplink_port_fec: Option<LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -331,14 +331,17 @@ pub enum PortSpeed {
     Speed400G,
 }
 
-/// Switchport FEC options
+/// The forward error correction mode of a link.
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum PortFec {
+pub enum LinkFec {
+    /// Firecode forward error correction.
     Firecode,
+    /// No forward error correction.
     None,
+    /// Reed-Solomon forward error correction.
     Rs,
 }
 

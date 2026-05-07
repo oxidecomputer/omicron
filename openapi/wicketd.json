@@ -2199,6 +2199,32 @@
           "flipped"
         ]
       },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode forward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -2478,15 +2504,6 @@
         "enum": [
           "valid",
           "invalid"
-        ]
-      },
-      "PortFec": {
-        "description": "Switchport FEC options",
-        "type": "string",
-        "enum": [
-          "firecode",
-          "none",
-          "rs"
         ]
       },
       "PortSpeed": {
@@ -7778,7 +7795,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/PortFec"
+                "$ref": "#/components/schemas/LinkFec"
               }
             ]
           },

@@ -25,7 +25,7 @@ use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use oxnet::IpNet;
-use sled_agent_types::early_networking::PortFec as OmicronPortFec;
+use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
@@ -824,9 +824,9 @@ fn build_port_settings(
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
     let fec = uplink.uplink_port_fec.map(|fec| match fec {
-        OmicronPortFec::Firecode => DpdPortFec::Firecode,
-        OmicronPortFec::None => DpdPortFec::None,
-        OmicronPortFec::Rs => DpdPortFec::Rs,
+        LinkFec::Firecode => DpdPortFec::Firecode,
+        LinkFec::None => DpdPortFec::None,
+        LinkFec::Rs => DpdPortFec::Rs,
     });
     let speed = match uplink.uplink_port_speed {
         OmicronPortSpeed::Speed0G => DpdPortSpeed::Speed0G,

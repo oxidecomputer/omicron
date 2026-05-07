@@ -362,7 +362,7 @@ pub struct PortConfig {
     /// Port speed.
     pub uplink_port_speed: v1::PortSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation

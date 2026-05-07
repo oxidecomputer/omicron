@@ -39,7 +39,7 @@ use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
-    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
+    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, LinkFec,
     PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
 };
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
@@ -943,10 +943,10 @@ fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
     }
 }
 
-fn convert_fec(fec: PortFec) -> dpd_client::types::PortFec {
+fn convert_fec(fec: LinkFec) -> dpd_client::types::PortFec {
     match fec {
-        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
-        PortFec::None => dpd_client::types::PortFec::None,
-        PortFec::Rs => dpd_client::types::PortFec::Rs,
+        LinkFec::Firecode => dpd_client::types::PortFec::Firecode,
+        LinkFec::None => dpd_client::types::PortFec::None,
+        LinkFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }

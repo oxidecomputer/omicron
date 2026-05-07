@@ -637,7 +637,7 @@ impl super::Nexus {
                 link_name: link_name.clone(),
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
-                fec: uplink_config.uplink_port_fec.map(|fec| fec.into()),
+                fec: uplink_config.uplink_port_fec,
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
                 lldp,

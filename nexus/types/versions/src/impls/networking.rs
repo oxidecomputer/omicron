@@ -5,7 +5,6 @@
 use crate::latest;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use oxnet::IpNet;
-use sled_agent_types_versions::latest::early_networking::PortFec;
 use sled_agent_types_versions::latest::early_networking::PortSpeed;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
@@ -68,19 +67,6 @@ impl latest::networking::SwitchPortSettingsCreate {
             routes: Vec::new(),
             bgp_peers: Vec::new(),
             addresses: Vec::new(),
-        }
-    }
-}
-
-// TODO-cleanup We could push `LinkFec` and `LinkSpeed` down into
-// sled-agent-types-versions and re-export them instead of having these
-// conversions. omicron#10403
-impl From<PortFec> for latest::networking::LinkFec {
-    fn from(x: PortFec) -> Self {
-        match x {
-            PortFec::Firecode => Self::Firecode,
-            PortFec::None => Self::None,
-            PortFec::Rs => Self::Rs,
         }
     }
 }

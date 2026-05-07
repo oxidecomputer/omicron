@@ -30,7 +30,7 @@ use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
@@ -175,32 +175,22 @@ impl_enum_type!(
     Speed400G => b"400G"
 );
 
-impl From<SwitchLinkFec> for PortFec {
+impl From<SwitchLinkFec> for LinkFec {
     fn from(value: SwitchLinkFec) -> Self {
         match value {
-            SwitchLinkFec::Firecode => PortFec::Firecode,
-            SwitchLinkFec::None => PortFec::None,
-            SwitchLinkFec::Rs => PortFec::Rs,
+            SwitchLinkFec::Firecode => Self::Firecode,
+            SwitchLinkFec::None => Self::None,
+            SwitchLinkFec::Rs => Self::Rs,
         }
     }
 }
 
-impl From<networking_types::LinkFec> for SwitchLinkFec {
-    fn from(value: networking_types::LinkFec) -> Self {
+impl From<LinkFec> for SwitchLinkFec {
+    fn from(value: LinkFec) -> Self {
         match value {
-            networking_types::LinkFec::Firecode => SwitchLinkFec::Firecode,
-            networking_types::LinkFec::None => SwitchLinkFec::None,
-            networking_types::LinkFec::Rs => SwitchLinkFec::Rs,
-        }
-    }
-}
-
-impl From<SwitchLinkFec> for networking_types::LinkFec {
-    fn from(value: SwitchLinkFec) -> Self {
-        match value {
-            SwitchLinkFec::Firecode => networking_types::LinkFec::Firecode,
-            SwitchLinkFec::None => networking_types::LinkFec::None,
-            SwitchLinkFec::Rs => networking_types::LinkFec::Rs,
+            LinkFec::Firecode => Self::Firecode,
+            LinkFec::None => Self::None,
+            LinkFec::Rs => Self::Rs,
         }
     }
 }

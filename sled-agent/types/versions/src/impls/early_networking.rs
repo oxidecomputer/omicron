@@ -9,7 +9,7 @@ use crate::latest::early_networking::InvalidIpAddrError;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
-use crate::latest::early_networking::PortFec;
+use crate::latest::early_networking::LinkFec;
 use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
@@ -294,12 +294,12 @@ impl fmt::Display for PortSpeed {
     }
 }
 
-impl fmt::Display for PortFec {
+impl fmt::Display for LinkFec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PortFec::Firecode => write!(f, "Firecode R-FEC"),
-            PortFec::None => write!(f, "None"),
-            PortFec::Rs => write!(f, "RS-FEC"),
+            LinkFec::Firecode => write!(f, "Firecode R-FEC"),
+            LinkFec::None => write!(f, "None"),
+            LinkFec::Rs => write!(f, "RS-FEC"),
         }
     }
 }

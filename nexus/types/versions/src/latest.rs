@@ -260,7 +260,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
-    pub use crate::v2025_11_20_00::networking::LinkFec;
     pub use crate::v2025_11_20_00::networking::LinkSpeed;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfig;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;

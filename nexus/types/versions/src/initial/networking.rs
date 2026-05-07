@@ -18,6 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::BfdMode;
 use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
+use sled_agent_types_versions::v1::early_networking::LinkFec;
 use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use sled_agent_types_versions::v1::early_networking::TxEqConfig;
 use std::collections::HashMap;
@@ -1001,18 +1002,6 @@ pub enum LinkSpeed {
     Speed200G,
     /// 400 gigabits per second.
     Speed400G,
-}
-
-/// The forward error correction mode of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkFec {
-    /// Firecode forward error correction.
-    Firecode,
-    /// No forward error correction.
-    None,
-    /// Reed-Solomon forward error correction.
-    Rs,
 }
 
 /// A link configuration for a port settings object.
