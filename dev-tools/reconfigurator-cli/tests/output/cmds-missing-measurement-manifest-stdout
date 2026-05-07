@@ -322,6 +322,16 @@ sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: install dataset updated: to target re
 sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target release (system version 1.0.0)
 
 
+> # Apply the latest blueprint to inventory so the noop check on the next plan
+> # sees up-to-date sled-agent generations and can exercise the measurement
+> # conversion path. (Earlier plans and edits bumped these generations.)
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (af934083-59b5-4bf6-8966-6fb5292c29e1)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (af934083-59b5-4bf6-8966-6fb5292c29e1)
+
+
 > # This time we expect that sled1 should have blocked at a missing
 > # measurement manifest because we are expecting one
 > inventory-generate

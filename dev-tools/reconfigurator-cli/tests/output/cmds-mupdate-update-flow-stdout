@@ -630,7 +630,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 1, new_generation: 3
 WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving mupdate override information: reconfigurator-cli simulated mupdate-override error
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (6123eac1-ec5b-42ba-b73f-9845105a9971)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (5)
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
@@ -949,7 +949,7 @@ INFO no previous MGS update found, so no action taken as part of updating bluepr
 WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving mupdate override information: reconfigurator-cli simulated mupdate-override error
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: sled not found in inventory
-WARN skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: error retrieving zone manifest: measurement manifest contained no entries
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
@@ -1003,13 +1003,19 @@ external DNS:
 
 
 
-> # Now simulate the new config being applied to sled 0, which would
-> # cause the mupdate override to be removed.
+> # Now simulate the new config being applied to sled 0, which would cause the
+> # mupdate override to be removed. Apply the latest blueprint to inventory
+> # too, so that the sled's reported sled-agent generation advances to match
+> # the blueprint's; the sled clearing the override and bumping its generation
+> # happen together when the sled processes the new blueprint config.
 > sled-set serial0 mupdate-override unset
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: 6123eac1-ec5b-42ba-b73f-9845105a9971 -> unset
 
 > sled-set serial0 inventory-visible
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 inventory visibility: hidden -> visible
+
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (626487fa-7139-45ec-8416-902271fc730b)
 
 
 > # But simulate a second mupdate on sled 2. This should invalidate the existing
@@ -1090,7 +1096,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO measurement is eligible for noop image source conversion, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, new_measurement_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
 
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (1c0ce176-6dc8-4a90-adea-d4a8000751da)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
@@ -1275,9 +1281,19 @@ external DNS:
 
 
 > # Clear the mupdate override on sled 2, signifying that the config has been
-> # applied.
+> # applied. Also advance the sled's reported sled-agent generation to match,
+> # since the sled clearing the override and bumping its generation happen
+> # together when it processes the new blueprint config. Likewise advance
+> # serial0's reported sled-agent generation: the previous plan did noop
+> # conversions on serial0 that the sled would have applied by now in production.
 > sled-set serial2 mupdate-override unset
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 mupdate override: 1c0ce176-6dc8-4a90-adea-d4a8000751da -> unset
+
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (c1a0d242-9160-40f4-96ae-61f8f40a0b1b)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (c1a0d242-9160-40f4-96ae-61f8f40a0b1b)
 
 
 > # Run the planner again. This will cause sled 2's blueprint
@@ -1640,6 +1656,19 @@ external DNS:
     unchanged names: 5 (records: 9)
 
 
+
+
+> # Model sled-agents applying the latest blueprint between plans (this happens
+> # automatically in production), advancing reported sled-agent generations to
+> # match.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (afb09faf-a586-4483-9289-04d4f1d8ba23)
+
+> sled-set serial2 omicron-config latest
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (afb09faf-a586-4483-9289-04d4f1d8ba23)
+
+> inventory-generate
+generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
 
 > # Now set the target release -- at this point, we're still waiting on the
@@ -2035,8 +2064,11 @@ external DNS:
 > sled-set serial1 mupdate-override unset
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: error -> unset
 
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (ce365dff-2cdb-4f35-a186-b15e20e1e700)
+
 > inventory-generate
-generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
+generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
 
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
@@ -2046,9 +2078,7 @@ INFO current sled measurements are in an unknown state, sled_id: 2b8f0cb3-0295-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
@@ -2102,7 +2132,7 @@ external DNS:
 sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target release (system version 2.0.0)
 
 > inventory-generate
-generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
+generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
 
 
 > # Measurements will block further planning progress, run a planning step
@@ -2114,9 +2144,7 @@ INFO current sled measurements are in an unknown state, sled_id: 2b8f0cb3-0295-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
@@ -2571,7 +2599,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest bluepri
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest blueprint (12d602a6-5ab4-487a-b94e-eb30cdf30300)
 
 > inventory-generate
-generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
+generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
 
 
 > # This will attempt to update the RoT bootloader on the first sled.
@@ -2922,7 +2950,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B,
 
 > # All MGS-based updates complete.
 > inventory-generate
-generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
+generated inventory collection 08abe624-4b5f-491c-90cb-d74a84e4ba3e from configured sleds
 
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
@@ -3201,7 +3229,7 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> c8fba91
 added sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b (serial: serial3)
 
 > inventory-generate
-generated inventory collection 08abe624-4b5f-491c-90cb-d74a84e4ba3e from configured sleds
+generated inventory collection 005f6a30-7f65-4593-9f78-ee68f766f42b from configured sleds
 
 
 > # This will *not* generate the datasets and internal NTP zone on the new
@@ -3222,15 +3250,13 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 4, new_generation: 5
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (c8fba912-63ae-473a-9115-0495d10fb3bc)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (6) that is older than the generation in the parent blueprint (7)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (8) that is older than the generation in the parent blueprint (9)
 INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO current sled measurements are in an unknown state, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (7) that is older than the generation in the parent blueprint (8)
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
 planning report:
@@ -3373,15 +3399,13 @@ planner config updated:
 
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (c8fba912-63ae-473a-9115-0495d10fb3bc)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (6) that is older than the generation in the parent blueprint (7)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (8) that is older than the generation in the parent blueprint (10)
 INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO current sled measurements are in an unknown state, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (7) that is older than the generation in the parent blueprint (8)
 INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 40, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 }, measurements: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
 generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 blueprint source: planner with report:
@@ -3548,7 +3572,7 @@ blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 created from latest blueprint (9a
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset -> cc724abe-80c1-47e6-9771-19e6540531a9
 
 > inventory-generate
-generated inventory collection 005f6a30-7f65-4593-9f78-ee68f766f42b from configured sleds
+generated inventory collection b5263998-e486-4cea-8842-b32bd326fa3a from configured sleds
 
 > blueprint-plan latest latest
 INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, new_bp_override: cc724abe-80c1-47e6-9771-19e6540531a9, prev_bp_override: None, zones: 
