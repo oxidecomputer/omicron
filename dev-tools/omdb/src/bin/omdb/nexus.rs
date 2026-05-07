@@ -3429,12 +3429,12 @@ fn print_ereporter_status_totals<'status>(
         total_new += new_ereports;
         total_reqs += requests;
         total_errors += errors.len();
-        if total_received > 0 {
+        if ereports_received > 0 {
             reporters_with_ereports += 1;
         } else {
             reporters_without_ereports += 1;
         }
-        if total_errors > 0 {
+        if !errors.is_empty() {
             reporters_with_errors += 1;
         } else {
             reporters_without_errors += 1;
@@ -3446,7 +3446,7 @@ fn print_ereporter_status_totals<'status>(
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
     println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
     println!(
         "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
