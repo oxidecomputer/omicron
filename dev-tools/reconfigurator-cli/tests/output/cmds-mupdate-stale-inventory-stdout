@@ -1,20 +1,20 @@
 using provided RNG seed: reconfigurator-cli-test
-> # This test exercises the bug where, in the mupdate override flow, the planner
-> # would clear `remove_mupdate_override` from a sled's blueprint based on stale
-> # inventory -- specifically, an inventory collection that was captured before
-> # the sled was mupdated, so the override marker isn't visible in it.
+> # This test verifies that when resolving a MUPdate, the planner does not clear
+> # the "will remove mupdate override" field from a sled's blueprint based on stale
+> # inventory -- specifically, an inventory collection that occurred before
+> # the sled was MUPdated, so the mupdate override UUID isn't visible in it.
 > #
 > # Acting on stale inventory in this way could cause the planner to acknowledge
 > # a sled recovery that hasn't happened, breaking the edge-triggered
-> # mupdate override semantics. The fix is to mark a sled as ineligible for
-> # both noop conversion and mupdate override clearing whenever the inventory's
-> # reported sled-agent generation is older than the generation in the parent
-> # blueprint.
+> # mupdate override semantics. The solution is to mark a sled as ineligible for
+> # both noop conversion and will-remove-mupdate-override clearing whenever the
+> # inventory's reported sled-agent generation is older than the generation in
+> # the parent blueprint.
 > #
 > # The test simulates two plans against the same parent blueprint: one against
-> # the latest (post-mupdate) inventory, and one against a stale (pre-mupdate)
+> # the latest (post-mupdate) inventory, and then one against a stale (pre-mupdate)
 > # inventory. With the fix, planning against the stale inventory leaves
-> # remove_mupdate_override alone instead of clearing it.
+> # the "will remove mupdate override" field alone instead of clearing it.
 
 > # Load a small example system. We only need one sled to demonstrate the bug.
 > load-example --nsleds 1 --ndisks-per-sled 3
@@ -75,7 +75,7 @@ set target release based on repo-1.0.0.zip
 sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: install dataset updated: to target release (system version 1.0.0)
 
 
-> # Generate the FIRST inventory collection. At this point the sled has no
+> # Generate the first inventory collection. At this point the sled has no
 > # mupdate override visible. We'll come back to this collection later to plan
 > # against it as a "stale" inventory.
 > inventory-generate
@@ -94,7 +94,7 @@ eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 0       <REDACTED_TIMESTAMP>
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> 11111111-1111-1111-1111-111111111111
 
 
-> # Generate a SECOND inventory collection, post-mupdate. This one has the
+> # Generate a second inventory collection, post-MUPdate. This one has the
 > # override visible.
 > inventory-generate
 generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
@@ -290,14 +290,13 @@ external DNS:
 > # stale inventory reports.
 > #
 > # The collection ID below is the deterministic UUID for the first
-> # `inventory-generate` above (driven by the test harness's --seed argument).
+> # `inventory-generate` above.
 > #
-> # Without the fix, the planner would treat the absence of the override in
-> # this stale inventory as evidence that the sled has recovered, and clear
-> # `remove_mupdate_override` from the blueprint. With the fix, the planner
-> # correctly identifies the inventory as stale (inv gen < parent bp gen) and
-> # leaves `remove_mupdate_override` alone, logging
-> # "blueprint override could not be cleared, ... reason: inventory stale".
+> # Without the check for stale inventory, the planner would treat the absence of
+> # the override in this stale inventory as evidence that the sled has recovered,
+> # and clear the "will remove mupdate override" field from the blueprint. With
+> # the check, the planner leaves the "will remove mupdate override" field alone,
+> # logging "blueprint override could not be cleared, ... reason: inventory stale".
 > blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 INFO inventory override no longer exists, but blueprint override could not be cleared, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, bp_override: 11111111-1111-1111-1111-111111111111, reason: this sled cannot be noop-converted to Artifact: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)

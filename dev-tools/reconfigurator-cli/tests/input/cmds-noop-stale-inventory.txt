@@ -43,8 +43,7 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Apply the latest blueprint to inventory and re-plan. inventory_gen now
-# matches parent_bp_gen, the noop check runs, and zones convert to Artifact
-# as expected.
+# matches parent_bp_gen, and zones are noop-converted to Artifact as expected.
 sled-set serial0 omicron-config latest
 inventory-generate
 blueprint-plan latest latest

@@ -264,8 +264,7 @@ external DNS:
 
 
 > # Apply the latest blueprint to inventory and re-plan. inventory_gen now
-> # matches parent_bp_gen, the noop check runs, and zones convert to Artifact
-> # as expected.
+> # matches parent_bp_gen, and zones are noop-converted to Artifact as expected.
 > sled-set serial0 omicron-config latest
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4)
 

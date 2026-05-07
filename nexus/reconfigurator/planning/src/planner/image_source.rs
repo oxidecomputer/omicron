@@ -97,7 +97,7 @@ impl NoopConvertInfo {
             // then the inventory is stale. We should not:
             //
             // * clear the "will remove mupdate override" field in the blueprint
-            // * noop convert any sleds to Artifact data sources based on this
+            // * noop convert any sleds to Artifact image sources based on this
             //   inventory
             if inventory_gen < parent_bp_gen {
                 sleds
