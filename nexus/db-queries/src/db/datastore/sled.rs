@@ -1357,19 +1357,24 @@ impl DataStore {
                                 // instance we are trying to allocate due to
                                 // affinity / anti-affinity constraints.
                                 //
-                                // This isn't a problem when _not_ performing
-                                // local storage allocations because the insert
-                                // query will fail, and another sled_target will
-                                // be chosen right away. With local storage
+                                // Both of these cases are not a problem when
+                                // _not_ performing local storage allocations:
+                                // in that branch, when the insert query returns
+                                // that it inserted 0 rows or returned an error
+                                // sentinel, another sled_target will be chosen
+                                // right away.
+                                //
+                                // When local storage allocations are required
                                 // (just like the failure mode mentioned in a
                                 // previous block comment), the iterator will
                                 // erroneously keep returning different
                                 // permutations, meanwhile the insert query
-                                // isn't failing due to the available local
-                                // storage space.
-                                //
-                                // Bail out of the search right away and pick
-                                // another sled_target
+                                // isn't succeeding for reasons other than the
+                                // available space for local storage. In this
+                                // case, one of the sentinels will be returned,
+                                // and if we see those then bail out of the
+                                // search right away and pick another
+                                // sled_target.
 
                                 info!(
                                     &log,
