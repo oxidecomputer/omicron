@@ -1160,7 +1160,7 @@ impl DataStore {
         // In the uncontended case, however, we'll only iterate through this
         // loop once.
 
-        loop {
+        'sled_reservation: loop {
             // Pick a reservation target, given the constraints we previously
             // saw in the database.
             let sled_target = pick_sled_reservation_target(
@@ -1249,7 +1249,7 @@ impl DataStore {
                     unpreferred.remove(&sled_target);
                     preferred.remove(&sled_target);
 
-                    continue;
+                    continue 'sled_reservation;
                 };
 
                 let mut complete_allocation_lists =
@@ -1273,7 +1273,7 @@ impl DataStore {
                             unpreferred.remove(&sled_target);
                             preferred.remove(&sled_target);
 
-                            continue;
+                            continue 'sled_reservation;
                         }
                     };
 
@@ -1282,13 +1282,13 @@ impl DataStore {
                 // that particular set.
                 //
                 // If the `complate_allocation_lists` iterator returns None,
-                // control will pass to the end of the loop marked with 'outer,
+                // control will exit the `local_storage_allocation_search` loop,
                 // which will then try the next possible sled target. In the
                 // case where there were pre-existing local storage allocations
                 // there will _not_ be any more sleds to try and the user will
                 // see a capacity error.
 
-                loop {
+                'local_storage_allocation_search: loop {
                     // If other concurrent sled reservations are not taken into
                     // account, another sled reservation could allocate local
                     // storage onto the same pools that this one considers
@@ -1312,7 +1312,7 @@ impl DataStore {
                     else {
                         // All done searching, nothing worked. Try another
                         // sled!
-                        break;
+                        break 'local_storage_allocation_search;
                     };
 
                     info!(
@@ -1381,7 +1381,7 @@ impl DataStore {
                                     "reservation failed due to {sentinel}",
                                 );
 
-                                break;
+                                break 'local_storage_allocation_search;
                             } else {
                                 // The query failed, return this as an error
                                 return Err(
