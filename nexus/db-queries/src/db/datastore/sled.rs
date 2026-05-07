@@ -1218,7 +1218,7 @@ impl DataStore {
                             // The only part of the `insert_valid` section of
                             // the insertion query that can fail are the same
                             // places where these sentinels are cast and thrown
-                            // as errors as this branch does not have any
+                            // as errors, as this branch does not have any
                             // requested local storage allocations. Ignore these
                             // and proceed to the next sled_target.
                             info!(&log, "reservation failed due to {sentinel}");
@@ -1347,12 +1347,15 @@ impl DataStore {
                                 &SLED_INSERT_QUERY_SENTINELS,
                             ) {
                                 // Concurrent sled reservations could have
-                                // allocated enough hardware threads, rss ram,
-                                // and/ or reservoir ram that means this
+                                // allocated enough hardware threads, RSS RAM,
+                                // and/ or reservoir RAM that means this
                                 // sled_target is no longer valid.
-                                // Alternatively, checking affinity related
-                                // conditions could now also invalidate this
-                                // sled_target.
+                                //
+                                // Alternatively, a concurrent reservation could
+                                // have allocated another instance to this sled
+                                // target which makes it invalid for this
+                                // instance we are trying to allocate due to
+                                // affinity / anti-affinity constraints.
                                 //
                                 // This isn't a problem when _not_ performing
                                 // local storage allocations because the insert
