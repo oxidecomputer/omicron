@@ -274,6 +274,18 @@ pub fn sled_find_targets_query(
     query.query()
 }
 
+pub const SLED_HAS_SPACE_SENTINEL: &'static str = "SLED_HAS_SPACE";
+pub const SLED_HAS_SPACE_SENTINEL_REASON: &'static str =
+    "sled target does not have the available hardware resources";
+
+pub const BANNED_SLEDS_SENTINEL: &'static str = "BANNED_SLEDS";
+pub const BANNED_SLEDS_SENTINEL_REASON: &'static str =
+    "sled target hosts another instance in anti-affinity group";
+
+pub const REQUIRED_SLEDS_SENTINEL: &'static str = "REQUIRED_SLEDS";
+pub const REQUIRED_SLEDS_SENTINEL_REASON: &'static str =
+    "sled target does not host another instance in affinity group";
+
 /// Attempts to:
 ///
 /// 1. Insert a sled_resource_vmm record, if it is still a valid reservation
@@ -412,7 +424,7 @@ pub fn sled_insert_resource_query(
         |query| {
             query.sql("EXISTS(SELECT 1 FROM sled_has_space)");
         },
-        "SLED_HAS_SPACE",
+        SLED_HAS_SPACE_SENTINEL,
     );
     query.sql(" AND ");
 
@@ -426,7 +438,7 @@ pub fn sled_insert_resource_query(
                 )
                 .sql("))");
         },
-        "BANNED_SLEDS",
+        BANNED_SLEDS_SENTINEL,
     );
     query.sql(" AND ");
 
@@ -440,7 +452,7 @@ pub fn sled_insert_resource_query(
                 )
                 .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
         },
-        "REQUIRED_SLEDS",
+        REQUIRED_SLEDS_SENTINEL,
     );
 
     match local_storage_allocation_required {

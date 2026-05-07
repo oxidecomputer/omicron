@@ -23,8 +23,14 @@ use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::disk::MAX_DISKS_PER_INSTANCE;
+use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL;
+use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL_REASON;
 use crate::db::queries::sled_reservation::LocalStorageAllocation;
 use crate::db::queries::sled_reservation::LocalStorageAllocationRequired;
+use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL;
+use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL_REASON;
+use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL;
+use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL_REASON;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::true_or_cast_error::matches_sentinel;
@@ -661,7 +667,20 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
 /// to three of the conditions related to a sled's available hardware resources,
 /// or affinity rules.
 const SLED_INSERT_QUERY_SENTINELS: [&'static str; 3] =
-    ["SLED_HAS_SPACE", "BANNED_SLEDS", "REQUIRED_SLEDS"];
+    [SLED_HAS_SPACE_SENTINEL, BANNED_SLEDS_SENTINEL, REQUIRED_SLEDS_SENTINEL];
+
+/// Turn the returned sentinel into a human-readable error
+fn sentinel_to_reason(sentinel: &'static str) -> &'static str {
+    match sentinel {
+        SLED_HAS_SPACE_SENTINEL => SLED_HAS_SPACE_SENTINEL_REASON,
+
+        BANNED_SLEDS_SENTINEL => BANNED_SLEDS_SENTINEL_REASON,
+
+        REQUIRED_SLEDS_SENTINEL => REQUIRED_SLEDS_SENTINEL_REASON,
+
+        _ => unreachable!("unrecognized sentinel"),
+    }
+}
 
 impl DataStore {
     /// Stores a new sled in the database.
@@ -1221,7 +1240,12 @@ impl DataStore {
                             // as errors, as this branch does not have any
                             // requested local storage allocations. Ignore these
                             // and proceed to the next sled_target.
-                            info!(&log, "reservation failed due to {sentinel}");
+                            let reason = sentinel_to_reason(sentinel);
+                            info!(
+                                &log,
+                                "reservation failed: {reason}";
+                                "sentinel" => sentinel,
+                            );
                         } else {
                             // The query failed, return this as an error
                             return Err(
@@ -1376,9 +1400,11 @@ impl DataStore {
                                 // search right away and pick another
                                 // sled_target.
 
+                                let reason = sentinel_to_reason(sentinel);
                                 info!(
                                     &log,
-                                    "reservation failed due to {sentinel}",
+                                    "reservation failed: {reason}";
+                                    "sentinel" => sentinel,
                                 );
 
                                 break 'local_storage_allocation_search;
