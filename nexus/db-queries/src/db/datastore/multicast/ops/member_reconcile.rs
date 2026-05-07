@@ -19,7 +19,7 @@
 //! - Conditional logic based on instance_valid and sled_id changes
 //!
 //! Other states ("Joined", "Left") have simpler transitions using direct datastore
-//! methods (e.g., `multicast_group_member_to_left_if_current`).
+//! methods (e.g., `multicast_group_member_to_left_if_current_for_parent`).
 //!
 //! ## Operations
 //!
@@ -41,7 +41,8 @@ use uuid::Uuid;
 
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    DbTypedUuid, MulticastGroupMember, MulticastGroupMemberState,
+    DbTypedUuid, MemberParentRef, MulticastGroupMember,
+    MulticastGroupMemberState,
 };
 use nexus_db_schema::schema::multicast_group_member::dsl;
 use omicron_common::api::external::Error as ExternalError;
@@ -114,13 +115,14 @@ impl From<ReconcileMemberError> for ExternalError {
 pub async fn reconcile_joining_member(
     conn: &async_bb8_diesel::Connection<DbConnection>,
     group_id: Uuid,
-    instance_id: Uuid,
-    instance_valid: bool,
+    parent: MemberParentRef,
+    parent_valid: bool,
     current_sled_id: Option<DbTypedUuid<SledKind>>,
 ) -> Result<ReconcileJoiningResult, ReconcileMemberError> {
     let member_opt: Option<MulticastGroupMember> = dsl::multicast_group_member
         .filter(dsl::external_group_id.eq(group_id))
-        .filter(dsl::parent_id.eq(instance_id))
+        .filter(dsl::parent_id.eq(parent.as_uuid()))
+        .filter(dsl::parent_kind.eq(parent.kind()))
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::state.eq(MulticastGroupMemberState::Joining))
         .select(MulticastGroupMember::as_select())
@@ -139,9 +141,9 @@ pub async fn reconcile_joining_member(
 
     let prior_sled_id = member.sled_id;
 
-    // Determine what action to take based on instance validity
-    if !instance_valid {
-        // Instance is invalid - transition to "Left"
+    // Determine what action to take based on parent validity
+    if !parent_valid {
+        // Parent is invalid - transition to "Left"
         let updated = diesel::update(dsl::multicast_group_member)
             .filter(dsl::id.eq(member.id))
             .filter(dsl::state.eq(MulticastGroupMemberState::Joining))
@@ -179,7 +181,7 @@ pub async fn reconcile_joining_member(
             })
         }
     } else if prior_sled_id != current_sled_id {
-        // Instance is valid but sled_id needs updating
+        // Parent is valid but sled_id needs updating
         let updated = diesel::update(dsl::multicast_group_member)
             .filter(dsl::id.eq(member.id))
             .filter(dsl::state.eq(MulticastGroupMemberState::Joining))
@@ -234,9 +236,7 @@ mod tests {
 
     use nexus_types::identity::Resource;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{
-        GenericUuid, InstanceUuid, MulticastGroupUuid, SledUuid,
-    };
+    use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, create_instance_with_vmm,
@@ -268,7 +268,7 @@ mod tests {
         )
         .await;
 
-        let (instance, _vmm) = create_instance_with_vmm(
+        let (instance_id, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &setup.authz_project,
@@ -276,14 +276,13 @@ mod tests {
             setup.sled_id,
         )
         .await;
-        let instance_id = *instance.as_untyped_uuid();
 
         // Attach instance to create member in Joining state
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
                 Some(NO_SOURCE_IPS),
             )
             .await
@@ -294,7 +293,7 @@ mod tests {
         let result = reconcile_joining_member(
             &conn,
             group.id(),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             false, // instance_valid=false
             Some(setup.sled_id.into()),
         )
@@ -307,10 +306,10 @@ mod tests {
 
         // Verify database state
         let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should get member")
@@ -356,7 +355,7 @@ mod tests {
         )
         .await;
 
-        let (instance, _vmm) = create_instance_with_vmm(
+        let (instance_id, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &setup.authz_project,
@@ -364,14 +363,13 @@ mod tests {
             setup.sled_id,
         )
         .await;
-        let instance_id = *instance.as_untyped_uuid();
 
         // Attach instance
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
                 Some(NO_SOURCE_IPS),
             )
             .await
@@ -382,7 +380,7 @@ mod tests {
         let result = reconcile_joining_member(
             &conn,
             group.id(),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             true, // instance_valid=true
             Some(sled_id_new.into()),
         )
@@ -404,10 +402,10 @@ mod tests {
 
         // Verify database state
         let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should get member")
@@ -444,7 +442,7 @@ mod tests {
         )
         .await;
 
-        let (instance, _vmm) = create_instance_with_vmm(
+        let (instance_id, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &setup.authz_project,
@@ -452,24 +450,23 @@ mod tests {
             setup.sled_id,
         )
         .await;
-        let instance_id = *instance.as_untyped_uuid();
 
         // Attach instance
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
                 Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
 
         let member_before = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should get member")
@@ -481,7 +478,7 @@ mod tests {
         let result = reconcile_joining_member(
             &conn,
             group.id(),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             true, // instance_valid=true
             Some(setup.sled_id.into()),
         )
@@ -497,10 +494,10 @@ mod tests {
 
         // Verify time_modified unchanged (no database update)
         let member_after = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should get member")
@@ -537,7 +534,7 @@ mod tests {
         .await;
 
         // Create instance but don't attach it
-        let (instance, _vmm) = create_instance_with_vmm(
+        let (instance_id, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &setup.authz_project,
@@ -545,14 +542,13 @@ mod tests {
             setup.sled_id,
         )
         .await;
-        let instance_id = *instance.as_untyped_uuid();
 
         // Reconcile non-existent member
         let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
         let result = reconcile_joining_member(
             &conn,
             group.id(),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             true,
             Some(setup.sled_id.into()),
         )
@@ -592,7 +588,7 @@ mod tests {
         )
         .await;
 
-        let (instance, _vmm) = create_instance_with_vmm(
+        let (instance_id, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &setup.authz_project,
@@ -600,14 +596,13 @@ mod tests {
             setup.sled_id,
         )
         .await;
-        let instance_id = *instance.as_untyped_uuid();
 
         // Attach instance
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
                 Some(NO_SOURCE_IPS),
             )
             .await
@@ -615,10 +610,10 @@ mod tests {
 
         // Transition member to Joined state before reconciliation
         datastore
-            .multicast_group_member_set_state_if_current(
+            .multicast_group_member_set_state_if_current_for_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
                 MulticastGroupMemberState::Joining,
                 MulticastGroupMemberState::Joined,
             )
@@ -630,7 +625,7 @@ mod tests {
         let result = reconcile_joining_member(
             &conn,
             group.id(),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             false, // Would transition to Left if still Joining
             Some(setup.sled_id.into()),
         )
@@ -642,10 +637,10 @@ mod tests {
 
         // Verify member is still in Joined state
         let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should get member")
@@ -692,7 +687,7 @@ mod tests {
         )
         .await;
 
-        let (instance, _vmm) = create_instance_with_vmm(
+        let (instance_id, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &setup.authz_project,
@@ -700,14 +695,13 @@ mod tests {
             sled_id_a,
         )
         .await;
-        let instance_id = *instance.as_untyped_uuid();
 
         // Attach instance (starts on sled_a)
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
                 Some(NO_SOURCE_IPS),
             )
             .await
@@ -718,7 +712,7 @@ mod tests {
         let result = reconcile_joining_member(
             &conn,
             group.id(),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             true,
             Some(sled_id_b.into()),
         )
@@ -740,10 +734,10 @@ mod tests {
 
         // Verify member remains in Joining state with new sled_id
         let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should get member")

@@ -942,11 +942,12 @@ impl DataStore {
     ) -> Result<usize, Error> {
         use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
+        // Probes only ever own an ephemeral external IP, so there is no kind to
+        // exclude here: every probe-owned row is torn down on probe delete.
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::is_probe.eq(true))
             .filter(dsl::parent_id.eq(probe_id))
-            .filter(dsl::kind.ne(IpKind::Ephemeral))
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await

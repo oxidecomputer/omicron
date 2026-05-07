@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS omicron.public.multicast_group_member@multicast_member_unique_parent_per_group;

@@ -932,7 +932,7 @@ mod tests {
     use crate::db::datastore::LookupType;
     use crate::db::model::{
         IncompleteIpPoolResource, IpPool, IpPoolAssignment, IpPoolResourceType,
-        IpVersion,
+        IpVersion, MemberParentRef,
     };
     use crate::db::pub_test_utils::helpers::create_instance_with_vmm;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
@@ -1969,10 +1969,12 @@ mod tests {
         .await;
 
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 group_id,
-                InstanceUuid::from_untyped_uuid(*instance.as_untyped_uuid()),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    *instance.as_untyped_uuid(),
+                )),
                 Some(&[] as &[IpAddr]),
             )
             .await

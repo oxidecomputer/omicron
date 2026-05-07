@@ -3025,6 +3025,7 @@ table! {
         multicast_ip -> Inet,
         source_ips -> Array<Inet>,
         membership_origin -> crate::enums::MulticastGroupMemberOriginEnum,
+        parent_kind -> crate::enums::MulticastGroupMemberParentKindEnum,
     }
 }
 
