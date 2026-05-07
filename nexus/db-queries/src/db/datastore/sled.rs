@@ -2380,16 +2380,27 @@ pub(in crate::db::datastore) mod test {
                 self.resources.clone(),
             );
 
-            sled_insert_resource_query(
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            match sled_insert_resource_query(
                 &resource,
                 &LocalStorageAllocationRequired::No,
             )
-            .execute_async(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
+            .execute_async(&*conn)
             .await
-            .unwrap()
-                > 0
+            {
+                Ok(rows_inserted) => rows_inserted > 0,
+
+                Err(e) => {
+                    if matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS)
+                        .is_some()
+                    {
+                        false
+                    } else {
+                        panic!("{e}")
+                    }
+                }
+            }
         }
 
         fn use_many_resources(mut self) -> Self {
