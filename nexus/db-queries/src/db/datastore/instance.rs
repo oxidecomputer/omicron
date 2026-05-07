@@ -51,6 +51,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_db_model::MemberParentRef;
 use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -1229,9 +1230,9 @@ impl DataStore {
         expected: &[ExpectedMulticastMembership],
     ) -> Result<(), diesel::result::Error> {
         let current_memberships = self
-            .multicast_group_members_list_by_instance_on_conn(
+            .multicast_group_members_list_by_parent_on_conn(
                 conn,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
                 &DataPageParams::max_page(),
             )
             .await
@@ -1307,10 +1308,10 @@ impl DataStore {
         for change in changes {
             match change {
                 MulticastMembershipChange::Leave { group_id } => {
-                    self.multicast_group_member_detach_by_group_and_instance_on_conn(
+                    self.multicast_group_member_detach_by_group_and_parent_on_conn(
                         conn,
                         *group_id,
-                        instance_id,
+                        MemberParentRef::Instance(instance_id),
                     )
                     .await
                     .map_err(to_server_error)?;
@@ -1327,10 +1328,10 @@ impl DataStore {
                     .map_err(to_server_error)?;
                 }
                 MulticastMembershipChange::Join { group_id, source_ips } => {
-                    self.multicast_group_member_attach_to_instance_on_conn(
+                    self.multicast_group_member_attach_on_conn(
                         conn,
                         *group_id,
-                        instance_id,
+                        MemberParentRef::Instance(instance_id),
                         source_ips.as_deref(),
                     )
                     .await
@@ -3939,10 +3940,10 @@ mod tests {
             .expect("Should replace the member's source filter");
 
         let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 group_id,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should look up the member")
@@ -3978,10 +3979,10 @@ mod tests {
         );
 
         let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 group_id,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should look up the member")
@@ -4014,10 +4015,10 @@ mod tests {
 
         assert!(
             datastore
-                .multicast_group_member_get_by_group_and_instance(
+                .multicast_group_member_get_by_group_and_parent(
                     &opctx,
                     other_group_id,
-                    instance_id,
+                    MemberParentRef::Instance(instance_id),
                 )
                 .await
                 .expect("Should look up the accepted member")
@@ -4045,10 +4046,10 @@ mod tests {
 
         assert!(
             datastore
-                .multicast_group_member_get_by_group_and_instance(
+                .multicast_group_member_get_by_group_and_parent(
                     &opctx,
                     group_id,
-                    instance_id,
+                    MemberParentRef::Instance(instance_id),
                 )
                 .await
                 .expect("Should look up the member")
@@ -4146,10 +4147,10 @@ mod tests {
             .expect("Should join both groups");
 
         let member_id = datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 &opctx,
                 left_group_id,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
             )
             .await
             .expect("Should look up the member")
@@ -4178,10 +4179,10 @@ mod tests {
 
         assert!(
             datastore
-                .multicast_group_member_get_by_group_and_instance(
+                .multicast_group_member_get_by_group_and_parent(
                     &opctx,
                     left_group_id,
-                    instance_id,
+                    MemberParentRef::Instance(instance_id),
                 )
                 .await
                 .expect("Should look up the departed member")
@@ -4239,10 +4240,10 @@ mod tests {
         );
         assert!(
             datastore
-                .multicast_group_member_get_by_group_and_instance(
+                .multicast_group_member_get_by_group_and_parent(
                     &opctx,
                     kept_group_id,
-                    instance_id,
+                    MemberParentRef::Instance(instance_id),
                 )
                 .await
                 .expect("Should look up the member")
@@ -4332,10 +4333,10 @@ mod tests {
 
         // A join that the plan never saw, standing in for a concurrent request.
         datastore
-            .multicast_group_member_attach_to_instance(
+            .multicast_group_member_attach(
                 &opctx,
                 drift_group_id,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
                 None,
             )
             .await
@@ -4357,9 +4358,9 @@ mod tests {
         );
 
         let memberships = datastore
-            .multicast_group_members_list_by_instance(
+            .multicast_group_members_list_by_parent(
                 &opctx,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
                 &DataPageParams::max_page(),
             )
             .await
@@ -4413,9 +4414,9 @@ mod tests {
         );
 
         let memberships = datastore
-            .multicast_group_members_list_by_instance(
+            .multicast_group_members_list_by_parent(
                 &opctx,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
                 &DataPageParams::max_page(),
             )
             .await

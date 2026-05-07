@@ -217,7 +217,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(member_uuid.instance_id, instance_uuid);
+    assert_eq!(member_uuid.parent_id, instance_uuid);
     // Instance is stopped (start: false), so reconciler transitions "Joining"→"Left"
     wait_for_member_state(
         cptestctx,
@@ -246,7 +246,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         1,
         "UUID-based list should show 1 membership"
     );
-    assert_eq!(uuid_memberships[0].instance_id, instance_uuid);
+    assert_eq!(uuid_memberships[0].parent_id, instance_uuid);
 
     // Verify UUID-based group member listing
     let group_members_url_uuid =
@@ -284,9 +284,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     let final_members_after_leave =
         list_multicast_group_members(client, group_name).await;
     assert!(
-        !final_members_after_leave
-            .iter()
-            .any(|m| m.instance_id == instance_uuid),
+        !final_members_after_leave.iter().any(|m| m.parent_id == instance_uuid),
         "instance3 should not be in the group after UUID-based leave"
     );
 

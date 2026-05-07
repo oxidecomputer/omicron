@@ -235,8 +235,8 @@ pub mod inventory {
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
-    pub use crate::v10::probes::ProbeCreate;
-    pub use crate::v10::probes::ProbeSet;
+    pub use crate::v49::probes::ProbeCreate;
+    pub use crate::v49::probes::ProbeSet;
 }
 
 pub mod rot {

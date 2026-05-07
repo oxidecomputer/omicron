@@ -29,6 +29,7 @@ use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::MemberParentRef;
 use nexus_db_model::MulticastGroupMember;
 use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmState as DbVmmState;
@@ -582,9 +583,11 @@ impl super::Nexus {
         // Get current multicast group memberships (active-only)
         let current_memberships = self
             .datastore()
-            .multicast_group_members_list_by_instance(
+            .multicast_group_members_list_by_parent(
                 opctx,
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    instance_id,
+                )),
                 &DataPageParams::max_page(),
             )
             .await?;
@@ -1458,9 +1461,11 @@ impl super::Nexus {
         // that is still running if the request fails.
         if self.multicast_enabled() {
             self.db_datastore
-                .multicast_group_members_detach_by_instance(
+                .multicast_group_members_detach_by_parent(
                     opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        authz_instance.id(),
+                    )),
                 )
                 .await?;
         }
@@ -1913,9 +1918,11 @@ impl super::Nexus {
         if self.multicast_enabled() {
             let multicast_members = self
                 .db_datastore
-                .multicast_group_members_list_by_instance(
+                .multicast_group_members_list_by_parent(
                     opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    MemberParentRef::Instance(
+                        InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    ),
                     &DataPageParams::max_page(),
                 )
                 .await
@@ -3323,8 +3330,8 @@ mod tests {
     use ipnetwork::IpNetwork;
     use nexus_db_model::{
         Generation, Instance as DbInstance, InstanceState as DbInstanceState,
-        MulticastGroupMemberOrigin, MulticastGroupMemberState, VmmCpuPlatform,
-        VmmState as DbVmmState,
+        MulticastGroupMemberOrigin, MulticastGroupMemberParentKind,
+        MulticastGroupMemberState, VmmCpuPlatform, VmmState as DbVmmState,
     };
     use nexus_types::external_api::instance;
     use omicron_common::api::external::{
@@ -3658,6 +3665,7 @@ mod tests {
             time_deleted: None,
             external_group_id: group_id.into_untyped_uuid(),
             parent_id: Uuid::new_v4(),
+            parent_kind: MulticastGroupMemberParentKind::Instance,
             sled_id: None,
             state: MulticastGroupMemberState::Joined,
             membership_origin: MulticastGroupMemberOrigin::Static,

@@ -76,6 +76,7 @@ use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::v2025_11_20_00;
 use nexus_types_versions::v2026_01_01_00;
 use nexus_types_versions::v2026_01_08_00;
+use nexus_types_versions::v2026_08_20_02;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
@@ -5465,10 +5466,35 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
-    // Pre-MULTICAST_SOURCE_LIMITS version: same types as the latest variant
-    // (re-exported through `latest::`), so delegate directly. The behavioral
-    // difference (per-member and per-group source IP caps) is enforced
-    // unconditionally in the Nexus app layer.
+    // Pre-PROBE_MULTICAST version: body and path types are unchanged, so
+    // delegate to the latest and downgrade the response via the version-
+    // chain `TryFrom`, which fails 406 if the row is probe-parented.
+    async fn instance_multicast_group_join_v2026_08_20_01(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<
+            v2026_01_08_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<project::OptionalProjectSelector>,
+        body_params: TypedBody<
+            v2026_01_08_00::multicast::InstanceMulticastGroupJoin,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
+        HttpError,
+    > {
+        let HttpResponseCreated(latest) = Self::instance_multicast_group_join(
+            rqctx,
+            path_params,
+            query_params,
+            body_params,
+        )
+        .await?;
+        let member: v2026_01_08_00::multicast::MulticastGroupMember =
+            latest.try_into()?;
+        Ok(HttpResponseCreated(member))
+    }
+
+    // Same shape as the v2026_08_20_01 variant. Delegate.
     async fn instance_multicast_group_join_v2026_01_08_00(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<
@@ -5482,7 +5508,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
         HttpError,
     > {
-        Self::instance_multicast_group_join(
+        Self::instance_multicast_group_join_v2026_08_20_01(
             rqctx,
             path_params,
             query_params,
@@ -5533,7 +5559,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     None, // Old API version doesn't support ip_version
                 )
                 .await?;
-            let member = multicast::MulticastGroupMember::try_from(result)?;
+            let latest =
+                v2026_08_20_02::multicast::MulticastGroupMember::try_from(
+                    result,
+                )?;
+            let member: v2026_01_08_00::multicast::MulticastGroupMember =
+                latest.try_into()?;
             Ok(HttpResponseCreated(member.into()))
         };
         apictx

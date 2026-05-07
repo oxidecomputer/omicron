@@ -11,6 +11,7 @@ use crate::app::MAX_DISKS_PER_INSTANCE;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::MemberParentRef;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::{ExternalIp, IpVersion};
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
@@ -1162,10 +1163,10 @@ async fn sic_join_instance_multicast_group(
     // reconciler has since hard-deleted while another group claimed its IP or
     // name, which surfaces as an expired recovery window.
     let attach_result = datastore
-        .multicast_group_member_attach_to_instance_with_id(
+        .multicast_group_member_attach_with_id(
             &opctx,
             group_id,
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             member_id,
             join_spec.source_ips.as_deref(),
         )

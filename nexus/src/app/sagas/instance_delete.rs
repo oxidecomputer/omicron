@@ -168,9 +168,9 @@ async fn sid_leave_multicast_groups(
 
     let instance_id = InstanceUuid::from_untyped_uuid(instance_id);
     let groups = datastore
-        .multicast_group_members_list_by_instance(
+        .multicast_group_members_list_by_parent(
             &opctx,
-            instance_id,
+            nexus_db_model::MemberParentRef::Instance(instance_id),
             &DataPageParams::max_page(),
         )
         .await
@@ -178,7 +178,10 @@ async fn sid_leave_multicast_groups(
 
     // Mark all multicast group memberships for this instance as deleted
     datastore
-        .multicast_group_members_mark_for_removal(&opctx, instance_id)
+        .multicast_group_members_mark_for_removal_by_parent(
+            &opctx,
+            nexus_db_model::MemberParentRef::Instance(instance_id),
+        )
         .await
         .map_err(saga_action_failed)?;
 
