@@ -82,7 +82,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_04_29_01, REMOVE_DUPLICATED_NETWORKING_TYPES),
+    (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
+    (2026_04_30_00, PROBE_AND_SAML_DOCS),
     (2026_04_29_00, METRICS_ADD_JOULES),
     (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
     (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),

@@ -49,3 +49,15 @@ pub mod config {
     pub use crate::v1::config::ServerNodeConfig;
     pub use crate::v1::config::path_schema;
 }
+
+pub mod retention {
+    pub use crate::v2::retention::Days;
+    pub use crate::v2::retention::RetentionPolicy;
+}
+
+pub mod usage {
+    pub use crate::v2::usage::DatabaseUsage;
+    pub use crate::v2::usage::DatabaseUsageError;
+    pub use crate::v2::usage::DatabaseUsageResult;
+    pub use crate::v2::usage::TableUsage;
+}

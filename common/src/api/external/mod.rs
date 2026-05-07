@@ -3055,6 +3055,7 @@ pub struct TufArtifactMeta {
     pub sign: Option<Vec<u8>>,
 }
 
+/// A networking probe
 #[derive(
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
 )]

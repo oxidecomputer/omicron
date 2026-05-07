@@ -790,6 +790,8 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 sagas.clone(),
                 producer_registry,
+                resolver.clone(),
+                inventory_load_watcher.clone(),
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
             );
             driver.register(TaskDefinition {
@@ -1148,6 +1150,7 @@ impl BackgroundTasksInitializer {
                 sitrep_gc: task_fm_sitrep_gc.clone(),
             },
             nexus_id,
+            config.fm.analysis_enabled,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",

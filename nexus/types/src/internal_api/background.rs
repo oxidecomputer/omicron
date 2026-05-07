@@ -852,6 +852,8 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    /// Total number of present SPs discovered via ignition.
+    pub sps_found: usize,
     pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
@@ -932,6 +934,9 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
+        /// The task is disabled by config.
+        Disabled,
+
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,

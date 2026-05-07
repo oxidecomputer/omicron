@@ -129,7 +129,7 @@ mod silo;
 mod silo_auth_settings;
 mod silo_group;
 mod silo_user;
-mod sled;
+pub mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;

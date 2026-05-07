@@ -3333,17 +3333,22 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors, disabled, sps_not_present } =
-        match serde_json::from_value(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let SpEreportIngesterStatus {
+        sps,
+        errors,
+        disabled,
+        sps_found,
+        sps_not_present,
+    } = match serde_json::from_value(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
 
     if !errors.is_empty() {
         println!("    errors listing reporters:");
@@ -3355,11 +3360,13 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     if disabled {
         println!("    SP ereport ingestion explicitly disabled by config!");
     } else {
+        println!("    {SPS_FOUND:<WIDTH$}{sps_found:>NUM_WIDTH$}");
+        if sps_not_present > 0 {
+            println!(
+                "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
+            );
+        }
         print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
-    }
-
-    if sps_not_present > 0 {
-        println!("(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}");
     }
 
     if !sps.is_empty() {
@@ -3422,12 +3429,12 @@ fn print_ereporter_status_totals<'status>(
         total_new += new_ereports;
         total_reqs += requests;
         total_errors += errors.len();
-        if total_received > 0 {
+        if ereports_received > 0 {
             reporters_with_ereports += 1;
         } else {
             reporters_without_ereports += 1;
         }
-        if total_errors > 0 {
+        if !errors.is_empty() {
             reporters_with_errors += 1;
         } else {
             reporters_without_errors += 1;
@@ -3439,7 +3446,7 @@ fn print_ereporter_status_totals<'status>(
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
     println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
     println!(
         "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
@@ -3473,6 +3480,7 @@ mod ereporter_status_fields {
     pub const REPORTERS_WITH_EREPORTS: &str = "    with ereports:";
     pub const REPORTERS_WITHOUT_EREPORTS: &str = "    without ereports:";
     pub const REPORTERS_WITH_ERRORS: &str = "  with collection errors:";
+    pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
         TOTAL_NEW_EREPORTS,
@@ -3485,6 +3493,7 @@ mod ereporter_status_fields {
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
         REPORTERS_WITH_ERRORS,
+        SPS_FOUND,
         SPS_NOT_PRESENT,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
@@ -3514,6 +3523,13 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
+        Outcome::Disabled => {
+            println!(
+                "    fault management analysis explicitly disabled \
+                 by config!"
+            );
+            return;
+        }
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
