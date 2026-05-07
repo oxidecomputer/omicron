@@ -93,7 +93,12 @@ impl NoopConvertInfo {
                 .current_sled_incoming_sled_agent_generation(sled_id)?;
             let inventory_gen =
                 last_reconciliation.last_reconciled_config.generation;
-            // TODO check/explain < vs <=
+            // If the inventory's reported generation is behind the blueprint,
+            // then the inventory is stale. We should not:
+            //
+            // * clear the "will remove mupdate override" field in the blueprint
+            // * noop convert any sleds to Artifact data sources based on this
+            //   inventory
             if inventory_gen < parent_bp_gen {
                 sleds
                     .insert_unique(NoopConvertSledInfo {
@@ -540,8 +545,8 @@ impl fmt::Display for NoopConvertSledIneligibleReason {
             Self::InventoryStale { parent_bp_gen, inventory_gen } => {
                 write!(
                     f,
-                    "inventory stale: for sled, inventory reported \
-                     generation ({inventory_gen}) that is older than the \
+                    "inventory stale: inventory reported generation \
+                     ({inventory_gen}) that is older than the \
                      generation in the parent blueprint ({parent_bp_gen})",
                 )
             }

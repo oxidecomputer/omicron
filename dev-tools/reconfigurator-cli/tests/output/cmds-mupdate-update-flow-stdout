@@ -639,7 +639,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 1, new_generation: 3
 WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving mupdate override information: reconfigurator-cli simulated mupdate-override error
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: for sled, inventory reported generation (2) that is older than the generation in the parent blueprint (5)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (5)
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
@@ -958,7 +958,7 @@ INFO no previous MGS update found, so no action taken as part of updating bluepr
 WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving mupdate override information: reconfigurator-cli simulated mupdate-override error
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: sled not found in inventory
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: for sled, inventory reported generation (2) that is older than the generation in the parent blueprint (3)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
@@ -1105,7 +1105,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO measurement is eligible for noop image source conversion, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, new_measurement_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
 
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: for sled, inventory reported generation (2) that is older than the generation in the parent blueprint (3)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
@@ -2089,7 +2089,7 @@ INFO current sled measurements are in an unknown state, sled_id: 2b8f0cb3-0295-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: for sled, inventory reported generation (5) that is older than the generation in the parent blueprint (6)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
@@ -2155,7 +2155,7 @@ INFO current sled measurements are in an unknown state, sled_id: 2b8f0cb3-0295-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: for sled, inventory reported generation (5) that is older than the generation in the parent blueprint (6)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
@@ -3263,13 +3263,13 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 4, new_generation: 5
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (6) that is older than the generation in the parent blueprint (7)
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: for sled, inventory reported generation (8) that is older than the generation in the parent blueprint (9)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (6) that is older than the generation in the parent blueprint (7)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (8) that is older than the generation in the parent blueprint (9)
 INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO current sled measurements are in an unknown state, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: for sled, inventory reported generation (7) that is older than the generation in the parent blueprint (8)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (7) that is older than the generation in the parent blueprint (8)
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
 planning report:
@@ -3412,13 +3412,13 @@ planner config updated:
 
 
 > blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (6) that is older than the generation in the parent blueprint (7)
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: for sled, inventory reported generation (8) that is older than the generation in the parent blueprint (10)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (6) that is older than the generation in the parent blueprint (7)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (8) that is older than the generation in the parent blueprint (10)
 INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO current sled measurements are in an unknown state, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: for sled, inventory reported generation (7) that is older than the generation in the parent blueprint (8)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (7) that is older than the generation in the parent blueprint (8)
 INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 40, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 }, measurements: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
 generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 blueprint source: planner with report:

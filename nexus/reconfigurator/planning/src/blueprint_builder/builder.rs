@@ -884,6 +884,8 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.all_in_service_and_expunged_zones(reason))
     }
 
+    /// For a sled, return the sled agent generation recorded in the parent
+    /// blueprint, or generation 1 if the sled is newly added.
     pub fn current_sled_incoming_sled_agent_generation(
         &self,
         sled_id: SledUuid,

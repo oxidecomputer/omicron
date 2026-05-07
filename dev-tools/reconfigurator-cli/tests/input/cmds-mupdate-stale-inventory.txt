@@ -4,7 +4,7 @@
 # the sled was mupdated, so the override marker isn't visible in it.
 #
 # Acting on stale inventory in this way could cause the planner to acknowledge
-# a sled recovery that hasn't happened, breaking the edge-triggere
+# a sled recovery that hasn't happened, breaking the edge-triggered
 # mupdate override semantics. The fix is to mark a sled as ineligible for
 # both noop conversion and mupdate override clearing whenever the inventory's
 # reported sled-agent generation is older than the generation in the parent

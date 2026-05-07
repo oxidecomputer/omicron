@@ -1528,8 +1528,15 @@ blueprint source: edited directly with reconfigurator-cli
 > #
 > # Note that since we are not running the command to emulate the sled-agent
 > # performing an inventory collection and seeing the DNS zone has gone away, the
-> # planner will not attemt to restore the internal DNS zone. This is intentional
-> # as we want the zone to stay in this state for the purposes of this test
+> # planner will not attempt to restore the internal DNS zone. This is intentional
+> # as we want the zone to stay in this state for the purposes of this test.
+> #
+> # A secondary effect of pinning inventory this way is that the noop image source
+> # check on serial1 will be skipped with reason "inventory stale" for the rest
+> # of this test: the expunge bumps serial1's blueprint sled-agent generation,
+> # but inventory still reports the prior generation. That's the correct
+> # behavior; see `cmds-noop-stale-inventory.txt` for a focused test of the
+> # inventory-staleness guarantee.
 > blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint df06bb57-ad42-4431-9206-abff322896c7 created from latest blueprint (af934083-59b5-4bf6-8966-6fb5292c29e1): expunged zone 99e2f30b-3174-40bf-a78a-90da8abba8ca from sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 
@@ -1668,7 +1675,7 @@ external DNS:
 > # Attempt to upgrade one RoT bootloader. This should successfully plan the
 > # pending RoT bootloader update
 > blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (3) that is older than the generation in the parent blueprint (4)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1727,7 +1734,7 @@ external DNS:
 
 > # We generate another plan, there should be no changes
 > blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (3) that is older than the generation in the parent blueprint (4)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1794,7 +1801,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT bootloader versions: stage0 ->
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
 > blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (3) that is older than the generation in the parent blueprint (4)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1869,7 +1876,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.0.0, act
 generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
 > blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (3) that is older than the generation in the parent blueprint (4)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1944,17 +1951,17 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 > sled-update-sp serial2 --active 1.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 
-> sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+> sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 
-> sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+> sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 
 > inventory-generate
 generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
 
 > blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: for sled, inventory reported generation (3) that is older than the generation in the parent blueprint (4)
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
