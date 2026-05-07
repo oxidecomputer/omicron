@@ -397,21 +397,51 @@ pub fn sled_insert_resource_query(
     //     allocation records with the existing ones and test each zpool.
     //   - the rendezvous local storage dataset is not tombstoned or marked
     //     no_provision
+    //
+    // In addition, use the "cast error string to bool" pattern to provide an
+    // error to the caller indicating what failed.
 
-    query
-        .sql(
-            "INSERT_VALID AS (
+    query.sql(
+        "INSERT_VALID AS (
               SELECT 1
               WHERE
-                  EXISTS(SELECT 1 FROM sled_has_space) AND
-                  NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-        .sql(")) AND (EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ")
-        .param()
-        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-        .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
+                  ",
+    );
+
+    query.true_or_cast_error(
+        |query| {
+            query.sql("EXISTS(SELECT 1 FROM sled_has_space)");
+        },
+        "SLED_HAS_SPACE",
+    );
+    query.sql(" AND ");
+
+    query.true_or_cast_error(
+        |query| {
+            query
+                .sql("NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ")
+                .param()
+                .bind::<sql_types::Uuid, _>(
+                    resource.sled_id.into_untyped_uuid(),
+                )
+                .sql("))");
+        },
+        "BANNED_SLEDS",
+    );
+    query.sql(" AND ");
+
+    query.true_or_cast_error(
+        |query| {
+            query
+                .sql("(EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ")
+                .param()
+                .bind::<sql_types::Uuid, _>(
+                    resource.sled_id.into_untyped_uuid(),
+                )
+                .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
+        },
+        "REQUIRED_SLEDS",
+    );
 
     match local_storage_allocation_required {
         LocalStorageAllocationRequired::No => {}
