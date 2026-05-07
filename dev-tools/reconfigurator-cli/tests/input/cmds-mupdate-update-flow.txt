@@ -20,6 +20,11 @@ blueprint-edit latest set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae
 blueprint-edit latest set-host-phase2 serial0 A artifact 1.0.0 3a9607047b03ccaab6d222249d890e93ca51b94ad631c7ca38be74cba60802ff
 blueprint-edit latest set-host-phase2 serial0 B artifact 1.0.0 044d45ad681b44e89c10e056cabdedf19fd8b1e54bc95e6622bcdd23f16bc8f2
 
+# Model sled 0 reconciling the blueprint edits above, so its reported
+# sled-agent generation matches the parent blueprint when the next
+# inventory is generated.
+sled-set serial0 omicron-config latest
+
 # Simulate a mupdate on sled 0 by setting the mupdate override field to a
 # new UUID (generated using uuidgen).
 sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
@@ -80,6 +85,12 @@ blueprint-diff latest
 sled-set serial0 mupdate-override unset
 sled-set serial0 inventory-visible
 sled-set serial0 omicron-config latest
+
+# Model sled 2 having processed the recovery blueprint emitted by the first
+# plan (which set remove_mupdate_override = 203fa72c on sled 2): advance the
+# reported sled-agent generation. (The marker is overwritten below, so we
+# don't need to unset it first.)
+sled-set serial2 omicron-config latest
 
 # But simulate a second mupdate on sled 2. This should invalidate the existing
 # mupdate override on sled 2 and cause another target release minimum
@@ -206,6 +217,13 @@ blueprint-diff latest
 # With the option disabled (the current state), the planner will
 # not proceed with adding new zones. But with the option enabled,
 # new zones will be added.
+
+# Advance serial0's reported sled-agent generation to match the latest
+# blueprint, modeling the sled having reconciled prior planning steps
+# before the new mupdate below. This also lets the planner confirm a
+# previously soft-expunged internal_dns zone, transitioning it to
+# hard-expunged and unblocking a replacement.
+sled-set serial0 omicron-config latest
 sled-set serial0 mupdate-override c8fba912-63ae-473a-9115-0495d10fb3bc
 sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 inventory-generate
@@ -224,6 +242,10 @@ blueprint-diff latest
 # test that the planner bails if it attempts a rollback of the target release
 # minimum generation.
 blueprint-edit latest set-target-release-min-gen 1000
+
+# Advance serial1's reported sled-agent generation to match the latest
+# blueprint before the new mupdate below.
+sled-set serial1 omicron-config latest
 sled-set serial1 mupdate-override cc724abe-80c1-47e6-9771-19e6540531a9
 inventory-generate
 blueprint-plan latest latest

@@ -5,6 +5,7 @@
 //! Support for editing the blueprint details of a single sled.
 
 use crate::blueprint_builder::BpMupdateOverrideNotClearedReason;
+use crate::blueprint_builder::BpMupdateOverrideNotSetReason;
 use crate::blueprint_builder::EditedSledScalarEdits;
 use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
@@ -597,9 +598,44 @@ impl SledEditor {
             (Ok(Some(inv_override)), bp_override) => {
                 // Inventory says there's an override in place, but the
                 // blueprint doesn't (or has a different override in place).
-                // This means that a MUPdate happened since we last did
-                // blueprint planning.
+                // This normally means that a MUPdate happened since we last
+                // did blueprint planning.
                 //
+                // However, if the sled's inventory is stale or the sled has no
+                // reconciled config, we can't trust the inventory's claim that
+                // the override exists. Acting on stale inventory here would
+                // rewind the mupdate/update state machine to an earlier point
+                // and bump `target_release_minimum_generation` a second time.
+                if let NoopConvertSledInfoMut::Ok(info) = &noop_sled_info {
+                    use NoopConvertSledIneligibleReason::*;
+                    let stale_reason = match &info.status {
+                        NoopConvertSledStatus::Ineligible(InventoryStale {
+                            parent_bp_gen,
+                            inventory_gen,
+                        }) => Some(
+                            BpMupdateOverrideNotSetReason::InventoryStale {
+                                parent_bp_gen: *parent_bp_gen,
+                                inventory_gen: *inventory_gen,
+                            },
+                        ),
+                        NoopConvertSledStatus::Ineligible(
+                            NoLastReconciliation,
+                        ) => Some(
+                            BpMupdateOverrideNotSetReason::NoLastReconciliation,
+                        ),
+                        _ => None,
+                    };
+                    if let Some(reason) = stale_reason {
+                        return Ok(
+                            EnsureMupdateOverrideAction::BpOverrideNotSet {
+                                inv_override: inv_override.mupdate_override_id,
+                                bp_override,
+                                reason,
+                            },
+                        );
+                    }
+                }
+
                 // Set the blueprint's remove_mupdate_override.
                 self.set_remove_mupdate_override(Some(
                     inv_override.mupdate_override_id,
