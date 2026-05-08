@@ -36,19 +36,34 @@ impl_enum_type!(
 );
 
 impl VmmState {
-    pub fn label(&self) -> &'static str {
+    /// Converts this DB VMM state to the corresponding
+    /// [`nexus_types::instance::VmmState`].
+    ///
+    /// Because the `nexus_types` version of `VmmState::Failed` carries a
+    /// [`nexus_types::instance::VmmFailureReason`], this conversion uses
+    /// `Prehistoric` as a placeholder. Callers that need the real failure
+    /// reason should use [`crate::Vmm::runtime()`] instead.
+    fn to_nexus_state(self) -> nexus_types::instance::VmmState {
+        use nexus_types::instance::VmmFailureReason;
+        use nexus_types::instance::VmmState as NexusVmmState;
         match self {
-            VmmState::Creating => "creating",
-            VmmState::Starting => "starting",
-            VmmState::Running => "running",
-            VmmState::Stopping => "stopping",
-            VmmState::Stopped => "stopped",
-            VmmState::Rebooting => "rebooting",
-            VmmState::Migrating => "migrating",
-            VmmState::Failed => "failed",
-            VmmState::Destroyed => "destroyed",
-            VmmState::SagaUnwound => "saga_unwound",
+            Self::Creating => NexusVmmState::Creating,
+            Self::Starting => NexusVmmState::Starting,
+            Self::Running => NexusVmmState::Running,
+            Self::Stopping => NexusVmmState::Stopping,
+            Self::Stopped => NexusVmmState::Stopped,
+            Self::Rebooting => NexusVmmState::Rebooting,
+            Self::Migrating => NexusVmmState::Migrating,
+            Self::Failed => {
+                NexusVmmState::Failed(VmmFailureReason::Prehistoric)
+            }
+            Self::Destroyed => NexusVmmState::Destroyed,
+            Self::SagaUnwound => NexusVmmState::SagaUnwound,
         }
+    }
+
+    pub fn label(&self) -> &'static str {
+        self.to_nexus_state().label()
     }
 
     /// All VMM states.
@@ -71,18 +86,19 @@ impl VmmState {
         &[Self::Creating, Self::SagaUnwound, Self::Destroyed];
 
     pub fn is_terminal(&self) -> bool {
-        Self::TERMINAL_STATES.contains(self)
+        self.to_nexus_state().is_terminal()
     }
-    /// Returns `true` if the instance is in a state in which it exists on a
+
+    /// Returns `true` if the VMM is in a state in which it exists on a
     /// sled.
     pub fn exists_on_sled(&self) -> bool {
-        !Self::NONEXISTENT_STATES.contains(self)
+        self.to_nexus_state().exists_on_sled()
     }
 }
 
 impl fmt::Display for VmmState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.label())
+        fmt::Display::fmt(&self.to_nexus_state(), f)
     }
 }
 

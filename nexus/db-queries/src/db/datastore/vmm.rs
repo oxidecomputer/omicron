@@ -489,7 +489,6 @@ mod tests {
     use crate::db;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
-    use crate::db::model::VmmRuntimeState;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_types::instance::VmmState;

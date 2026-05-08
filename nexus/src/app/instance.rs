@@ -30,7 +30,6 @@ use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
-use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -46,6 +45,7 @@ use nexus_types::external_api::instance;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
+use nexus_types::instance::VmmRuntimeState;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -1710,12 +1710,14 @@ impl super::Nexus {
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let runtime: db::model::VmmRuntimeState =
-                    state.vmm_state.into();
+                let runtime: VmmRuntimeState = state.vmm_state.into();
                 Ok(db::model::Vmm {
-                    time_state_updated: runtime.time_state_updated,
-                    generation: runtime.generation,
-                    state: runtime.state,
+                    time_state_updated: runtime.time_updated,
+                    generation: runtime.generation.into(),
+                    state: DbVmmState::from(runtime.state),
+                    failure_reason: db::model::VmmFailureReason::from_vmm_state(
+                        runtime.state,
+                    ),
                     ..initial_vmm.clone()
                 })
             }
@@ -1773,12 +1775,9 @@ impl super::Nexus {
             "reason" => %reason,
         );
 
-        let new_runtime = VmmRuntimeState {
-            state: db::model::VmmState::Failed,
-            time_state_updated: chrono::Utc::now(),
-            generation: db::model::Generation(vmm.generation.next()),
-            failure_reason: Some(reason),
-        };
+        let new_runtime = vmm
+            .runtime()
+            .transition(nexus_types::instance::VmmState::Failed(reason.into()));
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {

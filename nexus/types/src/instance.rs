@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::instance as sled_agent;
+use std::fmt;
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct SledVmmState {
@@ -96,6 +97,62 @@ pub enum VmmState {
     /// The start saga which created this VMM has failed and unwound before the
     /// instance was able to start.
     SagaUnwound,
+}
+
+impl VmmState {
+    /// Returns a human-readable label for this VMM state.
+    pub fn label(&self) -> &'static str {
+        match self {
+            VmmState::Creating => "creating",
+            VmmState::Starting => "starting",
+            VmmState::Running => "running",
+            VmmState::Stopping => "stopping",
+            VmmState::Stopped => "stopped",
+            VmmState::Rebooting => "rebooting",
+            VmmState::Migrating => "migrating",
+            VmmState::Failed(_) => "failed",
+            VmmState::Destroyed => "destroyed",
+            VmmState::SagaUnwound => "saga_unwound",
+        }
+    }
+
+    /// Returns `true` if this is a terminal VMM state.
+    ///
+    /// A VMM in a terminal state will never transition to another state.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, VmmState::Destroyed | VmmState::Failed(_))
+    }
+
+    /// Returns `true` if the VMM is in a `Failed` state.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, VmmState::Failed(_))
+    }
+
+    /// Returns `true` if the VMM is in a state where it is safe to
+    /// deallocate its sled resources and mark it as deleted.
+    pub fn is_destroyable(&self) -> bool {
+        matches!(
+            self,
+            VmmState::Destroyed | VmmState::Failed(_) | VmmState::SagaUnwound
+        )
+    }
+
+    /// Returns `true` if the VMM exists on a sled.
+    ///
+    /// This is `false` for VMMs that have not yet been created, have been
+    /// destroyed, or were produced by an unwound saga and will never exist.
+    pub fn exists_on_sled(&self) -> bool {
+        !matches!(
+            self,
+            VmmState::Creating | VmmState::SagaUnwound | VmmState::Destroyed
+        )
+    }
+}
+
+impl fmt::Display for VmmState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
 }
 
 impl From<sled_agent::VmmState> for VmmState {
