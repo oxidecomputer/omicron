@@ -68,3 +68,9 @@ impl Days {
         }
     }
 }
+
+impl std::fmt::Display for Days {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} days", self.0.get())
+    }
+}
