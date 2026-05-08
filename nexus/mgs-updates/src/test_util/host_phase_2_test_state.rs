@@ -941,6 +941,18 @@ mod api_impl {
             unimplemented!()
         }
 
+        async fn support_logs_download_v1(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<
+                sled_agent_types_versions::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+            >,
+            _query_params: dropshot::Query<
+                sled_agent_types_versions::v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+            >,
+        ) -> Result<http::Response<Body>, HttpError> {
+            unimplemented!()
+        }
+
         async fn chicken_switch_destroy_orphaned_datasets_get_v1(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<

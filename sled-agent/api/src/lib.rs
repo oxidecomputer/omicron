@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (38, ADD_LOG_TIME_RANGE),
     (37, MODIFY_SVC_ENABLED_NOT_ONLINE_STATE),
     (36, DROPSHOT_FREEFORM_BODY_DESC),
     (35, INLINE_ROUTER_PEER_IP_ADDR),
@@ -1332,6 +1333,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/support/logs/download/{zone}",
+        versions = VERSION_ADD_LOG_TIME_RANGE..,
     }]
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
@@ -1340,6 +1342,25 @@ pub trait SledAgentApi {
         >,
         query_params: Query<
             latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Pre-`VERSION_ADD_LOG_TIME_RANGE` shape of the zone-logs download
+    /// endpoint: takes only `max_rotated`, with no time-range query
+    /// parameters. Newer clients use the entry above.
+    #[endpoint {
+        operation_id = "support_logs_download",
+        method = GET,
+        path = "/support/logs/download/{zone}",
+        versions = ..VERSION_ADD_LOG_TIME_RANGE,
+    }]
+    async fn support_logs_download_v1(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
         >,
     ) -> Result<http::Response<Body>, HttpError>;
 

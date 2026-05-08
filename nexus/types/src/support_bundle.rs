@@ -8,6 +8,8 @@
 //! They are shared between the support bundle collector and FM case types.
 
 use crate::fm::ereport::EreportFilters;
+use chrono::DateTime;
+use chrono::Utc;
 use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,19 @@ pub enum BundleData {
     Ereports(EreportFilters),
 }
 
+/// Inclusive time bound applied bundle-wide to time-bounded categories
+/// (currently host-info logs and ereports).
+///
+/// `None` on either side means unbounded on that side. Stored as a
+/// single field on [`BundleDataSelection`] rather than smeared across
+/// per-category filters; the `time_range()` accessor surfaces it to
+/// consumers.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BundleTimeRange {
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
 impl BundleData {
     fn category(&self) -> BundleDataCategory {
         match self {
@@ -77,8 +92,8 @@ impl fmt::Display for DisplayBundleData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.data {
             BundleData::Reconfigurator => write!(f, "reconfigurator"),
-            BundleData::HostInfo(selection) => {
-                write!(f, "host_info({})", selection.display())
+            BundleData::HostInfo(sleds) => {
+                write!(f, "host_info({})", sleds.display())
             }
             BundleData::SledCubbyInfo => write!(f, "sled_cubby_info"),
             BundleData::SpDumps => write!(f, "sp_dumps"),
@@ -94,33 +109,38 @@ impl fmt::Display for DisplayBundleData<'_> {
 /// This wrapper ensures that categories and data always match - you can't
 /// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
 /// because each BundleData determines its own category.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+///
+/// `time_range`, when set, bounds every time-bounded category's
+/// collection (host-info logs and ereports). Stored as one field
+/// here rather than copied into per-category filters.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
     data: HashMap<BundleDataCategory, BundleData>,
+    time_range: Option<BundleTimeRange>,
 }
 
 impl BundleDataSelection {
     /// Creates an empty selection with no data categories.
     pub fn new() -> Self {
-        Self { data: HashMap::new() }
+        Self::default()
     }
 
     /// Returns a selection containing all default data categories
-    /// (i.e. "collect everything").
+    /// (i.e. "collect everything") with a bundle-wide 7-day time
+    /// window applied to host-info logs and ereports.
     pub fn all() -> Self {
         Self::new()
             .with_reconfigurator()
             .with_all_sleds()
             .with_sled_cubby_info()
             .with_sp_dumps()
-            .with_ereports(
-                EreportFilters::new()
-                    .with_start_time(
-                        omicron_common::now_db_precision()
-                            - chrono::Days::new(7),
-                    )
-                    .expect("no end time set, cannot fail"),
-            )
+            .with_ereports(EreportFilters::new())
+            .with_time_range(BundleTimeRange {
+                start: Some(
+                    omicron_common::now_db_precision() - chrono::Days::new(7),
+                ),
+                end: None,
+            })
     }
 
     /// Adds reconfigurator state collection.
@@ -164,10 +184,24 @@ impl BundleDataSelection {
         self
     }
 
+    /// Sets the bundle-wide time range. Affects every time-bounded
+    /// category (host-info logs and ereports) at collection time.
+    pub fn with_time_range(mut self, range: BundleTimeRange) -> Self {
+        self.time_range = Some(range);
+        self
+    }
+
     /// Inserts a [`BundleData`] value. If a value with the same category
     /// already exists, the last write wins.
     pub fn insert(&mut self, bundle_data: BundleData) {
         self.data.insert(bundle_data.category(), bundle_data);
+    }
+
+    /// Sets the bundle-wide time range in place (used by code paths
+    /// that build the selection incrementally, e.g. database read
+    /// paths).
+    pub fn set_time_range(&mut self, range: Option<BundleTimeRange>) {
+        self.time_range = range;
     }
 
     /// Returns `true` if reconfigurator state should be collected.
@@ -201,6 +235,12 @@ impl BundleDataSelection {
             Some(BundleData::Ereports(filters)) => Some(filters),
             _ => None,
         }
+    }
+
+    /// Returns the bundle-wide time range, if any was set. Applies
+    /// to every time-bounded category at collection time.
+    pub fn time_range(&self) -> Option<&BundleTimeRange> {
+        self.time_range.as_ref()
     }
 }
 
@@ -260,12 +300,6 @@ impl fmt::Display for DisplayBundleDataSelection<'_> {
     }
 }
 
-impl Default for BundleDataSelection {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// The set of sleds to include. This can either be all sleds, or a set of
 /// specific sleds.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -311,13 +345,41 @@ pub(crate) mod test_utils {
     use super::*;
     use proptest::prelude::*;
 
+    fn arb_datetime() -> impl Strategy<Value = DateTime<Utc>> {
+        // Span the full representable range of `DateTime<Utc>` so
+        // round-trip tests exercise far-past and far-future times,
+        // not just a hand-picked window that drifts out of date.
+        let min = DateTime::<Utc>::MIN_UTC.timestamp();
+        let max = DateTime::<Utc>::MAX_UTC.timestamp();
+        (min..=max).prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
+    }
+
+    impl Arbitrary for BundleTimeRange {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            (prop::option::of(arb_datetime()), prop::option::of(arb_datetime()))
+                .prop_map(|(start, end)| BundleTimeRange { start, end })
+                .boxed()
+        }
+    }
+
     impl Arbitrary for BundleDataSelection {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            prop::collection::vec(any::<BundleData>(), 0..=5)
-                .prop_map(|data| data.into_iter().collect())
+            (
+                prop::collection::vec(any::<BundleData>(), 0..=5),
+                prop::option::of(any::<BundleTimeRange>()),
+            )
+                .prop_map(|(data, time_range)| {
+                    let mut sel: BundleDataSelection =
+                        data.into_iter().collect();
+                    sel.set_time_range(time_range);
+                    sel
+                })
                 .boxed()
         }
     }

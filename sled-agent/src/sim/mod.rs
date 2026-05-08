@@ -12,6 +12,7 @@ mod http_entrypoints_pantry;
 mod http_entrypoints_storage;
 mod instance;
 mod server;
+mod sim_support_logs;
 mod simulatable;
 mod sled_agent;
 mod storage;
@@ -23,6 +24,7 @@ pub use config::{
     TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
 };
 pub use server::{RssArgs, Server, run_standalone_server};
+pub use sled_agent::SimLogEntry;
 pub use sled_agent::SledAgent;
 pub use storage::PantryServer;
 pub(crate) use storage::Storage;

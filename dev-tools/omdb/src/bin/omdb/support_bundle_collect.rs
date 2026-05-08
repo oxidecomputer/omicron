@@ -28,10 +28,12 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataSelection;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::sync::Arc;
+use std::time::Duration;
 use support_bundle_collection::BundleCollection;
 use support_bundle_collection::BundleInfo;
 use support_bundle_collection::zip::bundle_to_zipfile;
@@ -89,6 +91,19 @@ struct CollectArgs {
     /// Defaults to all categories.
     #[clap(long, value_enum)]
     include: Vec<BundleCategory>,
+
+    /// Collect data newer than this duration ago. Applies to both
+    /// service logs and ereports. Defaults to 7 days when `--since`
+    /// is not set.
+    #[clap(long, value_parser = humantime::parse_duration)]
+    since: Option<Duration>,
+
+    /// Collect data older than this duration ago. Truncates the
+    /// upper bound of the window. Applies to both service logs and
+    /// ereports. Defaults to no upper bound (file mtimes can't be
+    /// in the future, so this effectively means "up to now").
+    #[clap(long, value_parser = humantime::parse_duration)]
+    until: Option<Duration>,
 }
 
 impl CollectArgs {
@@ -106,17 +121,28 @@ impl CollectArgs {
                 BundleCategory::HostInfo => sel.with_all_sleds(),
                 BundleCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
                 BundleCategory::SpDumps => sel.with_sp_dumps(),
-                BundleCategory::Ereports => sel.with_ereports(
-                    EreportFilters::new()
-                        .with_start_time(
-                            omicron_common::now_db_precision()
-                                - chrono::Days::new(7),
-                        )
-                        .expect("no end time set, cannot fail"),
-                ),
+                BundleCategory::Ereports => {
+                    sel.with_ereports(EreportFilters::new())
+                }
             };
         }
-        sel
+
+        // Apply a bundle-wide time range. Each flag's default fires
+        // independently: `--since` defaults to 7 days, `--until`
+        // defaults to no upper bound.
+        let now = omicron_common::now_db_precision();
+        let range = BundleTimeRange {
+            start: self
+                .since
+                .and_then(|d| chrono::Duration::from_std(d).ok())
+                .map(|d| now - d)
+                .or(Some(now - chrono::Days::new(7))),
+            end: self
+                .until
+                .and_then(|d| chrono::Duration::from_std(d).ok())
+                .map(|d| now - d),
+        };
+        sel.with_time_range(range)
     }
 }
 

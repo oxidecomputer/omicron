@@ -35,6 +35,7 @@ pub async fn collect(
         debug!(log, "Support bundle: ereports not requested");
         return Ok(CollectionStepOutput::Skipped);
     };
+    let time_range = collection.data_selection().time_range().cloned();
     let ereports_dir = dir.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
     if let Err(err) = save_ereports(
@@ -43,6 +44,7 @@ pub async fn collect(
         opctx,
         datastore,
         ereport_filters.clone(),
+        time_range,
         ereports_dir,
         &mut status,
     )
@@ -67,12 +69,14 @@ pub async fn collect(
 //
 // Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
 // DB queries are eagerly cancelled via `select!`.
+#[allow(clippy::too_many_arguments)]
 async fn save_ereports(
     collection: &BundleCollection,
     log: &Logger,
     opctx: &OpContext,
     datastore: &Arc<DataStore>,
     filters: EreportFilters,
+    time_range: Option<nexus_types::support_bundle::BundleTimeRange>,
     dir: Utf8PathBuf,
     status: &mut SupportBundleEreportStatus,
 ) -> anyhow::Result<()> {
@@ -83,7 +87,7 @@ async fn save_ereports(
         let ereports = tokio::select! {
             _ = collection.cancelled() => return Ok(()),
             result = datastore.ereport_fetch_matching(
-                &opctx, &filters, &pagparams
+                &opctx, &filters, time_range.as_ref(), &pagparams
             ) => {
                 result.map_err(|e| {
                     e.internal_context("failed to query for ereports")

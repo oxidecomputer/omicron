@@ -261,33 +261,36 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl as time_range_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let bundle_uuid = bundle_id.into_untyped_uuid();
 
-        flags_dsl::support_bundle_data_selection_flags
-            .filter(flags_dsl::bundle_id.eq(bundle_uuid))
-            .left_join(
-                host_info_dsl::support_bundle_data_selection_host_info
-                    .on(host_info_dsl::bundle_id.eq(flags_dsl::bundle_id)),
-            )
-            .left_join(
-                ereports_dsl::support_bundle_data_selection_ereports
-                    .on(ereports_dsl::bundle_id.eq(flags_dsl::bundle_id)),
-            )
-            .select(DbBundleDataSelection::as_select())
-            .first_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context(
-                        "failed to query data selection for bundle",
-                    )
-            })?
-            .try_into()
-            .map_err(|e: Error| {
-                e.internal_context("failed to convert data selection")
-            })
+        let row: DbBundleDataSelection =
+            flags_dsl::support_bundle_data_selection_flags
+                .filter(flags_dsl::bundle_id.eq(bundle_uuid))
+                .left_join(
+                    host_info_dsl::support_bundle_data_selection_host_info
+                        .on(host_info_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+                )
+                .left_join(
+                    ereports_dsl::support_bundle_data_selection_ereports
+                        .on(ereports_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+                )
+                .left_join(
+                    time_range_dsl::support_bundle_data_selection_time_range
+                        .on(time_range_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+                )
+                .select(DbBundleDataSelection::as_select())
+                .first_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to query data selection for bundle",
+                        )
+                })?;
+        Ok(row.into())
     }
 
     /// Looks up a single support bundle
@@ -645,10 +648,13 @@ impl DataStore {
         bundle_id: SupportBundleUuid,
         data_selection: BundleDataSelection,
     ) -> Result<(), diesel::result::Error> {
-        use crate::db::model::{DataSelectionFlags, Ereports, HostInfo};
+        use crate::db::model::{
+            DataSelectionFlags, Ereports, HostInfo, TimeRange,
+        };
         use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl as time_range_dsl;
 
         // Always insert a flags row.
         diesel::insert_into(flags_dsl::support_bundle_data_selection_flags)
@@ -662,6 +668,17 @@ impl DataStore {
             })
             .execute_async(conn)
             .await?;
+
+        // Insert the bundle-wide time-range row (if set), independent
+        // of any per-category rows.
+        if let Some(range) = data_selection.time_range() {
+            diesel::insert_into(
+                time_range_dsl::support_bundle_data_selection_time_range,
+            )
+            .values(TimeRange::new(bundle_id, range))
+            .execute_async(conn)
+            .await?;
+        }
 
         // Insert payload tables for variants that carry data.
         for data in data_selection {
@@ -704,6 +721,7 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl as time_range_dsl;
 
         diesel::delete(flags_dsl::support_bundle_data_selection_flags)
             .filter(flags_dsl::bundle_id.eq_any(bundle_ids.clone()))
@@ -714,9 +732,15 @@ impl DataStore {
             .execute_async(conn)
             .await?;
         diesel::delete(ereports_dsl::support_bundle_data_selection_ereports)
-            .filter(ereports_dsl::bundle_id.eq_any(bundle_ids))
+            .filter(ereports_dsl::bundle_id.eq_any(bundle_ids.clone()))
             .execute_async(conn)
             .await?;
+        diesel::delete(
+            time_range_dsl::support_bundle_data_selection_time_range,
+        )
+        .filter(time_range_dsl::bundle_id.eq_any(bundle_ids))
+        .execute_async(conn)
+        .await?;
         Ok(())
     }
 

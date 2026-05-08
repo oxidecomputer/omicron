@@ -1430,12 +1430,48 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let SledDiagnosticsLogsDownloadPathParam { zone } =
             path_params.into_inner();
-        let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
-            query_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+            start_time,
+            end_time,
+        } = query_params.into_inner();
+        let window = sled_diagnostics::LogTimeWindow {
+            start: start_time,
+            end: end_time,
+        };
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
                 sa.as_support_bundle_logs()
-                    .get_logs_for_zone(zone, max_rotated)
+                    .get_logs_for_zone(zone, max_rotated, window)
+                    .await
+                    .map_err(HttpError::from)
+            })
+            .await
+    }
+
+    async fn support_logs_download_v1(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let v1::diagnostics::SledDiagnosticsLogsDownloadPathParam { zone } =
+            path_params.into_inner();
+        let v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+        } = query_params.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_logs()
+                    .get_logs_for_zone(
+                        zone,
+                        Some(max_rotated),
+                        sled_diagnostics::LogTimeWindow::default(),
+                    )
                     .await
                     .map_err(HttpError::from)
             })

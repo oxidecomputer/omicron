@@ -11,6 +11,8 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::DateTime;
+use chrono::Utc;
 use fs_err::File;
 use illumos_utils::zfs::{
     CreateSnapshotError, DestroySnapshotError, GetValueError,
@@ -566,7 +568,8 @@ impl LogsHandle {
     pub async fn get_zone_logs<W: Write + Seek>(
         &self,
         zone: &str,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
+        window: LogTimeWindow,
         writer: &mut W,
     ) -> Result<(), LogError> {
         // We are opting to use oxlog to find logs rather than using a similar
@@ -575,6 +578,14 @@ impl LogsHandle {
         // internal structures like a list of running zones. Instead we operate
         // on all of the log paths that oxlog is capable of discovering via the
         // filesystem directly.
+        //
+        // NOTE: We deliberately pass `date_range: None` to oxlog and apply
+        // the time-range filter ourselves below. oxlog's filter would
+        // exclude "current" SMF log files whose mtime falls outside the
+        // window — but the active log file is exactly the place fresh
+        // entries land, so we always want it included regardless of the
+        // requested window. Filtering here lets us keep current logs
+        // unconditionally and gate only the archived/extra files.
         let zones = oxlog::Zones::load().map_err(|e| LogError::OxLog(e))?;
         let zone_logs = zones.zone_logs(
             zone,
@@ -599,10 +610,13 @@ impl LogsHandle {
         // we'll leak snapshots.
         let mut log_snapshots = LogSnapshots::new();
 
+        let mtime_range = window.to_mtime_range();
+
         let result = self
             .get_zone_logs_inner(
                 zone_logs,
                 max_rotated,
+                mtime_range,
                 zip,
                 &mut log_snapshots,
             )
@@ -616,12 +630,19 @@ impl LogsHandle {
     async fn get_zone_logs_inner<W: Write + Seek>(
         &self,
         zone_logs: BTreeMap<String, SvcLogs>,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
+        mtime_range: MtimeRange,
         mut zip: zip::ZipWriter<W>,
         mut log_snapshots: &mut LogSnapshots,
     ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
             //  - Grab all of the service's SMF logs -
+
+            // The "current" log is always included, regardless of mtime
+            // bounds — the file is where fresh entries land, and a
+            // long-quiet but still-active service shouldn't lose its
+            // current log just because its last write predates the
+            // window.
             if let Some(current) = service_logs.current {
                 self.process_logs(
                     &service,
@@ -643,6 +664,7 @@ impl LogsHandle {
                 .archived
                 .into_iter()
                 .filter(|log| log.path.as_str().contains("crypt/debug"))
+                .filter(|log| mtime_range.contains(log.modified))
                 .collect();
 
             // Since these logs can be spread out across multiple U.2 devices
@@ -655,12 +677,19 @@ impl LogsHandle {
                     .unwrap_or(0)
             });
 
-            for file in archived.iter().rev().take(max_rotated) {
+            // Apply the count cap (`max_rotated`) only when the caller
+            // specified one. With a time range and no count cap, take
+            // everything in the window.
+            let mut to_process: Vec<&LogFile> = archived.iter().rev().collect();
+            if let Some(n) = max_rotated {
+                to_process.truncate(n);
+            }
+            for file in to_process {
                 self.process_logs(
                     &service,
                     &mut zip,
                     &mut log_snapshots,
-                    &file,
+                    file,
                     LogType::Archive,
                 )
                 .await?;
@@ -692,8 +721,18 @@ impl LogsHandle {
                     .await?;
                 }
 
-                // We clamp the number of rotated logs we grab to 5.
-                for log in logs.rotated.iter().rev().take(max_rotated) {
+                // Apply mtime + count cap to rotated extras.
+                let mut rotated: Vec<&LogFile> = logs
+                    .rotated
+                    .iter()
+                    .copied()
+                    .rev()
+                    .filter(|log| mtime_range.contains(log.modified))
+                    .collect();
+                if let Some(n) = max_rotated {
+                    rotated.truncate(n);
+                }
+                for log in rotated {
                     self.process_logs(
                         &service,
                         &mut zip,
@@ -710,6 +749,60 @@ impl LogsHandle {
 
         Ok(())
     }
+}
+
+/// Inclusive log-collection time window expressed in chrono terms.
+///
+/// Bundles `start_time`/`end_time` into one type so callers can't
+/// accidentally swap them at the call site — the two fields have the
+/// same type and same `Option`-ness, and would otherwise be adjacent
+/// positional arguments.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LogTimeWindow {
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
+impl LogTimeWindow {
+    fn to_mtime_range(self) -> MtimeRange {
+        MtimeRange {
+            start: self.start.map(chrono_to_jiff),
+            end: self.end.map(chrono_to_jiff),
+        }
+    }
+}
+
+/// Inclusive `mtime` window applied to archived and extra log files.
+#[derive(Clone, Copy, Debug, Default)]
+struct MtimeRange {
+    start: Option<jiff::Timestamp>,
+    end: Option<jiff::Timestamp>,
+}
+
+impl MtimeRange {
+    /// Returns true if a file with the given `modified` time should be
+    /// included. Files with unknown mtime (`None`) are included — over-
+    /// inclusive matches the calling pattern.
+    fn contains(&self, modified: Option<jiff::Timestamp>) -> bool {
+        let Some(mtime) = modified else {
+            return true;
+        };
+        if let Some(start) = self.start {
+            if mtime < start {
+                return false;
+            }
+        }
+        if let Some(end) = self.end {
+            if mtime > end {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn chrono_to_jiff(ts: DateTime<Utc>) -> jiff::Timestamp {
+    jiff::Timestamp::from_second(ts.timestamp()).unwrap_or(jiff::Timestamp::MIN)
 }
 
 fn write_log_to_zip<W: Write + Seek>(

@@ -6,14 +6,20 @@
 
 use anyhow::Context;
 use anyhow::Result;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
+use chrono::DateTime;
+use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use futures::TryStreamExt;
 use http::StatusCode;
 use http::method::Method;
+use internal_dns_resolver::Resolver;
 use nexus_db_model::SupportBundleState as DbSupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -25,10 +31,15 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::support_bundle::BundleDataSelection;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
+use std::sync::Arc;
+use support_bundle_collection::BundleCollection;
+use support_bundle_collection::BundleInfo;
 use zip::read::ZipArchive;
 
 type ControlPlaneTestContext =
@@ -1012,4 +1023,159 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
         .expect("fetching FM bundle via lockstep API")
         .into_inner();
     assert_eq!(fetched_fm.fm_case_id, Some(case_id));
+}
+
+/// The collector writes per-sled logs at
+/// `<root>/rack/<rack_id>/sled/<sled_id>/logs/<zone>/`. Find the
+/// first matching directory; tests that use this only inject data
+/// on one sled.
+fn find_first_zone_log_dir(root: &Utf8Path, zone: &str) -> Utf8PathBuf {
+    let rack_root = root.join("rack");
+    let mut entries = rack_root
+        .read_dir_utf8()
+        .expect("read rack dir")
+        .filter_map(Result::ok);
+    let rack = entries.next().expect("at least one rack").path().to_owned();
+    let mut sled_iter = rack
+        .join("sled")
+        .read_dir_utf8()
+        .expect("read sled dir")
+        .filter_map(Result::ok);
+    loop {
+        let sled =
+            sled_iter.next().expect("at least one sled with injected logs");
+        let candidate = sled.path().join("logs").join(zone);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+}
+
+/// Build a `BundleCollection` with `start` as the bundle-wide lower
+/// bound and run `collect_bundle_locally` into a fresh temp dir.
+/// Bypasses the Nexus state machine and `support_bundle` row;
+/// useful only for exercising the collection mechanism directly.
+async fn collect_with_window(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    datastore: &Arc<DataStore>,
+    resolver: Resolver,
+    start: DateTime<Utc>,
+) -> camino_tempfile::Utf8TempDir {
+    let bundle_id = SupportBundleUuid::new_v4();
+    let log = cptestctx.logctx.log.new(slog::o!(
+        "component" => "test_support_bundle_log_time_range",
+        "bundle" => bundle_id.to_string(),
+    ));
+    let selection = BundleDataSelection::new()
+        .with_all_sleds()
+        .with_time_range(BundleTimeRange { start: Some(start), end: None });
+    let collection = Arc::new(BundleCollection::new(
+        datastore.clone(),
+        resolver,
+        log,
+        opctx.child(std::collections::BTreeMap::new()),
+        selection,
+        BundleInfo {
+            id: bundle_id,
+            reason_for_creation: "log time-range test".into(),
+        },
+    ));
+    let dir = camino_tempfile::tempdir().expect("creating output tempdir");
+    collection
+        .collect_bundle_locally(&dir)
+        .await
+        .expect("collect_bundle_locally");
+    dir
+}
+
+// Exercise the host-info time-range filter end-to-end:
+// inject synthetic log entries on the sim sled-agent with crafted mtimes,
+// then run the bundle collector and confirm that only entries within the
+// requested window land in the output directory.
+#[nexus_test]
+async fn test_support_bundle_log_time_range(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use chrono::TimeDelta;
+    use omicron_sled_agent::sim::SimLogEntry;
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let resolver = nexus.resolver();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Inject four synthetic entries with mtimes that bracket the two
+    // windows we test below: 30 m and 6 h ago land inside both, 3 d
+    // ago lands only inside the 7 d window, and 30 d ago is outside
+    // both.
+    let now = Utc::now();
+    let recent = now - TimeDelta::minutes(30);
+    let middle = now - TimeDelta::hours(6);
+    let between = now - TimeDelta::days(3);
+    let ancient = now - TimeDelta::days(30);
+    let zone = "test_zone";
+    let sled_agent = cptestctx.first_sled_agent();
+    for (filename, mtime) in [
+        ("recent.log", recent),
+        ("middle.log", middle),
+        ("between.log", between),
+        ("ancient.log", ancient),
+    ] {
+        sled_agent.insert_support_log(
+            zone,
+            SimLogEntry {
+                filename: filename.into(),
+                contents: filename.as_bytes().to_vec(),
+                mtime,
+            },
+        );
+    }
+
+    // 24h window: recent + middle inside; between (3 d) and ancient
+    // (30 d) excluded.
+    let dir_24h = collect_with_window(
+        cptestctx,
+        &opctx,
+        datastore,
+        resolver.clone(),
+        now - TimeDelta::hours(24),
+    )
+    .await;
+    let log_dir = find_first_zone_log_dir(dir_24h.path(), zone);
+    assert!(
+        log_dir.join("recent.log").exists(),
+        "24h window: recent.log should be present at {log_dir}",
+    );
+    assert!(
+        log_dir.join("middle.log").exists(),
+        "24h window: middle.log should be present at {log_dir}",
+    );
+    assert!(
+        !log_dir.join("between.log").exists(),
+        "24h window: between.log (3 d) should NOT be present at {log_dir}",
+    );
+    assert!(
+        !log_dir.join("ancient.log").exists(),
+        "24h window: ancient.log should NOT be present at {log_dir}",
+    );
+
+    // 7d window: between (3 d) now in scope; ancient (30 d) still out.
+    let dir_7d = collect_with_window(
+        cptestctx,
+        &opctx,
+        datastore,
+        resolver.clone(),
+        now - TimeDelta::days(7),
+    )
+    .await;
+    let log_dir = find_first_zone_log_dir(dir_7d.path(), zone);
+    assert!(log_dir.join("recent.log").exists());
+    assert!(log_dir.join("middle.log").exists());
+    assert!(
+        log_dir.join("between.log").exists(),
+        "7d window: between.log (3 d) should be present at {log_dir}",
+    );
+    assert!(!log_dir.join("ancient.log").exists());
 }
