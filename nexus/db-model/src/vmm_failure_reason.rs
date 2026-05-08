@@ -63,6 +63,13 @@ impl From<VmmFailureReason> for types::VmmFailureReason {
 }
 
 impl VmmFailureReason {
+    pub fn from_vmm_state(state: types::VmmState) -> Option<Self> {
+        match state {
+            types::VmmState::Failed(reason) => Some(reason.into()),
+            _ => None,
+        }
+    }
+
     pub fn description(&self) -> &'static str {
         types::VmmFailureReason::from(*self).description()
     }
