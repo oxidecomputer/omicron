@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.40"
+#: target = "lab-3.0-opte-0.40"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -256,7 +256,15 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-pfexec zpool create -f scratch c1t1d0 c2t1d0
+# Enumerate the names of NVMe devices on on which one might place a zpool.
+#
+# N.B. that it is fine to do use "every NVMe device on the box" since this
+# script only runs on buildomat workers which do not have any disks used for
+# storing anything persistently, and which are PXE-booted...so we're not gonna
+# clobber anything that anyone might have cared about on sock and buskin, at
+# least.
+DISKS=( $(pfexec nvmeadm list -p -o disk) )
+pfexec zpool create -f scratch "${DISKS[@]}"
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
