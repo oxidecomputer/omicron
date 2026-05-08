@@ -5,7 +5,6 @@
 use crate::latest;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use oxnet::IpNet;
-use sled_agent_types_versions::latest::early_networking::PortSpeed;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
     fn from(ipnet: IpNet) -> Self {
@@ -67,22 +66,6 @@ impl latest::networking::SwitchPortSettingsCreate {
             routes: Vec::new(),
             bgp_peers: Vec::new(),
             addresses: Vec::new(),
-        }
-    }
-}
-
-impl From<PortSpeed> for latest::networking::LinkSpeed {
-    fn from(x: PortSpeed) -> Self {
-        match x {
-            PortSpeed::Speed0G => Self::Speed0G,
-            PortSpeed::Speed1G => Self::Speed1G,
-            PortSpeed::Speed10G => Self::Speed10G,
-            PortSpeed::Speed25G => Self::Speed25G,
-            PortSpeed::Speed40G => Self::Speed40G,
-            PortSpeed::Speed50G => Self::Speed50G,
-            PortSpeed::Speed100G => Self::Speed100G,
-            PortSpeed::Speed200G => Self::Speed200G,
-            PortSpeed::Speed400G => Self::Speed400G,
         }
     }
 }

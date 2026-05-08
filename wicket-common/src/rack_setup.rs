@@ -21,7 +21,7 @@ use sled_agent_types::early_networking::BgpPeerConfig;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::LinkFec;
-use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
@@ -185,7 +185,7 @@ impl UserSpecifiedRackNetworkConfig {
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
     pub addresses: Vec<UserSpecifiedUplinkAddressConfig>,
-    pub uplink_port_speed: PortSpeed,
+    pub uplink_port_speed: LinkSpeed,
     pub uplink_port_fec: Option<LinkFec>,
     pub autoneg: bool,
     #[serde(default)]

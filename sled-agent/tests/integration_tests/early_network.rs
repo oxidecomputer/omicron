@@ -11,7 +11,7 @@ use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
     LldpAdminStatus, LldpPortConfig, MaxPathConfig, PortConfig, LinkFec,
-    PortSpeed, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
+    LinkSpeed, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
     SwitchSlot, UplinkAddress, UplinkAddressConfig,
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;
@@ -145,7 +145,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     addresses: vec![],
                     switch: SwitchSlot::Switch1,
                     port: "qsfp0".to_owned(),
-                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_speed: LinkSpeed::Speed100G,
                     uplink_port_fec: None,
                     bgp_peers: vec![],
                     autoneg: false,
@@ -157,7 +157,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     addresses: vec![],
                     switch: SwitchSlot::Switch1,
                     port: "qsfp26".to_owned(),
-                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_speed: LinkSpeed::Speed100G,
                     uplink_port_fec: Some(LinkFec::Rs),
                     bgp_peers: vec![],
                     autoneg: false,
@@ -180,7 +180,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     }],
                     switch: SwitchSlot::Switch1,
                     port: "qsfp18".to_owned(),
-                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_speed: LinkSpeed::Speed100G,
                     uplink_port_fec: Some(LinkFec::Rs),
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
@@ -227,7 +227,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     )],
                     switch: SwitchSlot::Switch0,
                     port: "qsfp18".to_owned(),
-                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_speed: LinkSpeed::Speed100G,
                     uplink_port_fec: Some(LinkFec::Rs),
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
@@ -271,7 +271,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     addresses: vec![],
                     switch: SwitchSlot::Switch0,
                     port: "qsfp0".to_owned(),
-                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_speed: LinkSpeed::Speed100G,
                     uplink_port_fec: None,
                     bgp_peers: vec![],
                     autoneg: false,
@@ -283,7 +283,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     addresses: vec![],
                     switch: SwitchSlot::Switch0,
                     port: "qsfp26".to_owned(),
-                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_speed: LinkSpeed::Speed100G,
                     uplink_port_fec: Some(LinkFec::Rs),
                     bgp_peers: vec![],
                     autoneg: false,

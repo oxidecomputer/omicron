@@ -2225,6 +2225,74 @@
           }
         ]
       },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
+        ]
+      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -2504,21 +2572,6 @@
         "enum": [
           "valid",
           "invalid"
-        ]
-      },
-      "PortSpeed": {
-        "description": "Switchport Speed options",
-        "type": "string",
-        "enum": [
-          "speed0_g",
-          "speed1_g",
-          "speed10_g",
-          "speed25_g",
-          "speed40_g",
-          "speed50_g",
-          "speed100_g",
-          "speed200_g",
-          "speed400_g"
         ]
       },
       "PowerMode": {
@@ -7800,7 +7853,7 @@
             ]
           },
           "uplink_port_speed": {
-            "$ref": "#/components/schemas/PortSpeed"
+            "$ref": "#/components/schemas/LinkSpeed"
           }
         },
         "required": [

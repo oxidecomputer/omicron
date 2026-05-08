@@ -269,7 +269,7 @@ pub struct PortConfig {
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: PortSpeed,
+    pub uplink_port_speed: LinkSpeed,
     /// Port forward error correction type.
     pub uplink_port_fec: Option<LinkFec>,
     /// BGP peers on this port
@@ -305,28 +305,37 @@ pub enum SwitchSlot {
     Switch1,
 }
 
-/// Switchport Speed options
+/// The speed of a link.
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum PortSpeed {
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
     #[serde(alias = "0G")]
     Speed0G,
+    /// 1 gigabit per second.
     #[serde(alias = "1G")]
     Speed1G,
+    /// 10 gigabits per second.
     #[serde(alias = "10G")]
     Speed10G,
+    /// 25 gigabits per second.
     #[serde(alias = "25G")]
     Speed25G,
+    /// 40 gigabits per second.
     #[serde(alias = "40G")]
     Speed40G,
+    /// 50 gigabits per second.
     #[serde(alias = "50G")]
     Speed50G,
+    /// 100 gigabits per second.
     #[serde(alias = "100G")]
     Speed100G,
+    /// 200 gigabits per second.
     #[serde(alias = "200G")]
     Speed200G,
+    /// 400 gigabits per second.
     #[serde(alias = "400G")]
     Speed400G,
 }

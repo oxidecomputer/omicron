@@ -10,7 +10,7 @@ use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
 use crate::latest::early_networking::LinkFec;
-use crate::latest::early_networking::PortSpeed;
+use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
 use crate::latest::early_networking::RouterPeerIpAddr;
@@ -278,18 +278,18 @@ impl fmt::Debug for SwitchSlot {
     }
 }
 
-impl fmt::Display for PortSpeed {
+impl fmt::Display for LinkSpeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PortSpeed::Speed0G => write!(f, "0G"),
-            PortSpeed::Speed1G => write!(f, "1G"),
-            PortSpeed::Speed10G => write!(f, "10G"),
-            PortSpeed::Speed25G => write!(f, "25G"),
-            PortSpeed::Speed40G => write!(f, "40G"),
-            PortSpeed::Speed50G => write!(f, "50G"),
-            PortSpeed::Speed100G => write!(f, "100G"),
-            PortSpeed::Speed200G => write!(f, "200G"),
-            PortSpeed::Speed400G => write!(f, "400G"),
+            LinkSpeed::Speed0G => write!(f, "0G"),
+            LinkSpeed::Speed1G => write!(f, "1G"),
+            LinkSpeed::Speed10G => write!(f, "10G"),
+            LinkSpeed::Speed25G => write!(f, "25G"),
+            LinkSpeed::Speed40G => write!(f, "40G"),
+            LinkSpeed::Speed50G => write!(f, "50G"),
+            LinkSpeed::Speed100G => write!(f, "100G"),
+            LinkSpeed::Speed200G => write!(f, "200G"),
+            LinkSpeed::Speed400G => write!(f, "400G"),
         }
     }
 }

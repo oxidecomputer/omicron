@@ -61,7 +61,7 @@ pub mod early_networking {
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
     pub use crate::v1::early_networking::LinkFec;
-    pub use crate::v1::early_networking::PortSpeed;
+    pub use crate::v1::early_networking::LinkSpeed;
     pub use crate::v1::early_networking::RouteConfig;
     pub use crate::v1::early_networking::SwitchSlot;
     pub use crate::v1::early_networking::TxEqConfig;

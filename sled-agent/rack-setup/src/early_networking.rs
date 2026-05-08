@@ -40,7 +40,7 @@ use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, LinkFec,
-    PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
+    LinkSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
 };
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -929,17 +929,17 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
 // in the internal API to the types used in the dpd-client API.  The conversion
 // is done here, rather than with "impl From" at the definition, to avoid a
 // circular dependency between omicron-common and dpd.
-fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
+fn convert_speed(speed: &LinkSpeed) -> dpd_client::types::PortSpeed {
     match speed {
-        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
-        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
-        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
-        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
-        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
-        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
-        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
-        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
-        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+        LinkSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+        LinkSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+        LinkSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+        LinkSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+        LinkSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+        LinkSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+        LinkSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+        LinkSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+        LinkSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
     }
 }
 
