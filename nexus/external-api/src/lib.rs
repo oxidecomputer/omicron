@@ -28,6 +28,7 @@ use nexus_types_versions::v2026_01_01_00;
 use nexus_types_versions::v2026_01_03_00;
 use nexus_types_versions::v2026_01_05_00;
 use nexus_types_versions::v2026_01_08_00;
+use nexus_types_versions::v2026_01_15_00;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
@@ -7774,6 +7775,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/audit-log",
         tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..,
     }]
     async fn audit_log_list(
         rqctx: RequestContext<Self::Context>,
@@ -7784,6 +7786,58 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::audit::AuditLogEntry>>,
         HttpError,
     >;
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_AUTH_METHOD_ENUM..VERSION_AUDIT_LOG_CREDENTIAL_ID,
+    }]
+    async fn audit_log_list_v2026_01_15_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_15_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = ..VERSION_AUDIT_LOG_AUTH_METHOD_ENUM,
+    }]
+    async fn audit_log_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page
+                .items
+                .into_iter()
+                .map(|e| v2026_01_15_00::audit::AuditLogEntry::from(e).into())
+                .collect(),
+            next_page: page.next_page,
+        }))
+    }
 
     // Console API: logins
 
