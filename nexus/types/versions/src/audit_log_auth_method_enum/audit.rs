@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Audit log types for version AUDIT_LOG_CREDENTIAL_ID.
+//! Audit log types for version AUDIT_LOG_AUTH_METHOD_ENUM.
 
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -11,7 +11,36 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 use crate::v2025_11_20_00::audit::{AuditLogEntryActor, AuditLogEntryResult};
-use crate::v2026_01_15_00::audit::AuthMethod;
+
+/// Authentication method used for a request
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// Console session cookie
+    SessionCookie,
+    /// Device access token (OAuth 2.0 device authorization flow)
+    AccessToken,
+    /// SCIM client bearer token
+    ScimToken,
+    /// Spoof authentication (test only)
+    #[schemars(skip)]
+    Spoof,
+}
+
+impl AuthMethod {
+    /// Returns the wire-format name used by older API versions that exposed
+    /// `auth_method` as a free-form string.
+    fn as_str(self) -> &'static str {
+        match self {
+            AuthMethod::SessionCookie => "session_cookie",
+            AuthMethod::AccessToken => "access_token",
+            AuthMethod::ScimToken => "scim_token",
+            AuthMethod::Spoof => "spoof",
+        }
+    }
+}
 
 /// Audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -41,11 +70,6 @@ pub struct AuditLogEntry {
     /// token). Null for unauthenticated requests like login attempts.
     pub auth_method: Option<AuthMethod>,
 
-    /// ID of the credential used for authentication. Null for unauthenticated
-    /// requests. The value of `auth_method` indicates what kind of credential
-    /// it is (access token, session, or SCIM token).
-    pub credential_id: Option<Uuid>,
-
     /// Time operation completed
     pub time_completed: DateTime<Utc>,
 
@@ -53,7 +77,7 @@ pub struct AuditLogEntry {
     pub result: AuditLogEntryResult,
 }
 
-impl From<AuditLogEntry> for crate::v2026_01_15_00::audit::AuditLogEntry {
+impl From<AuditLogEntry> for crate::v2025_11_20_00::audit::AuditLogEntry {
     fn from(new: AuditLogEntry) -> Self {
         Self {
             id: new.id,
@@ -64,7 +88,7 @@ impl From<AuditLogEntry> for crate::v2026_01_15_00::audit::AuditLogEntry {
             source_ip: new.source_ip,
             user_agent: new.user_agent,
             actor: new.actor,
-            auth_method: new.auth_method,
+            auth_method: new.auth_method.map(|m| m.as_str().to_string()),
             time_completed: new.time_completed,
             result: new.result,
         }
