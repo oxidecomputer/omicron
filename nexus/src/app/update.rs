@@ -480,6 +480,7 @@ impl super::Nexus {
 
         let problems = checks.problems();
 
+        // TODO-K: Log a single thing with all of the messages instead of several ones?
         for problem in &problems {
             match problem {
                 UpdateStatusProblem::StuckSagas(sagas) => {
@@ -523,7 +524,14 @@ impl super::Nexus {
                         "svcs_by_sled" => ?svcs_by_sled,
                     );
                 }
-                UpdateStatusProblem::StuckUpdate => {}
+                // TODO-K: Add the time the last step was planned
+                UpdateStatusProblem::StuckUpdate => {
+                    warn!(
+                        opctx.log,
+                        "found a stuck update older than {STUCK_UPDATE_THRESHOLD}";
+                        "time_last_step_planned" => "todo_time",
+                    );
+                }
             }
         }
 
