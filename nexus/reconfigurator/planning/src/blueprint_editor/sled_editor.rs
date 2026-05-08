@@ -150,7 +150,7 @@ pub enum SledEditError {
     },
 }
 
-/// Error returned by [`SledEditor::ensure_mupdate_override`].
+/// Error returned by `SledEditor::ensure_mupdate_override`.
 ///
 /// Distinct from [`SledEditError`] so that the caller can route the `Planner`
 /// arm to `Error::Planner`.
