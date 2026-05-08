@@ -10,8 +10,8 @@ use omicron_common::api::external::Vni;
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
-    LldpAdminStatus, LldpPortConfig, MaxPathConfig, PortConfig, LinkFec,
-    LinkSpeed, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
+    LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
+    PortConfig, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
     SwitchSlot, UplinkAddress, UplinkAddressConfig,
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;

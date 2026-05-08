@@ -6,11 +6,11 @@
 
 use crate::latest::early_networking::BgpPeerConfig;
 use crate::latest::early_networking::InvalidIpAddrError;
+use crate::latest::early_networking::LinkFec;
+use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
-use crate::latest::early_networking::LinkFec;
-use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
 use crate::latest::early_networking::RouterPeerIpAddr;

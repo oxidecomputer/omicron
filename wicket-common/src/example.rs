@@ -13,9 +13,9 @@ use omicron_common::{
     api::external::AllowedSourceIps,
 };
 use sled_agent_types::early_networking::{
-    BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    LinkFec, LinkSpeed, RouteConfig, RouterLifetimeConfig, TxEqConfig,
-    UplinkAddress,
+    BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
+    LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
+    TxEqConfig, UplinkAddress,
 };
 use sled_hardware_types::Baseboard;
 
