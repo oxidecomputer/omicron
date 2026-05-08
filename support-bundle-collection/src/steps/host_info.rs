@@ -31,6 +31,8 @@ pub async fn spawn_query_all_sleds(
     else {
         return Ok(CollectionStepOutput::Skipped);
     };
+    let sled_selection = sled_selection.clone();
+    let time_range = collection.data_selection().time_range().cloned();
 
     let all_sleds = tokio::select! {
         _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
@@ -48,12 +50,16 @@ pub async fn spawn_query_all_sleds(
         }
 
         let sled = sled.clone();
+        let time_range = time_range.clone();
         extra_steps.push(CollectionStep::new(
             format!("sled data for sled {}", sled.id()),
             Box::new({
                 move |collection, dir| {
                     async move {
-                        collect_data_from_sled(collection, sled, dir).await
+                        collect_data_from_sled(
+                            collection, sled, time_range, dir,
+                        )
+                        .await
                     }
                     .boxed()
                 }
@@ -79,6 +85,7 @@ pub async fn spawn_query_all_sleds(
 async fn collect_data_from_sled(
     collection: &BundleCollection,
     sled: Sled,
+    time_range: Option<nexus_types::support_bundle::BundleTimeRange>,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
     let (log, opctx, datastore) =
@@ -240,6 +247,7 @@ async fn collect_data_from_sled(
                 &sled_client,
                 zone,
                 &sled_path,
+                time_range.as_ref(),
                 cancellation_token,
             )
         })
@@ -317,15 +325,23 @@ async fn save_zone_log_zip_or_error(
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
+    time_range: Option<&nexus_types::support_bundle::BundleTimeRange>,
     cancellation_token: &CancellationToken,
 ) -> anyhow::Result<()> {
-    // In the future when support bundle collection exposes tuning parameters
-    // this can turn into a collection parameter.
-    const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
+    // Destructure with field names so the positional Progenitor call
+    // below can't accidentally swap start_time and end_time (both have
+    // the same `Option<&DateTime<Utc>>` type).
+    let nexus_types::support_bundle::BundleTimeRange { start, end } =
+        time_range.cloned().unwrap_or_default();
 
     let download_result = tokio::select! {
         _ = cancellation_token.cancelled() => return Ok(()),
-        result = client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS) => result,
+        result = client.support_logs_download(
+            zone,
+            /* end_time   */ end.as_ref(),
+            /* max_rotated*/ None,
+            /* start_time */ start.as_ref(),
+        ) => result,
     };
 
     match download_result {

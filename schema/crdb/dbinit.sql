@@ -3201,13 +3201,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_inf
 
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
     bundle_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (bundle_id)
+);
+
+/*
+ * Bundle-wide time bound applied to time-bounded categories
+ * (host-info logs and ereports). Persisted at the bundle level
+ * rather than per-category; absent rows imply no time bound.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_range (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (bundle_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
 );
 
 /*******************************************************************/
@@ -7718,13 +7731,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
     sitrep_id UUID NOT NULL,
     request_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+/*
+ * Bundle-wide time bound for FM-driven support bundle requests.
+ * Mirrors `support_bundle_data_selection_time_range` but keyed by
+ * the FM (sitrep_id, request_id) tuple.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_time_range (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (sitrep_id, request_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
 );
 
 /*
@@ -8557,7 +8584,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '256.0.0', NULL)
+    (TRUE, NOW(), NOW(), '257.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

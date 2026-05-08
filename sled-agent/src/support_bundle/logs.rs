@@ -10,6 +10,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use range_requests::make_get_response;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_diagnostics::LogTimeWindow;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncSeekExt;
@@ -72,10 +73,15 @@ impl<'a> SupportBundleLogs<'a> {
 
     /// For a given zone and its services create a zip file of all logs
     /// found in that zone and stream it out via an `HttpResponse`.
+    ///
+    /// `max_rotated` caps the number of rotated files per service when
+    /// `Some(_)`. `window` bounds files by `mtime`; either side may be
+    /// `None` for "unbounded on that side."
     pub async fn get_logs_for_zone<Z>(
         &self,
         zone: Z,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
+        window: LogTimeWindow,
     ) -> Result<http::Response<dropshot::Body>, Error>
     where
         Z: Into<String>,
@@ -88,7 +94,9 @@ impl<'a> SupportBundleLogs<'a> {
 
         let zip_file = {
             let handle = sled_diagnostics::LogsHandle::new(log);
-            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
+            match handle
+                .get_zone_logs(&zone, max_rotated, window, &mut tempfile)
+                .await
             {
                 Ok(_) => Ok(tempfile),
                 Err(e) => Err(e),

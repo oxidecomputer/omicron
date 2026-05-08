@@ -20,6 +20,7 @@ use anyhow::Context;
 use anyhow::bail;
 use bootstore::schemes::v0 as bootstore;
 use bytes::Bytes;
+use chrono::DateTime;
 use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
@@ -79,6 +80,21 @@ use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+/// A synthetic log file the simulated sled-agent will return from
+/// `support_logs_download`.
+///
+/// Tests construct these with controlled mtimes to exercise the
+/// support-bundle log time-range filtering end-to-end.
+#[derive(Clone, Debug)]
+pub struct SimLogEntry {
+    /// File name to write inside the per-zone zip.
+    pub filename: String,
+    /// File contents.
+    pub contents: Vec<u8>,
+    /// Modification time used for the time-range filter.
+    pub mtime: DateTime<Utc>,
+}
+
 /// Simulates management of the control plane on a sled
 ///
 /// The current implementation simulates a server directly in this program.
@@ -117,6 +133,12 @@ pub struct SledAgent {
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
     pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
+    /// Test-only log entries keyed by zone name. Populated via
+    /// [`SledAgent::insert_support_log`]; consulted by the
+    /// `support_logs` / `support_logs_download` HTTP handlers.
+    /// Empty by default.
+    pub(crate) support_logs:
+        Mutex<std::collections::BTreeMap<String, Vec<SimLogEntry>>>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
@@ -203,6 +225,7 @@ impl SledAgent {
             repo_depot,
             log,
             bootstore_network_config,
+            support_logs: Mutex::new(std::collections::BTreeMap::new()),
             health_monitor,
         })
     }
@@ -1092,6 +1115,26 @@ impl SledAgent {
             .delete(zpool_id, dataset_id, support_bundle_id)
             .await
             .map_err(|err| err.into())
+    }
+
+    /// Test helper: append a synthetic log entry that the sim
+    /// `support_logs_download` handler will return for `zone`.
+    pub fn insert_support_log(
+        &self,
+        zone: impl Into<String>,
+        entry: SimLogEntry,
+    ) {
+        self.support_logs
+            .lock()
+            .unwrap()
+            .entry(zone.into())
+            .or_default()
+            .push(entry);
+    }
+
+    /// Test helper: drop all injected synthetic log entries.
+    pub fn clear_support_logs(&self) {
+        self.support_logs.lock().unwrap().clear();
     }
 
     pub fn datasets_ensure(

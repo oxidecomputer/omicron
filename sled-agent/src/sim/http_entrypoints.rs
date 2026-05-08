@@ -997,18 +997,61 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn support_logs(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        // Return an empty zone list for testing.
-        Ok(HttpResponseOk(Default::default()))
+        let sa = request_context.context();
+        // Return whatever zones tests have injected entries for. By
+        // default this is empty.
+        let zones =
+            sa.support_logs.lock().unwrap().keys().cloned().collect::<Vec<_>>();
+        Ok(HttpResponseOk(zones))
     }
 
     async fn support_logs_download(
-        _request_context: RequestContext<Self::Context>,
-        _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
-        _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        let SledDiagnosticsLogsDownloadPathParam { zone } =
+            path_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+            start_time,
+            end_time,
+        } = query_params.into_inner();
+        super::sim_support_logs::serve_zip(
+            sa,
+            &zone,
+            max_rotated,
+            sled_diagnostics::LogTimeWindow {
+                start: start_time,
+                end: end_time,
+            },
+        )
+    }
+
+    async fn support_logs_download_v1(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let v1::diagnostics::SledDiagnosticsLogsDownloadPathParam { zone } =
+            path_params.into_inner();
+        let v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+        } = query_params.into_inner();
+        super::sim_support_logs::serve_zip(
+            sa,
+            &zone,
+            Some(max_rotated),
+            sled_diagnostics::LogTimeWindow::default(),
+        )
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_get_v1(

@@ -32,6 +32,7 @@ use nexus_db_schema::schema::ereport::dsl;
 use nexus_types::fm::ereport as fm;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -96,11 +97,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         filters: &EreportFilters,
+        time_range: Option<&BundleTimeRange>,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let query = Self::ereport_fetch_matching_query(filters, pagparams);
+        let query =
+            Self::ereport_fetch_matching_query(filters, time_range, pagparams);
         query
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -109,6 +112,7 @@ impl DataStore {
 
     fn ereport_fetch_matching_query(
         filters: &EreportFilters,
+        time_range: Option<&BundleTimeRange>,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> impl RunnableQuery<Ereport> + use<> {
         let mut query = paginated_multicolumn(
@@ -119,12 +123,13 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .select(Ereport::as_select());
 
-        if let Some(start) = filters.start_time() {
-            query = query.filter(dsl::time_collected.ge(start));
-        }
-
-        if let Some(end) = filters.end_time() {
-            query = query.filter(dsl::time_collected.le(end));
+        if let Some(range) = time_range {
+            if let Some(start) = range.start {
+                query = query.filter(dsl::time_collected.ge(start));
+            }
+            if let Some(end) = range.end {
+                query = query.filter(dsl::time_collected.le(end));
+            }
         }
 
         if !filters.only_serials().is_empty() {
@@ -553,23 +558,20 @@ mod tests {
 
     #[tokio::test]
     async fn explain_ereport_fetch_matching_only_time() {
-        explain_fetch_matching_query(
+        explain_fetch_matching_query_with_time(
             "explain_ereport_fetch_matching_only_time",
-            EreportFilters::new()
-                .with_end_time(chrono::Utc::now())
-                .expect("no start time set"),
+            EreportFilters::new(),
+            BundleTimeRange { start: None, end: Some(chrono::Utc::now()) },
         )
         .await
     }
 
     #[tokio::test]
     async fn explain_ereport_fetch_matching_time_and_serials() {
-        explain_fetch_matching_query(
+        explain_fetch_matching_query_with_time(
             "explain_ereport_fetch_matching_only_time",
-            EreportFilters::new()
-                .with_serials(["BRM6900420", "BRM5555555"])
-                .with_end_time(chrono::Utc::now())
-                .expect("no start time set"),
+            EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
+            BundleTimeRange { start: None, end: Some(chrono::Utc::now()) },
         )
         .await
     }
@@ -577,6 +579,23 @@ mod tests {
     async fn explain_fetch_matching_query(
         test_name: &str,
         filters: EreportFilters,
+    ) {
+        explain_fetch_matching_query_inner(test_name, filters, None).await
+    }
+
+    async fn explain_fetch_matching_query_with_time(
+        test_name: &str,
+        filters: EreportFilters,
+        time_range: BundleTimeRange,
+    ) {
+        explain_fetch_matching_query_inner(test_name, filters, Some(time_range))
+            .await
+    }
+
+    async fn explain_fetch_matching_query_inner(
+        test_name: &str,
+        filters: EreportFilters,
+        time_range: Option<BundleTimeRange>,
     ) {
         let logctx = dev::test_setup_log(test_name);
         let db = TestDatabase::new_with_pool(&logctx.log).await;
@@ -590,8 +609,11 @@ mod tests {
         };
         eprintln!("--- filters: {filters:#?}\n");
 
-        let query =
-            DataStore::ereport_fetch_matching_query(&filters, &pagparams);
+        let query = DataStore::ereport_fetch_matching_query(
+            &filters,
+            time_range.as_ref(),
+            &pagparams,
+        );
 
         let explanation = query
             .explain_async(&conn)
@@ -795,19 +817,25 @@ mod tests {
         };
 
         let found_default = datastore
-            .ereport_fetch_matching(opctx, &Default::default(), &pagparams)
+            .ereport_fetch_matching(
+                opctx,
+                &Default::default(),
+                None,
+                &pagparams,
+            )
             .await
             .expect("fetch matching with default filters should succeed");
         check_results(dbg!(found_default), &id, &ereport);
 
+        let time_range = BundleTimeRange {
+            start: Some(ereport.time_collected - Duration::from_secs(600)),
+            end: None,
+        };
         let found_by_time_range = datastore
             .ereport_fetch_matching(
                 opctx,
-                &EreportFilters::new()
-                    .with_start_time(
-                        ereport.time_collected - Duration::from_secs(600),
-                    )
-                    .expect("no end time set"),
+                &EreportFilters::new(),
+                Some(&time_range),
                 &pagparams,
             )
             .await
@@ -818,6 +846,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new().with_serials(["my cool serial"]),
+                None,
                 &pagparams,
             )
             .await
@@ -828,6 +857,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new().with_classes(["my cool ereport"]),
+                None,
                 &pagparams,
             )
             .await
