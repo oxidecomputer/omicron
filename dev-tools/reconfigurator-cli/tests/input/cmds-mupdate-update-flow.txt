@@ -245,8 +245,10 @@ blueprint-diff latest
 # This *will* generate the datasets and internal NTP zone on the new sled.
 set planner-config --add-zones-with-mupdate-override true
 blueprint-plan latest latest
-# TODO: This blippy run produces two FATAL notes due to
-# https://github.com/oxidecomputer/omicron/issues/10420.
+# TODO: This blippy run produces two FATAL notes, due to, respectively:
+#
+# * https://github.com/oxidecomputer/omicron/issues/10420
+# * https://github.com/oxidecomputer/omicron/pull/10363
 blueprint-blippy latest
 blueprint-diff latest
 
