@@ -37,6 +37,25 @@ pub struct VmmRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
+impl VmmRuntimeState {
+    /// Transitions the VMM state from the current state to `new_state`,
+    /// returning a `VmmRuntimeState` representing the VMM after transitioning
+    /// to the new state.
+    ///
+    /// If `new_state` is the same as the current state, returns a copy of
+    /// `self` without any changes.
+    pub fn transition(&self, new_state: VmmState) -> Self {
+        if new_state == self.state {
+            return self.clone();
+        }
+        Self {
+            state: new_state,
+            generation: self.generation.next(),
+            time_updated: Utc::now(),
+        }
+    }
+}
+
 impl From<sled_agent::VmmRuntimeState> for VmmRuntimeState {
     fn from(state: sled_agent::VmmRuntimeState) -> Self {
         let sled_agent::VmmRuntimeState { state, generation, time_updated } =
@@ -55,6 +74,8 @@ impl From<VmmRuntimeState> for sled_agent::VmmRuntimeState {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum VmmState {
+    /// The VMM exists in the database but has not begun initialization on the sled.
+    Creating,
     /// The VMM is initializing and has not started running guest CPUs yet.
     Starting,
     /// The VMM has finished initializing and may be running guest CPUs.
@@ -72,6 +93,9 @@ pub enum VmmState {
     Failed(VmmFailureReason),
     /// The VMM process has been destroyed and its resources have been released.
     Destroyed,
+    /// The start saga which created this VMM has failed and unwound before the
+    /// instance was able to start.
+    SagaUnwound,
 }
 
 impl From<sled_agent::VmmState> for VmmState {
@@ -97,14 +121,23 @@ impl From<sled_agent::VmmState> for VmmState {
 impl From<VmmState> for sled_agent::VmmState {
     fn from(state: VmmState) -> Self {
         match state {
-            VmmState::Starting => sled_agent::VmmState::Starting,
+            // The `Creating` state is internal to Nexus; the outside world
+            // should treat it as equivalent to `Starting`.
+            VmmState::Starting | VmmState::Creating => {
+                sled_agent::VmmState::Starting
+            }
             VmmState::Running => sled_agent::VmmState::Running,
             VmmState::Stopping => sled_agent::VmmState::Stopping,
             VmmState::Stopped => sled_agent::VmmState::Stopped,
             VmmState::Rebooting => sled_agent::VmmState::Rebooting,
             VmmState::Migrating => sled_agent::VmmState::Migrating,
             VmmState::Failed(_) => sled_agent::VmmState::Failed,
-            VmmState::Destroyed => sled_agent::VmmState::Destroyed,
+
+            // The `SagaUnwound` state is internal to Nexus; the outside world
+            // should treat it as equivalent to `Destroyed`.
+            VmmState::Destroyed | VmmState::SagaUnwound => {
+                sled_agent::VmmState::Destroyed
+            }
         }
     }
 }

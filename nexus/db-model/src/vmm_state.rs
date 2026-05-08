@@ -90,6 +90,24 @@ impl From<nexus_types::instance::VmmState> for VmmState {
     fn from(value: nexus_types::instance::VmmState) -> Self {
         use nexus_types::instance::VmmState as Input;
         match value {
+            Input::Creating => Self::Creating,
+            Input::Starting => Self::Starting,
+            Input::Running => Self::Running,
+            Input::Stopping => Self::Stopping,
+            Input::Stopped => Self::Stopped,
+            Input::Rebooting => Self::Rebooting,
+            Input::Migrating => Self::Migrating,
+            Input::Failed(_) => Self::Failed,
+            Input::Destroyed => Self::Destroyed,
+            Input::SagaUnwound => Self::SagaUnwound,
+        }
+    }
+}
+
+impl From<sled_agent_types::instance::VmmState> for VmmState {
+    fn from(value: sled_agent_types::instance::VmmState) -> Self {
+        use sled_agent_types::instance::VmmState as Input;
+        match value {
             Input::Starting => Self::Starting,
             Input::Running => Self::Running,
             Input::Stopping => Self::Stopping,

@@ -109,6 +109,33 @@ impl Vmm {
         }
     }
 
+    pub fn runtime(&self) -> nexus_types::instance::VmmRuntimeState {
+        use nexus_types::instance as types;
+        let state = match (self.state, self.failure_reason) {
+            (VmmState::Failed, None) => {
+                // Weird and bad!
+                types::VmmState::Failed(types::VmmFailureReason::Prehistoric)
+            }
+            (VmmState::Failed, Some(reason)) => {
+                types::VmmState::Failed(reason.into())
+            }
+            (VmmState::Creating, _) => types::VmmState::Creating,
+            (VmmState::Starting, _) => types::VmmState::Starting,
+            (VmmState::Running, _) => types::VmmState::Running,
+            (VmmState::Stopping, _) => types::VmmState::Stopping,
+            (VmmState::Stopped, _) => types::VmmState::Stopped,
+            (VmmState::Rebooting, _) => types::VmmState::Rebooting,
+            (VmmState::Migrating, _) => types::VmmState::Migrating,
+            (VmmState::Destroyed, _) => types::VmmState::Destroyed,
+            (VmmState::SagaUnwound, _) => types::VmmState::SagaUnwound,
+        };
+        types::VmmRuntimeState {
+            state,
+            generation: self.generation.into(),
+            time_updated: self.time_state_updated,
+        }
+    }
+
     pub fn sled_id(&self) -> SledUuid {
         self.sled_id.into()
     }
