@@ -966,6 +966,21 @@ impl Client {
     }
 
     /// Set the retention policy for the oximeter database tables.
+    ///
+    /// This attempts to set the policy to the same value on every relevant
+    /// table. But because we set each table in a separate query, those
+    /// individual queries can fail, leaving each table with different retention
+    /// policies.
+    ///
+    /// The return value of `retention_policy()` includes the value for every
+    /// table. That should be checked to ensure the policy was correctly set on
+    /// every table.
+    ///
+    /// Also note that this sets the TTLs asynchronously. Fetching the TTL
+    /// itself immediately after should show the correct value (assuming it
+    /// succceeded), but dropping any data beyond the new TTL happens
+    /// asynchronously. Use the method `database_table_usage()` to monitor the
+    /// behavior.
     pub async fn set_retention_policy(
         &self,
         policy: RetentionPolicyRequest,
@@ -1104,12 +1119,16 @@ impl Client {
     /// could not be extracted. `None` is returned if there is no retention
     /// policy set yet, which can happen if the database hasn't been initialized
     /// yet.
+    ///
+    /// This returns the retention policy for every relevant table in the
+    /// database. Because we set the policy individually on each of them, they
+    /// can differ, if that set request fails in the middle. That also implies
+    /// the returned values may be different for different tables.
     pub async fn retention_policy(
         &self,
     ) -> Result<Option<DatabaseRetentionPolicy>, Error> {
         // It's possible today that different tables actually have different
-        // TTLs, because we short-circuit if we fail to set the TTL partway
-        // through the list of tables.
+        // TTLs, because we individual queries may fail.
         //
         // Let's fetch all of them.
         const SQL: &str = "\

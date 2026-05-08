@@ -67,10 +67,11 @@ impl Days {
             }
         }
     }
-}
 
-impl std::fmt::Display for Days {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} days", self.0.get())
+    /// Return a human-friendly string displaying the policy.
+    pub fn as_human_str(&self) -> String {
+        let n_days = self.0.get();
+        let suffix = if n_days >= 1 { "days" } else { "day" };
+        format!("{n_days} {suffix}")
     }
 }
