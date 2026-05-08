@@ -3482,8 +3482,10 @@ Waiting on zone add/update blockers
 
 
 
-> # TODO: This blippy run produces two FATAL notes due to
-> # https://github.com/oxidecomputer/omicron/issues/10420.
+> # TODO: This blippy run produces two FATAL notes, due to, respectively:
+> #
+> # * https://github.com/oxidecomputer/omicron/issues/10420
+> # * https://github.com/oxidecomputer/omicron/pull/10363
 > blueprint-blippy latest
 blippy report for blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35: 2 notes
   FATAL note: sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: Nexus zones 466a9f29-62bf-4e63-924a-b9efdb86afec and 0c71b3b2-6ceb-4e8f-b020-b08675e83038 both have generation 1 but different image sources (Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") } vs InstallDataset)
