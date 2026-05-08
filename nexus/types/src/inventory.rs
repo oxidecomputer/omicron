@@ -613,7 +613,9 @@ impl From<InventoryDisk> for PhysicalDisk {
 }
 
 /// A zpool reported by a sled agent.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,

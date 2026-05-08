@@ -16,6 +16,8 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
+use nexus_db_model::saga_types::Saga;
+use nexus_db_model::saga_types::SagaId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::SledFilter;
@@ -25,15 +27,18 @@ use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::Zpool;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
-use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
+use omicron_uuid_kinds::{GenericUuid, SledUuid, TufTrustRootUuid};
 use semver::Version;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_hardware_types::BaseboardId;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::iter;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -77,6 +82,127 @@ impl UpdateStatusHandle {
         latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
         Self { latest_blueprint }
+    }
+}
+
+/// Inputs needed to identify update health problems.
+struct UpdateContactSupportChecks {
+    inventory: Arc<Collection>,
+    stuck_sagas: Vec<Saga>,
+    components_by_release_version: BTreeMap<String, usize>,
+    time_last_step_planned: DateTime<Utc>,
+}
+
+/// Identifies a saga that has been running or unwinding for too long.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct StuckSaga {
+    id: SagaId,
+    name: String,
+}
+
+/// A problem identified by an update health check.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum UpdateStatusProblem {
+    /// One or more sagas have been running or unwinding longer than
+    /// `STUCK_SAGA_THRESHOLD`.
+    StuckSagas { sagas: Vec<StuckSaga> },
+    /// An update is in progress and the last step planned in the blueprint is
+    /// older than `STUCK_UPDATE_THRESHOLD`.
+    StuckUpdate,
+    /// The latest inventory collection is older than
+    /// `STALE_INVENTORY_THRESHOLD`.
+    StaleInventory { time_done: DateTime<Utc> },
+    /// One or more zpools are not in an `Online` state.
+    UnhealthyZpools { zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>> },
+    /// One or more enabled SMF services are not in an `online` state.
+    EnabledSmfServicesNotOnline {
+        svcs_by_sled: BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
+    },
+}
+
+impl UpdateContactSupportChecks {
+    /// We assume an update is in progress if not all components are at the
+    /// same version or there are only two versions and they are not
+    /// "install dataset" and "unknown".
+    fn is_update_in_progress(&self) -> bool {
+        let versions_at_initial_state =
+            self.components_by_release_version.len() == 2
+                && self.components_by_release_version.contains_key(
+                    &internal_views::TufRepoVersion::Unknown.to_string(),
+                )
+                && self.components_by_release_version.contains_key(
+                    &internal_views::TufRepoVersion::InstallDataset.to_string(),
+                );
+        self.components_by_release_version.len() != 1
+            && !versions_at_initial_state
+    }
+
+    /// An update is "stuck" if it is in progress but the last step planned
+    /// in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
+    fn is_update_stuck(&self) -> bool {
+        self.is_update_in_progress()
+            && self.time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
+    }
+
+    /// Identify the set of problems present given these inputs.
+    ///
+    /// Stuck sagas are always reported. The remaining checks (stuck update,
+    /// stale inventory, unhealthy zpools, SMF services) are skipped when an
+    /// update is in progress and not yet stuck, since they are expected to
+    /// fail mid-update.
+    fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
+        let mut problems = BTreeSet::new();
+
+        if !self.stuck_sagas.is_empty() {
+            let sagas = self
+                .stuck_sagas
+                .iter()
+                .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
+                .collect();
+            problems.insert(UpdateStatusProblem::StuckSagas { sagas });
+        }
+
+        // It is expected that the remaining checks could fail during an
+        // update, so we skip them if an update is in progress but not stuck.
+        if self.is_update_in_progress() && !self.is_update_stuck() {
+            return problems;
+        }
+
+        if self.is_update_stuck() {
+            problems.insert(UpdateStatusProblem::StuckUpdate);
+        }
+
+        if self.inventory.time_done < Utc::now() - STALE_INVENTORY_THRESHOLD {
+            problems.insert(UpdateStatusProblem::StaleInventory {
+                time_done: self.inventory.time_done,
+            });
+        }
+
+        let zpools_by_sled: BTreeMap<_, Vec<Zpool>> = self
+            .inventory
+            .unhealthy_zpools()
+            .into_iter()
+            .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
+            .collect();
+        if !zpools_by_sled.is_empty() {
+            problems.insert(UpdateStatusProblem::UnhealthyZpools {
+                zpools_by_sled,
+            });
+        }
+
+        let svcs_by_sled: BTreeMap<_, SvcsEnabledNotOnlineResult> = self
+            .inventory
+            .enabled_smf_services_not_online()
+            .into_iter()
+            .map(|(sled, svcs)| (sled, svcs.clone()))
+            .collect();
+        if !svcs_by_sled.is_empty() {
+            problems.insert(UpdateStatusProblem::EnabledSmfServicesNotOnline {
+                svcs_by_sled,
+            });
+        }
+
+        problems
     }
 }
 
@@ -279,8 +405,8 @@ impl super::Nexus {
             .contact_support(
                 opctx,
                 time_last_step_planned,
-                &components_by_release_version,
-                &inventory,
+                components_by_release_version.clone(),
+                inventory,
             )
             .await?;
 
@@ -309,116 +435,81 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         time_last_step_planned: DateTime<Utc>,
-        components_by_release_version: &BTreeMap<String, usize>,
-        inventory: &Arc<Collection>,
+        components_by_release_version: BTreeMap<String, usize>,
+        inventory: Arc<Collection>,
     ) -> Result<bool, Error> {
-        // We only run health checks for stuck active sagas and an existing
-        // inventory collection before checking to see if there is an update in
-        // progress. If these two checks return with unhealthy states, we
-        // definitely want to log them even if there is an update in progress.
-        //
-        // It is expected that the remaining checks could fail during an update,
-        // so we don't log them and return early if we identify an update in
-        // progress
-        let stuck_active_sagas = self
+        // TODO-K: Add stuck sagas later?
+        let stuck_sagas = self
             .datastore()
             .saga_list_running_or_unwinding_older_than(
                 opctx,
                 STUCK_SAGA_THRESHOLD,
             )
             .await?;
-        let has_stuck_sagas = !stuck_active_sagas.is_empty();
-        if has_stuck_sagas {
-            let sagas: Vec<_> = stuck_active_sagas
-                .iter()
-                .map(|s| format!("{}: {}", s.id, s.name))
-                .collect();
-            warn!(
-                opctx.log,
-                "found stuck sagas active for longer than {}",
-                omicron_common::format_time_delta(STUCK_SAGA_THRESHOLD);
-                "sagas" => ?sagas,
-            );
-        }
 
-        // We assume an update is in progress if not all components are at the
-        // same version or there are only two versions and they are not
-        // "install dataset" and "unknown".
-        //
-        // If we assume an update is in progress, but the last step planned in
-        // the blueprint is older than 15 minutes, we consider the update as
-        // "stuck".
-        let versions_at_initial_state = components_by_release_version.len()
-            == 2
-            && components_by_release_version.contains_key(
-                &internal_views::TufRepoVersion::Unknown.to_string(),
-            )
-            && components_by_release_version.contains_key(
-                &internal_views::TufRepoVersion::InstallDataset.to_string(),
-            );
-
-        let is_update_in_progress = components_by_release_version.len() != 1
-            && !versions_at_initial_state;
-        let mut is_update_stuck = false;
-
-        if is_update_in_progress {
-            if time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD {
-                is_update_stuck = true
-            } else {
-                info!(
-                    opctx.log,
-                    "skipping update health checks; update in progress with last \
-                    step planned within the last {}",
-                    omicron_common::format_time_delta(STUCK_UPDATE_THRESHOLD);
-                );
-                return Ok(false);
-            }
+        let checks = UpdateContactSupportChecks {
+            inventory,
+            stuck_sagas,
+            components_by_release_version,
+            time_last_step_planned,
         };
 
-        // Check that the inventory collection is not too old.
-        let is_inventory_stuck = if inventory.time_done
-            < Utc::now() - STALE_INVENTORY_THRESHOLD
-        {
+        // If an update is in progress but not stuck, the remaining checks
+        // could fail mid-update and shouldn't trigger a contact-support
+        // signal.
+        if checks.is_update_in_progress() && !checks.is_update_stuck() {
             info!(
                 opctx.log,
-                "inventory collection is stuck: older that {}",
-                omicron_common::format_time_delta(STALE_INVENTORY_THRESHOLD);
-                "collection_time_done" => ?inventory.time_done,
+                "skipping update health checks; update in progress with last \
+                step planned within the last {}",
+                omicron_common::format_time_delta(STUCK_UPDATE_THRESHOLD);
             );
-            true
-        } else {
-            false
-        };
-
-        let unhealthy_zpools = inventory.unhealthy_zpools();
-        let has_unhealthy_zpools = !unhealthy_zpools.is_empty();
-        if has_unhealthy_zpools {
-            warn!(
-                opctx.log,
-                "found unhealthy zpools";
-                "zpools_by_sled" => ?unhealthy_zpools,
-            );
+            return Ok(false);
         }
 
-        let enabled_smf_services_not_online =
-            inventory.enabled_smf_services_not_online();
-        let has_enabled_services_not_online =
-            !enabled_smf_services_not_online.is_empty();
-        if has_enabled_services_not_online {
-            warn!(
-                opctx.log,
-                "found enabled SMF services not online";
-                "svcs_by_sled" => ?enabled_smf_services_not_online,
-            );
+        let problems = checks.problems();
+
+        for problem in &problems {
+            match problem {
+                UpdateStatusProblem::StuckSagas { sagas } => {
+                    warn!(
+                        opctx.log,
+                        "found stuck sagas active for longer than {}",
+                        omicron_common::format_time_delta(STUCK_SAGA_THRESHOLD);
+                        "sagas" => ?sagas,
+                    );
+                }
+                UpdateStatusProblem::StaleInventory { time_done } => {
+                    warn!(
+                        opctx.log,
+                        "inventory collection is stuck: older that {}",
+                        omicron_common::format_time_delta(
+                            STALE_INVENTORY_THRESHOLD
+                        );
+                        "collection_time_done" => ?time_done,
+                    );
+                }
+                UpdateStatusProblem::UnhealthyZpools { zpools_by_sled } => {
+                    warn!(
+                        opctx.log,
+                        "found unhealthy zpools";
+                        "zpools_by_sled" => ?zpools_by_sled,
+                    );
+                }
+                UpdateStatusProblem::EnabledSmfServicesNotOnline {
+                    svcs_by_sled,
+                } => {
+                    warn!(
+                        opctx.log,
+                        "found enabled SMF services not online";
+                        "svcs_by_sled" => ?svcs_by_sled,
+                    );
+                }
+                UpdateStatusProblem::StuckUpdate => {}
+            }
         }
 
-        let contact_support = is_inventory_stuck
-            || is_update_stuck
-            || has_unhealthy_zpools
-            || has_enabled_services_not_online
-            || has_stuck_sagas;
-
-        Ok(contact_support)
+        Ok(!problems.is_empty())
     }
 
     /// Build a map of version strings to the number of components on that
@@ -764,8 +855,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_finished(),
-                    &inventory,
+                    system_version_update_finished(),
+                    inventory,
                 )
                 .await
                 .unwrap()
@@ -800,8 +891,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_finished(),
-                    &inventory,
+                    system_version_update_finished(),
+                    inventory,
                 )
                 .await
                 .unwrap()
@@ -836,8 +927,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_finished(),
-                    &inventory,
+                    system_version_update_finished(),
+                    inventory,
                 )
                 .await
                 .unwrap()
@@ -872,8 +963,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_versions_initial_state(),
-                    &inventory,
+                    system_versions_initial_state(),
+                    inventory,
                 )
                 .await
                 .unwrap()
@@ -909,8 +1000,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_versions_initial_state(),
-                    &inventory
+                    system_versions_initial_state(),
+                    inventory
                 )
                 .await
                 .unwrap()
@@ -948,8 +1039,8 @@ mod test {
                     Utc::now()
                         - STUCK_UPDATE_THRESHOLD
                         - TimeDelta::seconds(10),
-                    &system_version_update_in_progress(),
-                    &inventory,
+                    system_version_update_in_progress(),
+                    inventory,
                 )
                 .await
                 .unwrap()
@@ -985,8 +1076,8 @@ mod test {
                 .contact_support(
                     &opctx,
                     Utc::now(),
-                    &system_version_update_in_progress(),
-                    &inventory,
+                    system_version_update_in_progress(),
+                    inventory,
                 )
                 .await
                 .unwrap()
