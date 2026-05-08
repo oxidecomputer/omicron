@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS physical_disk_adoption_request (
+CREATE TABLE IF NOT EXISTS omicron.public.physical_disk_adoption_request (
     id UUID PRIMARY KEY,
 	vendor STRING(63) NOT NULL,
     model STRING(63) NOT NULL,
