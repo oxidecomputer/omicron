@@ -1,0 +1,50 @@
+# This test exercises a guarantee of the inventory-staleness check
+# in `NoopConvertInfo::new`: the planner must not perform noop conversions of
+# zone image sources from InstallDataset to Artifact when planning against an
+# inventory that's older than the parent blueprint, even when no mupdate
+# override is involved.
+#
+# The test simulates: zones that would be eligible for a noop conversion to
+# Artifact, an unrelated edit that bumps the parent blueprint's sled-agent
+# generation past what inventory reports, and then a plan against that now-
+# stale inventory. With the fix, the planner skips the noop check on the
+# bumped sled and the resulting blueprint contains no zone image source
+# changes. Once inventory is up-to-date, the next plan proceeds with the
+# noop conversions as expected.
+
+# Load a small example system. We only need one sled to demonstrate the case.
+load-example --nsleds 1 --ndisks-per-sled 3
+sled-list
+
+# Create a TUF repository whose artifacts match the install dataset, so noop
+# conversions of all zones would otherwise be eligible.
+tuf-assemble ../../update-common/manifests/fake.toml
+set target-release repo-1.0.0.zip
+
+# Update the install dataset on serial0 to the target release. This populates
+# the simulated sled-agent's zone/measurement manifests but does not bump its
+# reported sled-agent generation.
+sled-update-install-dataset serial0 --to-target-release
+
+# Generate inventory. At this point the sled's reported sled-agent generation
+# matches the parent blueprint's: noop conversions would be eligible.
+inventory-generate
+
+# Bump the parent blueprint's sled-agent generation for serial0 via the debug
+# command. This simulates a blueprint edit that bumps the generation.
+blueprint-edit latest debug force-sled-generation-bump serial0
+blueprint-diff latest
+
+# Plan against the same inventory. The noop check should fire the
+# inventory-stale path on serial0, the noop conversion of zones to Artifact
+# should be skipped, and the resulting blueprint should contain no zone
+# image source changes for serial0.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Apply the latest blueprint to inventory and re-plan. inventory_gen now
+# matches parent_bp_gen, and zones are noop-converted to Artifact as expected.
+sled-set serial0 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
