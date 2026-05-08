@@ -286,6 +286,23 @@ pub const REQUIRED_SLEDS_SENTINEL: &'static str = "REQUIRED_SLEDS";
 pub const REQUIRED_SLEDS_SENTINEL_REASON: &'static str =
     "sled target does not host another instance in affinity group";
 
+/// The sled insert query will return a sentinel (using the pattern of an
+/// erroneous cast of a string into a bool) if the insert is no longer valid due
+/// to three of the conditions related to a sled's available hardware resources,
+/// or affinity rules.
+pub const SLED_INSERT_QUERY_SENTINELS: [&'static str; 3] =
+    [SLED_HAS_SPACE_SENTINEL, BANNED_SLEDS_SENTINEL, REQUIRED_SLEDS_SENTINEL];
+
+/// Turn the returned sentinel into a human-readable error
+pub fn sentinel_to_reason(sentinel: &'static str) -> &'static str {
+    match sentinel {
+        SLED_HAS_SPACE_SENTINEL => SLED_HAS_SPACE_SENTINEL_REASON,
+        BANNED_SLEDS_SENTINEL => BANNED_SLEDS_SENTINEL_REASON,
+        REQUIRED_SLEDS_SENTINEL => REQUIRED_SLEDS_SENTINEL_REASON,
+        _ => sentinel,
+    }
+}
+
 /// Attempts to:
 ///
 /// 1. Insert a sled_resource_vmm record, if it is still a valid reservation

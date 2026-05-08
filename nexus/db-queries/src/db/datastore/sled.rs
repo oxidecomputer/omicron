@@ -23,14 +23,10 @@ use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::disk::MAX_DISKS_PER_INSTANCE;
-use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL;
-use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL_REASON;
 use crate::db::queries::sled_reservation::LocalStorageAllocation;
 use crate::db::queries::sled_reservation::LocalStorageAllocationRequired;
-use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL;
-use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL_REASON;
-use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL;
-use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL_REASON;
+use crate::db::queries::sled_reservation::SLED_INSERT_QUERY_SENTINELS;
+use crate::db::queries::sled_reservation::sentinel_to_reason;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::true_or_cast_error::matches_sentinel;
@@ -659,26 +655,6 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
         }
 
         None
-    }
-}
-
-/// The sled insert query will return a sentinel (using the pattern of an
-/// erroneous cast of a string into a bool) if the insert is no longer valid due
-/// to three of the conditions related to a sled's available hardware resources,
-/// or affinity rules.
-const SLED_INSERT_QUERY_SENTINELS: [&'static str; 3] =
-    [SLED_HAS_SPACE_SENTINEL, BANNED_SLEDS_SENTINEL, REQUIRED_SLEDS_SENTINEL];
-
-/// Turn the returned sentinel into a human-readable error
-fn sentinel_to_reason(sentinel: &'static str) -> &'static str {
-    match sentinel {
-        SLED_HAS_SPACE_SENTINEL => SLED_HAS_SPACE_SENTINEL_REASON,
-
-        BANNED_SLEDS_SENTINEL => BANNED_SLEDS_SENTINEL_REASON,
-
-        REQUIRED_SLEDS_SENTINEL => REQUIRED_SLEDS_SENTINEL_REASON,
-
-        _ => unreachable!("unrecognized sentinel"),
     }
 }
 
