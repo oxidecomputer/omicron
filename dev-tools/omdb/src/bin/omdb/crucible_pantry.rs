@@ -101,7 +101,7 @@ async fn cmd_volume_info(
     args: &VolumeArgs,
 ) -> Result<(), anyhow::Error> {
     let volume = args.uuid.to_string();
-    let VolumeStatus { active, num_job_handles, seen_active } =
+    let VolumeStatus { active, num_job_handles, seen_active, info: _ } =
         *client.volume_status(&volume).await.context("listing volumes")?;
 
     println!("          active: {}", active);

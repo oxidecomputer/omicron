@@ -80,7 +80,6 @@ range-requests.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
-reqwest012 = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
