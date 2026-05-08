@@ -16,6 +16,7 @@ use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::NoopConvertSledInfoMut;
 use crate::planner::NoopConvertSledStatus;
 use crate::planner::SledPlannerRng;
+use anyhow::anyhow;
 use host_phase_2::HostPhase2Editor;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
@@ -147,6 +148,18 @@ pub enum SledEditError {
         noop_id: Option<MupdateOverrideUuid>,
         blueprint_id: MupdateOverrideUuid,
     },
+}
+
+/// Error returned by [`SledEditor::ensure_mupdate_override`].
+///
+/// Distinct from [`SledEditError`] so that the caller can route the `Planner`
+/// arm to `Error::Planner`.
+#[derive(Debug, thiserror::Error)]
+pub enum EnsureMupdateOverrideError {
+    #[error(transparent)]
+    SledEdit(#[from] SledEditError),
+    #[error("programming error in planner")]
+    Planner(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -582,7 +595,7 @@ impl SledEditor {
         >,
         pending_mgs_update: Entry<'_, PendingMgsUpdate>,
         noop_sled_info: NoopConvertSledInfoMut<'_>,
-    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+    ) -> Result<EnsureMupdateOverrideAction, EnsureMupdateOverrideError> {
         match (inv_mupdate_override_info, *self.remove_mupdate_override.value())
         {
             (Ok(Some(inv_override)), Some(bp_override))
@@ -623,7 +636,57 @@ impl SledEditor {
                         ) => Some(
                             BpMupdateOverrideNotSetReason::NoLastReconciliation,
                         ),
-                        _ => None,
+
+                        // ManifestError: the mupdate override is read from
+                        // boot-partition info, which is independent of the
+                        // zone manifest, so manifest errors don't invalidate
+                        // us observing the override.
+                        //
+                        // MupdateOverride: the equal-id case is handled by
+                        // the prior match arm above, so we're here because
+                        // the inventory and blueprint override IDs differ;
+                        // we want to swap in the new one.
+                        //
+                        // Eligible: the standard "MUPdate happened" path.
+                        NoopConvertSledStatus::Ineligible(
+                            ManifestError { .. } | MupdateOverride { .. },
+                        )
+                        | NoopConvertSledStatus::Eligible(_) => None,
+
+                        // The remaining variants represent invariant
+                        // violations:
+                        //
+                        // * NotInInventory: do_plan_mupdate_override skips
+                        //   sleds missing from inventory before calling
+                        //   ensure_mupdate_override, and
+                        //   inv_mupdate_override_info was read from the same
+                        //   inventory entry. Ok(Some(_)) implies the sled is
+                        //   in inventory.
+                        // * MupdateOverrideError: never constructed by
+                        //   NoopConvertInfo::new; only assigned as a side
+                        //   effect of the Err arm of this same method, and
+                        //   this method runs at most once per sled per
+                        //   planning round.
+                        NoopConvertSledStatus::Ineligible(NotInInventory) => {
+                            return Err(EnsureMupdateOverrideError::Planner(
+                                anyhow!(
+                                    "inventory reported a mupdate \
+                                     override, but noop_sled_info \
+                                     reports NotInInventory"
+                                ),
+                            ));
+                        }
+                        NoopConvertSledStatus::Ineligible(
+                            MupdateOverrideError { .. },
+                        ) => {
+                            return Err(EnsureMupdateOverrideError::Planner(
+                                anyhow!(
+                                    "inventory reported a mupdate \
+                                     override, but noop_sled_info \
+                                     reports MupdateOverrideError"
+                                ),
+                            ));
+                        }
                     };
                     if let Some(reason) = stale_reason {
                         return Ok(
@@ -681,10 +744,13 @@ impl SledEditor {
 
                 let mut zones = IdOrdMap::with_capacity(zone_ids.len());
                 for (zone_id, kind) in zone_ids {
-                    let old_image_source = self.zones.set_zone_image_source(
-                        &zone_id,
-                        BlueprintZoneImageSource::InstallDataset,
-                    )?;
+                    let old_image_source = self
+                        .zones
+                        .set_zone_image_source(
+                            &zone_id,
+                            BlueprintZoneImageSource::InstallDataset,
+                        )
+                        .map_err(SledEditError::from)?;
                     let item = EnsureMupdateOverrideUpdatedZone {
                         zone_id,
                         kind,
@@ -769,7 +835,8 @@ impl SledEditor {
                                     SledEditError::NoopMupdateOverrideMismatch {
                                         noop_id: Some(*mupdate_override_id),
                                         blueprint_id: bp_override,
-                                    },
+                                    }
+                                    .into(),
                                 )
                             }
                         }
@@ -785,7 +852,8 @@ impl SledEditor {
                             Err(SledEditError::NoopMupdateOverrideMismatch {
                                 noop_id: None,
                                 blueprint_id: bp_override,
-                            })
+                            }
+                            .into())
                         }
                     },
                     NoopConvertSledInfoMut::GlobalIneligible(

@@ -6,6 +6,7 @@
 
 use crate::blueprint_editor::DiskExpungeDetails;
 use crate::blueprint_editor::EditedSled;
+use crate::blueprint_editor::EnsureMupdateOverrideError;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
@@ -1481,7 +1482,16 @@ impl<'a> BlueprintBuilder<'a> {
                 pending_mgs_update,
                 noop_sled_info,
             )
-            .map_err(|err| Error::SledEditError { sled_id, err })
+            .map_err(|err| match err {
+                EnsureMupdateOverrideError::SledEdit(err) => {
+                    Error::SledEditError { sled_id, err }
+                }
+                EnsureMupdateOverrideError::Planner(err) => {
+                    Error::Planner(err.context(format!(
+                        "for sled {sled_id}, programming error ensuring mupdate override"
+                    )))
+                }
+            })
     }
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
