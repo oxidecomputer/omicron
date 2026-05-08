@@ -14,7 +14,7 @@
 
 use super::{Generation, VmmState};
 use crate::typed_uuid::DbTypedUuid;
-use crate::{SqlU16, VmmCpuPlatform};
+use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
 use omicron_uuid_kinds::*;
@@ -72,6 +72,10 @@ pub struct Vmm {
     /// control plane if this VMM's instance didn't specify a required platform
     /// when it was started.
     pub cpu_platform: VmmCpuPlatform,
+
+    /// If this VMM is in the `Failed` state, this field describes why it
+    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    pub failure_reason: Option<VmmFailureReason>,
 }
 
 impl Vmm {
@@ -101,6 +105,7 @@ impl Vmm {
             propolis_port: SqlU16(propolis_port),
             state: VmmState::Creating,
             cpu_platform,
+            failure_reason: None,
         }
     }
 
@@ -110,6 +115,7 @@ impl Vmm {
             time_state_updated: self.time_state_updated,
             generation: self.generation,
             state: self.state,
+            failure_reason: self.failure_reason,
         }
     }
 
@@ -143,6 +149,10 @@ pub struct VmmRuntimeState {
     /// The state of this VMM. If this VMM is the active VMM for a given
     /// instance, this state is the instance's logical state.
     pub state: VmmState,
+
+    /// If this VMM is in the `Failed` state, this field describes why it
+    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    pub failure_reason: Option<VmmFailureReason>,
 }
 
 impl From<sled_agent_types::instance::VmmRuntimeState> for VmmRuntimeState {
@@ -151,6 +161,16 @@ impl From<sled_agent_types::instance::VmmRuntimeState> for VmmRuntimeState {
             state: value.state.into(),
             time_state_updated: value.time_updated,
             generation: value.generation.into(),
+            failure_reason: if value.state
+                == sled_agent_types::instance::VmmState::Failed
+            {
+                // If we are converting a state received from a sled-agent that
+                // indicates that the VMM is failed, the failure reason is
+                // implicitly "from_sled_agent" for now.
+                Some(VmmFailureReason::FromSledAgent)
+            } else {
+                None
+            },
         }
     }
 }

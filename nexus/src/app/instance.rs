@@ -190,6 +190,16 @@ impl SledAgentInstanceError {
             _ => false,
         }
     }
+
+    /// If this error indicates that the VMM should be marked as `Failed`,
+    /// returns the reason for the failure.
+    pub fn vmm_failure_reason(&self) -> Option<db::model::VmmFailureReason> {
+        if self.vmm_gone() {
+            Some(db::model::VmmFailureReason::NoSuchVmm)
+        } else {
+            None
+        }
+    }
 }
 
 /// An error that can be returned from an operation that changes the state of an
@@ -1008,9 +1018,15 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.vmm_gone() {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                        .mark_vmm_failed(
+                            opctx,
+                            authz_instance,
+                            vmm,
+                            inner,
+                            reason,
+                        )
                         .await;
                 }
             }
@@ -1123,9 +1139,15 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.vmm_gone() {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                        .mark_vmm_failed(
+                            opctx,
+                            authz_instance,
+                            vmm,
+                            inner,
+                            reason,
+                        )
                         .await;
                 }
             }
@@ -1698,13 +1720,16 @@ impl super::Nexus {
                 })
             }
             Err(e) => {
-                if e.vmm_gone() {
+                // If this error indicates that the VMM should be marked as
+                // `Failed`, do that now.
+                if let Some(reason) = e.vmm_failure_reason() {
                     let _ = self
                         .mark_vmm_failed(
                             &opctx,
                             authz_instance.clone(),
                             &initial_vmm,
                             &e,
+                            reason,
                         )
                         .await;
                 }
@@ -1715,7 +1740,7 @@ impl super::Nexus {
 
     /// Attempts to transition an instance to to the `Failed` state in
     /// response to an error returned from a call to a sled
-    /// agent instance API, supplied in `reason`.
+    /// agent instance API, supplied in `error`.
     ///
     /// This is done by first marking the associated `vmm` as `Failed`, and then
     /// running an `instance-update` saga which transitions the instance record
@@ -1734,25 +1759,33 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstanceError,
+        error: &SledAgentInstanceError,
+        reason: db::model::VmmFailureReason,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-        error!(self.log, "marking VMM failed due to sled agent API error";
-               "instance_id" => %instance_id,
-               "vmm_id" => %vmm_id,
-               "error" => ?reason);
+        error!(
+            &opctx.log,
+            "marking VMM failed due to sled agent API error";
+            "instance_id" => %instance_id,
+            "vmm_id" => %vmm_id,
+            "error" => &InlineErrorChain::new(&error),
+            "reason" => %reason,
+        );
 
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
             generation: db::model::Generation(vmm.generation.next()),
+            failure_reason: Some(reason),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {
             Ok(_) => {
-                info!(self.log, "marked VMM as Failed, preparing update saga";
+                info!(
+                    &opctx.log,
+                    "marked VMM as Failed, preparing update saga";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
                     "reason" => ?reason,

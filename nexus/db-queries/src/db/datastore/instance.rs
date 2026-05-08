@@ -2991,6 +2991,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3052,6 +3053,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3148,6 +3150,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Stopped,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3187,6 +3190,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3225,6 +3229,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         generation: Generation(vmm2.generation.0.next()),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 )
                 .await
@@ -3288,6 +3293,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3324,6 +3330,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         generation: Generation(vmm2.generation.0.next().next()),
                         state: VmmState::SagaUnwound,
+                        failure_reason: None,
                     },
                 )
                 .await
@@ -3433,6 +3440,7 @@ mod tests {
                             time_state_updated: Utc::now(),
                             generation: Generation::new(),
                             state: VmmState::Running,
+                            failure_reason: None,
                         },
                     )
                     .await

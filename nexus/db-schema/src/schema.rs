@@ -485,6 +485,7 @@ table! {
         propolis_port -> Int4,
         state -> crate::enums::VmmStateEnum,
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
+        failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
     }
 }
 joinable!(vmm -> sled (sled_id));
