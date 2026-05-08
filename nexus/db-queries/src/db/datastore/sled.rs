@@ -25,8 +25,11 @@ use crate::db::pagination::paginated;
 use crate::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use crate::db::queries::sled_reservation::LocalStorageAllocation;
 use crate::db::queries::sled_reservation::LocalStorageAllocationRequired;
+use crate::db::queries::sled_reservation::SLED_INSERT_QUERY_SENTINELS;
+use crate::db::queries::sled_reservation::sentinel_to_reason;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
+use crate::db::true_or_cast_error::matches_sentinel;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -1151,7 +1154,8 @@ impl DataStore {
         //
         // In the uncontended case, however, we'll only iterate through this
         // loop once.
-        loop {
+
+        'sled_reservation: loop {
             // Pick a reservation target, given the constraints we previously
             // saw in the database.
             let sled_target = pick_sled_reservation_target(
@@ -1187,18 +1191,45 @@ impl DataStore {
                 // Try to INSERT the record. If this is still a valid target,
                 // we'll use it. If it isn't a valid target, we'll shrink the
                 // set of viable sled targets and try again.
-                let rows_inserted = sled_insert_resource_query(
+
+                match sled_insert_resource_query(
                     &resource,
                     &LocalStorageAllocationRequired::No,
                 )
                 .execute_async(&*conn)
-                .await?;
+                .await
+                {
+                    Ok(rows_inserted) => {
+                        if rows_inserted > 0 {
+                            info!(&log, "reservation succeeded!");
+                            return Ok(resource);
+                        }
+                    }
 
-                if rows_inserted > 0 {
-                    info!(&log, "reservation succeeded!");
-                    return Ok(resource);
-                }
-                info!(&log, "reservation failed");
+                    Err(e) => {
+                        if let Some(sentinel) =
+                            matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS)
+                        {
+                            // The only part of the `insert_valid` section of
+                            // the insertion query that can fail are the same
+                            // places where these sentinels are cast and thrown
+                            // as errors, as this branch does not have any
+                            // requested local storage allocations. Ignore these
+                            // and proceed to the next sled_target.
+                            let reason = sentinel_to_reason(sentinel);
+                            info!(
+                                &log,
+                                "reservation failed: {reason}";
+                                "sentinel" => sentinel,
+                            );
+                        } else {
+                            // The query failed, return this as an error
+                            return Err(
+                                SledReservationTransactionError::Diesel(e),
+                            );
+                        }
+                    }
+                };
             } else {
                 // If local storage allocation is required, match the requests
                 // with all the zpools of this sled that have available space.
@@ -1218,7 +1249,7 @@ impl DataStore {
                     unpreferred.remove(&sled_target);
                     preferred.remove(&sled_target);
 
-                    continue;
+                    continue 'sled_reservation;
                 };
 
                 let mut complete_allocation_lists =
@@ -1242,7 +1273,7 @@ impl DataStore {
                             unpreferred.remove(&sled_target);
                             preferred.remove(&sled_target);
 
-                            continue;
+                            continue 'sled_reservation;
                         }
                     };
 
@@ -1251,18 +1282,18 @@ impl DataStore {
                 // that particular set.
                 //
                 // If the `complate_allocation_lists` iterator returns None,
-                // control will pass to the end of the loop marked with 'outer,
+                // control will exit the `local_storage_allocation_search` loop,
                 // which will then try the next possible sled target. In the
                 // case where there were pre-existing local storage allocations
                 // there will _not_ be any more sleds to try and the user will
                 // see a capacity error.
 
-                loop {
+                'local_storage_allocation_search: loop {
                     // If other concurrent sled reservations are not taken into
                     // account, another sled reservation could allocate local
                     // storage onto the same pools that this one considers
-                    // candidates, and then this iterator will return an
-                    // allocation that will never work. Because the iterator
+                    // candidates, and then this iterator will return
+                    // allocations that will never work. Because the iterator
                     // searches for _every_ possible combination, this will end
                     // up searching for a long time. It's important to prune the
                     // list that we're searching from: using the _current_
@@ -1281,7 +1312,7 @@ impl DataStore {
                     else {
                         // All done searching, nothing worked. Try another
                         // sled!
-                        break;
+                        break 'local_storage_allocation_search;
                     };
 
                     info!(
@@ -1296,19 +1327,68 @@ impl DataStore {
                     // local storage allocations still fit, we'll use it. If it
                     // isn't a valid target, we'll shrink the set of viable sled
                     // targets and try again.
-                    let rows_inserted = sled_insert_resource_query(
+                    match sled_insert_resource_query(
                         &resource,
                         &LocalStorageAllocationRequired::Yes { allocations },
                     )
                     .execute_async(&*conn)
-                    .await?;
+                    .await
+                    {
+                        Ok(rows_inserted) => {
+                            if rows_inserted > 0 {
+                                info!(&log, "reservation succeeded!");
+                                return Ok(resource);
+                            }
+                        }
 
-                    if rows_inserted > 0 {
-                        info!(&log, "reservation succeeded!");
-                        return Ok(resource);
+                        Err(e) => {
+                            if let Some(sentinel) = matches_sentinel(
+                                &e,
+                                &SLED_INSERT_QUERY_SENTINELS,
+                            ) {
+                                // Concurrent sled reservations could have
+                                // allocated enough hardware threads, RSS RAM,
+                                // and/or reservoir RAM that means this
+                                // sled_target is no longer valid.
+                                //
+                                // Alternatively, a concurrent reservation could
+                                // have allocated another instance to this sled
+                                // target which makes it invalid for this
+                                // instance we are trying to allocate due to
+                                // affinity / anti-affinity constraints.
+                                //
+                                // Both of these cases are not a problem when
+                                // _not_ performing local storage allocations:
+                                // in that branch, when the insert query returns
+                                // that it inserted 0 rows or returned an error
+                                // sentinel, another sled_target will be chosen
+                                // right away.
+                                //
+                                // If a sentinel is returned, the insert query
+                                // isn't succeeding for reasons other than the
+                                // available space for local storage. If we
+                                // don't bail out here, the loop will keep
+                                // searching through permutations of local
+                                // storage allocations to try. Bail out of the
+                                // search right away and pick another
+                                // sled_target.
+
+                                let reason = sentinel_to_reason(sentinel);
+                                info!(
+                                    &log,
+                                    "reservation failed: {reason}";
+                                    "sentinel" => sentinel,
+                                );
+
+                                break 'local_storage_allocation_search;
+                            } else {
+                                // The query failed, return this as an error
+                                return Err(
+                                    SledReservationTransactionError::Diesel(e),
+                                );
+                            }
+                        }
                     }
-
-                    info!(&log, "reservation failed");
                 }
             }
 
@@ -2307,16 +2387,27 @@ pub(in crate::db::datastore) mod test {
                 self.resources.clone(),
             );
 
-            sled_insert_resource_query(
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            match sled_insert_resource_query(
                 &resource,
                 &LocalStorageAllocationRequired::No,
             )
-            .execute_async(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
+            .execute_async(&*conn)
             .await
-            .unwrap()
-                > 0
+            {
+                Ok(rows_inserted) => rows_inserted > 0,
+
+                Err(e) => {
+                    if matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS)
+                        .is_some()
+                    {
+                        false
+                    } else {
+                        panic!("{e}")
+                    }
+                }
+            }
         }
 
         fn use_many_resources(mut self) -> Self {
@@ -5830,6 +5921,149 @@ pub(in crate::db::datastore) mod test {
             vmms.into_iter().map(|vmm| vmm.sled_id).collect();
 
         assert_eq!(sleds.len(), 32);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Ensure that four sleds can have _many_ VMMs (enough to fully use all
+    /// cpus) allocate local storage, where the sled reservations happen
+    /// concurrently in chunks.
+    #[tokio::test]
+    async fn local_storage_allocation_four_sleds_concurrent_small() {
+        let logctx = dev::test_setup_log(
+            "local_storage_allocation_four_sleds_concurrent_small",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut config = LocalStorageTest {
+            sleds: vec![],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            instances: vec![],
+        };
+
+        const MAX_U2_PER_INSTANCE: usize = 10;
+
+        // Only define a few sleds, otherwise this test takes a considerable
+        // amount of time adding records to cockroach.
+
+        const NUM_SLEDS: usize = 4;
+
+        for i in 0..NUM_SLEDS {
+            let mut u2s = vec![];
+
+            for n in 0..MAX_U2_PER_INSTANCE {
+                u2s.push(LocalStorageTestSledU2 {
+                    physical_disk_id: PhysicalDiskUuid::new_v4(),
+                    physical_disk_serial: format!("phys_{i}_{n}"),
+
+                    zpool_id: ZpoolUuid::new_v4(),
+                    control_plane_storage_buffer:
+                        external::ByteCount::from_gibibytes_u32(250),
+
+                    inventory_total_size:
+                        external::ByteCount::from_gibibytes_u32(1024),
+
+                    crucible_dataset_id: DatasetUuid::new_v4(),
+                    crucible_dataset_addr: format!(
+                        "[fd00:1122:3344:{i}{n:02x}::1]:12345"
+                    )
+                    .parse()
+                    .unwrap(),
+
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
+                });
+            }
+
+            config.sleds.push(LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: format!("sled_{i}"),
+                u2s,
+            });
+        }
+
+        // Each instance requires 2 cpus. At 128 hardware threads per sled we
+        // need 64 instances to fully consume all available hardware threads.
+
+        for i in 0..(64 * NUM_SLEDS) {
+            let mut disks = vec![];
+
+            for n in 0..MAX_U2_PER_INSTANCE {
+                disks.push(LocalStorageTestInstanceDisk {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from(format!("local-{i}-{n}"))
+                        .unwrap(),
+
+                    // 64 instances per sled, total provisionable size is 1024 -
+                    // 250 = 774, so roughly 12 G disks, minus overhead of about
+                    // 780M = drop to 10G
+                    size: external::ByteCount::from_gibibytes_u32(10),
+                });
+            }
+
+            config.instances.push(LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: format!("inst{i}"),
+                affinity: None,
+                disks,
+            });
+        }
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let mut vmms = vec![];
+
+        // Reserve the instances concurrently in chunks - 8 at a time, because
+        // that's the maximum concurrent claims that qorb currently supports.
+        for chunk in config.instances.chunks(8) {
+            let mut jhs = vec![];
+
+            for (i, config_instance) in chunk.iter().enumerate() {
+                let instance = Instance::new_with_id(config_instance.id);
+
+                let datastore = datastore.clone();
+
+                let opctx = opctx.child(BTreeMap::from([(
+                    String::from("task"),
+                    format!("{i}"),
+                )]));
+
+                let jh = tokio::spawn(async move {
+                    datastore
+                        .sled_reservation_create_inner(
+                            &opctx,
+                            instance.id,
+                            PropolisUuid::new_v4(),
+                            db::model::Resources::new(
+                                2,
+                                ByteCount::try_from(1024).unwrap(),
+                                ByteCount::try_from(1024).unwrap(),
+                            ),
+                            db::model::SledReservationConstraints::none(),
+                        )
+                        .await
+                        .unwrap()
+                });
+
+                jhs.push(jh);
+            }
+
+            for jh in jhs {
+                let vmm = jh.await.unwrap();
+                vmms.push(vmm);
+            }
+        }
+
+        assert_eq!(vmms.len(), (64 * NUM_SLEDS));
+
+        let sleds: HashSet<_> =
+            vmms.into_iter().map(|vmm| vmm.sled_id).collect();
+
+        assert_eq!(sleds.len(), NUM_SLEDS);
 
         validate_local_storage_allocations(&datastore).await;
 

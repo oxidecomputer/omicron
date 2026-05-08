@@ -83,14 +83,12 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
-use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -4072,7 +4070,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-            let settings: networking::SwitchPortSettings = result.into();
+            let settings: networking::SwitchPortSettings = result.try_into()?;
             Ok(HttpResponseCreated(settings))
         })
         .await
@@ -4096,7 +4094,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<networking::SwitchPortSettingsSelector>,
         >,
     ) -> Result<
-        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpResponseOk<ResultsPage<networking::SwitchPortSettingsIdentity>>,
         HttpError,
     > {
         let apictx = rqctx.context();
@@ -4140,7 +4138,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let settings =
                 nexus.switch_port_settings_get(&opctx, &query).await?;
-            Ok(HttpResponseOk(settings.into()))
+            Ok(HttpResponseOk(settings.try_into()?))
         };
         apictx
             .context
@@ -4242,7 +4240,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortPathSelector>,
         query_params: Query<networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::LldpLinkConfig>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4271,7 +4269,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortPathSelector>,
         query_params: Query<networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();

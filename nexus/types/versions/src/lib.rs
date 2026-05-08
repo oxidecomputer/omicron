@@ -47,6 +47,8 @@ pub mod v2026_01_03_00;
 pub mod v2026_01_05_00;
 #[path = "multicast_implicit_lifecycle_updates/mod.rs"]
 pub mod v2026_01_08_00;
+#[path = "audit_log_auth_method_enum/mod.rs"]
+pub mod v2026_01_15_00;
 #[path = "audit_log_credential_id/mod.rs"]
 pub mod v2026_01_15_01;
 #[path = "rename_address_selector_to_address_allocator/mod.rs"]
@@ -79,3 +81,5 @@ pub mod v2026_03_23_00;
 pub mod v2026_03_25_00;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
 pub mod v2026_04_16_00;
+#[path = "remove_duplicated_networking_types/mod.rs"]
+pub mod v2026_05_07_00;

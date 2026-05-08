@@ -73,7 +73,7 @@ fi
 
 # Actually install the xde kernel module and opteadm tool
 RC=0
-pfexec pkg install -v pkg://helios-dev/driver/network/opte@"$OPTE_VERSION" || RC=$?
+pfexec pkg install -v pkg://helios/driver/network/opte@"$OPTE_VERSION" || RC=$?
 if [[ "$RC" -eq 0 ]]; then
     echo "xde driver installed successfully"
 elif [[ "$RC" -eq 4 ]]; then

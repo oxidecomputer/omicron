@@ -72,10 +72,14 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Now simulate the new config being applied to sled 0, which would
-# cause the mupdate override to be removed.
+# Now simulate the new config being applied to sled 0, which would cause the
+# mupdate override to be removed. Apply the latest blueprint to inventory
+# too, so that the sled's reported sled-agent generation advances to match
+# the blueprint's; the sled clearing the override and bumping its generation
+# happen together when the sled processes the new blueprint config.
 sled-set serial0 mupdate-override unset
 sled-set serial0 inventory-visible
+sled-set serial0 omicron-config latest
 
 # But simulate a second mupdate on sled 2. This should invalidate the existing
 # mupdate override on sled 2 and cause another target release minimum
@@ -98,8 +102,14 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Clear the mupdate override on sled 2, signifying that the config has been
-# applied.
+# applied. Also advance the sled's reported sled-agent generation to match,
+# since the sled clearing the override and bumping its generation happen
+# together when it processes the new blueprint config. Likewise advance
+# serial0's reported sled-agent generation: the previous plan did noop
+# conversions on serial0 that the sled would have applied by now in production.
 sled-set serial2 mupdate-override unset
+sled-set serial0 omicron-config latest
+sled-set serial2 omicron-config latest
 
 # Run the planner again. This will cause sled 2's blueprint
 # remove_mupdate_override to be unset. But no further planning steps will
@@ -108,6 +118,13 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
+
+# Model sled-agents applying the latest blueprint between plans (this happens
+# automatically in production), advancing reported sled-agent generations to
+# match.
+sled-set serial0 omicron-config latest
+sled-set serial2 omicron-config latest
+inventory-generate
 
 # Now set the target release -- at this point, we're still waiting on the
 # sled with the mupdate override error to be cleared.
@@ -119,6 +136,7 @@ blueprint-diff latest
 # Now clear the mupdate override error. At this point, we're *still* blocked
 # on serial1's install dataset not being known (so cannot be noop converted).
 sled-set serial1 mupdate-override unset
+sled-set serial1 omicron-config latest
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

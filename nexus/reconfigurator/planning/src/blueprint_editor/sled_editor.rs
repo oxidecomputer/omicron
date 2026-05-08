@@ -377,6 +377,10 @@ impl SledEditor {
         self.zones.all_in_service_and_expunged_zones(reason)
     }
 
+    pub fn incoming_sled_agent_generation(&self) -> Generation {
+        self.incoming_sled_agent_generation
+    }
+
     pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
         self.host_phase_2.value()
     }
