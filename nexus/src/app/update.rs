@@ -105,7 +105,7 @@ struct StuckSaga {
 enum UpdateStatusProblem {
     /// One or more sagas have been running or unwinding longer than
     /// `STUCK_SAGA_THRESHOLD`.
-    StuckSagas { sagas: Vec<StuckSaga> },
+    StuckSagas(Vec<StuckSaga>),
     /// The query for stuck sagas itself failed.
     StuckSagasQueryFailed(String),
     /// An update is in progress and the last step planned in the blueprint is
@@ -113,13 +113,11 @@ enum UpdateStatusProblem {
     StuckUpdate,
     /// The latest inventory collection is older than
     /// `STALE_INVENTORY_THRESHOLD`.
-    StaleInventory { time_done: DateTime<Utc> },
+    StaleInventory(DateTime<Utc>),
     /// One or more zpools are not in an `Online` state.
-    UnhealthyZpools { zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>> },
+    UnhealthyZpools(BTreeMap<SledUuid, Vec<Zpool>>),
     /// One or more enabled SMF services are not in an `online` state.
-    EnabledSmfServicesNotOnline {
-        svcs_by_sled: BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
-    },
+    EnabledSmfServicesNotOnline(BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>),
 }
 
 /// We assume an update is in progress if not all components are at the
@@ -154,6 +152,7 @@ impl UpdateContactSupportChecks {
     /// stale inventory, unhealthy zpools, SMF services) are skipped when an
     /// update is in progress and not yet stuck, since they are expected to
     /// fail mid-update.
+    // TODO-K: Add some tests for this
     fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
         let mut problems = BTreeSet::new();
 
@@ -171,7 +170,7 @@ impl UpdateContactSupportChecks {
                     .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
                     .collect();
                 if !sagas.is_empty() {
-                    problems.insert(UpdateStatusProblem::StuckSagas { sagas });
+                    problems.insert(UpdateStatusProblem::StuckSagas(sagas));
                 }
             }
             Err(e) => {
@@ -182,9 +181,9 @@ impl UpdateContactSupportChecks {
         }
 
         if self.inventory.time_done < Utc::now() - STALE_INVENTORY_THRESHOLD {
-            problems.insert(UpdateStatusProblem::StaleInventory {
-                time_done: self.inventory.time_done,
-            });
+            problems.insert(UpdateStatusProblem::StaleInventory(
+                self.inventory.time_done,
+            ));
         }
 
         let zpools_by_sled: BTreeMap<_, Vec<Zpool>> = self
@@ -194,9 +193,8 @@ impl UpdateContactSupportChecks {
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
         if !zpools_by_sled.is_empty() {
-            problems.insert(UpdateStatusProblem::UnhealthyZpools {
-                zpools_by_sled,
-            });
+            problems
+                .insert(UpdateStatusProblem::UnhealthyZpools(zpools_by_sled));
         }
 
         let svcs_by_sled: BTreeMap<_, SvcsEnabledNotOnlineResult> = self
@@ -206,9 +204,9 @@ impl UpdateContactSupportChecks {
             .map(|(sled, svcs)| (sled, svcs.clone()))
             .collect();
         if !svcs_by_sled.is_empty() {
-            problems.insert(UpdateStatusProblem::EnabledSmfServicesNotOnline {
+            problems.insert(UpdateStatusProblem::EnabledSmfServicesNotOnline(
                 svcs_by_sled,
-            });
+            ));
         }
 
         problems
@@ -484,7 +482,7 @@ impl super::Nexus {
 
         for problem in &problems {
             match problem {
-                UpdateStatusProblem::StuckSagas { sagas } => {
+                UpdateStatusProblem::StuckSagas(sagas) => {
                     warn!(
                         opctx.log,
                         "found stuck sagas active for longer than {}",
@@ -499,7 +497,7 @@ impl super::Nexus {
                         "error" => ?error_msg,
                     );
                 }
-                UpdateStatusProblem::StaleInventory { time_done } => {
+                UpdateStatusProblem::StaleInventory(time_done) => {
                     warn!(
                         opctx.log,
                         "found stale inventory collection: older than {}",
@@ -509,16 +507,16 @@ impl super::Nexus {
                         "collection_time_done" => ?time_done,
                     );
                 }
-                UpdateStatusProblem::UnhealthyZpools { zpools_by_sled } => {
+                UpdateStatusProblem::UnhealthyZpools(zpools_by_sled) => {
                     warn!(
                         opctx.log,
                         "found unhealthy zpools";
                         "zpools_by_sled" => ?zpools_by_sled,
                     );
                 }
-                UpdateStatusProblem::EnabledSmfServicesNotOnline {
+                UpdateStatusProblem::EnabledSmfServicesNotOnline(
                     svcs_by_sled,
-                } => {
+                ) => {
                     warn!(
                         opctx.log,
                         "found enabled SMF services not online";
