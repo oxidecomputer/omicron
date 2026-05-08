@@ -23,9 +23,6 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::result::{
-    DatabaseErrorKind as DieselErrorKind, Error as DieselError,
-};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -175,9 +172,28 @@ impl DataStore {
                             .into(),
                         ));
                     }
+                    // Idempotent case: if an adoption request already exists
+                    // for this disk then query it back and return it.
+                    //
+                    // Note: We are only doing this before the insert
+                    // due to diesel limitations with regards to
+                    // on_conflict/on_constraint for partial indexes.
+                    let req = adoption_dsl::physical_disk_adoption_request
+                        .filter(adoption_dsl::vendor.eq(vendor.clone()))
+                        .filter(adoption_dsl::serial.eq(serial.clone()))
+                        .filter(adoption_dsl::model.eq(model.clone()))
+                        .filter(adoption_dsl::time_deleted.is_null())
+                        .select(PhysicalDiskAdoptionRequest::as_select())
+                        .first_async(&conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(req) = req {
+                        return Ok(req);
+                    }
 
                     // Insert the adoption request.
-                    let request = diesel::insert_into(
+                    diesel::insert_into(
                         adoption_dsl::physical_disk_adoption_request,
                     )
                     .values((
@@ -189,56 +205,20 @@ impl DataStore {
                     ))
                     .returning(PhysicalDiskAdoptionRequest::as_returning())
                     .get_result_async(&conn)
-                    .await?;
-
-                    Ok(request)
+                    .await
                 }
             })
             .await;
 
         match txn_res {
-            Ok(request) => return Ok(request),
+            Ok(request) => Ok(request),
             Err(e) => match err.take() {
                 // A called function performed its own error propagation.
-                Some(txn_error) => {
-                    return Err(txn_error.into_public_ignore_retries());
-                }
+                Some(txn_error) => Err(txn_error.into_public_ignore_retries()),
                 // The transaction setup/teardown itself encountered a diesel error.
-                None => match e {
-                    // Check for a unique index violation for an active
-                    // adoption request with the same vendor/serial/model.
-                    //
-                    // Return the existing request in this case as the
-                    // request is idempotent.
-                    DieselError::DatabaseError(
-                        DieselErrorKind::UniqueViolation,
-                        _,
-                    ) => {
-                        // Fall through to query the existing request below.
-                    }
-                    _ => {
-                        return Err(public_error_from_diesel(
-                            e,
-                            ErrorHandler::Server,
-                        ));
-                    }
-                },
+                None => Err(public_error_from_diesel(e, ErrorHandler::Server)),
             },
         }
-
-        // Idempotent case: an adoption request already exists for this disk.
-        // Query it back and return it.
-        let conn = &*self.pool_connection_authorized(opctx).await?;
-        let request = adoption_dsl::physical_disk_adoption_request
-            .filter(adoption_dsl::vendor.eq(disk_id.vendor))
-            .filter(adoption_dsl::serial.eq(disk_id.serial))
-            .filter(adoption_dsl::model.eq(disk_id.model))
-            .filter(adoption_dsl::time_deleted.is_null())
-            .select(PhysicalDiskAdoptionRequest::as_select())
-            .first_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(request)
     }
 
     /// Stores a new physical disk in the database.
