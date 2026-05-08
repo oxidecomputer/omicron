@@ -109,78 +109,7 @@ impl Vmm {
         }
     }
 
-    /// Returns the runtime state of this VMM.
-    pub fn runtime(&self) -> VmmRuntimeState {
-        VmmRuntimeState {
-            time_state_updated: self.time_state_updated,
-            generation: self.generation,
-            state: self.state,
-            failure_reason: self.failure_reason,
-        }
-    }
-
     pub fn sled_id(&self) -> SledUuid {
         self.sled_id.into()
-    }
-}
-
-/// Runtime state for a VMM, owned by the sled where that VMM is running.
-#[derive(
-    Clone,
-    Debug,
-    AsChangeset,
-    Selectable,
-    Insertable,
-    Queryable,
-    Serialize,
-    Deserialize,
-    PartialEq,
-)]
-#[diesel(table_name = vmm)]
-pub struct VmmRuntimeState {
-    /// The time at which this state was most recently updated.
-    pub time_state_updated: DateTime<Utc>,
-
-    /// The generation number protecting this VMM's state and update time.
-    #[diesel(column_name = state_generation)]
-    #[serde(rename = "gen")]
-    pub generation: Generation,
-
-    /// The state of this VMM. If this VMM is the active VMM for a given
-    /// instance, this state is the instance's logical state.
-    pub state: VmmState,
-
-    /// If this VMM is in the `Failed` state, this field describes why it
-    /// failed. This is `None` for VMMs that are not in the `Failed` state.
-    pub failure_reason: Option<VmmFailureReason>,
-}
-
-impl From<sled_agent_types::instance::VmmRuntimeState> for VmmRuntimeState {
-    fn from(value: sled_agent_types::instance::VmmRuntimeState) -> Self {
-        Self {
-            state: value.state.into(),
-            time_state_updated: value.time_updated,
-            generation: value.generation.into(),
-            failure_reason: if value.state
-                == sled_agent_types::instance::VmmState::Failed
-            {
-                // If we are converting a state received from a sled-agent that
-                // indicates that the VMM is failed, the failure reason is
-                // implicitly "from_sled_agent" for now.
-                Some(VmmFailureReason::FromSledAgent)
-            } else {
-                None
-            },
-        }
-    }
-}
-
-impl From<Vmm> for sled_agent_types::instance::VmmRuntimeState {
-    fn from(s: Vmm) -> Self {
-        Self {
-            generation: s.generation.into(),
-            state: s.state.into(),
-            time_updated: s.time_state_updated,
-        }
     }
 }

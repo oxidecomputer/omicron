@@ -86,26 +86,9 @@ impl fmt::Display for VmmState {
     }
 }
 
-impl From<VmmState> for sled_agent_types::instance::VmmState {
-    fn from(value: VmmState) -> Self {
-        match value {
-            // The `Creating` state is internal to Nexus; the outside world
-            // should treat it as equivalent to `Starting`.
-            VmmState::Creating | VmmState::Starting => Self::Starting,
-            VmmState::Running => Self::Running,
-            VmmState::Stopping => Self::Stopping,
-            VmmState::Stopped => Self::Stopped,
-            VmmState::Rebooting => Self::Rebooting,
-            VmmState::Migrating => Self::Migrating,
-            VmmState::Failed => Self::Failed,
-            VmmState::Destroyed | VmmState::SagaUnwound => Self::Destroyed,
-        }
-    }
-}
-
-impl From<sled_agent_types::instance::VmmState> for VmmState {
-    fn from(value: sled_agent_types::instance::VmmState) -> Self {
-        use sled_agent_types::instance::VmmState as Input;
+impl From<nexus_types::instance::VmmState> for VmmState {
+    fn from(value: nexus_types::instance::VmmState) -> Self {
+        use nexus_types::instance::VmmState as Input;
         match value {
             Input::Starting => Self::Starting,
             Input::Running => Self::Running,

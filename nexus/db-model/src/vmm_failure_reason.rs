@@ -5,7 +5,9 @@
 //! Describes why a VMM record is in the `Failed` state.
 
 use super::impl_enum_type;
+use nexus_types::instance as types;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 impl_enum_type!(
     VmmFailureReasonEnum:
@@ -19,10 +21,7 @@ impl_enum_type!(
         FromSqlRow,
         Serialize,
         Deserialize,
-        strum::Display,
-        strum::IntoStaticStr,
     )]
-    #[strum(serialize_all = "snake_case")]
     pub enum VmmFailureReason;
 
     // The reason for this VMM's failure is unknown, because the VMM failed
@@ -39,16 +38,41 @@ impl_enum_type!(
     SledOff => b"sled_off"
 );
 
-impl VmmFailureReason {
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Prehistoric => "<VMM failed prior to recorded history>",
-            Self::FromSledAgent => "failed VMM state received from sled-agent",
-            Self::NoSuchVmm => "VMM no longer present on sled",
-            Self::SledExpunged => {
-                "the sled this VMM was running on has been expunged"
-            }
-            Self::SledOff => "the sled this VMM was running on powered off",
+impl From<types::VmmFailureReason> for VmmFailureReason {
+    fn from(reason: types::VmmFailureReason) -> Self {
+        match reason {
+            types::VmmFailureReason::Prehistoric => Self::Prehistoric,
+            types::VmmFailureReason::FromSledAgent => Self::FromSledAgent,
+            types::VmmFailureReason::NoSuchVmm => Self::NoSuchVmm,
+            types::VmmFailureReason::SledExpunged => Self::SledExpunged,
+            types::VmmFailureReason::SledOff => Self::SledOff,
         }
+    }
+}
+
+impl From<VmmFailureReason> for types::VmmFailureReason {
+    fn from(reason: VmmFailureReason) -> Self {
+        match reason {
+            VmmFailureReason::Prehistoric => Self::Prehistoric,
+            VmmFailureReason::FromSledAgent => Self::FromSledAgent,
+            VmmFailureReason::NoSuchVmm => Self::NoSuchVmm,
+            VmmFailureReason::SledExpunged => Self::SledExpunged,
+            VmmFailureReason::SledOff => Self::SledOff,
+        }
+    }
+}
+
+impl VmmFailureReason {
+    pub fn from_vmm_state(state: types::VmmState) -> Option<Self> {
+        match state {
+            types::VmmState::Failed(reason) => Some(reason.into()),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for VmmFailureReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        types::VmmFailureReason::from(*self).fmt(f)
     }
 }

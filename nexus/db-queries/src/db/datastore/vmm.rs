@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::model::Vmm;
-use crate::db::model::VmmRuntimeState;
 use crate::db::model::VmmState as DbVmmState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -21,6 +20,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::vmm::dsl;
+use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
