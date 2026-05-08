@@ -1348,7 +1348,7 @@ impl DataStore {
                             ) {
                                 // Concurrent sled reservations could have
                                 // allocated enough hardware threads, RSS RAM,
-                                // and/ or reservoir RAM that means this
+                                // and/or reservoir RAM that means this
                                 // sled_target is no longer valid.
                                 //
                                 // Alternatively, a concurrent reservation could
@@ -1364,15 +1364,12 @@ impl DataStore {
                                 // sentinel, another sled_target will be chosen
                                 // right away.
                                 //
-                                // When local storage allocations are required
-                                // (just like the failure mode mentioned in a
-                                // previous block comment), the iterator will
-                                // erroneously keep returning different
-                                // permutations, meanwhile the insert query
+                                // If a sentinel is returned, the insert query
                                 // isn't succeeding for reasons other than the
-                                // available space for local storage. In this
-                                // case, one of the sentinels will be returned,
-                                // and if we see those then bail out of the
+                                // available space for local storage. If we
+                                // don't bail out here, the loop will keep
+                                // searching through permutations of local
+                                // storage allocations to try. Bail out of the
                                 // search right away and pick another
                                 // sled_target.
 
