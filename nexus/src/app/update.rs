@@ -88,7 +88,7 @@ impl UpdateStatusHandle {
 /// Inputs needed to identify update health problems.
 struct UpdateContactSupportChecks {
     inventory: Arc<Collection>,
-    stuck_sagas: Vec<Saga>,
+    stuck_sagas: Result<Vec<Saga>, Error>,
     components_by_release_version: BTreeMap<String, usize>,
     time_last_step_planned: DateTime<Utc>,
 }
@@ -106,6 +106,8 @@ enum UpdateStatusProblem {
     /// One or more sagas have been running or unwinding longer than
     /// `STUCK_SAGA_THRESHOLD`.
     StuckSagas { sagas: Vec<StuckSaga> },
+    /// The query for stuck sagas itself failed.
+    StuckSagasQueryFailed(String),
     /// An update is in progress and the last step planned in the blueprint is
     /// older than `STUCK_UPDATE_THRESHOLD`.
     StuckUpdate,
@@ -120,30 +122,32 @@ enum UpdateStatusProblem {
     },
 }
 
+/// We assume an update is in progress if not all components are at the
+/// same version or there are only two versions and they are not
+/// "install dataset" and "unknown".
+fn is_update_in_progress(
+    components_by_release_version: &BTreeMap<String, usize>,
+) -> bool {
+    let versions_at_initial_state = components_by_release_version.len() == 2
+        && components_by_release_version
+            .contains_key(&internal_views::TufRepoVersion::Unknown.to_string())
+        && components_by_release_version.contains_key(
+            &internal_views::TufRepoVersion::InstallDataset.to_string(),
+        );
+    components_by_release_version.len() != 1 && !versions_at_initial_state
+}
+
+/// An update is "stuck" if it is in progress but the last step planned
+/// in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
+fn is_update_stuck(
+    components_by_release_version: &BTreeMap<String, usize>,
+    time_last_step_planned: DateTime<Utc>,
+) -> bool {
+    is_update_in_progress(components_by_release_version)
+        && time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
+}
+
 impl UpdateContactSupportChecks {
-    /// We assume an update is in progress if not all components are at the
-    /// same version or there are only two versions and they are not
-    /// "install dataset" and "unknown".
-    fn is_update_in_progress(&self) -> bool {
-        let versions_at_initial_state =
-            self.components_by_release_version.len() == 2
-                && self.components_by_release_version.contains_key(
-                    &internal_views::TufRepoVersion::Unknown.to_string(),
-                )
-                && self.components_by_release_version.contains_key(
-                    &internal_views::TufRepoVersion::InstallDataset.to_string(),
-                );
-        self.components_by_release_version.len() != 1
-            && !versions_at_initial_state
-    }
-
-    /// An update is "stuck" if it is in progress but the last step planned
-    /// in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
-    fn is_update_stuck(&self) -> bool {
-        self.is_update_in_progress()
-            && self.time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
-    }
-
     /// Identify the set of problems present given these inputs.
     ///
     /// Stuck sagas are always reported. The remaining checks (stuck update,
@@ -153,23 +157,28 @@ impl UpdateContactSupportChecks {
     fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
         let mut problems = BTreeSet::new();
 
-        if !self.stuck_sagas.is_empty() {
-            let sagas = self
-                .stuck_sagas
-                .iter()
-                .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
-                .collect();
-            problems.insert(UpdateStatusProblem::StuckSagas { sagas });
-        }
-
-        // It is expected that the remaining checks could fail during an
-        // update, so we skip them if an update is in progress but not stuck.
-        if self.is_update_in_progress() && !self.is_update_stuck() {
-            return problems;
-        }
-
-        if self.is_update_stuck() {
+        if is_update_stuck(
+            &self.components_by_release_version,
+            self.time_last_step_planned,
+        ) {
             problems.insert(UpdateStatusProblem::StuckUpdate);
+        }
+
+        match &self.stuck_sagas {
+            Ok(sagas) => {
+                let sagas: Vec<_> = sagas
+                    .iter()
+                    .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
+                    .collect();
+                if !sagas.is_empty() {
+                    problems.insert(UpdateStatusProblem::StuckSagas { sagas });
+                }
+            }
+            Err(e) => {
+                problems.insert(UpdateStatusProblem::StuckSagasQueryFailed(
+                    e.to_string(),
+                ));
+            }
         }
 
         if self.inventory.time_done < Utc::now() - STALE_INVENTORY_THRESHOLD {
@@ -438,26 +447,15 @@ impl super::Nexus {
         components_by_release_version: BTreeMap<String, usize>,
         inventory: Arc<Collection>,
     ) -> Result<bool, Error> {
-        // TODO-K: Add stuck sagas later?
-        let stuck_sagas = self
-            .datastore()
-            .saga_list_running_or_unwinding_older_than(
-                opctx,
-                STUCK_SAGA_THRESHOLD,
-            )
-            .await?;
-
-        let checks = UpdateContactSupportChecks {
-            inventory,
-            stuck_sagas,
-            components_by_release_version,
-            time_last_step_planned,
-        };
-
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
         // signal.
-        if checks.is_update_in_progress() && !checks.is_update_stuck() {
+        if is_update_in_progress(&components_by_release_version)
+            && !is_update_stuck(
+                &components_by_release_version,
+                time_last_step_planned,
+            )
+        {
             info!(
                 opctx.log,
                 "skipping update health checks; update in progress with last \
@@ -466,6 +464,21 @@ impl super::Nexus {
             );
             return Ok(false);
         }
+
+        let stuck_sagas = self
+            .datastore()
+            .saga_list_running_or_unwinding_older_than(
+                opctx,
+                STUCK_SAGA_THRESHOLD,
+            )
+            .await;
+
+        let checks = UpdateContactSupportChecks {
+            inventory,
+            stuck_sagas,
+            components_by_release_version,
+            time_last_step_planned,
+        };
 
         let problems = checks.problems();
 
@@ -479,10 +492,17 @@ impl super::Nexus {
                         "sagas" => ?sagas,
                     );
                 }
+                UpdateStatusProblem::StuckSagasQueryFailed(error_msg) => {
+                    warn!(
+                        opctx.log,
+                        "failed to list stuck sagas";
+                        "error" => ?error_msg,
+                    );
+                }
                 UpdateStatusProblem::StaleInventory { time_done } => {
                     warn!(
                         opctx.log,
-                        "inventory collection is stuck: older that {}",
+                        "found stale inventory collection: older than {}",
                         omicron_common::format_time_delta(
                             STALE_INVENTORY_THRESHOLD
                         );
