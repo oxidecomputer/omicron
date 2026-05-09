@@ -1689,17 +1689,25 @@ impl Client {
 // TTL last_updated_at + toIntervalDay(<N>)
 // ```
 //
-// for the field tables.
+// for the field tables, or:
+//
+// ```
+// TTL event_time + toIntervalDay(<N>)
+// ```
+//
+// for `system.query_log`.
 //
 // We're picking out the number of days from the function argument as a string.
 fn extract_ttl_in_days_from_create_table_query(
     row: &str,
 ) -> Result<Days, Error> {
-    const NEEDLES: [&str; 2] = [
+    const NEEDLES: [&str; 3] = [
         // For measurement tables
         "TTL toDateTime(timestamp) + toIntervalDay(",
         // For field tables
         "TTL last_updated_at + toIntervalDay(",
+        // For `system.query_log`
+        "TTL event_time + toIntervalDay(",
     ];
 
     // Find the first needle that matches, and error if none do.
@@ -2153,6 +2161,57 @@ mod tests {
         } else {
             assert!(!client.is_oximeter_cluster().await.unwrap());
         }
+    }
+
+    // Round-trip integration test for retention policies.
+    //
+    // Note: `system.query_log` doesn't exist until we've logged a query, so
+    // run a dummy query and `SYSTEM FLUSH LOGS` before the round-trip test.
+    #[tokio::test]
+    async fn test_retention_policy_round_trip() {
+        let logctx = test_setup_log("test_retention_policy_round_trip");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.native_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+
+        // Ensure `system.query_log` table exists.
+        {
+            let mut handle = client.claim_connection().await.unwrap();
+            client
+                .execute_with_block(&mut handle, "SELECT 1")
+                .await
+                .unwrap();
+            client
+                .execute_with_block(&mut handle, "SYSTEM FLUSH LOGS")
+                .await
+                .unwrap();
+            assert!(
+                client.database_has_query_log_table(&mut handle).await.unwrap(),
+                "system.query_log should exist after SYSTEM FLUSH LOGS",
+            );
+        }
+
+        let days = Days::new(7).unwrap();
+        client
+            .set_retention_policy(RetentionPolicyRequest { days }, false)
+            .await
+            .unwrap();
+
+        let policy = client.retention_policy().await.unwrap().unwrap();
+
+        assert!(
+            policy.tables.iter().all(|p| p.days == days),
+            "expected every table at {days:?}, got: {:?}",
+            policy
+                .tables
+                .iter()
+                .map(|p| (p.table.as_str(), p.days))
+                .collect::<Vec<_>>(),
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -5344,6 +5403,15 @@ mod tests {
             u8::from(extract_ttl_in_days_from_create_table_query(
                 "some junk TTL last_updated_at + toIntervalDay(7) other stuff"
             ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(
+                extract_ttl_in_days_from_create_table_query(
+                    "some junk TTL event_time + toIntervalDay(7) other stuff"
+                )
+                .unwrap()
+            ),
         );
 
         for invalid in [
