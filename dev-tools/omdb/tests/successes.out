@@ -852,7 +852,8 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: task disabled
+physical disks added: 0
+/!\ task disabled
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -1534,7 +1535,8 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: task disabled
+physical disks added: 0
+/!\ task disabled
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m

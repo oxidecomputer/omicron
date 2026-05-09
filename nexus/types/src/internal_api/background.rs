@@ -1171,6 +1171,16 @@ pub struct ServiceFirewallRuleStatus {
     pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
 }
 
+/// Status of the `PhysicalDiskAdoption` background task
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct PhysicalDiskAdoptionStatus {
+    /// The number of physical disks added during this activation
+    pub disks_added: usize,
+
+    /// Errors encountered during this activation
+    pub errors: Vec<String>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

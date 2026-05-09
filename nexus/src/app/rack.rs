@@ -95,7 +95,7 @@ impl super::Nexus {
             .physical_disks
             .into_iter()
             .map(|disk| {
-                db::model::PhysicalDisk::new(
+                db::model::PhysicalDisk::from_parts(
                     disk.id,
                     disk.vendor,
                     disk.serial,
