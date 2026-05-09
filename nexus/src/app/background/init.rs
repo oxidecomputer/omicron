@@ -588,6 +588,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            nexus_id,
         );
         let rx_planner = blueprint_planner.watcher();
         driver.register(TaskDefinition {
