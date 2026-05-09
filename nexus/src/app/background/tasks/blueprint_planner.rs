@@ -552,6 +552,13 @@ mod test {
             blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
         );
 
+        // Verify the creator is the Nexus UUID, not the hardcoded string.
+        let nexus_id = nexus.id.to_string();
+        assert_eq!(
+            blueprint.creator, nexus_id,
+            "blueprint creator should be the Nexus UUID, not a hardcoded string"
+        );
+
         // Planning again should not change the plan, because nothing has changed.
         let status = serde_json::from_value::<BlueprintPlannerStatus>(
             planner.activate(&opctx).await,
