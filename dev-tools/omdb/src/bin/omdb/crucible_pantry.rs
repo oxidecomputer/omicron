@@ -101,12 +101,54 @@ async fn cmd_volume_info(
     args: &VolumeArgs,
 ) -> Result<(), anyhow::Error> {
     let volume = args.uuid.to_string();
-    let VolumeStatus { active, num_job_handles, seen_active } =
-        *client.volume_status(&volume).await.context("listing volumes")?;
+    let VolumeStatus { active, num_job_handles, seen_active, info } = client
+        .volume_status(&volume)
+        .await
+        .context("listing volumes")?
+        .into_inner();
 
-    println!("          active: {}", active);
-    println!(" num_job_handles: {}", num_job_handles);
-    println!("     seen_active: {}", seen_active);
+    println!("          active: {active}");
+    println!(" num_job_handles: {num_job_handles}");
+    println!("     seen_active: {seen_active}");
+
+    match info {
+        crucible_pantry_client::types::VolumeInfo::Volume {
+            sub_volumes,
+            read_only_parent,
+        } => {
+            println!("            info: volume");
+            println!("     sub_volumes: {}", sub_volumes.len());
+            println!("read_only_parent: {}", read_only_parent.is_some());
+        }
+        crucible_pantry_client::types::VolumeInfo::Upstairs {
+            state,
+            upstairs_id,
+            session_id,
+            generation,
+            live_repair_in_progress,
+            reconcile_in_progress,
+            block_size,
+            encrypted,
+            read_only,
+            targets,
+            ..
+        } => {
+            println!("            info: upstairs");
+            println!("     upstairs_id: {upstairs_id}");
+            println!("      session_id: {session_id}");
+            println!("      generation: {generation}");
+            println!("           state: {state:?}");
+            println!("      block_size: {block_size:?}");
+            println!("       encrypted: {encrypted}");
+            println!("       read_only: {read_only}");
+            println!("  live_repair_in_progress: {live_repair_in_progress}");
+            println!("    reconcile_in_progress: {reconcile_in_progress}");
+            println!("    targets ({}):", targets.len());
+            for (i, t) in targets.iter().enumerate() {
+                println!("      [{i}] {t:?}");
+            }
+        }
+    }
     Ok(())
 }
 

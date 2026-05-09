@@ -53,11 +53,16 @@ impl AllCases {
         &mut self,
         de: fm::DiagnosisEngineKind,
     ) -> iddqd::id_ord_map::RefMut<'_, CaseBuilder> {
-        let (id, case_rng) = self.rng.next_case();
+        let (id, case_rng) = loop {
+            let (id, case_rng) = self.rng.next_case();
+            if !self.cases.contains_key(&id) {
+                break (id, case_rng);
+            }
+        };
         let sitrep_id = self.sitrep_id;
         let case = match self.cases.entry(&id) {
             iddqd::id_ord_map::Entry::Occupied(_) => {
-                panic!("generated a colliding UUID!")
+                unreachable!("UUID should be unused")
             }
             iddqd::id_ord_map::Entry::Vacant(entry) => {
                 let case = fm::Case {
@@ -130,7 +135,12 @@ impl CaseBuilder {
         alert: &impl serde::Serialize,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
-        let id = self.rng.next_alert();
+        let id = loop {
+            let id = self.rng.next_alert();
+            if !self.case.alerts_requested.contains_key(&id) {
+                break id;
+            }
+        };
         let req = fm::case::AlertRequest {
             id,
             class,
@@ -140,9 +150,10 @@ impl CaseBuilder {
             })?,
             comment: comment.to_string(),
         };
-        self.case.alerts_requested.insert_unique(req).map_err(|_| {
-            anyhow::anyhow!("an alert with ID {id:?} already exists")
-        })?;
+        self.case
+            .alerts_requested
+            .insert_unique(req)
+            .expect("UUID should be unused");
 
         let comment = comment.to_string();
         slog::info!(
@@ -165,21 +176,23 @@ impl CaseBuilder {
         &mut self,
         data_selection: BundleDataSelection,
         comment: impl ToString,
-    ) -> anyhow::Result<()> {
-        let id = self.rng.next_support_bundle();
+    ) {
+        let id = loop {
+            let id = self.rng.next_support_bundle();
+            if !self.case.support_bundles_requested.contains_key(&id) {
+                break id;
+            }
+        };
         let req = fm::case::SupportBundleRequest {
             id,
             requested_sitrep_id: self.sitrep_id,
             data_selection,
             comment: comment.to_string(),
         };
-        self.case.support_bundles_requested.insert_unique(req).map_err(
-            |_| {
-                anyhow::anyhow!(
-                    "a support bundle request with ID {id:?} already exists"
-                )
-            },
-        )?;
+        self.case
+            .support_bundles_requested
+            .insert_unique(req)
+            .expect("UUID should be unused");
 
         let comment = comment.to_string();
         slog::info!(
@@ -192,8 +205,6 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
-
-        Ok(())
     }
 
     pub fn close(&mut self, comment: impl ToString) {

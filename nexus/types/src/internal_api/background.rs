@@ -852,6 +852,8 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    /// Total number of present SPs discovered via ignition.
+    pub sps_found: usize,
     pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
@@ -932,6 +934,9 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
+        /// The task is disabled by config.
+        Disabled,
+
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,
@@ -1155,6 +1160,25 @@ pub struct SessionCleanupStatus {
     pub limit: u32,
     /// Errors encountered during this activation.
     pub error: Option<String>,
+}
+
+/// Status of the background task pushing service firewall rules.
+#[derive(Default, Deserialize, Serialize)]
+pub struct ServiceFirewallRuleStatus {
+    /// An error encountered looking firewall rules up in the database.
+    pub lookup_error: Option<String>,
+    /// Errors encountered pushing the set of rules to each sled.
+    pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
+}
+
+/// Status of the `PhysicalDiskAdoption` background task
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct PhysicalDiskAdoptionStatus {
+    /// The number of physical disks added during this activation
+    pub disks_added: usize,
+
+    /// Errors encountered during this activation
+    pub errors: Vec<String>,
 }
 
 #[cfg(test)]

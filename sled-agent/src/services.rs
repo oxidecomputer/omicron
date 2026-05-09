@@ -23,14 +23,10 @@
 //!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::bootstrap::BootstrapNetworking;
-use crate::bootstrap::early_networking::{
-    EarlyNetworkSetup, EarlyNetworkSetupError,
-};
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
-use crate::sled_agent::ThisSledSwitchZoneUnderlayIpAddr;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
@@ -88,6 +84,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_rack_setup::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -100,6 +97,7 @@ use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
+use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
@@ -2409,6 +2407,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
+                            compression: dropshot::CompressionConfig::None,
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
@@ -2416,6 +2415,7 @@ impl ServiceManager {
                         default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
+                        compression: dropshot::CompressionConfig::None,
                     },
                     dropshot_lockstep: dropshot::ConfigDropshot {
                         bind_address: SocketAddr::new(
@@ -2425,6 +2425,7 @@ impl ServiceManager {
                         default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
+                        compression: dropshot::CompressionConfig::None,
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(

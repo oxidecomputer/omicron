@@ -4,38 +4,12 @@
 
 //! Path parameter types for version INITIAL.
 
+use crate::impls::{id_path_param, path_param};
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-macro_rules! path_param {
-    ($struct:ident, $param:ident, $name:tt) => {
-        #[derive(Serialize, Deserialize, JsonSchema)]
-        pub struct $struct {
-            #[doc = "Name or ID of the "]
-            #[doc = $name]
-            pub $param: NameOrId,
-        }
-    };
-}
-
-macro_rules! id_path_param {
-    ($struct:ident, $param:ident, $name:tt) => {
-        id_path_param!($struct, $param, $name, Uuid);
-    };
-
-    ($struct:ident, $param:ident, $name:tt, $uuid_type:ident) => {
-        #[derive(Serialize, Deserialize, JsonSchema)]
-        pub struct $struct {
-            #[doc = "ID of the "]
-            #[doc = $name]
-            #[schemars(with = "Uuid")]
-            pub $param: $uuid_type,
-        }
-    };
-}
 
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");

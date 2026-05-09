@@ -118,13 +118,14 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   test suite
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   test suite
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -254,13 +255,14 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-cli
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-cli
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -516,13 +518,14 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-cli
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-cli
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
