@@ -37,12 +37,13 @@ impl_enum_type!(
 
 impl VmmState {
     /// Converts this DB VMM state to the corresponding
-    /// [`nexus_types::instance::VmmState`].
+    /// `nexus_types::instance::VmmState`, to pass through methods defined in
+    /// `nexus_types`.
     ///
-    /// Because the `nexus_types` version of `VmmState::Failed` carries a
-    /// [`nexus_types::instance::VmmFailureReason`], this conversion uses
-    /// `Prehistoric` as a placeholder. Callers that need the real failure
-    /// reason should use [`crate::Vmm::runtime()`] instead.
+    /// This is an internal conversion that always emits the `Prehistoric`
+    /// failure reason, since we don't know the actual `nexus_types` failure
+    /// reason. Doing this is fine *here*, as the methods we intend to call
+    /// don't care about the failure reason.
     fn to_nexus_state(self) -> nexus_types::instance::VmmState {
         use nexus_types::instance::VmmFailureReason;
         use nexus_types::instance::VmmState as NexusVmmState;
@@ -87,6 +88,12 @@ impl VmmState {
 
     pub fn is_terminal(&self) -> bool {
         self.to_nexus_state().is_terminal()
+    }
+
+    /// Returns `true` if the VMM is in a state where it is safe to
+    /// deallocate its sled resources and mark it as deleted.
+    pub fn is_destroyable(&self) -> bool {
+        self.to_nexus_state().is_destroyable()
     }
 
     /// Returns `true` if the VMM is in a state in which it exists on a
@@ -216,6 +223,48 @@ mod tests {
     fn test_from_str_roundtrips() {
         for &variant in VmmState::ALL_STATES {
             assert_eq!(Ok(dbg!(variant)), dbg!(variant.to_string().parse()));
+        }
+    }
+
+    #[test]
+    fn test_terminal_states_consistent() {
+        for &state in VmmState::ALL_STATES {
+            assert_eq!(
+                VmmState::TERMINAL_STATES.contains(&state),
+                state.is_terminal(),
+                "inconsistency between nexus_db_model::VmmState::{state:?} \
+                and nexus_types::instance::VmmState::{state:?}: if the \
+                is_terminal() method in nexus_types returns true, the state \
+                should be in TERMINAL_STATES, and vice versa",
+            );
+        }
+    }
+
+    #[test]
+    fn test_destroyable_states_consistent() {
+        for &state in VmmState::ALL_STATES {
+            assert_eq!(
+                VmmState::DESTROYABLE_STATES.contains(&state),
+                state.is_destroyable(),
+                "inconsistency between nexus_db_model::VmmState::{state:?} \
+                and nexus_types::instance::VmmState::{state:?}: if the \
+                is_destroyable() method in nexus_types returns true, the state \
+                should be in DESTROYABLE_STATES, and vice versa",
+            );
+        }
+    }
+
+    #[test]
+    fn test_nonexistent_states_consistent() {
+        for &state in VmmState::ALL_STATES {
+            assert_eq!(
+                VmmState::NONEXISTENT_STATES.contains(&state),
+                !state.exists_on_sled(),
+                "inconsistency between nexus_db_model::VmmState::{state:?} \
+                and nexus_types::instance::VmmState::{state:?}: if the \
+                exists_on_sled() method in nexus_types returns false, the \
+                state should be in NONEXISTENT_STATES, and vice versa",
+            );
         }
     }
 }
