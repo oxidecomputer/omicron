@@ -5238,6 +5238,28 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn test_inventory_collection_read_missing_returns_not_found() {
+        let logctx = dev::test_setup_log("inventory_collection_read_missing");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let missing_id = CollectionUuid::new_v4();
+
+        let err = datastore
+            .inventory_collection_read(&opctx, missing_id)
+            .await
+            .expect_err("expected error for missing collection");
+
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "expected ObjectNotFound error, got: {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     /// Tests inserting several collections, reading them back, and making sure
     /// they look the same.
     #[tokio::test]
