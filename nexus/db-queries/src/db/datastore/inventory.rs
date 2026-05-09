@@ -4738,8 +4738,20 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-            bail_unless!(collections.len() == 1);
-            let collection = collections.into_iter().next().unwrap();
+            let collection = match collections.len() {
+                0 => {
+                    return Err(Error::ObjectNotFound {
+                        type_name: ResourceType::InventoryCollection,
+                        lookup_type: LookupType::ById(id.into_untyped_uuid()),
+                    });
+                },
+                1 => collections.into_iter().next().unwrap(),
+                n => {
+                    return Err(Error::internal_error(&format!(
+                        "expected 1 collection row, got {n}"
+                    )));
+                },
+            };
             (
                 collection.time_started,
                 collection.time_done,
