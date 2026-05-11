@@ -95,7 +95,6 @@ pub mod instance {
     pub use crate::v1::instance::InstanceMigrationTargetParams;
     pub use crate::v1::instance::MigrationRuntimeState;
     pub use crate::v1::instance::MigrationState;
-    pub use crate::v1::instance::Migrations;
     pub use crate::v1::instance::SledVmmState;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;

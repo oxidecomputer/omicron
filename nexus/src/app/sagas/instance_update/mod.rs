@@ -362,6 +362,7 @@ use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::instance::SledVmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
@@ -370,7 +371,6 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::instance::SledVmmState;
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
 
@@ -1563,6 +1563,7 @@ mod test {
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
+    use nexus_types::instance::Migrations;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -1574,9 +1575,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::early_networking::SwitchSlot;
-    use sled_agent_types::instance::{
-        MigrationRuntimeState, MigrationState, Migrations,
-    };
+    use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;

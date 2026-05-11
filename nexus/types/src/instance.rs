@@ -26,6 +26,15 @@ impl From<sled_agent::SledVmmState> for SledVmmState {
     }
 }
 
+impl SledVmmState {
+    pub fn migrations(&self) -> Migrations<'_> {
+        Migrations {
+            migration_in: self.migration_in.as_ref(),
+            migration_out: self.migration_out.as_ref(),
+        }
+    }
+}
+
 /// The dynamic runtime properties of an individual VMM process.
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct VmmRuntimeState {
@@ -199,6 +208,33 @@ impl From<VmmState> for sled_agent::VmmState {
     }
 }
 
+impl From<VmmState> for omicron_common::api::external::InstanceState {
+    fn from(value: VmmState) -> Self {
+        use omicron_common::api::external::InstanceState as Output;
+
+        match value {
+            // An instance with a VMM which is in the `Creating` state maps to
+            // `InstanceState::Starting`, rather than `InstanceState::Creating`.
+            // If we are still creating the VMM, this is because we are
+            // attempting to *start* the instance; instances may be created
+            // without creating a VMM to run them, and then started later.
+            VmmState::Creating | VmmState::Starting => Output::Starting,
+            VmmState::Running => Output::Running,
+            VmmState::Stopping => Output::Stopping,
+            // `SagaUnwound` should map to `Stopped` so that an `instance_view`
+            // API call that produces an instance with an unwound VMM will appear to
+            // be `Stopped`. This is because instances with unwound VMMs can
+            // be started by a subsequent instance-start saga, just like
+            // instances whose internal state actually is `Stopped`.
+            VmmState::Stopped | VmmState::SagaUnwound => Output::Stopped,
+            VmmState::Rebooting => Output::Rebooting,
+            VmmState::Migrating => Output::Migrating,
+            VmmState::Failed(_) => Output::Failed,
+            VmmState::Destroyed => Output::Destroyed,
+        }
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -238,5 +274,17 @@ impl VmmFailureReason {
             }
             Self::SledOff => "the sled this VMM was running on powered off",
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Migrations<'state> {
+    pub migration_in: Option<&'state sled_agent::MigrationRuntimeState>,
+    pub migration_out: Option<&'state sled_agent::MigrationRuntimeState>,
+}
+
+impl Migrations<'_> {
+    pub fn empty() -> Self {
+        Self { migration_in: None, migration_out: None }
     }
 }

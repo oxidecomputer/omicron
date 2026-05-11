@@ -23,6 +23,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
+use nexus_types::instance::Migrations;
 use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -35,7 +36,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use sled_agent_types::instance::{MigrationRuntimeState, Migrations};
+use sled_agent_types::instance::MigrationRuntimeState;
 use std::net::SocketAddr;
 use uuid::Uuid;
 

@@ -45,7 +45,7 @@ use nexus_types::external_api::instance;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
-use nexus_types::instance::VmmRuntimeState;
+use nexus_types::instance::SledVmmState;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -82,7 +82,6 @@ use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_types::instance as sled_agent;
 use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::instance::ExternalIps;
-use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::inventory::SourceNatConfig;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
@@ -1172,7 +1171,7 @@ impl super::Nexus {
         let sa = self.sled_client(&sled_id).await?;
         sa.vmm_unregister(propolis_id)
             .await
-            .map(|res| res.into_inner().updated_runtime)
+            .map(|res| res.into_inner().updated_runtime.map(Into::into))
             .map_err(|e| {
                 InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
             })
@@ -1407,7 +1406,7 @@ impl super::Nexus {
                         &VmmPutStateBody { state: requested.into() },
                     )
                     .await
-                    .map(|res| res.into_inner().updated_runtime)
+                    .map(|res| res.into_inner().updated_runtime.map(Into::into))
                     .map_err(|e| SledAgentInstanceError(e));
 
                 // If the operation succeeded, write the instance state back,
@@ -1704,13 +1703,13 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| res.into_inner())
+            .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstanceError(e));
 
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let runtime: VmmRuntimeState = state.vmm_state.into();
+                let runtime = state.vmm_state;
                 Ok(db::model::Vmm {
                     time_state_updated: runtime.time_updated,
                     generation: runtime.generation.into(),
@@ -1978,7 +1977,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
-        new_runtime_state: &sled_agent::SledVmmState,
+        new_runtime_state: &SledVmmState,
     ) -> Result<(), Error> {
         if let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
@@ -2784,7 +2783,7 @@ pub(crate) async fn process_vmm_update(
             &opctx,
             propolis_id,
             // TODO(eliza): probably should take this by value...
-            &new_runtime_state.vmm_state.clone().into(),
+            &new_runtime_state.vmm_state.clone(),
             migrations,
         )
         .await?;
