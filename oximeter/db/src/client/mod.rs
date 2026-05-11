@@ -1042,15 +1042,26 @@ impl Client {
             })?;
         let days = u8::from(policy.days);
 
-        // We are explicitly _queueing_ the changes to the TTL, not waiting for
-        // the full modification to take effect. This can be quite
-        // time-consuming when reducing the TTL substantially.
-        let sql = format!(
+        // We want to explicitly queue the changes to the TTL, rather than wait
+        // for the full modification. This is a bit complicated in our version
+        // of ClickHouse. We need to:
+        //
+        // - set the TTL, but ensure the DB does not "materialize" that TTL
+        //   right away (the `materialize_ttl_after_modify` setting).
+        // - start materializing the TTL, but don't wait for it to finish (the
+        //   `mutations_sync` setting).
+        let alter_ttl_sql = format!(
             "ALTER TABLE {table} {maybe_on_cluster}\
             MODIFY TTL {start_time} + toIntervalDay({days}) \
+            SETTINGS materialize_ttl_after_modify=0;"
+        );
+        self.execute_native(handle, &alter_ttl_sql).await?;
+        let materialize_ttl_sql = format!(
+            "ALTER TABLE {table} {maybe_on_cluster} \
+            MATERIALIZE TTL \
             SETTINGS mutations_sync=0;"
         );
-        self.execute_native(handle, &sql).await
+        self.execute_native(handle, &materialize_ttl_sql).await
     }
 
     fn ttl_start_time_expr_for_table(table: &str) -> Option<&'static str> {
