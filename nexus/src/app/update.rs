@@ -208,13 +208,7 @@ fn is_update_stuck(
 }
 
 impl UpdateContactSupportChecks {
-    /// Identify the set of problems present given these inputs.
-    ///
-    /// Stuck sagas are always reported. The remaining checks (stuck update,
-    /// stale inventory, unhealthy zpools, SMF services) are skipped when an
-    /// update is in progress and not yet stuck, since they are expected to
-    /// fail mid-update.
-    // TODO-K: Add some tests for this
+    /// Identify the set of problems present with given inputs.
     fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
         let mut problems = BTreeSet::new();
 
@@ -853,7 +847,7 @@ mod test {
             .expect("inserted inventory collection");
     }
 
-    // Insert a running saga whose `time_created` is older than
+        // Insert a running saga whose `time_created` is older than
     // `STUCK_SAGA_THRESHOLD`.
     async fn insert_stuck_running_saga(cptestctx: &ControlPlaneTestContext) {
         let datastore = cptestctx.server.server_context().nexus.datastore();
@@ -867,6 +861,51 @@ mod test {
         saga.time_created =
             Utc::now() - STUCK_SAGA_THRESHOLD - TimeDelta::seconds(10);
         datastore.saga_create(&saga).await.expect("inserted stuck saga");
+    }
+
+    // Build a `Saga` without inserting it into the datastore for unit tests
+    // that exercise `problems()` directly.
+    fn fake_saga(id: Uuid) -> Saga {
+        let params = steno::SagaCreateParams {
+            id: steno::SagaId(id),
+            name: steno::SagaName::new("test stuck saga"),
+            dag: serde_json::Value::Null,
+            state: steno::SagaCachedState::Running,
+        };
+        Saga::new(SecId(Uuid::nil()), params)
+    }
+
+    fn unhealthy_zpool_with_id(zpool_id: ZpoolUuid) -> InventoryZpool {
+        InventoryZpool {
+            id: zpool_id,
+            total_size: ByteCount::from(1024 * 1024),
+            health: ZpoolHealth::Degraded,
+        }
+    }
+
+    // Build an in-memory `Collection` for unit tests with a hardcoded sled id.
+    fn fake_collection_with_ids(
+        sled_id: SledUuid,
+        zpools: Vec<InventoryZpool>,
+        smf_services: SvcsEnabledNotOnlineResult,
+    ) -> Collection {
+        let mut inv = fake_sled_inventory(zpools, smf_services);
+        inv.sled_id = sled_id;
+        let mut builder = CollectionBuilder::new("test");
+        builder.found_sled_inventory("test", inv).unwrap();
+        builder.build()
+    }
+
+    fn sled_id() -> SledUuid {
+        SledUuid::from_untyped_uuid(Uuid::from_u128(0xAAAA))
+    }
+
+    fn zpool_id() -> ZpoolUuid {
+        ZpoolUuid::from_untyped_uuid(Uuid::from_u128(0xBBBB))
+    }
+
+    fn saga_uuid() -> Uuid {
+        Uuid::from_u128(0xCCCC)
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1176,5 +1215,287 @@ mod test {
                 .await
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn test_problems_healthy_system() {
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+        assert_eq!(checks.problems(), BTreeSet::new());
+    }
+
+    #[test]
+    fn test_problems_empty_stuck_sagas_vec_is_not_a_problem() {
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+        assert_eq!(checks.problems(), BTreeSet::new());
+    }
+
+    #[test]
+    fn test_problems_stuck_sagas() {
+        let saga = fake_saga(saga_uuid());
+        let expected_stuck_saga =
+            StuckSaga { id: saga.id, name: saga.name.clone() };
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![saga]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+
+        let expected = BTreeSet::from([UpdateStatusProblem::StuckSagas {
+            sagas: vec![expected_stuck_saga],
+        }]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_stuck_sagas_query_failed() {
+        let err = Error::internal_error("db boom");
+        let expected_error = err.to_string();
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Err(err),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+
+        let expected =
+            BTreeSet::from([UpdateStatusProblem::StuckSagasQueryFailed {
+                error: expected_error,
+            }]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_stuck_update() {
+        let time_last_step_planned =
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_in_progress(),
+            time_last_step_planned,
+        };
+
+        let expected = BTreeSet::from([UpdateStatusProblem::StuckUpdate {
+            time_last_step_planned,
+        }]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_update_in_progress_not_stuck_is_not_a_problem() {
+        // Update in progress but the last step planned is recent — not stuck.
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_in_progress(),
+            time_last_step_planned: Utc::now(),
+        };
+        assert_eq!(checks.problems(), BTreeSet::new());
+    }
+
+    #[test]
+    fn test_problems_stale_inventory() {
+        let mut collection = fake_collection_with_ids(
+            sled_id(),
+            healthy_zpools(),
+            healthy_services(),
+        );
+        let collection_time_done =
+            Utc::now() - STALE_INVENTORY_THRESHOLD - TimeDelta::seconds(10);
+        collection.time_done = collection_time_done;
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+
+        let expected = BTreeSet::from([UpdateStatusProblem::StaleInventory {
+            collection_time_done,
+        }]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_unhealthy_zpools() {
+        let sled_id = sled_id();
+        let collection = fake_collection_with_ids(
+            sled_id,
+            vec![unhealthy_zpool_with_id(zpool_id())],
+            healthy_services(),
+        );
+        // The builder stamps `time_collected` with the current time, which we
+        // can't predict, so capture the resulting zpool to build the expected.
+        let zpool = collection
+            .unhealthy_zpools()
+            .get(&sled_id)
+            .expect("sled has unhealthy zpools")
+            .first()
+            .map(|z| (*z).clone())
+            .expect("at least one unhealthy zpool");
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+
+        let expected = BTreeSet::from([UpdateStatusProblem::UnhealthyZpools {
+            zpools_by_sled: BTreeMap::from([(sled_id, vec![zpool])]),
+        }]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services() {
+        let sled_id = sled_id();
+        let services = unhealthy_services();
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            services.clone(),
+        );
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+
+        let expected = BTreeSet::from([
+            UpdateStatusProblem::EnabledSmfServicesNotOnline {
+                svcs_by_sled: BTreeMap::from([(sled_id, services)]),
+            },
+        ]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_stuck_sagas_and_unhealthy_zpools() {
+        let sled_id = sled_id();
+        let saga = fake_saga(saga_uuid());
+        let expected_stuck_saga =
+            StuckSaga { id: saga.id, name: saga.name.clone() };
+
+        let collection = fake_collection_with_ids(
+            sled_id,
+            vec![unhealthy_zpool_with_id(zpool_id())],
+            healthy_services(),
+        );
+        let zpool = collection
+            .unhealthy_zpools()
+            .get(&sled_id)
+            .unwrap()
+            .first()
+            .map(|z| (*z).clone())
+            .unwrap();
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![saga]),
+            components_by_release_version: system_version_update_finished(),
+            time_last_step_planned: Utc::now(),
+        };
+
+        let expected = BTreeSet::from([
+            UpdateStatusProblem::StuckSagas {
+                sagas: vec![expected_stuck_saga],
+            },
+            UpdateStatusProblem::UnhealthyZpools {
+                zpools_by_sled: BTreeMap::from([(sled_id, vec![zpool])]),
+            },
+        ]);
+        assert_eq!(checks.problems(), expected);
+    }
+
+    #[test]
+    fn test_problems_all_unhealthy() {
+        let sled_id = sled_id();
+        let saga = fake_saga(saga_uuid());
+        let expected_stuck_saga =
+            StuckSaga { id: saga.id, name: saga.name.clone() };
+
+        let services = unhealthy_services();
+        let mut collection = fake_collection_with_ids(
+            sled_id,
+            vec![unhealthy_zpool_with_id(zpool_id())],
+            services.clone(),
+        );
+        let collection_time_done =
+            Utc::now() - STALE_INVENTORY_THRESHOLD - TimeDelta::seconds(10);
+        collection.time_done = collection_time_done;
+        let zpool = collection
+            .unhealthy_zpools()
+            .get(&sled_id)
+            .unwrap()
+            .first()
+            .map(|z| (*z).clone())
+            .unwrap();
+
+        let time_last_step_planned =
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
+
+        let checks = UpdateContactSupportChecks {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![saga]),
+            components_by_release_version: system_version_update_in_progress(),
+            time_last_step_planned,
+        };
+
+        let expected = BTreeSet::from([
+            UpdateStatusProblem::StuckSagas {
+                sagas: vec![expected_stuck_saga],
+            },
+            UpdateStatusProblem::StuckUpdate { time_last_step_planned },
+            UpdateStatusProblem::StaleInventory { collection_time_done },
+            UpdateStatusProblem::UnhealthyZpools {
+                zpools_by_sled: BTreeMap::from([(sled_id, vec![zpool])]),
+            },
+            UpdateStatusProblem::EnabledSmfServicesNotOnline {
+                svcs_by_sled: BTreeMap::from([(sled_id, services)]),
+            },
+        ]);
+        assert_eq!(checks.problems(), expected);
     }
 }
