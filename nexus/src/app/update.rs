@@ -110,7 +110,7 @@ enum UpdateStatusProblem {
     StuckSagasQueryFailed(String),
     /// An update is in progress and the last step planned in the blueprint is
     /// older than `STUCK_UPDATE_THRESHOLD`.
-    StuckUpdate,
+    StuckUpdate(DateTime<Utc>),
     /// The latest inventory collection is older than
     /// `STALE_INVENTORY_THRESHOLD`.
     StaleInventory(DateTime<Utc>),
@@ -160,7 +160,9 @@ impl UpdateContactSupportChecks {
             &self.components_by_release_version,
             self.time_last_step_planned,
         ) {
-            problems.insert(UpdateStatusProblem::StuckUpdate);
+            problems.insert(UpdateStatusProblem::StuckUpdate(
+                self.time_last_step_planned,
+            ));
         }
 
         match &self.stuck_sagas {
@@ -524,12 +526,13 @@ impl super::Nexus {
                         "svcs_by_sled" => ?svcs_by_sled,
                     );
                 }
-                // TODO-K: Add the time the last step was planned
-                UpdateStatusProblem::StuckUpdate => {
+                UpdateStatusProblem::StuckUpdate(last_step_planned) => {
                     warn!(
                         opctx.log,
-                        "found a stuck update older than {STUCK_UPDATE_THRESHOLD}";
-                        "time_last_step_planned" => "todo_time",
+                        "found a stuck update older than {}", omicron_common::format_time_delta(
+                            STUCK_UPDATE_THRESHOLD
+                        );
+                        "time_last_step_planned" => ?last_step_planned,
                     );
                 }
             }
