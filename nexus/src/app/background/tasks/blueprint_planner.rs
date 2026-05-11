@@ -98,7 +98,7 @@ impl BlueprintPlanner {
             rx_blueprint,
             tx_planned,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
-            creator: nexus_id.to_string(),
+            creator: format!("nexus {}", nexus_id),
         }
     }
 
@@ -558,10 +558,10 @@ mod test {
         );
 
         // Verify the creator is the Nexus UUID, not the hardcoded string.
-        let nexus_id = nexus.id.to_string();
+        let expected_creator = format!("nexus {}", nexus.id);
         assert_eq!(
-            blueprint.creator, nexus_id,
-            "blueprint creator should be the Nexus UUID, not a hardcoded string"
+            blueprint.creator, expected_creator,
+            "blueprint creator should be the 'nexus UUID', not a hardcoded string"
         );
 
         // Planning again should not change the plan, because nothing has changed.
