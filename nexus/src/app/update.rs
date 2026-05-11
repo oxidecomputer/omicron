@@ -35,6 +35,10 @@ use omicron_uuid_kinds::{GenericUuid, SledUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_hardware_types::BaseboardId;
+use slog::KV;
+use slog::OwnedKV;
+use slog::Record;
+use slog::Serializer;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -105,19 +109,77 @@ struct StuckSaga {
 enum UpdateStatusProblem {
     /// One or more sagas have been running or unwinding longer than
     /// `STUCK_SAGA_THRESHOLD`.
-    StuckSagas(Vec<StuckSaga>),
+    StuckSagas { sagas: Vec<StuckSaga> },
     /// The query for stuck sagas itself failed.
-    StuckSagasQueryFailed(String),
+    StuckSagasQueryFailed { error: String },
     /// An update is in progress and the last step planned in the blueprint is
     /// older than `STUCK_UPDATE_THRESHOLD`.
-    StuckUpdate(DateTime<Utc>),
+    StuckUpdate { time_last_step_planned: DateTime<Utc> },
     /// The latest inventory collection is older than
     /// `STALE_INVENTORY_THRESHOLD`.
-    StaleInventory(DateTime<Utc>),
+    StaleInventory { collection_time_done: DateTime<Utc> },
     /// One or more zpools are not in an `Online` state.
-    UnhealthyZpools(BTreeMap<SledUuid, Vec<Zpool>>),
+    UnhealthyZpools { zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>> },
     /// One or more enabled SMF services are not in an `online` state.
-    EnabledSmfServicesNotOnline(BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>),
+    EnabledSmfServicesNotOnline {
+        svcs_by_sled: BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
+    },
+}
+
+impl KV for UpdateStatusProblem {
+    fn serialize(
+        &self,
+        _record: &Record,
+        serializer: &mut dyn Serializer,
+    ) -> slog::Result {
+        match self {
+            Self::StuckSagas { sagas } => serializer.emit_arguments(
+                "stuck_sagas".into(),
+                &format_args!("{sagas:?}"),
+            ),
+            Self::StuckSagasQueryFailed { error } => serializer.emit_arguments(
+                "error_message".into(),
+                &format_args!("{error}"),
+            ),
+            Self::StuckUpdate { time_last_step_planned } => serializer
+                .emit_arguments(
+                    "stuck_update_last_step_planned_time".into(),
+                    &format_args!("{time_last_step_planned:?}"),
+                ),
+            Self::StaleInventory { collection_time_done } => serializer
+                .emit_arguments(
+                    "stale_inventory_last_collection_time_done".into(),
+                    &format_args!("{collection_time_done:?}"),
+                ),
+            Self::UnhealthyZpools { zpools_by_sled } => serializer
+                .emit_arguments(
+                    "unhealthy_zpools_by_sled".into(),
+                    &format_args!("{zpools_by_sled:?}"),
+                ),
+            Self::EnabledSmfServicesNotOnline { svcs_by_sled } => serializer
+                .emit_arguments(
+                    "enabled_not_online_svcs_by_sled".into(),
+                    &format_args!("{svcs_by_sled:?}"),
+                ),
+        }
+    }
+}
+
+/// Wrapper that lets a whole set of [`UpdateStatusProblem`]s contribute their
+/// kvs to a single log record.
+struct UpdateStatusProblemsKv(BTreeSet<UpdateStatusProblem>);
+
+impl KV for UpdateStatusProblemsKv {
+    fn serialize(
+        &self,
+        record: &Record,
+        serializer: &mut dyn Serializer,
+    ) -> slog::Result {
+        for problem in &self.0 {
+            problem.serialize(record, serializer)?;
+        }
+        Ok(())
+    }
 }
 
 /// We assume an update is in progress if not all components are at the
@@ -160,9 +222,9 @@ impl UpdateContactSupportChecks {
             &self.components_by_release_version,
             self.time_last_step_planned,
         ) {
-            problems.insert(UpdateStatusProblem::StuckUpdate(
-                self.time_last_step_planned,
-            ));
+            problems.insert(UpdateStatusProblem::StuckUpdate {
+                time_last_step_planned: self.time_last_step_planned,
+            });
         }
 
         match &self.stuck_sagas {
@@ -172,20 +234,20 @@ impl UpdateContactSupportChecks {
                     .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
                     .collect();
                 if !sagas.is_empty() {
-                    problems.insert(UpdateStatusProblem::StuckSagas(sagas));
+                    problems.insert(UpdateStatusProblem::StuckSagas { sagas });
                 }
             }
             Err(e) => {
-                problems.insert(UpdateStatusProblem::StuckSagasQueryFailed(
-                    e.to_string(),
-                ));
+                problems.insert(UpdateStatusProblem::StuckSagasQueryFailed {
+                    error: e.to_string(),
+                });
             }
         }
 
         if self.inventory.time_done < Utc::now() - STALE_INVENTORY_THRESHOLD {
-            problems.insert(UpdateStatusProblem::StaleInventory(
-                self.inventory.time_done,
-            ));
+            problems.insert(UpdateStatusProblem::StaleInventory {
+                collection_time_done: self.inventory.time_done,
+            });
         }
 
         let zpools_by_sled: BTreeMap<_, Vec<Zpool>> = self
@@ -195,8 +257,9 @@ impl UpdateContactSupportChecks {
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
         if !zpools_by_sled.is_empty() {
-            problems
-                .insert(UpdateStatusProblem::UnhealthyZpools(zpools_by_sled));
+            problems.insert(UpdateStatusProblem::UnhealthyZpools {
+                zpools_by_sled,
+            });
         }
 
         let svcs_by_sled: BTreeMap<_, SvcsEnabledNotOnlineResult> = self
@@ -206,9 +269,9 @@ impl UpdateContactSupportChecks {
             .map(|(sled, svcs)| (sled, svcs.clone()))
             .collect();
         if !svcs_by_sled.is_empty() {
-            problems.insert(UpdateStatusProblem::EnabledSmfServicesNotOnline(
+            problems.insert(UpdateStatusProblem::EnabledSmfServicesNotOnline {
                 svcs_by_sled,
-            ));
+            });
         }
 
         problems
@@ -481,64 +544,17 @@ impl super::Nexus {
         };
 
         let problems = checks.problems();
+        let contact_support = !problems.is_empty();
 
-        // TODO-K: Log a single thing with all of the messages instead of several ones?
-        for problem in &problems {
-            match problem {
-                UpdateStatusProblem::StuckSagas(sagas) => {
-                    warn!(
-                        opctx.log,
-                        "found stuck sagas active for longer than {}",
-                        omicron_common::format_time_delta(STUCK_SAGA_THRESHOLD);
-                        "sagas" => ?sagas,
-                    );
-                }
-                UpdateStatusProblem::StuckSagasQueryFailed(error_msg) => {
-                    warn!(
-                        opctx.log,
-                        "failed to list stuck sagas";
-                        "error" => ?error_msg,
-                    );
-                }
-                UpdateStatusProblem::StaleInventory(time_done) => {
-                    warn!(
-                        opctx.log,
-                        "found stale inventory collection: older than {}",
-                        omicron_common::format_time_delta(
-                            STALE_INVENTORY_THRESHOLD
-                        );
-                        "collection_time_done" => ?time_done,
-                    );
-                }
-                UpdateStatusProblem::UnhealthyZpools(zpools_by_sled) => {
-                    warn!(
-                        opctx.log,
-                        "found unhealthy zpools";
-                        "zpools_by_sled" => ?zpools_by_sled,
-                    );
-                }
-                UpdateStatusProblem::EnabledSmfServicesNotOnline(
-                    svcs_by_sled,
-                ) => {
-                    warn!(
-                        opctx.log,
-                        "found enabled SMF services not online";
-                        "svcs_by_sled" => ?svcs_by_sled,
-                    );
-                }
-                UpdateStatusProblem::StuckUpdate(last_step_planned) => {
-                    warn!(
-                        opctx.log,
-                        "found a stuck update older than {}", omicron_common::format_time_delta(
-                            STUCK_UPDATE_THRESHOLD
-                        );
-                        "time_last_step_planned" => ?last_step_planned,
-                    );
-                }
-            }
+        if contact_support {
+            let log = opctx.log.new(OwnedKV(UpdateStatusProblemsKv(problems)));
+            warn!(
+                log,
+                "found problems in the system before or after an update"
+            );
         }
 
-        Ok(!problems.is_empty())
+        Ok(contact_support)
     }
 
     /// Build a map of version strings to the number of components on that
@@ -1001,7 +1017,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_contact_support_healthy_system_with_stuck_saga(
+    async fn test_contact_support_stuck_saga(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1061,6 +1077,55 @@ mod test {
         // Components are split across multiple non-initial versions and the
         // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
         // update is considered stuck and contact support is true.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now()
+                        - STUCK_UPDATE_THRESHOLD
+                        - TimeDelta::seconds(10),
+                    system_version_update_in_progress(),
+                    inventory,
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_all_unhealthy(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+
+        // Add unhealthy zpools and enabled svcs not online
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+
+        // Insert stuck sagas
+        insert_stuck_running_saga(cptestctx).await;
+        insert_stuck_running_saga(cptestctx).await;
+
+        // Backdate the collection so the stale-inventory check fires
+        let mut collection = nexus
+            .datastore()
+            .inventory_get_latest_collection(&opctx)
+            .await
+            .unwrap()
+            .unwrap();
+        collection.time_done =
+            Utc::now() - STALE_INVENTORY_THRESHOLD - TimeDelta::seconds(10);
+
+        let inventory = Arc::new(collection);
+        // Every health check is unhealthy: stuck saga, stuck update, stale
+        // inventory, unhealthy zpools, and unhealthy SMF services. Contact
+        // support should be true.
         assert!(
             nexus
                 .contact_support(
