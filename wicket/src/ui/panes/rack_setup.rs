@@ -1269,7 +1269,7 @@ fn rss_config_text<'a>(
             ];
             let mut originate_spans =
                 vec![Span::styled("  • originate : ", label_style)];
-            if originate_spans.is_empty() {
+            if originate.is_empty() {
                 originate_spans.push(Span::styled("None", warn_style));
             } else {
                 originate_spans
