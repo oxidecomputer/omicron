@@ -1059,7 +1059,7 @@ impl Client {
         } else if table.contains("fields") {
             Some("last_updated_at")
         } else if table.contains("query_log") {
-            Some("event_time")
+            Some("event_date")
         } else {
             None
         }
@@ -1136,9 +1136,12 @@ impl Client {
             FROM system.tables \
             WHERE (\
                 database = 'oximeter' \
-                AND multiSearchAny(name, ['measurements', 'fields']) \
+                AND (\
+                    startsWith(name, 'measurements') OR \
+                    startsWith(name, 'fields') \
+                ) \
                 AND position(engine, 'MergeTree') != 0\
-            ) OR database = 'system' AND name = 'query_log';";
+            ) OR (database = 'system' AND name = 'query_log');";
         let result = self
             .execute_with_block(&mut self.claim_connection().await?, SQL)
             .await?;
@@ -1691,15 +1694,26 @@ impl Client {
 //
 // for the field tables.
 //
+// Lastly, the TTL line could look like this
+//
+// ```
+// TTL event_date + toIntervalDay(<N>)
+// ```
+//
+// for the system.query_log table.
+//
+//
 // We're picking out the number of days from the function argument as a string.
 fn extract_ttl_in_days_from_create_table_query(
     row: &str,
 ) -> Result<Days, Error> {
-    const NEEDLES: [&str; 2] = [
+    const NEEDLES: [&str; 3] = [
         // For measurement tables
         "TTL toDateTime(timestamp) + toIntervalDay(",
         // For field tables
         "TTL last_updated_at + toIntervalDay(",
+        // For system.query_log
+        "TTL event_date + toIntervalDay(",
     ];
 
     // Find the first needle that matches, and error if none do.
@@ -5344,6 +5358,15 @@ mod tests {
             u8::from(extract_ttl_in_days_from_create_table_query(
                 "some junk TTL last_updated_at + toIntervalDay(7) other stuff"
             ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(
+                extract_ttl_in_days_from_create_table_query(
+                    "some junk TTL event_date + toIntervalDay(7) other stuff"
+                )
+                .unwrap()
+            ),
         );
 
         for invalid in [
