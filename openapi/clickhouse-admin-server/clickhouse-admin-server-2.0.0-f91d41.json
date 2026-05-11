@@ -118,7 +118,7 @@
     "/retention-policy": {
       "get": {
         "summary": "Get the retention policy for timeseries data from the database",
-        "operationId": "retention_policy",
+        "operationId": "retention_policy_v2",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -140,7 +140,7 @@
       },
       "put": {
         "summary": "Set the retention policy for timeseries data.",
-        "operationId": "set_retention_policy",
+        "operationId": "set_retention_policy_v2",
         "requestBody": {
           "content": {
             "application/json": {

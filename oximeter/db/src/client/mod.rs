@@ -31,8 +31,10 @@ use crate::native::block::Block;
 use crate::native::block::ValueArray;
 use crate::query;
 use chrono::Utc;
+use clickhouse_admin_types::retention::DatabaseRetentionPolicy;
 use clickhouse_admin_types::retention::Days;
 use clickhouse_admin_types::retention::RetentionPolicy;
+use clickhouse_admin_types::retention::RetentionPolicyRequest;
 use clickhouse_admin_types::usage::DatabaseUsage;
 use clickhouse_admin_types::usage::TableUsage;
 use debug_ignore::DebugIgnore;
@@ -40,6 +42,7 @@ use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
+use iddqd::IdOrdMap;
 use omicron_common::backoff;
 use omicron_common::backoff::Backoff as _;
 use oximeter::Measurement;
@@ -981,9 +984,24 @@ impl Client {
     }
 
     /// Set the retention policy for the oximeter database tables.
+    ///
+    /// This attempts to set the policy to the same value on every relevant
+    /// table. But because we set each table in a separate query, those
+    /// individual queries can fail, leaving each table with different retention
+    /// policies.
+    ///
+    /// The return value of `retention_policy()` includes the value for every
+    /// table. That should be checked to ensure the policy was correctly set on
+    /// every table.
+    ///
+    /// Also note that this sets the TTLs asynchronously. Fetching the TTL
+    /// itself immediately after should show the correct value (assuming it
+    /// succceeded), but dropping any data beyond the new TTL happens
+    /// asynchronously. Use the method `database_table_usage()` to monitor the
+    /// behavior.
     pub async fn set_retention_policy(
         &self,
-        policy: RetentionPolicy,
+        policy: RetentionPolicyRequest,
         replicated: bool,
     ) -> Result<(), Error> {
         let mut handle = self.claim_connection().await?;
@@ -1007,6 +1025,11 @@ impl Client {
                     "error" => InlineErrorChain::new(&e),
                 );
                 res = Err(e);
+
+                // Be cautious and claim a new connection if this attempt fails.
+                // We're not really sure what state the connection is in, so
+                // recycle it to the pool to be reset and claim a new one.
+                handle = self.claim_connection().await?;
             }
         }
         res
@@ -1019,7 +1042,7 @@ impl Client {
     async fn set_one_table_retention_policy(
         &self,
         handle: &mut Handle,
-        policy: &RetentionPolicy,
+        policy: &RetentionPolicyRequest,
         table: &str,
         replicated: bool,
     ) -> Result<(), Error> {
@@ -1036,11 +1059,27 @@ impl Client {
                 ))
             })?;
         let days = u8::from(policy.days);
-        let sql = format!(
+
+        // We want to explicitly queue the changes to the TTL, rather than wait
+        // for the full modification. This is a bit complicated in our version
+        // of ClickHouse. We need to:
+        //
+        // - set the TTL, but ensure the DB does not "materialize" that TTL
+        //   right away (the `materialize_ttl_after_modify` setting).
+        // - start materializing the TTL, but don't wait for it to finish (the
+        //   `mutations_sync` setting).
+        let alter_ttl_sql = format!(
             "ALTER TABLE {table} {maybe_on_cluster}\
-            MODIFY TTL {start_time} + toIntervalDay({days})"
+            MODIFY TTL {start_time} + toIntervalDay({days}) \
+            SETTINGS materialize_ttl_after_modify=0;"
         );
-        self.execute_native(handle, &sql).await
+        self.execute_native(handle, &alter_ttl_sql).await?;
+        let materialize_ttl_sql = format!(
+            "ALTER TABLE {table} {maybe_on_cluster} \
+            MATERIALIZE TTL \
+            SETTINGS mutations_sync=0;"
+        );
+        self.execute_native(handle, &materialize_ttl_sql).await
     }
 
     fn ttl_start_time_expr_for_table(table: &str) -> Option<&'static str> {
@@ -1049,7 +1088,7 @@ impl Client {
         } else if table.contains("fields") {
             Some("last_updated_at")
         } else if table.contains("query_log") {
-            Some("event_time")
+            Some("event_date")
         } else {
             None
         }
@@ -1109,27 +1148,49 @@ impl Client {
     /// could not be extracted. `None` is returned if there is no retention
     /// policy set yet, which can happen if the database hasn't been initialized
     /// yet.
+    ///
+    /// This returns the retention policy for every relevant table in the
+    /// database. Because we set the policy individually on each of them, they
+    /// can differ, if that set request fails in the middle. That also implies
+    /// the returned values may be different for different tables.
     pub async fn retention_policy(
         &self,
-    ) -> Result<Option<RetentionPolicy>, Error> {
+    ) -> Result<Option<DatabaseRetentionPolicy>, Error> {
         // It's possible today that different tables actually have different
-        // TTLs, because we short-circuit if we fail to set the TTL partway
-        // through the list of tables. We're hoping that they're all the same,
-        // and picking a measurements table for simplicity.
+        // TTLs, because we individual queries may fail.
+        //
+        // Let's fetch all of them.
         const SQL: &str = "\
-            SELECT create_table_query \
+            SELECT name, create_table_query \
             FROM system.tables \
-            WHERE database = 'oximeter' \
-            AND startsWith(name, 'measurements') \
-            AND position(engine, 'MergeTree') != 0 \
-            LIMIT 1;";
+            WHERE (\
+                database = 'oximeter' \
+                AND (\
+                    startsWith(name, 'measurements') OR \
+                    startsWith(name, 'fields') \
+                ) \
+                AND position(engine, 'MergeTree') != 0\
+            ) OR (database = 'system' AND name = 'query_log');";
         let result = self
             .execute_with_block(&mut self.claim_connection().await?, SQL)
             .await?;
         let block = result.data.ok_or_else(|| Error::QueryMissingData {
             query: SQL.to_string(),
         })?;
-        let ValueArray::String(rows) = &block
+        let names = block
+            .columns
+            .get("name")
+            .ok_or_else(|| {
+                Error::Database("Expected a column named `name`".to_string())
+            })?
+            .values
+            .as_string()
+            .map_err(|dt| {
+                Error::Database(format!(
+                    "Expected string datatype found '{dt}'"
+                ))
+            })?;
+        let queries = block
             .columns
             .get("create_table_query")
             .ok_or_else(|| {
@@ -1138,35 +1199,44 @@ impl Client {
                 )
             })?
             .values
-        else {
-            return Err(Error::Database(
-                "Expected `create_table_query` to have type string".to_string(),
-            ));
-        };
-        if rows.is_empty() {
+            .as_string()
+            .map_err(|dt| {
+                Error::Database(format!(
+                    "Expected string datatype found '{dt}'"
+                ))
+            })?;
+        if queries.is_empty() {
             return Ok(None);
         }
-        if rows.len() != 1 {
-            return Err(Error::Database(
-                "Expected `create_table_query` to have exactly 1 row"
-                    .to_string(),
-            ));
-        }
-        let days =
-            extract_ttl_in_days_from_measurements_create_table_query(&rows[0])?;
-        Ok(Some(RetentionPolicy { days }))
+        names
+            .iter()
+            .cloned()
+            .zip(
+                queries
+                    .iter()
+                    .map(|q| extract_ttl_in_days_from_create_table_query(q)),
+            )
+            .map(|(table, ttl)| ttl.map(|days| RetentionPolicy { table, days }))
+            .collect::<Result<IdOrdMap<_>, _>>()
+            .map(|tables| Some(DatabaseRetentionPolicy { tables }))
     }
 
     /// Return the resource usage of tables in the database.
     pub async fn database_table_usage(&self) -> Result<DatabaseUsage, Error> {
         let started_at = Utc::now();
-        const SQL: &str = "\
+        const SQL: &str = const_format::formatcp!(
+            "\
             SELECT \
                 concat(database, '.', name) AS table_name, \
                 ifNull(total_bytes, 0) AS total_bytes, \
                 ifNull(total_rows, 0) AS total_rows \
             FROM system.tables \
-            WHERE has_own_data";
+            WHERE (\
+                database = '{}' OR \
+                (database = 'system' AND name = 'query_log')\
+            ) AND has_own_data",
+            crate::DATABASE_NAME,
+        );
         let columns = self
             .execute_with_block(&mut self.claim_connection().await?, SQL)
             .await?
@@ -1714,17 +1784,48 @@ impl Client {
 // SETTINGS ...
 // ```
 //
+// The TTL line could also look like:
+//
+// ```
+// TTL last_updated_at + toIntervalDay(<N>)
+// ```
+//
+// for the field tables.
+//
+// Lastly, the TTL line could look like this
+//
+// ```
+// TTL event_date + toIntervalDay(<N>)
+// ```
+//
+// for the system.query_log table.
+//
+//
 // We're picking out the number of days from the function argument as a string.
-fn extract_ttl_in_days_from_measurements_create_table_query(
+fn extract_ttl_in_days_from_create_table_query(
     row: &str,
 ) -> Result<Days, Error> {
-    const NEEDLE: &str = "TTL toDateTime(timestamp) + toIntervalDay(";
-    let needle_start = row.find(NEEDLE).ok_or_else(|| {
-        Error::Database(format!(
-            "could not find TTL expression in query: '{row}'"
-        ))
-    })?;
-    let n_days_start = needle_start + NEEDLE.len();
+    const NEEDLES: [&str; 3] = [
+        // For measurement tables
+        "TTL toDateTime(timestamp) + toIntervalDay(",
+        // For field tables
+        "TTL last_updated_at + toIntervalDay(",
+        // For system.query_log
+        "TTL event_date + toIntervalDay(",
+    ];
+
+    // Find the first needle that matches, and error if none do.
+    let (needle_start, needle) = NEEDLES
+        .iter()
+        .find_map(|needle| row.find(needle).map(|ix| (ix, needle)))
+        .ok_or_else(|| {
+            Error::Database(format!(
+                "could not find TTL expression in query: '{row}'"
+            ))
+        })?;
+
+    // Now the closing parentheses.
+    let n_days_start = needle_start + needle.len();
     let close_paren_start = row[n_days_start..].find(")").ok_or_else(|| {
         Error::Database(format!(
             "could not find closing paren in TTL expression: '{row}'"
@@ -5420,15 +5521,30 @@ mod tests {
     fn test_extract_ttl_in_days_from_create_table_query() {
         assert_eq!(
             30u8,
-            u8::from(extract_ttl_in_days_from_measurements_create_table_query(
+            u8::from(extract_ttl_in_days_from_create_table_query(
                 "some junk TTL toDateTime(timestamp) + toIntervalDay(30) other stuff"
             ).unwrap()),
         );
         assert_eq!(
             7u8,
-            u8::from(extract_ttl_in_days_from_measurements_create_table_query(
+            u8::from(extract_ttl_in_days_from_create_table_query(
                 "some junk TTL toDateTime(timestamp) + toIntervalDay(7) other stuff"
             ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(extract_ttl_in_days_from_create_table_query(
+                "some junk TTL last_updated_at + toIntervalDay(7) other stuff"
+            ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(
+                extract_ttl_in_days_from_create_table_query(
+                    "some junk TTL event_date + toIntervalDay(7) other stuff"
+                )
+                .unwrap()
+            ),
         );
 
         for invalid in [
@@ -5438,12 +5554,10 @@ mod tests {
             "some junk TTL toDateTime(timestamp) + toIntervalDay(100)",
             "some junk TTL toDateTime(timestamp) + toIntervalDay(3000)",
             "some junk TTL toDateTime(timestamp) + toIntervalDay(3.0)",
+            "some junk TTL last_updated_at + toIntervalDay(3.0)",
         ] {
             assert!(
-                extract_ttl_in_days_from_measurements_create_table_query(
-                    invalid
-                )
-                .is_err()
+                extract_ttl_in_days_from_create_table_query(invalid).is_err()
             )
         }
     }
