@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (38, RENAME_PORT_FEC_SPEED_TO_LINK_FEC_SPEED),
     (37, MODIFY_SVC_ENABLED_NOT_ONLINE_STATE),
     (36, DROPSHOT_FREEFORM_BODY_DESC),
     (35, INLINE_ROUTER_PEER_IP_ADDR),
