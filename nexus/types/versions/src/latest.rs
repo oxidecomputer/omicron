@@ -260,8 +260,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
-    pub use crate::v2025_11_20_00::networking::LinkFec;
-    pub use crate::v2025_11_20_00::networking::LinkSpeed;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfig;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::Route;
@@ -461,6 +459,12 @@ pub mod physical_disk {
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskPolicy;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskState;
+
+    // Types from MANUAL_DISK_ADOPTION.
+    pub use crate::v2026_05_08_00::physical_disk::PhysicalDiskAdoptionRequest;
+    pub use crate::v2026_05_08_00::physical_disk::PhysicalDiskAdoptionRequestPath;
+    pub use crate::v2026_05_08_00::physical_disk::PhysicalDiskManufacturerIdentity;
+    pub use crate::v2026_05_08_00::physical_disk::UnadoptedPhysicalDisk;
 }
 
 pub mod rack {

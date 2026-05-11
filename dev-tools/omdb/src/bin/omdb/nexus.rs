@@ -65,6 +65,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -1299,6 +1300,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "phantom_disks" => {
             print_task_phantom_disks(details);
+        }
+        "physical_disk_adoption" => {
+            print_task_physical_disk_adoption(details);
         }
         "probe_distributor" => {
             print_task_probe_distributor(details);
@@ -3946,6 +3950,25 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
         TrustQuorumManagerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
+    }
+}
+
+fn print_task_physical_disk_adoption(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<PhysicalDiskAdoptionStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+    println!("physical disks added: {}", status.disks_added);
+    for error in status.errors {
+        println!("{ERRICON} {error}");
     }
 }
 

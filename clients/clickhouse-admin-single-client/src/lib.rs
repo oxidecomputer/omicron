@@ -27,3 +27,11 @@ progenitor::generate_api!(
         ServerConfigurableSettings = clickhouse_admin_types::server::ServerConfigurableSettings,
     }
 );
+
+impl crate::types::Days {
+    pub fn as_human_str(&self) -> String {
+        let n_days = self.0.get();
+        let suffix = if n_days > 1 { "days" } else { "day" };
+        format!("{n_days} {suffix}")
+    }
+}
