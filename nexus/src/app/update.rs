@@ -89,7 +89,9 @@ impl UpdateStatusHandle {
     }
 }
 
-/// Inputs needed to identify update health problems.
+/// Inputs used to decide, based on health checks of a subset of system
+/// components, whether the user should contact support before or after an
+/// update.
 struct UpdateContactSupportChecks {
     inventory: Arc<Collection>,
     stuck_sagas: Result<Vec<Saga>, Error>,
@@ -182,9 +184,12 @@ impl KV for UpdateStatusProblemsKv {
     }
 }
 
-/// We assume an update is in progress if not all components are at the
-/// same version or there are only two versions and they are not
-/// "install dataset" and "unknown".
+/// Returns true if the system appears to be mid-update.
+///
+/// A system is considered mid-update when its components don't all report
+/// the same version. The one exception is the initial state of a system
+/// that has never been updated, which has exactly two versions present:
+/// "install dataset" and "unknown". This state is not treated as in progress.
 fn is_update_in_progress(
     components_by_release_version: &BTreeMap<String, usize>,
 ) -> bool {
@@ -197,8 +202,10 @@ fn is_update_in_progress(
     components_by_release_version.len() != 1 && !versions_at_initial_state
 }
 
-/// An update is "stuck" if it is in progress but the last step planned
-/// in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
+/// Returns true if an update appears to be stuck.
+///
+/// An update is considered "stuck" if it is in progress but the last step
+/// planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
 fn is_update_stuck(
     components_by_release_version: &BTreeMap<String, usize>,
     time_last_step_planned: DateTime<Utc>,
@@ -208,7 +215,8 @@ fn is_update_stuck(
 }
 
 impl UpdateContactSupportChecks {
-    /// Identify the set of problems present with given inputs.
+    /// Identify a set of problems present in the system based on a series of
+    /// health checks.
     fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
         let mut problems = BTreeSet::new();
 
@@ -464,9 +472,8 @@ impl super::Nexus {
         let suspended = *db_target_release.generation
             < blueprint_target.blueprint.target_release_minimum_generation;
 
-        // We want a rough idea of whether the system is in a healthy state or
-        // not. We do this by retrieving the latest inventory collection and
-        // performing a series of checks.
+        // Decide whether to surface a "contact support" signal based on health
+        // checks against a subset of components in the system
         let contact_support = self
             .contact_support(
                 opctx,
