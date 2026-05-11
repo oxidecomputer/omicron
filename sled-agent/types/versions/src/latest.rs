@@ -58,10 +58,10 @@ pub mod early_networking {
     pub use crate::v1::early_networking::BfdMode;
     pub use crate::v1::early_networking::BfdPeerConfig;
     pub use crate::v1::early_networking::ImportExportPolicy;
+    pub use crate::v1::early_networking::LinkFec;
+    pub use crate::v1::early_networking::LinkSpeed;
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
-    pub use crate::v1::early_networking::PortFec;
-    pub use crate::v1::early_networking::PortSpeed;
     pub use crate::v1::early_networking::RouteConfig;
     pub use crate::v1::early_networking::SwitchSlot;
     pub use crate::v1::early_networking::TxEqConfig;
@@ -238,9 +238,9 @@ pub mod system_networking {
     pub use crate::v33::system_networking::ServiceZoneNatEntry;
     pub use crate::v33::system_networking::ServiceZoneNatKind;
 
-    pub use crate::v38::system_networking::BlueprintExternalNetworkingConfig;
-    pub use crate::v38::system_networking::SystemNetworkingConfig;
-    pub use crate::v38::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
+    pub use crate::v39::system_networking::SystemNetworkingConfig;
+    pub use crate::v39::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {
