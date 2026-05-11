@@ -2550,7 +2550,7 @@ fn does_bootstore_need_update(
         is_blueprint_different,
         is_network_config_different,
     ) {
-        // If either config is out of date, we mut not make changes to avoid
+        // If either config is out of date, we must not make changes to avoid
         // overwriting newer data. A future task activation will load a
         // different (and newer) set of desired config.
         (DesiredConfigOutOfDate::Yes, _, _, _)
