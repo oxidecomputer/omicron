@@ -6041,7 +6041,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_failure_reason AS ENUM (
      * A request to the sled-agent received a response indicating that this
      * VMM is no longer present on the sled.
      */
-    'no_such_vmm',
+    'no_such_instance',
     /*
      * The sled on which this VMM was running has been expunged.
      */

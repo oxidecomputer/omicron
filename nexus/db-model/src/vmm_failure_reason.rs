@@ -31,7 +31,7 @@ impl_enum_type!(
     FromSledAgent => b"from_sled_agent"
     // A request to the sled-agent received a response indicating that this
     // VMM is no longer present on the sled.
-    NoSuchVmm => b"no_such_vmm"
+    NoSuchInstance => b"no_such_instance"
     // The sled on which this VMM was running has been expunged.
     SledExpunged => b"sled_expunged"
     // The sled on which this VMM was running has powered off.
@@ -43,7 +43,7 @@ impl From<types::VmmFailureReason> for VmmFailureReason {
         match reason {
             types::VmmFailureReason::Prehistoric => Self::Prehistoric,
             types::VmmFailureReason::FromSledAgent => Self::FromSledAgent,
-            types::VmmFailureReason::NoSuchVmm => Self::NoSuchVmm,
+            types::VmmFailureReason::NoSuchInstance => Self::NoSuchInstance,
             types::VmmFailureReason::SledExpunged => Self::SledExpunged,
             types::VmmFailureReason::SledOff => Self::SledOff,
         }
@@ -55,7 +55,7 @@ impl From<VmmFailureReason> for types::VmmFailureReason {
         match reason {
             VmmFailureReason::Prehistoric => Self::Prehistoric,
             VmmFailureReason::FromSledAgent => Self::FromSledAgent,
-            VmmFailureReason::NoSuchVmm => Self::NoSuchVmm,
+            VmmFailureReason::NoSuchInstance => Self::NoSuchInstance,
             VmmFailureReason::SledExpunged => Self::SledExpunged,
             VmmFailureReason::SledOff => Self::SledOff,
         }

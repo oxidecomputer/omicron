@@ -256,7 +256,7 @@ pub enum VmmFailureReason {
     FromSledAgent,
     /// A request to the sled-agent received a response indicating that this
     /// VMM is no longer present on the sled.
-    NoSuchVmm,
+    NoSuchInstance,
     /// The sled on which this VMM was running has been expunged.
     SledExpunged,
     /// The sled on which this VMM was running has powered off.
@@ -268,7 +268,7 @@ impl VmmFailureReason {
         match self {
             Self::Prehistoric => "<VMM failed prior to recorded history>",
             Self::FromSledAgent => "failed VMM state received from sled-agent",
-            Self::NoSuchVmm => "VMM no longer present on sled",
+            Self::NoSuchInstance => "VMM no longer present on sled",
             Self::SledExpunged => {
                 "the sled this VMM was running on has been expunged"
             }
