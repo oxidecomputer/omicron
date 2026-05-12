@@ -257,7 +257,7 @@ impl Check {
                     error,
                 );
                 self.outcome = CheckOutcome::Failure(Failure::NoSuchInstance);
-                mk_failed(VmmFailureReason::NoSuchVmm)
+                mk_failed(VmmFailureReason::NoSuchInstance)
             }
             // We were able to contact the sled-agent, but it responded with an
             // error which does *not* tell us that the VMM has failed. Either
